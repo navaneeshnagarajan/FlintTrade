@@ -601,9 +601,9 @@ function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
     setLoading(true);
     setError("");
     try {
-      // Password-only reset (no session) — the backend guards this route with
-      // the account password and a 3/hour rate limit, so a shoulder-surfer can
-      // neither trigger it nor learn the new secret without the password.
+      // buildHeaders attaches a session when one is already in memory.
+      // Once an account exists the backend also requires that session or a
+      // setup-session JWT; a password on its own does not re-key the account.
       const resp = await fetch(`${getBase()}/v1/auth/setup/regenerate-2fa`, {
         method: "POST",
         headers: buildHeaders(true),

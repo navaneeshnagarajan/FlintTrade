@@ -22,10 +22,12 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     # Vault open during first-run. The handler requires a setup-session JWT,
     # not the daily API key, so the global check must let the request through.
     ("POST", "/v1/auth/setup/vault"),
-    # First-run reset. Reachable with the operator password or a setup JWT
-    # before a daily session exists.
+    # First-run reset. Once an account exists the handler requires a session
+    # or setup-session JWT and does not wipe the account from a password alone.
     ("POST", "/v1/auth/setup/reset"),
-    # Setup-wizard authenticator regeneration. The handler checks the password.
+    # Setup-wizard authenticator regeneration. Once an account exists the
+    # handler requires a session or setup-session JWT and does not re-key
+    # from a password alone.
     ("POST", "/v1/auth/setup/regenerate-2fa"),
     # Password recovery. No session exists yet.
     ("POST", "/v1/auth/forgot-password"),
@@ -41,8 +43,8 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     ("GET", "/v1/docs/search"),
     ("GET", "/v1/docs/document"),
     ("GET", "/v1/docs/changelog"),
-    # Setup-wizard OpenAlgo probe. After the operator account exists the
-    # handler itself requires a session.
+    # Setup-wizard OpenAlgo probe. Once an account exists the handler
+    # requires a session or setup-session JWT.
     ("GET", "/v1/config/openalgo"),
     ("POST", "/v1/config/openalgo"),
     # Setup-wizard connectivity probe. The handler is loopback-only.

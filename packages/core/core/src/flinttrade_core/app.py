@@ -5345,18 +5345,28 @@ def create_flask_app(
 
         return serialised
 
-    def _openalgo_config_request_authenticated() -> bool:
+    def _openalgo_config_bearer() -> str:
         auth_header = request.headers.get("Authorization", "")
-        bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
-        if bearer:
-            try:
-                from .auth_routes import decode_token  # noqa: PLC0415
+        if not auth_header.startswith("Bearer "):
+            return ""
+        return auth_header.removeprefix("Bearer ").strip()
 
-                if decode_token(bearer).get("type") == "session":
-                    return True
-            except Exception:
-                pass
+    def _openalgo_config_session_authenticated() -> bool:
+        """True for a session or setup-session JWT. An API key is not a session."""
+        bearer = _openalgo_config_bearer()
+        if not bearer:
+            return False
+        try:
+            from .auth_routes import decode_token  # noqa: PLC0415
 
+            return decode_token(bearer).get("type") == "session"
+        except Exception:
+            return False
+
+    def _openalgo_config_request_authenticated() -> bool:
+        if _openalgo_config_session_authenticated():
+            return True
+        bearer = _openalgo_config_bearer()
         expected = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
         supplied = request.headers.get("X-API-Key") or bearer
         return bool(expected and supplied and secrets.compare_digest(str(supplied), expected))
@@ -5370,10 +5380,11 @@ def create_flask_app(
         Security: writes and unauthenticated status probes are loopback-only.
         Before the operator account exists, GET returns redacted metadata and
         POST must carry an explicit OpenAlgo API key. After setup, both
-        methods require a session JWT or the configured backend/OpenAlgo API
-        key. An authenticated GET may cross the network so a remote web
-        terminal (e.g. over Tailscale) can rehydrate its OpenAlgo connection;
-        it is the only shape that returns the raw key.
+        methods require a session or setup-session JWT. An API key alone does
+        not read or change the saved connection. An authenticated GET may
+        cross the network so a remote web terminal (e.g. over Tailscale) can
+        rehydrate its OpenAlgo connection; it is the only shape that returns
+        the raw key.
 
         Request JSON: ``{"api_key": "...", "host": "...", "port": 5000, "ws_port": 8765}``
         """
@@ -5389,8 +5400,9 @@ def create_flask_app(
 
         remote = request.remote_addr or ""
         remote_is_loopback = remote in ("127.0.0.1", "::1", "localhost")
+        session_authenticated = _openalgo_config_session_authenticated()
         authenticated = _openalgo_config_request_authenticated()
-        if not remote_is_loopback and (request.method != "GET" or not authenticated):
+        if not remote_is_loopback and (request.method != "GET" or not session_authenticated):
             return jsonify(
                 {
                     "status": "error",
@@ -5403,7 +5415,7 @@ def create_flask_app(
             operator_is_setup = bool(auth_service is None or auth_service.is_setup())
         except Exception:
             operator_is_setup = True
-        if operator_is_setup and not authenticated:
+        if operator_is_setup and not session_authenticated:
             return jsonify({"status": "error", "message": "Authentication required"}), 401
 
         if request.method == "GET":
@@ -5427,9 +5439,10 @@ def create_flask_app(
                     "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
                 }
                 # The terminal needs the bridge key in memory for its direct
-                # OpenAlgo WebSocket. Only an authenticated operator session (or
-                # explicit backend API key) may rehydrate it; pre-setup status
-                # probes receive redacted metadata only.
+                # OpenAlgo WebSocket. After the account exists only a session
+                # or setup-session JWT may rehydrate it. Before that, a
+                # configured API key may; unsigned pre-setup probes receive
+                # redacted metadata only.
                 if authenticated:
                     data["api_key"] = api_key
                 return jsonify(

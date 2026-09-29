@@ -324,12 +324,13 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       if (
         !Number.isInteger(minimumCalls)
         || !Number.isInteger(maximumCalls)
-        || minimumCalls < 1
+        || minimumCalls < 0
+        || maximumCalls < 1
         || maximumCalls < minimumCalls
       ) {
         throw new Error(
           `[fail-closed registry "${this.name}"] handler "${name}" expectedCalls range requires ` +
-            "positive integer minimum/maximum with minimum <= maximum",
+            "a non-negative integer minimum, a positive integer maximum, and minimum <= maximum",
         );
       }
     }
@@ -605,8 +606,9 @@ function assertReadOnlyProbe(request: Request): void {
 /**
  * Register the operator-status probes mounted with the desk.
  *
- * These are reads: desk ping, desk health, Chat config, and the public
- * site/install plus neutral internet checks. They are not Live order paths.
+ * These are reads: public desk ping, authenticated desk health, Chat
+ * config, and the public site/install plus neutral internet checks. They
+ * are not Live order paths. Signed-out liveness uses the ping handler.
  * The Practice place handler stays the JWT authority check.
  */
 export function registerOperatorStatusProbes(
@@ -633,14 +635,20 @@ export function registerOperatorStatusProbes(
       return { json: { status: "ok" } };
     },
   });
+  const healthCalls = typeof expectedCalls === "number"
+    ? { minimum: 0, maximum: expectedCalls }
+    : { minimum: 0, maximum: expectedCalls.maximum };
   registry.register({
     name: "operator desk health",
     method: "GET",
     path: "/ft-api/health",
-    expectedCalls,
+    expectedCalls: healthCalls,
     handler: (request) => {
       assertReadOnlyProbe(request);
-      expect(request.headers()["authorization"]).toBeUndefined();
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization.startsWith("Bearer ")).toBe(true);
+      }
       return { json: { status: "healthy" } };
     },
   });

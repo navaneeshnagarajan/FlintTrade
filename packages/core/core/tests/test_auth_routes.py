@@ -943,6 +943,118 @@ class TestSetupSessionReset:
         assert resp.status_code == 401
         assert svc.is_setup() is True
 
+    def test_password_alone_does_not_wipe_existing_account(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == "Authentication required."
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "nav"
+
+    def test_invalid_bearer_and_password_do_not_wipe(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-session"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_reset_token_and_password_do_not_wipe(self, client):
+        c, svc = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+        reset = _create_reset_token("nav")
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_session_and_password_wipes(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers=_session_headers(),
+        )
+        assert resp.status_code == 200
+        assert svc.is_setup() is False
+
+
+class TestSetupRegenerateRequiresSession:
+    """Once an account exists, authenticator regeneration needs a session."""
+
+    def _setup(self, c):
+        return c.post("/v1/auth/setup", json={
+            "username": "nav",
+            "email": "nav@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_password_alone_does_not_rekey(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == "Authentication required."
+        assert svc.get_totp_secret() == before
+        assert "totp_uri" not in resp.get_data(as_text=True)
+
+    def test_invalid_bearer_does_not_rekey(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-session"},
+        )
+        assert resp.status_code == 401
+        assert svc.get_totp_secret() == before
+
+    def test_session_and_password_rekeys(self, client):
+        c, svc = client
+        created = self._setup(c)
+        before = svc.get_totp_secret()
+        setup_token = created.get_json()["data"]["token"]
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert resp.status_code == 200
+        assert svc.get_totp_secret() != before
+        assert resp.get_json()["data"]["totp_uri"]
+
+    def test_daily_session_and_password_rekeys(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers=_session_headers(),
+        )
+        assert resp.status_code == 200
+        assert svc.get_totp_secret() != before
+
 
 class TestSetupMintsSession:
     """Audit fix (#18/#19): /v1/auth/setup returns an explore-mode session token

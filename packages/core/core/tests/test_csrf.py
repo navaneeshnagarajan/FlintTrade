@@ -155,7 +155,15 @@ class TestPublicEndpointBypass:
         """Documented public liveness probe stays reachable without an API key."""
         resp = client.get("/api/v1/ping")
         assert resp.status_code == 200
-        assert resp.get_json()["status"] == "ok"
+        body = resp.get_json()
+        assert set(body) == {"status", "timestamp", "laya"}
+        assert body["status"] == "ok"
+        assert body["laya"] in {"ready", "degraded", "down"}
+        text = resp.get_data(as_text=True).lower()
+        assert "version" not in text
+        assert "/home/" not in text
+        for detail in ("broker", "duckdb", "disk", "memory", "checks", "path"):
+            assert detail not in text
 
     def test_api_v1_health_no_key_required(self, client: Any) -> None:
         """Documented public aggregated health surface stays reachable without a key."""

@@ -566,6 +566,37 @@ def _session_token_from_request() -> str:
     return request.headers.get("X-FlintTrade-Token", "").strip()
 
 
+def _account_exists(svc: Any) -> bool:
+    """Return whether an operator account is present.
+
+    A lookup failure is treated as present so a reset or re-key cannot
+    proceed when the check itself is unavailable.
+    """
+    try:
+        return bool(svc.is_setup())
+    except Exception:
+        logger.debug("Account existence check failed", exc_info=True)
+        return True
+
+
+def _operator_session_payload(token: str) -> dict[str, Any] | None:
+    """Return a verified session or setup-session payload, or None.
+
+    Both are ``type: session``. A setup-session JWT also carries
+    ``setup_session``. Password-reset tokens and unsigned requests are not
+    a session.
+    """
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    if payload.get("type") != "session":
+        return None
+    return payload
+
+
 def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
     """Accept only the account-create setup JWT for passwordless wipe.
 
@@ -614,20 +645,23 @@ def auth_setup_reset() -> tuple[Any, int]:
     """Wipe the account during the setup wizard.
 
     Body: ``{"password": "…"}`` (password-confirmed wipe) **or** the
-    account-create setup JWT with an empty body (lost-QR start-over). A
-    daily-login session or password-reset token is never enough.
+    account-create setup JWT with an empty body (lost-QR start-over).
+    Once an account exists, a session or setup-session JWT is required
+    before either path runs. A password alone, a password-reset token, or
+    a daily-login session without the password does not wipe the account.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
+    token = _session_token_from_request()
+    if _account_exists(svc) and _operator_session_payload(token) is None:
+        return jsonify({"status": "error", "message": "Authentication required."}), 401
     if password:
         if not svc.reset_account(password):
             return jsonify({"status": "error", "message": "Invalid password."}), 401
         return jsonify({"status": "success", "data": {}}), 200
-
-    token = _session_token_from_request()
     if not token:
         return jsonify({"status": "error", "message": "Password required to confirm reset."}), 400
     verified = _verify_setup_session_token(token)
@@ -652,12 +686,16 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
     Body: ``{"password": "…"}``. Used by the "Reset 2FA" escape hatch on the
     setup wizard 2FA screen — useful when the user scanned the QR into the
     wrong device or wants a clean second attempt before first login.
+    Once an account exists, a session or setup-session JWT is required as
+    well as the password. A password alone does not re-key the account.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
+    if _account_exists(svc) and _operator_session_payload(_session_token_from_request()) is None:
+        return jsonify({"status": "error", "message": "Authentication required."}), 401
     if not password:
         return jsonify({"status": "error", "message": "Password required to reset 2FA."}), 400
     result = svc.regenerate_totp(password)
