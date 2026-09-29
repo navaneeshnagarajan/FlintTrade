@@ -45,7 +45,7 @@ describe("PracticeLaterSetup", () => {
     const dismiss = screen.getByRole("button", { name: "Dismiss" });
     expect(dismiss.className.split(/\s+/)).toContain("text-text-primary");
     expect(dismiss.className.split(/\s+/)).not.toContain("text-text-secondary");
-    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Two-factor authentication" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Set up Monitoring" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Set up Risk" })).not.toBeInTheDocument();
@@ -59,14 +59,15 @@ describe("PracticeLaterSetup", () => {
     expect(screen.getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hide" }).className).toContain("w-16");
-    expect(screen.getByRole("button", { name: "Skip Two-factor authentication" })).toBeInTheDocument();
+    const laterTotp = screen.getByRole("button", { name: "Later Two-factor authentication" });
+    expect(laterTotp).toHaveTextContent("Later");
+    expect(screen.getByRole("button", { name: "Later LLM" })).toHaveTextContent("Later");
+    expect(screen.getByRole("button", { name: "Later Trading defaults" })).toHaveTextContent("Later");
     expect(screen.getByRole("button", { name: "Continue without a broker" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "FlintTrade Native" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "OpenAlgo Bridge" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Skip LLM" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Skip Trading defaults" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip Monitoring" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip Risk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Risk" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /live/i })).not.toBeInTheDocument();
   });
 
@@ -74,7 +75,7 @@ describe("PracticeLaterSetup", () => {
     markPracticeLaterPending();
     const first = render(<PracticeLaterSetup />);
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
-    fireEvent.click(screen.getByRole("button", { name: "Skip Two-factor authentication" }));
+    fireEvent.click(screen.getByRole("button", { name: "Later Two-factor authentication" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue without a broker" }));
 
     expect(screen.getByText("Optional setup · 0 of 4 done · 2 skipped")).toBeInTheDocument();
@@ -94,7 +95,7 @@ describe("PracticeLaterSetup", () => {
       expect(view.getByText("Skipped")).toBeInTheDocument();
       expect(view.getAllByRole("button").map((button) => button.textContent)).toEqual(["Set up"]);
     }
-    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Two-factor authentication" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set up Two-factor authentication" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set up Broker connect" })).toBeInTheDocument();
@@ -148,7 +149,7 @@ describe("PracticeLaterSetup", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Later" }));
     expect(screen.getByRole("button", { name: "Set up Two-factor authentication" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Skip Two-factor authentication" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Later Two-factor authentication" })).toBeInTheDocument();
     expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
     expect(screen.queryByText("Skipped")).not.toBeInTheDocument();
     expect(screen.queryByText("Done")).not.toBeInTheDocument();
@@ -176,11 +177,11 @@ describe("PracticeLaterSetup", () => {
     expect(screen.getByText("Default Exchange")).toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Skip Trading defaults" }));
+    fireEvent.click(screen.getByRole("button", { name: "Later Trading defaults" }));
     expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
     expect(screen.queryByText("Skipped")).not.toBeInTheDocument();
     expect(screen.queryByText("Done")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Skip Trading defaults" }));
+    fireEvent.click(screen.getByRole("button", { name: "Later Trading defaults" }));
     expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
     const trading = screen.getByText("Trading defaults").closest("li");
     expect(trading).not.toBeNull();
@@ -188,7 +189,7 @@ describe("PracticeLaterSetup", () => {
     expect(tradingView.getByText("Trading defaults").textContent).not.toMatch(/later/i);
     expect(tradingView.getByText("Skipped")).toBeInTheDocument();
     expect(tradingView.getAllByRole("button").map((button) => button.textContent)).toEqual(["Set up"]);
-    expect(screen.queryByRole("button", { name: "Skip Trading defaults" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Trading defaults" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set up Trading defaults" })).toBeInTheDocument();
   });
 
@@ -225,48 +226,86 @@ describe("PracticeLaterSetup", () => {
     expect(view.getByRole("button", { name: "Set up Broker connect" })).toBeInTheDocument();
   });
 
-  it("Later inside a panel closes it and does not mark the card Done or Skipped", () => {
-    markPracticeLaterPending();
-    render(<PracticeLaterSetup />);
-    fireEvent.click(screen.getByRole("button", { name: "Show" }));
-
+  it("Later inside a panel closes it and leaves the card and strip unchanged", () => {
     const panels = [
       {
+        id: "totp",
         open: "Set up Two-factor authentication",
         later: "Later",
         title: "Two-factor authentication",
       },
       {
+        id: "llm",
         open: "Set up LLM",
-        later: "Skip LLM",
+        later: "Later LLM",
         title: "LLM",
       },
       {
+        id: "trading",
         open: "Set up Trading defaults",
-        later: "Skip Trading defaults",
+        later: "Later Trading defaults",
         title: "Trading defaults",
       },
     ] as const;
 
     for (const panel of panels) {
-      fireEvent.click(screen.getByRole("button", { name: panel.open }));
-      fireEvent.click(screen.getByRole("button", { name: panel.later }));
+      for (const started of ["not-started", "done"] as const) {
+        localStorage.clear();
+        clearOptionalSetupState();
+        const state = {
+          skipped: ["broker"],
+          completed: started === "done" ? [panel.id] : [],
+          dismissed: false,
+        };
+        localStorage.setItem(OPTIONAL_SETUP_STATE_KEY, JSON.stringify(state));
+        markPracticeLaterPending();
+        const strip = started === "done"
+          ? "Optional setup · 1 of 4 done · 1 skipped"
+          : "Optional setup · 0 of 4 done · 1 skipped";
+        const view = render(<PracticeLaterSetup />);
+        fireEvent.click(screen.getByRole("button", { name: "Show" }));
+        expect(screen.getByText(strip)).toBeInTheDocument();
 
-      expect(screen.getByRole("button", { name: panel.open })).toBeInTheDocument();
-      expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
-      const card = screen.getByText(panel.title).closest("li");
-      expect(card).not.toBeNull();
-      const view = within(card as HTMLElement);
-      expect(view.queryByText("Done")).not.toBeInTheDocument();
-      expect(view.queryByText("Skipped")).not.toBeInTheDocument();
-    }
+        fireEvent.click(screen.getByRole("button", { name: panel.open }));
+        fireEvent.click(screen.getByRole("button", { name: panel.later }));
 
-    const stored = localStorage.getItem(OPTIONAL_SETUP_STATE_KEY);
-    if (stored !== null) {
-      const parsed = JSON.parse(stored) as { skipped: string[]; completed: string[] };
-      expect(parsed.skipped).toEqual([]);
-      expect(parsed.completed).toEqual([]);
+        expect(screen.getByRole("button", { name: panel.open })).toBeInTheDocument();
+        expect(screen.getByText(strip)).toBeInTheDocument();
+        const card = screen.getByText(panel.title).closest("li");
+        expect(card).not.toBeNull();
+        const cardView = within(card as HTMLElement);
+        if (started === "done") {
+          expect(cardView.getByText("Done")).toBeInTheDocument();
+          expect(cardView.queryByText("Skipped")).not.toBeInTheDocument();
+        } else {
+          expect(cardView.queryByText("Done")).not.toBeInTheDocument();
+          expect(cardView.queryByText("Skipped")).not.toBeInTheDocument();
+        }
+        const broker = screen.getByText("Broker connect").closest("li");
+        expect(broker).not.toBeNull();
+        expect(within(broker as HTMLElement).getByText("Skipped")).toBeInTheDocument();
+        expect(JSON.parse(localStorage.getItem(OPTIONAL_SETUP_STATE_KEY) ?? "{}")).toEqual(state);
+        view.unmount();
+      }
     }
+  });
+
+  it("keeps the Skipped and Done tags at text-xxs", () => {
+    localStorage.setItem(OPTIONAL_SETUP_STATE_KEY, JSON.stringify({
+      skipped: ["totp"],
+      completed: ["llm"],
+      dismissed: false,
+    }));
+    markPracticeLaterPending();
+    render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+
+    const skipped = screen.getByText("Skipped");
+    const done = screen.getByText("Done");
+    expect(skipped).toHaveClass("text-xxs");
+    expect(skipped).not.toHaveClass("text-xs");
+    expect(done).toHaveClass("text-xxs");
+    expect(done).not.toHaveClass("text-xs");
   });
 
   it("marks a finished card Done and does not offer Later", () => {
@@ -284,7 +323,7 @@ describe("PracticeLaterSetup", () => {
     const view = within(card as HTMLElement);
     expect(view.getByText("LLM").textContent).toBe("LLM");
     expect(view.getByText("Done")).toBeInTheDocument();
-    expect(view.queryByRole("button", { name: "Skip LLM" })).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "Later LLM" })).not.toBeInTheDocument();
     expect(view.queryByText("Later")).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "Set up LLM" })).toBeInTheDocument();
   });

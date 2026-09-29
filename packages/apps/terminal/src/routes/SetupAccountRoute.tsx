@@ -1346,7 +1346,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                         type="button"
                         variant="ghost"
                         size="sm"
-                        aria-label={`Skip ${item.title}`}
+                        aria-label={`Later ${item.title}`}
                         onClick={() => skip(item.id)}
                       >
                         Later
@@ -1384,7 +1384,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
           {panel === "llm" && (
             <div className="space-y-3">
               <div className="flex justify-end">
-                <Button type="button" variant="outline" aria-label="Skip LLM" onClick={() => setPanel(null)}>
+                <Button type="button" variant="outline" aria-label="Later LLM" onClick={() => setPanel(null)}>
                   Later
                 </Button>
               </div>
@@ -1398,7 +1398,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                 <Button
                   type="button"
                   variant="outline"
-                  aria-label="Skip Trading defaults"
+                  aria-label="Later Trading defaults"
                   onClick={() => setPanel(null)}
                 >
                   Later

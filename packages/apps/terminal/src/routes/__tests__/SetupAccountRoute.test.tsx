@@ -303,8 +303,8 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     mocks.downgradeMode.mockResolvedValue("practice-token");
     render(<SetupAccountRoute />);
 
-    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip Broker connect" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Broker connect" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
 
     await waitFor(() =>
