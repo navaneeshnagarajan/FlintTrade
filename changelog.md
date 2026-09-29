@@ -23,11 +23,22 @@ changelog rebuilds itself from the first release cut after this baseline.
   case or separator spelling, is HTTP 422 `gtt_unsupported` on place,
   routed place, and exit-all, before Laya, SafetySystem, and any broker
   call. The message is `Not placed. GTT orders aren't supported right now.`
-  Dhan place does not call `/forever/orders` or `/super/orders`. Kotak Neo
-  refuses GTT. A second exit while this desk's exit is unfilled is
-  `exit_pending`. When the broker order book cannot be read, that refusal
-  is `exit_orders_unreadable`. A signed-out reset names an authenticator
-  code only when one is enrolled.
+  No submit route reaches a broker forever or super-order endpoint. The
+  Kotak Neo adapter refuses a `gtt` place. Order Pad keeps GTT visible and
+  disabled, with the tooltip `GTT orders aren't supported right now.`
+  `POST /api/v1/orders/forever` does not place: a valid body is HTTP 501
+  `Orders are placed through /api/v1/orders/place.` A second exit while
+  this desk's exit is unfilled is HTTP 409 `exit_pending`: `Not placed.
+  An exit for <symbol> is already pending. Wait for it to fill, or cancel
+  it and try again.` The row keeps **Exit pending**. When the broker
+  order book cannot be read, that refusal is HTTP 409
+  `exit_orders_unreadable`: `Not placed. One exit at a time for <symbol>
+  until your broker's orders load.` A signed-out reset with no
+  authenticator enrolled reads `Sign in to reset this account. You'll
+  need your password.` With an authenticator enrolled it reads `Sign in
+  to reset this account. You'll need your password and authenticator
+  code.` Recovery asks for an authenticator code only once one is
+  enrolled.
 
 ### Added
 
@@ -71,16 +82,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Order, session, and probe reference.** Orders are submitted on
   `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and
-  `POST /api/v1/positions/exit-all`. A GTT order is `"variety": "gtt"`
-  on place. A reduce-only close can be admitted while new orders are
-  paused. PIN unlock replaces the session token. Reset of a finished
-  account needs a session, the password, and an authenticator code, and
-  ends other sessions. Practice restore marks fills and leaves them out
+  `POST /api/v1/positions/exit-all`. `"variety": "gtt"` on those routes
+  is HTTP 422 `gtt_unsupported`. A reduce-only close can be admitted while
+  new orders are paused. PIN unlock replaces the session token. Reset of
+  a finished account needs a session and the password. An authenticator
+  code is required only once one is enrolled. A wipe ends other sessions. Practice restore marks fills and leaves them out
   of the Laya, strategy, benchmark, and training readers. `GET /healthz`
   and `GET /readyz` are public and return status only.
 
-- **GTT is not admitted at place.** Submit routes refuse
-  `"variety": "gtt"` before Laya and SafetySystem.
+- **GTT is refused before Laya and SafetySystem.** Submit routes return
+  HTTP 422 `gtt_unsupported` for `"variety": "gtt"`.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
@@ -202,8 +213,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   `USER_GUIDE` Practice walkthrough no longer treats Explore
   Sample Buy as a sandbox Positions/Orders fill.
   `API.md` no longer claims `/orders/gtt-*` is gated like
-  regular Live place — those verbs 501 after unlock; gated
-  GTT is `/orders/forever`. `API.md` documents
+  regular Live place — those verbs return HTTP 501 after unlock
+  and do not place. `POST /api/v1/orders/forever` does not place.
+  `API.md` documents
   `GET /api/v1/advisor/status` `source` (`env` / `stored` /
   `default`). `ARCHITECTURE.md` mode-guards Practice to
   `SandboxEngine` and runs L1–L5 only on Live.

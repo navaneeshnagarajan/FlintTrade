@@ -482,7 +482,11 @@ The sandbox routes cancel and modify only. Settings → Practice does not
 place. Live operator and automate **place** is checked when it's
 placed: Mode guard → `Laya.admit` → SafetySystem L1–L5 → `gate_order`
 → `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
-before that path, on place, routed place, and exit-all.
+(`Not placed. GTT orders aren't supported right now.`) before that
+path, on place, routed place, and exit-all. No submit route reaches a
+broker forever or super-order endpoint. The Kotak Neo adapter refuses a
+`gtt` place. `POST /api/v1/orders/forever` returns HTTP 501 and does not
+place.
 Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Explore
 placement is refused by the backend (`mode_blocked`); Order Pad Sample

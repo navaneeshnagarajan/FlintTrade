@@ -47,9 +47,13 @@ place route is Live only and uses the same Live admission. Modify and
 cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 before Laya, SafetySystem, and any broker call, on place, routed place,
-and exit-all. It is not `POST /api/v1/orders/forever` (that route
-returns HTTP 501 and does not place). Practice and Live both refuse
-that variety before the sandbox or a broker.
+and exit-all. The message is `Not placed. GTT orders aren't supported right now.`
+No submit route reaches a broker forever or super-order endpoint. The
+Kotak Neo adapter refuses a `gtt` place. `POST /api/v1/orders/forever` returns
+HTTP 501 `Orders are placed through /api/v1/orders/place.` and does not
+call a broker. Practice and Live both refuse that variety before the
+sandbox or a broker. The Order Pad GTT option stays visible and disabled,
+with the tooltip `GTT orders aren't supported right now.`
 
 **Regular modify and cancel:**
 
@@ -101,8 +105,8 @@ a dispatcher error and does not place the reduced quantity on its own.
 Chat is not an admission source. Modify, cancel, and cancel-all are not
 admitted as place. Forever place, basket, split, and conditional-trigger
 place do not submit. A GTT body is refused on every submit route
-before Laya admission and SafetySystem. Dhan place does not call
-`/forever/orders` or `/super/orders`.
+before Laya admission and SafetySystem. No submit route reaches a broker
+forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down. New orders are paused until it's Ready. You can still close positions.").
@@ -120,8 +124,10 @@ it. Down and Degraded do not block it. Live still runs
 SafetySystem after that record. A second exit while one of this desk's
 exits on that contract is still unfilled is HTTP 409 `exit_pending`:
 "Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."
-When the broker order book cannot be read, that refusal is HTTP 409
+Practice uses this code. On Live it is the code when the broker order book
+can be read. When the broker order book cannot be read, that refusal is HTTP 409
 `exit_orders_unreadable`: "Not placed. One exit at a time for <symbol> until your broker's orders load."
+`message` and `reason` are that same text. The label is the symbol, or `this contract` when the symbol is empty.
 The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has
 loaded keeps that row, tagged **Unexpected**, and the book shows
 `Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.`

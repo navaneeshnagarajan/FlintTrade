@@ -420,10 +420,12 @@ Position Mirror start. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
 smart, multi, forever modify and cancel, and the other non-place write
 verbs still reach SafetySystem without this place admission.
-`POST /api/v1/orders/forever` does not place. A GTT body is refused
-before Laya, SafetySystem, and any broker call, including Dhan
-`/forever/orders` and `/super/orders`. Laya starts Down; the three
-statuses are Ready, Degraded, and Down. The desk ping publishes the
+`POST /api/v1/orders/forever` does not place. A valid body is HTTP 501
+`Orders are placed through /api/v1/orders/place.` and the route does not
+call a broker. A GTT body is HTTP 422 `gtt_unsupported` before Laya,
+SafetySystem, and any broker call. No submit route reaches a broker
+forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
+Laya starts Down; the three statuses are Ready, Degraded, and Down. The desk ping publishes the
 stored status and does not invent Ready. Ready and Degraded are recorded
 by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
@@ -657,9 +659,11 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - Reset of a finished account needs an active session. Once an
   authenticator is enrolled it also needs the password and the current
   authenticator code. The wipe bumps `epoch`, so other sessions end. A
-  signed-out reset is refused with "Sign in to reset this account.
-  You'll need your password." When an authenticator is enrolled, that
-  sentence also asks for the authenticator code.
+  signed-out reset with no authenticator enrolled is refused with
+  "Sign in to reset this account. You'll need your password." With an
+  authenticator enrolled it is "Sign in to reset this account. You'll
+  need your password and authenticator code." Recovery asks for an
+  authenticator code only once one is enrolled.
 - Revocation blocklist keyed by `jti` in
   `packages/core/core/src/flinttrade_core/auth_state.py`.
 - Non-public routes accept a session JWT or `FLINTTRADE_API_KEY`. An

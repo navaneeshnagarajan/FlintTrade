@@ -156,8 +156,11 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
   Practice are refused; Live `gtt-*` returns HTTP 501 rather than
   forwarding that upstream 501. A body with `"variety": "gtt"` on
   place, routed place, or exit-all is HTTP 422 `gtt_unsupported`
-  before Laya, SafetySystem, and any broker call.
-  `POST /api/v1/orders/forever` does not place.
+  (`Not placed. GTT orders aren't supported right now.`) before Laya,
+  SafetySystem, and any broker call. No submit route reaches a broker
+  forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
+  `POST /api/v1/orders/forever` does not place. A valid body is HTTP 501
+  `Orders are placed through /api/v1/orders/place.`
 - **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
 - **WhatsApp bot** — `POST /api/v1/whatsapp/notify` exists upstream in
   OpenAlgo. FlintTrade no longer proxies or exposes it: WhatsApp support was
