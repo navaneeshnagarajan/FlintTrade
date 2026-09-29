@@ -99,6 +99,41 @@ describe("PageTabs", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Tax" }));
     expect(screen.getByRole("tab", { name: "Tax" })).toHaveAttribute("aria-selected", "true");
   });
+
+  it("points every group tab at the one shared panel when given a panelId", () => {
+    render(
+      <PageTabs<TabId>
+        tabs={TABS}
+        value="holdings"
+        onChange={() => undefined}
+        label="Invest sections"
+        idPrefix="invest-group"
+        panelId="invest-tabpanel-sip"
+      />,
+    );
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toHaveAttribute("aria-controls", "invest-tabpanel-sip");
+    }
+    expect(screen.getByRole("tab", { name: "Holdings" })).toHaveAttribute("id", "invest-group-tab-holdings");
+  });
+
+  it("renders a smaller secondary row for views inside a group", () => {
+    render(
+      <PageTabs<TabId>
+        tabs={TABS}
+        value="overview"
+        onChange={() => undefined}
+        label="Overview views"
+        idPrefix="invest"
+        variant="secondary"
+      />,
+    );
+    const classes = (name: string) => screen.getByRole("tab", { name }).className.split(/\s+/);
+    expect(classes("Overview")).toEqual(expect.arrayContaining(["h-8", "text-xs", "bg-surface-hover"]));
+    expect(classes("Overview")).not.toContain("border-b-2");
+    expect(classes("Holdings")).not.toContain("bg-surface-hover");
+    expect(screen.getByRole("tablist", { name: "Overview views" })).toBeInTheDocument();
+  });
 });
 
 describe("PageBody", () => {

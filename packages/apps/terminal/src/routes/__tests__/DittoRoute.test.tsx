@@ -264,9 +264,9 @@ beforeEach(() => {
 });
 
 describe("DittoRoute", () => {
-  it("renders the Account Manager header", () => {
+  it("renders the Accounts heading, matching its sidebar label", () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Account Manager")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Accounts" })).toBeInTheDocument();
   });
 
   it("keeps route-local checkmark SVG markup out of the source", () => {

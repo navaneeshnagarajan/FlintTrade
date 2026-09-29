@@ -116,6 +116,13 @@ export interface PageTabsProps<T extends string> {
   label: string;
   /** Tab ids are `${idPrefix}-tab-${id}`, panel ids `${idPrefix}-tabpanel-${id}`. */
   idPrefix: string;
+  /**
+   * The one panel every tab controls, when a row of groups sits above a row
+   * of views that owns the panels. Defaults to one panel per tab.
+   */
+  panelId?: string;
+  /** `secondary` is the smaller row of views under a primary row of groups. */
+  variant?: "primary" | "secondary";
   className?: string;
 }
 
@@ -137,8 +144,11 @@ export function PageTabs<T extends string>({
   onChange,
   label,
   idPrefix,
+  panelId,
+  variant = "primary",
   className,
 }: PageTabsProps<T>) {
+  const secondary = variant === "secondary";
   const listRef = useRef<HTMLDivElement>(null);
 
   const handleKeyDown = useCallback(
@@ -169,7 +179,8 @@ export function PageTabs<T extends string>({
       aria-orientation="horizontal"
       onKeyDown={handleKeyDown}
       className={cn(
-        "flex min-w-0 items-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "flex min-w-0 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        secondary ? "items-center" : "items-end",
         className,
       )}
     >
@@ -183,18 +194,27 @@ export function PageTabs<T extends string>({
             role="tab"
             id={pageTabId(idPrefix, tab.id)}
             aria-selected={active}
-            aria-controls={pageTabPanelId(idPrefix, tab.id)}
+            aria-controls={panelId ?? pageTabPanelId(idPrefix, tab.id)}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(tab.id)}
             className={cn(
-              "flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-md border-b-2 px-3 text-sm font-medium transition-colors",
+              "flex shrink-0 items-center whitespace-nowrap font-medium transition-colors",
               "focus-visible:outline-offset-[-2px]",
-              active
-                ? "border-accent text-text-primary"
-                : "border-transparent text-text-secondary hover:border-border-strong hover:text-text-primary",
+              secondary
+                ? "h-8 gap-1.5 rounded-md px-2.5 text-xs"
+                : "h-10 gap-1.5 rounded-t-md border-b-2 px-3 text-sm",
+              secondary
+                ? active
+                  ? "bg-surface-hover text-text-primary"
+                  : "text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary"
+                : active
+                  ? "border-accent text-text-primary"
+                  : "border-transparent text-text-secondary hover:border-border-strong hover:text-text-primary",
             )}
           >
-            {Icon ? <Icon className="size-4 shrink-0" aria-hidden="true" /> : null}
+            {Icon ? (
+              <Icon className={cn("shrink-0", secondary ? "size-3.5" : "size-4")} aria-hidden="true" />
+            ) : null}
             {tab.label}
             {tab.badge}
           </button>
