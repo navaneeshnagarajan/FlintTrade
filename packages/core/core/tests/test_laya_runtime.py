@@ -19,8 +19,9 @@ from flinttrade_core.health_routes import health_bp
 from flinttrade_core.laya_runtime import (
     CPU_TORCH_INDEX,
     LAYA_BIND_HOST,
-    LAYA_SERVE_REQUIREMENT,
+    LAYA_DOWNLOAD_BOOTSTRAP,
     LAYA_DOWNLOAD_LOG,
+    LAYA_SERVE_REQUIREMENT,
     LAYA_WATCH_INTERVAL_SECONDS,
     LAYA_WEIGHTS_DRIFT_LOG,
     LAYA_WEIGHTS_LOG,
@@ -1393,6 +1394,22 @@ def _write_pinned_snapshot(root: Path) -> Path:
     return path
 
 
+def _write_pinned_tree(directory: Path) -> Path:
+    """Write the pinned weights file and manifest as a flat checkpoint directory."""
+    policy = load_policy()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / policy.weight_file
+    path.write_bytes(b"pinned-weights")
+    for name, _digest in policy.manifest:
+        companion = directory / name
+        companion.parent.mkdir(parents=True, exist_ok=True)
+        companion.write_bytes(b"companion:" + name.encode())
+    return path
+
+
+_PINNED_REVISION = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+
+
 @pytest.mark.unit
 def test_clean_cache_downloads_then_launches_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -1409,11 +1426,19 @@ def test_clean_cache_downloads_then_launches_offline(
         assert env["HF_HUB_OFFLINE"] == "0"
         assert env["LAYA_REPO"] == policy.repo
         assert env["LAYA_REVISION"] == policy.revision
+        assert env["LAYA_REVISION"] == _PINNED_REVISION
+        assert env["LAYA_REVISION"] != "main"
+        assert "HUGGINGFACE_HUB_CACHE" not in env
+        assert "LAYA_DOWNLOAD_DIR" in env
+        staging = Path(env["LAYA_DOWNLOAD_DIR"])
+        assert staging.name == "staging"
+        assert staging != runtime_root_checkpoint(staging)
+        assert "snapshot_download" in "\n".join(argv)
+        assert "revision=revision" in "\n".join(argv)
+        assert "laya-serve" not in "\n".join(argv)
         assert env.get("TRANSFORMERS_OFFLINE") != "1"
         assert "LAYA_WEIGHTS_PATH" not in env
-        assert "snapshot_download" in "\n".join(argv)
-        assert "laya-serve" not in "\n".join(argv)
-        _write_pinned_snapshot(Path(env["HUGGINGFACE_HUB_CACHE"]))
+        _write_pinned_tree(staging)
         return 0
 
     def factory(_argv: list[str], env: dict[str, str]) -> _Process:
@@ -1437,9 +1462,20 @@ def test_clean_cache_downloads_then_launches_offline(
     assert "LAYA_REVISION" not in env
     assert "LAYA_MODELS" not in env
     assert env["LAYA_WEIGHTS_PATH"].endswith(policy.weight_file)
+    assert "checkpoint" in env["LAYA_WEIGHTS_PATH"]
+    assert "staging" not in env["LAYA_WEIGHTS_PATH"]
+    assert str(cache) not in env["LAYA_WEIGHTS_PATH"]
+    assert not runtime.staging_dir.exists()
+    assert (runtime.checkpoint_dir / policy.weight_file).is_file()
+    assert not cache.exists() or not any(cache.rglob("*"))
     assert LAYA_DOWNLOAD_LOG % (policy.repo, policy.revision) in caplog.text
     assert policy.sha256 in caplog.text
     reset_process_laya_for_tests()
+
+
+def runtime_root_checkpoint(staging: Path) -> Path:
+    """Launch directory that sits next to a staging directory."""
+    return staging.parent / "checkpoint"
 
 
 @pytest.mark.unit
@@ -1460,7 +1496,7 @@ def test_tampered_download_is_removed_and_does_not_launch(
     launched: list[object] = []
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        path = _write_pinned_snapshot(Path(env["HUGGINGFACE_HUB_CACHE"]))
+        path = _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
         (path.parent / "encoder" / "config.json").write_bytes(b"tampered")
         return 0
 
@@ -1476,16 +1512,11 @@ def test_tampered_download_is_removed_and_does_not_launch(
     assert launched == []
     assert runtime._process is None  # noqa: SLF001
     assert not (runtime.runtime_root / "sidecar.pid").exists()
-    weights = snapshot_weight_path(
-        cache,
-        repo=policy.repo,
-        revision=policy.revision,
-        filename=policy.weight_file,
-    )
-    assert not weights.exists()
-    assert not (weights.parent / "encoder" / "config.json").exists()
+    assert not runtime.staging_dir.exists()
+    assert not (runtime.checkpoint_dir / policy.weight_file).exists()
     assert keeper.read_bytes() == b"keep"
     assert other.read_bytes() == b"leave-this"
+    assert not any(cache.rglob("model.safetensors"))
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "wrong_revision"
@@ -1501,10 +1532,12 @@ def test_failed_download_does_not_launch(tmp_path: Path, monkeypatch: pytest.Mon
     repo = cache / ("models--" + policy.repo.replace("/", "--"))
     launched: list[object] = []
 
+    keeper = repo / "blobs" / "already-there"
+    keeper.parent.mkdir(parents=True)
+    keeper.write_bytes(b"keep")
+
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        partial = Path(env["HUGGINGFACE_HUB_CACHE"]) / ("models--" + policy.repo.replace("/", "--"))
-        partial = partial / "snapshots" / policy.revision / policy.weight_file
-        partial.parent.mkdir(parents=True)
+        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
         partial.write_bytes(b"partial")
         return 1
 
@@ -1515,13 +1548,93 @@ def test_failed_download_does_not_launch(tmp_path: Path, monkeypatch: pytest.Mon
         health_reader=lambda _url: _healthy(),
         watch=False,
     )
-    with pytest.raises(LayaRuntimeError, match="Can't verify the model"):
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
         runtime.start()
     assert launched == []
     assert not (runtime.runtime_root / "sidecar.pid").exists()
-    assert not (repo / "snapshots").exists()
-    runtime.publish_status()
+    assert not runtime.staging_dir.exists()
+    assert not (runtime.checkpoint_dir / policy.weight_file).exists()
+    assert keeper.read_bytes() == b"keep"
+    report = runtime.status()
+    assert report["reason"] == "download_failed"
+    assert report["detail"] == "Can't download the model"
+    assert report["tooltip"] == "Check your connection, then Start Laya again."
+    assert "Next:" not in str(report["tooltip"])
     assert process_laya().status is DecisionStatus.DOWN
-    assert process_laya().runtime_reason()[0] == "unverified"
-    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    assert laya_reason_detail("download_failed", runtime._port) == "Can't download the model"  # noqa: SLF001
+    assert laya_reason_tooltip("download_failed", runtime._port) == (  # noqa: SLF001
+        "Check your connection, then Start Laya again."
+    )
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_download_uses_the_pinned_revision_not_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    seen: dict[str, str] = {}
+
+    def download(argv: list[str], env: dict[str, str]) -> int:
+        seen["revision"] = env["LAYA_REVISION"]
+        seen["script"] = "\n".join(argv)
+        return 1
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
+        runtime.start()
+    assert seen["revision"] == policy.revision
+    assert seen["revision"] == _PINNED_REVISION
+    assert seen["revision"] != "main"
+    assert "revision=revision" in seen["script"]
+    assert "revision=revision" in LAYA_DOWNLOAD_BOOTSTRAP
+    assert '"main"' not in LAYA_DOWNLOAD_BOOTSTRAP
+    assert "'main'" not in LAYA_DOWNLOAD_BOOTSTRAP
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_download_progress_updates_the_chip_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    _accept_pinned_digests(monkeypatch, policy)
+    seen: list[str] = []
+
+    def download(_argv: list[str], env: dict[str, str], progress: Any) -> int:
+        progress(500_000_000, 3_400_000_000)
+        first = process_laya().download_progress()
+        assert first is not None
+        seen.append(laya_reason_detail("downloading", 8000, progress=first) or "")
+        progress(1_200_000_000, 3_400_000_000)
+        second = process_laya().download_progress()
+        assert second == (1_200_000_000, 3_400_000_000)
+        seen.append(laya_reason_detail("downloading", 8000, progress=second) or "")
+        assert process_laya().runtime_reason()[0] == "downloading"
+        assert process_laya().status is DecisionStatus.DOWN
+        assert laya_reason_tooltip("downloading", 8000) is None
+        verdict = process_laya().admit(
+            Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice")
+        )
+        assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+        _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
+        return 0
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime.start()
+    assert seen == [
+        "Downloading the model · 0.5 of 3.4 GB",
+        "Downloading the model · 1.2 of 3.4 GB",
+    ]
     reset_process_laya_for_tests()

@@ -20,10 +20,12 @@ from __future__ import annotations
 import argparse
 import atexit
 import hashlib
+import inspect
 import json
 import logging
 import os
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -85,28 +87,93 @@ LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
     )
     """
 )
-# Downloads the pinned revision and exits. This is not a sidecar: nothing
-# here binds a port or loads the model.
+# Downloads the pinned commit into LAYA_DOWNLOAD_DIR and exits. This is not
+# a sidecar: nothing here binds a port or loads the model. The revision is
+# the commit hash from the policy. It is never omitted, so the hub cannot
+# fall through to the default branch. The library cache stays inside the
+# staging directory; the shared Hugging Face cache is not the destination.
 LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
     """\
     import os
+    import shutil
     import sys
 
     repo = os.environ.get("LAYA_REPO", "").strip()
     revision = os.environ.get("LAYA_REVISION", "").strip()
-    if not repo or not revision:
+    dest = os.environ.get("LAYA_DOWNLOAD_DIR", "").strip()
+    if not repo or len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision) or not dest:
         sys.stderr.write("laya download pin is incomplete\\n")
         raise SystemExit(1)
     os.environ["HF_HUB_OFFLINE"] = "0"
     os.environ.pop("TRANSFORMERS_OFFLINE", None)
+    os.environ.pop("HUGGINGFACE_HUB_CACHE", None)
+    os.environ.pop("HF_HUB_CACHE", None)
+    os.environ.pop("HF_HOME", None)
+    os.makedirs(dest, exist_ok=True)
+    cache = os.path.join(dest, ".hf-cache")
+    bars = []
+
+    class _Progress:
+        def __init__(self, *args, total=None, **kwargs):
+            self.n = 0
+            self.total = int(total or 0)
+            bars.append(self)
+            _emit()
+
+        def update(self, n=1):
+            self.n += int(n)
+            _emit()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def close(self):
+            _emit()
+
+        def refresh(self):
+            _emit()
+
+        def reset(self, total=None):
+            self.n = 0
+            if total is not None:
+                self.total = int(total)
+            _emit()
+
+        def set_description(self, *args, **kwargs):
+            return None
+
+    def _emit():
+        done = sum(bar.n for bar in bars)
+        total = sum(bar.total for bar in bars)
+        sys.stdout.write(f"laya download progress {done} {total}\\n")
+        sys.stdout.flush()
+
     from huggingface_hub import snapshot_download
 
-    cache = os.environ.get("HUGGINGFACE_HUB_CACHE", "").strip()
     snapshot_download(
         repo_id=repo,
         revision=revision,
-        cache_dir=cache or None,
+        local_dir=dest,
+        cache_dir=cache,
+        tqdm_class=_Progress,
     )
+    cache_root = os.path.abspath(cache)
+    for dirpath, _dirnames, filenames in os.walk(dest):
+        here = os.path.abspath(dirpath)
+        if here == cache_root or here.startswith(cache_root + os.sep):
+            continue
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if not os.path.islink(path):
+                continue
+            target = os.path.realpath(path)
+            copied = path + ".copy"
+            shutil.copyfile(target, copied)
+            os.replace(copied, path)
+    shutil.rmtree(cache, ignore_errors=True)
     """
 )
 _WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".gguf")
@@ -659,18 +726,30 @@ def find_pinned_weight(
     return candidate
 
 
-def _repo_cache_dir(root: Path, repo: str) -> Path:
-    """Hugging Face cache folder for one model repository."""
-    return root / ("models--" + repo.replace("/", "--"))
-
-
 def _pinned_names(policy: Any) -> tuple[str, ...]:
     """Weights file plus every manifest name, in pin order."""
     return (str(policy.weight_file), *(str(name) for name, _digest in policy.manifest))
 
 
-def _pinned_files_missing(policy: Any) -> bool:
-    """True when the weights file or any manifest file is not on disk."""
+def _is_pinned_commit(revision: str) -> bool:
+    """True when ``revision`` is the 40-character commit pinned in the policy."""
+    text = revision.strip()
+    return len(text) == 40 and all(char in "0123456789abcdef" for char in text)
+
+
+def _directory_has_pinned_files(directory: Path, policy: Any) -> bool:
+    """True when the weights file and every manifest file are in ``directory``."""
+    return all((directory / name).is_file() for name in _pinned_names(policy))
+
+
+def _pinned_files_missing(policy: Any, checkpoint_dir: Path | None = None) -> bool:
+    """True when the weights file or any manifest file is not already installed.
+
+    The runtime checkpoint is checked first. The shared Hugging Face cache
+    is the other place a previous download may already have landed.
+    """
+    if checkpoint_dir is not None and _directory_has_pinned_files(checkpoint_dir, policy):
+        return False
     names = _pinned_names(policy)
     for root in huggingface_cache_roots():
         directory = snapshot_weight_path(
@@ -682,49 +761,6 @@ def _pinned_files_missing(policy: Any) -> bool:
         if all((directory / name).is_file() for name in names):
             return False
     return True
-
-
-def _files_under(root: Path) -> set[str]:
-    """Files and symlinks under ``root``. The walk does not follow links."""
-    if not root.exists():
-        return set()
-    found: set[str] = set()
-    for path in root.rglob("*"):
-        if path.is_symlink() or path.is_file():
-            found.add(str(path))
-    return found
-
-
-def _inside_directory(path: Path, root: Path) -> bool:
-    """True when ``path`` itself, not a symlink target, sits inside ``root``."""
-    try:
-        path.absolute().relative_to(root.absolute())
-    except ValueError:
-        return False
-    return True
-
-
-def _remove_fetched(repo_dir: Path, fetched: tuple[Path, ...]) -> None:
-    """Delete files this start created, then empty directories they left."""
-    for path in fetched:
-        if not _inside_directory(path, repo_dir):
-            continue
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            continue
-    if not repo_dir.exists():
-        return
-    directories = [path for path in repo_dir.rglob("*") if path.is_dir() and not path.is_symlink()]
-    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
-        try:
-            directory.rmdir()
-        except OSError:
-            continue
-    try:
-        repo_dir.rmdir()
-    except OSError:
-        return
 
 
 def extra_loadable_file(directory: Path, allowed: set[str]) -> str | None:
@@ -752,26 +788,24 @@ def extra_loadable_file(directory: Path, allowed: set[str]) -> str | None:
     return None
 
 
-def verify_installed_model(
+def verify_model_directory(
+    directory: Path,
     *,
-    repo: str,
     revision: str,
     filename: str,
     expected_sha256: str,
     manifest: tuple[tuple[str, str], ...] = (),
-    cache_roots: list[Path] | None = None,
 ) -> ArtifactCheck:
-    """Verify the pinned revision, the weight file, and the companion manifest.
+    """Hash the weights file and every manifest file in ``directory``.
 
-    A missing weight file is unverified. A snapshot that also holds a shard
+    A missing weight file is unverified. A directory that also holds a shard
     index, another weights file, or any other file the launcher could read
-    is unverified and must not be
-    launched. A file whose digest is not the pin is a real mismatch.
+    is unverified and must not be launched. A file whose digest is not the
+    pin is a real mismatch.
     """
-    path = snapshot_weight_file(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
-    if path is None:
+    path = directory / filename
+    if not path.is_file():
         return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
-    directory = path.parent
     allowed = {filename, *(name for name, _digest in manifest)}
     if snapshot_has_extra_weights(directory, filename):
         return ArtifactCheck(
@@ -841,6 +875,104 @@ def verify_installed_model(
     return replace(check, files=tuple(files))
 
 
+def verify_installed_model(
+    *,
+    repo: str,
+    revision: str,
+    filename: str,
+    expected_sha256: str,
+    manifest: tuple[tuple[str, str], ...] = (),
+    cache_roots: list[Path] | None = None,
+) -> ArtifactCheck:
+    """Verify the pinned revision already present in a Hugging Face cache.
+
+    A missing weight file is unverified. A snapshot that also holds a shard
+    index, another weights file, or any other file the launcher could read
+    is unverified and must not be launched. A file whose digest is not the
+    pin is a real mismatch.
+    """
+    path = snapshot_weight_file(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
+    if path is None:
+        return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
+    return verify_model_directory(
+        path.parent,
+        revision=revision,
+        filename=filename,
+        expected_sha256=expected_sha256,
+        manifest=manifest,
+    )
+
+
+def _staged_download_refusal(directory: Path, check: ArtifactCheck, policy: Any) -> ArtifactCheck:
+    """Map a hash of the staging directory onto a chip reason.
+
+    A readable file whose digest is not the pin is ``wrong_revision``.
+    An extra loadable file in a complete download is ``unverified``.
+    A missing file, a partial file, or a read error is ``download_failed``.
+    """
+    if check.ok or check.reason == "wrong_revision":
+        return check
+    complete = _directory_has_pinned_files(directory, policy)
+    allowed = set(_pinned_names(policy))
+    extra = extra_loadable_file(directory, allowed) if complete else None
+    extra_weights = snapshot_has_extra_weights(directory, str(policy.weight_file)) if complete else False
+    if complete and check.reason == "unverified" and (extra is not None or extra_weights):
+        return check
+    return ArtifactCheck(
+        ok=False,
+        reason="download_failed",
+        revision=str(policy.revision),
+        sha256="",
+    )
+
+
+def _materialise_tree(directory: Path) -> None:
+    """Copy symlink targets into ``directory`` and drop its private hub cache.
+
+    The shared Hugging Face cache is only read. After this returns, the
+    staging tree no longer points at it.
+    """
+    if not directory.is_dir():
+        return
+    cache = directory / ".hf-cache"
+    links = [path for path in directory.rglob("*") if path.is_symlink()]
+    for path in links:
+        if path == cache or cache in path.parents:
+            continue
+        target = path.resolve()
+        if not target.is_file():
+            continue
+        data = target.read_bytes()
+        path.unlink()
+        path.write_bytes(data)
+    if cache.exists():
+        shutil.rmtree(cache)
+
+
+def _relocate_check(check: ArtifactCheck, source: Path, dest: Path) -> ArtifactCheck:
+    """Point a staging hash at the launch directory. Rename keeps the inode."""
+
+    def relocate(path: str) -> str:
+        relative = Path(path).resolve().relative_to(source.resolve())
+        return str(dest / relative)
+
+    weights = relocate(check.weights_path) if check.weights_path else ""
+    inode, size, mtime_ns = _file_identity(Path(weights)) if weights else (0, 0, 0)
+    files: list[PinnedFile] = []
+    for item in check.files:
+        path = relocate(item.path)
+        file_inode, file_size, file_mtime = _file_identity(Path(path))
+        files.append(replace(item, path=path, inode=file_inode, size=file_size, mtime_ns=file_mtime))
+    return replace(
+        check,
+        weights_path=weights,
+        inode=inode,
+        size=size,
+        mtime_ns=mtime_ns,
+        files=tuple(files),
+    )
+
+
 class LayaRuntime:
     """Install and supervise one loopback ``laya-serve`` process."""
 
@@ -856,7 +988,7 @@ class LayaRuntime:
         health_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
         port_probe: Callable[[int], bool] | None = None,
         artifact_checker: Callable[[], ArtifactCheck] | None = None,
-        downloader: Callable[[list[str], dict[str, str]], int] | None = None,
+        downloader: Callable[..., int] | None = None,
         watch: bool = True,
         watch_interval: float | None = None,
     ) -> None:
@@ -867,6 +999,8 @@ class LayaRuntime:
         self.workspace_dir = workspace_dir.expanduser().resolve()
         self.runtime_root = self.workspace_dir / "runtime" / "laya"
         self.venv_dir = self.runtime_root / "venv"
+        self.staging_dir = self.runtime_root / "staging"
+        self.checkpoint_dir = self.runtime_root / "checkpoint"
         self._port = resolve_laya_port(port)
         self._device = device
         self._process_factory = process_factory or self._spawn
@@ -882,6 +1016,7 @@ class LayaRuntime:
         self._key_rejected = False
         self._artifact_check: ArtifactCheck | None = None
         self._launch_refusal: ArtifactCheck | None = None
+        self._downloading = False
         self._weight_drift: tuple[str, str] | None = None
         self._start_token = ""
         self._watch = watch
@@ -949,13 +1084,8 @@ class LayaRuntime:
             self._launch_refusal = None
             self._weight_drift = None
             weighed = self._weigh_before_launch(policy)
-            if self._artifact_checker is None and _pinned_files_missing(policy):
-                repo_dir, fetched, downloaded = self._download_checkpoint(policy)
-                weighed = self._weigh_before_launch(policy)
-                if not weighed.ok:
-                    if downloaded:
-                        _remove_fetched(repo_dir, fetched)
-                    self._refuse_before_launch(weighed)
+            if self._artifact_checker is None and _pinned_files_missing(policy, self.checkpoint_dir):
+                weighed = self._download_then_weigh(policy)
             if self._weights_block_launch(weighed):
                 self._refuse_before_launch(weighed)
             pinned = weighed.ok and bool(weighed.weights_path)
@@ -1123,6 +1253,8 @@ class LayaRuntime:
         from flinttrade_engine.laya_decision import health_identity_failure, publish_probe  # noqa: PLC0415
 
         self._sync_watched_key()
+        if self._downloading:
+            return process_laya().status
         if self._launch_refusal is not None:
             engine = process_laya()
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
@@ -1195,7 +1327,9 @@ class LayaRuntime:
             in_process = process is not None and _process_alive(process)
         pid = _read_pid_file(self._pid_path)
         running = in_process or attached or _pid_alive(pid)
-        reason, port = process_laya().runtime_reason()
+        engine = process_laya()
+        reason, port = engine.runtime_reason()
+        progress = engine.download_progress()
         health = self._last_health
         return {
             "running": running,
@@ -1206,8 +1340,8 @@ class LayaRuntime:
             "pid": pid,
             "health": dict(health) if isinstance(health, Mapping) else None,
             "reason": reason,
-            "detail": laya_reason_detail(reason, port),
-            "tooltip": laya_reason_tooltip(reason, port),
+            "detail": laya_reason_detail(reason, port, progress=progress),
+            "tooltip": laya_reason_tooltip(reason, port, progress=progress),
         }
 
     def reap_children(self) -> None:
@@ -1433,49 +1567,205 @@ class LayaRuntime:
         self._record_launch_refusal(check)
         raise LayaRuntimeError(_launch_refusal_message(check))
 
-    def _download_checkpoint(self, policy: Any) -> tuple[Path, tuple[Path, ...], bool]:
-        """Fetch the pinned revision. Does not start the sidecar.
+    def _download_then_weigh(self, policy: Any) -> ArtifactCheck:
+        """Download into staging, hash it there, and rename it into place.
 
-        Returns the repository cache directory, the files this call created,
-        and whether the download process exited 0. A failed download deletes
-        only those new files.
+        A failed or incomplete download deletes the staging directory and
+        leaves the shared cache alone. A pre-existing incomplete snapshot
+        is still reported as itself. An empty cache is ``download_failed``.
         """
-        root = huggingface_cache_roots()[0]
-        repo_dir = _repo_cache_dir(root, policy.repo)
-        before = _files_under(repo_dir)
+        self._downloading = True
+        try:
+            self._note_progress(0, 0)
+            downloaded = self._download_checkpoint(policy)
+            if not downloaded:
+                self._discard_staging()
+                existing = self._weigh_before_launch(policy)
+                if existing.weights_path:
+                    self._refuse_before_launch(existing)
+                self._refuse_download()
+            try:
+                _materialise_tree(self.staging_dir)
+                staged = verify_model_directory(
+                    self.staging_dir,
+                    revision=policy.revision,
+                    filename=policy.weight_file,
+                    expected_sha256=policy.sha256,
+                    manifest=tuple(policy.manifest),
+                )
+            except OSError:
+                self._discard_staging()
+                self._refuse_download()
+            refusal = _staged_download_refusal(self.staging_dir, staged, policy)
+            if not refusal.ok:
+                self._discard_staging()
+                self._refuse_before_launch(refusal)
+            try:
+                self._move_staging_into_place()
+            except OSError:
+                self._discard_staging()
+                self._refuse_download()
+            return _relocate_check(staged, self.staging_dir, self.checkpoint_dir)
+        finally:
+            self._downloading = False
+
+    def _download_checkpoint(self, policy: Any) -> bool:
+        """Fetch the pinned commit into the staging directory. Does not launch.
+
+        Returns whether the download process exited 0. The destination is
+        ``runtime/laya/staging``, not the launch directory and not the
+        shared Hugging Face cache.
+        """
+        revision = str(policy.revision).strip()
+        if not _is_pinned_commit(revision):
+            return False
+        self._ensure_dirs()
+        self.staging_dir.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env["HF_HUB_OFFLINE"] = "0"
-        env["LAYA_REPO"] = policy.repo
-        env["LAYA_REVISION"] = policy.revision
-        env["HUGGINGFACE_HUB_CACHE"] = str(root)
-        env.pop("TRANSFORMERS_OFFLINE", None)
+        env["LAYA_REPO"] = str(policy.repo)
+        env["LAYA_REVISION"] = revision
+        env["LAYA_DOWNLOAD_DIR"] = str(self.staging_dir)
+        for name in (
+            "TRANSFORMERS_OFFLINE",
+            "HUGGINGFACE_HUB_CACHE",
+            "HF_HUB_CACHE",
+            "HF_HOME",
+            "HF_TOKEN",
+            "LAYA_WEIGHTS_PATH",
+        ):
+            env.pop(name, None)
         argv = [str(venv_python(self.venv_dir)), "-c", LAYA_DOWNLOAD_BOOTSTRAP]
-        _LOG.info(LAYA_DOWNLOAD_LOG, policy.repo, policy.revision)
+        _LOG.info(LAYA_DOWNLOAD_LOG, policy.repo, revision)
         try:
-            if self._downloader is not None:
-                code = self._downloader(argv, env)
-            else:
-                self._ensure_dirs()
-                completed = subprocess.run(  # noqa: S603
-                    argv,
-                    env=env,
-                    cwd=self.runtime_root,
-                    check=False,
-                    stdin=subprocess.DEVNULL,
-                )
-                code = completed.returncode
+            code = self._invoke_downloader(argv, env)
         except OSError:
-            code = 1
-        fetched = tuple(Path(path) for path in sorted(_files_under(repo_dir) - before))
-        if code != 0:
-            _remove_fetched(repo_dir, fetched)
-            return repo_dir, (), False
-        return repo_dir, fetched, True
+            return False
+        return code == 0
+
+    def _invoke_downloader(self, argv: list[str], env: dict[str, str]) -> int:
+        """Run the injected downloader, or the staging bootstrap.
+
+        A downloader that accepts a third argument receives progress
+        updates as ``(done_bytes, total_bytes)``.
+        """
+        if self._downloader is None:
+            return self._run_download(argv, env)
+        try:
+            parameters = inspect.signature(self._downloader).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_progress = any(
+            item.kind == inspect.Parameter.VAR_POSITIONAL for item in parameters.values()
+        ) or sum(
+            1
+            for item in parameters.values()
+            if item.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ) >= 3
+        if accepts_progress:
+            return int(self._downloader(argv, env, self._note_progress))
+        return int(self._downloader(argv, env))
+
+    def _run_download(self, argv: list[str], env: dict[str, str]) -> int:
+        """Run the download bootstrap and publish progress lines as they arrive."""
+        completed = subprocess.Popen(  # noqa: S603
+            argv,
+            env=env,
+            cwd=self.runtime_root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        def _drain(pipe: Any) -> None:
+            try:
+                pipe.read()
+            except OSError:
+                return
+
+        drainer = threading.Thread(target=_drain, args=(completed.stderr,), daemon=True)
+        drainer.start()
+        if completed.stdout is not None:
+            for line in completed.stdout:
+                self._note_download_line(line)
+        code = completed.wait()
+        drainer.join(timeout=2)
+        return code
+
+    def _note_download_line(self, line: str) -> None:
+        """Publish ``laya download progress <done> <total>`` from the child."""
+        parts = line.strip().split()
+        if len(parts) != 5 or parts[:3] != ["laya", "download", "progress"]:
+            return
+        try:
+            done = int(parts[3])
+            total = int(parts[4])
+        except ValueError:
+            return
+        if done < 0 or total < 0:
+            return
+        self._note_progress(done, total)
+
+    def _note_progress(self, done: int, total: int) -> None:
+        """Record Down with the live download sentence. Orders stay paused."""
+        from flinttrade_engine.laya import LAYA_REASON_DOWNLOADING, DecisionStatus, process_laya  # noqa: PLC0415
+
+        engine = process_laya()
+        engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+        engine.set_runtime_reason(LAYA_REASON_DOWNLOADING, self._port, progress=(done, total))
+
+    def _discard_staging(self) -> None:
+        """Delete the staging directory. The launch path and the cache stay."""
+        staging = self.staging_dir
+        try:
+            staging.resolve().relative_to(self.runtime_root.resolve())
+        except ValueError:
+            return
+        if staging.exists():
+            shutil.rmtree(staging)
+
+    def _move_staging_into_place(self) -> None:
+        """Rename staging onto the launch directory. Both sit on one filesystem."""
+        staging = self.staging_dir
+        launch = self.checkpoint_dir
+        if not staging.is_dir():
+            raise OSError("staging directory is missing")
+        if not launch.exists():
+            os.rename(staging, launch)
+            return
+        aside = self.runtime_root / "checkpoint.aside"
+        if aside.exists():
+            shutil.rmtree(aside)
+        os.rename(launch, aside)
+        try:
+            os.rename(staging, launch)
+        except OSError:
+            if not launch.exists() and aside.exists():
+                os.rename(aside, launch)
+            raise
+        shutil.rmtree(aside, ignore_errors=True)
+
+    def _refuse_download(self) -> None:
+        """Chip for a download that did not finish. Does not return."""
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
+
+        policy = load_policy()
+        self._refuse_before_launch(
+            ArtifactCheck(ok=False, reason="download_failed", revision=policy.revision, sha256="")
+        )
 
     def _weigh_before_launch(self, policy: Any) -> ArtifactCheck:
         """Hash the pinned file before the sidecar process exists."""
         if self._artifact_checker is not None:
             return self._artifact_checker()
+        if _directory_has_pinned_files(self.checkpoint_dir, policy):
+            return verify_model_directory(
+                self.checkpoint_dir,
+                revision=policy.revision,
+                filename=policy.weight_file,
+                expected_sha256=policy.sha256,
+                manifest=tuple(policy.manifest),
+            )
         return verify_installed_model(
             repo=policy.repo,
             revision=policy.revision,
@@ -1561,6 +1851,8 @@ class LayaRuntime:
         """Apply a pid, key, or runtime-record change to the chip immediately."""
         from flinttrade_engine.laya import LAYA_REASON_STOPPED, DecisionStatus, process_laya  # noqa: PLC0415
 
+        if self._downloading:
+            return
         signature = self._watched_signature()
         changed = signature != self._watch_signature
         self._watch_signature = signature
@@ -2035,6 +2327,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _launch_refusal_message(check: ArtifactCheck) -> str:
     """Chip words for a sidecar that was not started."""
+    if check.reason == "download_failed":
+        return "Can't download the model"
     if check.reason == "wrong_revision":
         return "Wrong model version"
     return "Can't verify the model"

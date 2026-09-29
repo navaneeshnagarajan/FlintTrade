@@ -145,6 +145,48 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
   });
 
+  it("shows live download progress and stays off Still loading", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "downloading",
+      layaPort: 8000,
+      layaDownloadBytes: 1_200_000_000,
+      layaDownloadTotal: 3_400_000_000,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip.textContent).not.toMatch(/Still loading/);
+    expect(chip.getAttribute("title") ?? "").not.toMatch(/Next:/);
+    fireEvent.click(chip);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Downloading the model · 1.2 of 3.4 GB");
+    expect(screen.queryByTestId("laya-reason-tooltip")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Next:/)).not.toBeInTheDocument();
+  });
+
+  it("shows a failed download without launching copy", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "download_failed",
+      layaPort: 8000,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveAttribute("title", "Check your connection, then Start Laya again.");
+    fireEvent.click(chip);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Can't download the model");
+    expect(screen.getByTestId("laya-reason-tooltip")).toHaveTextContent(
+      "Check your connection, then Start Laya again.",
+    );
+  });
+
   it("names a port clash in the tooltip", () => {
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({

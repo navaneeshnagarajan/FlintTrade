@@ -115,10 +115,15 @@ that request is already at the allowed quantity.
 
 Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `port_in_use` (`Port <n> in use`), `still_loading` (Still loading),
-`unreachable` (Unreachable), `unverified` (Can't verify the model),
-`wrong_revision` (Wrong model version), and `key_rejected` (Can't reach
-Laya). `<n>` is the sidecar port. For the first five, the tooltip is the
-label followed by `. Next: python -m flinttrade_core.laya_runtime start`.
+`downloading` (Downloading the model · 1.2 of 3.4 GB), `download_failed`
+(Can't download the model), `unreachable` (Unreachable), `unverified`
+(Can't verify the model), `wrong_revision` (Wrong model version), and
+`key_rejected` (Can't reach Laya). `<n>` is the sidecar port. For
+`not_started`, `stopped`, `port_in_use`, `still_loading`, and
+`unreachable`, the tooltip is the label followed by
+`. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
+has no tooltip. The `download_failed` tooltip is "Check your connection,
+then Start Laya again."
 The `unverified` tooltip is "The installed model couldn't be checked
 against the pinned version. Restart Laya. If it keeps happening, reinstall
 it." The `wrong_revision` tooltip is "Laya is running a different model
@@ -163,9 +168,14 @@ weights file or other file the launcher could read is present, the chip
 shows Can't verify the model (`unverified`) and the sidecar does not
 start. A changed byte shows Wrong model version (`wrong_revision`) and
 the sidecar does not start. Neither case reaches Ready. When the weights file or a manifest file is
-not on disk, `start` downloads the pinned revision without starting the
-sidecar, then hashes those files. A failed download is `unverified`. A
-mismatch removes only the files that download added. A verified boot
+not on disk, `start` downloads the pinned commit into
+`<workspace>/runtime/laya/staging` without starting the sidecar, then
+hashes those files there. A full match renames that directory onto
+`<workspace>/runtime/laya/checkpoint`. A failed or incomplete download
+is `download_failed` ("Can't download the model"). A fully downloaded
+file whose hash does not match is `wrong_revision`. Either failure
+deletes the staging directory and does not touch the rest of the cache.
+A verified boot
 sets `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. The launch log line is

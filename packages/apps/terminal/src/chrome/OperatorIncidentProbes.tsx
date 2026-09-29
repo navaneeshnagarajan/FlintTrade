@@ -50,6 +50,7 @@ export function OperatorIncidentProbes() {
     store.setLayaLiveQualified(ping.data.layaLiveQualified);
     store.setLayaReason(ping.data.layaReason);
     store.setLayaPort(ping.data.layaPort);
+    store.setLayaDownloadProgress(ping.data.layaDownloadBytes, ping.data.layaDownloadTotal);
   }, [ping.data]);
 
   useEffect(() => {

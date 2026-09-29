@@ -32,6 +32,10 @@ export interface OperatorSignalSnapshot {
   layaReason: string | null;
   /** Loopback port the reason refers to. The host stays 127.0.0.1. */
   layaPort: number;
+  /** Bytes received while the reason is `downloading`. */
+  layaDownloadBytes: number | null;
+  /** Bytes expected while the reason is `downloading`. */
+  layaDownloadTotal: number | null;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -51,6 +55,8 @@ const INITIAL: OperatorSignalSnapshot = {
   layaLiveQualified: false,
   layaReason: null,
   layaPort: 8000,
+  layaDownloadBytes: null,
+  layaDownloadTotal: null,
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {
@@ -64,6 +70,7 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setLayaLiveQualified: (layaLiveQualified: boolean) => void;
   setLayaReason: (layaReason: string | null) => void;
   setLayaPort: (layaPort: number) => void;
+  setLayaDownloadProgress: (layaDownloadBytes: number | null, layaDownloadTotal: number | null) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -89,6 +96,7 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   setLayaLiveQualified: (layaLiveQualified) => set({ layaLiveQualified }),
   setLayaReason: (layaReason) => set({ layaReason }),
   setLayaPort: (layaPort) => set({ layaPort }),
+  setLayaDownloadProgress: (layaDownloadBytes, layaDownloadTotal) => set({ layaDownloadBytes, layaDownloadTotal }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

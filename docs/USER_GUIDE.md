@@ -434,6 +434,7 @@ until it's Ready.**
 The chip tooltip is the hover text. For `not_started`, `stopped`,
 `port_in_use`, `still_loading`, and `unreachable` it is the chip label
 followed by `. Next: python -m flinttrade_core.laya_runtime start`.
+`downloading` has no tooltip and no Next line. `download_failed`,
 `unverified`, `wrong_revision`, and `key_rejected` keep the sentences in
 the table. When the sidecar is **Ready** or **Degraded** and Live is not
 qualified, the tooltip is **Not qualified for Live**. That line is not
@@ -449,11 +450,12 @@ If the start fails, the popover says **Laya could not be started.**
 stays on **Still loading** until Laya is **Ready** or **Degraded**, or
 the probe reports a reason other than `not_started`.
 
-The popover prints the chip label, not the raw code. For `unverified`,
-`wrong_revision`, and `key_rejected` it also prints the tooltip, because
+The popover prints the chip label, not the raw code. For `download_failed`,
+`unverified`, `wrong_revision`, and `key_rejected` it also prints the tooltip, because
 that sentence does not start with the label. The status word on the chip
 is **Down**, except during the first load, when the chip says **Still
-loading**. `<n>` in the port label is the sidecar port.
+loading**. A download in progress stays **Down** and is not **Still loading**.
+`<n>` in the port label is the sidecar port.
 
 | Code | Chip label | Tooltip |
 |---|---|---|
@@ -461,6 +463,8 @@ loading**. `<n>` in the port label is the sidecar port.
 | `stopped` | Stopped | `Stopped. Next: python -m flinttrade_core.laya_runtime start` |
 | `port_in_use` | `Port <n> in use` | `Port <n> in use. Next: python -m flinttrade_core.laya_runtime start` |
 | `still_loading` | Still loading | `Still loading. Next: python -m flinttrade_core.laya_runtime start` |
+| `downloading` | Downloading the model · 1.2 of 3.4 GB | (none) |
+| `download_failed` | Can't download the model | `Check your connection, then Start Laya again.` |
 | `unreachable` | Unreachable | `Unreachable. Next: python -m flinttrade_core.laya_runtime start` |
 | `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` |
 | `wrong_revision` | Wrong model version | `Laya is running a different model than FlintTrade expects.` |
@@ -555,14 +559,25 @@ writes a fresh API key to `<workspace>/runtime/laya/api.key`. `stop`
 stops the sidecar, deletes that key, and records **Down** with
 `not_started`. `status` prints the report, including `reason` and the
 plain-words `detail`, and does not print the API key. If
-the weights file or any pinned manifest file is not in the cache yet,
-`start` downloads the pinned revision first. That step does not start
-the sidecar. FlintTrade then hashes the weights file and every manifest
-file. A full match launches the offline verified boot. A changed byte
-shows **Wrong model version**, the files that download added are
-removed, and the sidecar does not start. A missing or extra file, or a
-failed download, shows **Can't verify the model** and the sidecar does
-not start. The log line for the download step is
+the weights file or any pinned manifest file is not already installed,
+`start` downloads the pinned commit from `[checkpoint] revision` first.
+That step does not start the sidecar, and it does not use the default
+branch. The files land in `<workspace>/runtime/laya/staging`, not in the
+launch directory and not in the shared Hugging Face cache. While that
+runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
+progress, one decimal, decimal GB). Orders are refused with **Laya is
+Down. Orders are paused until it's Ready.** FlintTrade then hashes the
+weights file and every manifest file in the staging directory. A full
+match renames that directory onto `<workspace>/runtime/laya/checkpoint`
+in one step and launches the offline verified boot. A fully downloaded
+file whose hash does not match shows **Wrong model version**. A download
+that fails or stops short (connection drop, timeout, partial file, or
+disk error) shows **Can't download the model**, with the tooltip
+**Check your connection, then Start Laya again.** Either way the staging
+directory is deleted, nothing else in the cache is touched, and the
+sidecar does not start. A missing or extra file in a checkpoint that
+was already on disk still shows **Can't verify the model**. The log line
+for the download step is
 `laya download repo=<repo> revision=<revision>`.
 
 Start the backend with `LAYA_HOST=127.0.0.1`, the same `LAYA_PORT`, and

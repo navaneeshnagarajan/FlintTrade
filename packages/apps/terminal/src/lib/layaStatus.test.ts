@@ -3,6 +3,7 @@ import {
   LAYA_NOT_QUALIFIED_FOR_LIVE,
   LAYA_START_COMMAND,
   LAYA_START_DOCS_HREF,
+  formatDownloadProgress,
   layaChipLabel,
   layaChipStatus,
   layaDisabledLiveReason,
@@ -40,6 +41,11 @@ describe("Laya chip status", () => {
     expect(layaReasonPlain("stopped", 8000)).toBe("Stopped");
     expect(layaReasonPlain("port_in_use", 8123)).toBe("Port 8123 in use");
     expect(layaReasonPlain("still_loading", 8000)).toBe("Still loading");
+    expect(layaReasonPlain("downloading", 8000, 1_200_000_000, 3_400_000_000)).toBe(
+      "Downloading the model · 1.2 of 3.4 GB",
+    );
+    expect(formatDownloadProgress(1_200_000_000, 3_400_000_000)).toBe("Downloading the model · 1.2 of 3.4 GB");
+    expect(layaReasonPlain("download_failed", 8000)).toBe("Can't download the model");
     expect(layaReasonPlain("unreachable", 8000)).toBe("Unreachable");
     expect(layaReasonPlain("wrong_revision", 8000)).toBe("Wrong model version");
     expect(layaReasonPlain("unverified", 8000)).toBe("Can't verify the model");
@@ -50,6 +56,10 @@ describe("Laya chip status", () => {
     expect(loading).toBe("Still loading");
     expect(loading).not.toMatch(/Down/);
     expect(layaReasonTooltip("still_loading", 8000)).toBe(`Still loading. Next: ${LAYA_START_COMMAND}`);
+    expect(layaReasonTooltip("downloading", 8000)).toBeNull();
+    expect(layaReasonTooltip("download_failed", 8000)).toBe("Check your connection, then Start Laya again.");
+    expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "downloading" })).toBe("Down");
+    expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "download_failed" })).toBe("Down");
     expect(layaReasonTooltip("unverified", 8000)).toBe(
       "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
     );

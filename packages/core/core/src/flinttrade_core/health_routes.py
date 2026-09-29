@@ -225,14 +225,17 @@ def ping() -> tuple[Any, int]:
 
     Returns:
         JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar),
-        ``laya_live_qualified``, ``laya_reason``, and ``laya_port``. ``laya``
-        starts Down. A ping does not invent Ready and does not probe the port.
+        ``laya_live_qualified``, ``laya_reason``, ``laya_port``, and, while a
+        model download is in progress, ``laya_download_bytes`` and
+        ``laya_download_total``. ``laya`` starts Down. A ping does not invent
+        Ready and does not probe the port.
     """
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 
     engine = process_laya()
     practice, live, qualified = engine.desk_heartbeat()
     reason, port = engine.runtime_reason()
+    progress = engine.download_progress()
     return (
         jsonify(
             {
@@ -243,6 +246,8 @@ def ping() -> tuple[Any, int]:
                 "laya_live_qualified": qualified,
                 "laya_reason": reason,
                 "laya_port": port,
+                "laya_download_bytes": None if progress is None else progress[0],
+                "laya_download_total": None if progress is None else progress[1],
             }
         ),
         200,

@@ -68,6 +68,8 @@ LAYA_REASON_NOT_STARTED = "not_started"
 LAYA_REASON_STOPPED = "stopped"
 LAYA_REASON_PORT_IN_USE = "port_in_use"
 LAYA_REASON_STILL_LOADING = "still_loading"
+LAYA_REASON_DOWNLOADING = "downloading"
+LAYA_REASON_DOWNLOAD_FAILED = "download_failed"
 LAYA_REASON_UNREACHABLE = "unreachable"
 LAYA_REASON_WRONG_REVISION = "wrong_revision"
 LAYA_REASON_UNVERIFIED = "unverified"
@@ -78,6 +80,8 @@ LAYA_REASON_CODES = frozenset(
         LAYA_REASON_STOPPED,
         LAYA_REASON_PORT_IN_USE,
         LAYA_REASON_STILL_LOADING,
+        LAYA_REASON_DOWNLOADING,
+        LAYA_REASON_DOWNLOAD_FAILED,
         LAYA_REASON_UNREACHABLE,
         LAYA_REASON_WRONG_REVISION,
         LAYA_REASON_UNVERIFIED,
@@ -86,6 +90,10 @@ LAYA_REASON_CODES = frozenset(
 )
 
 LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start"
+LAYA_DOWNLOAD_FAILED_DETAIL = "Can't download the model"
+LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then Start Laya again."
+# Decimal gigabytes, so 1_200_000_000 of 3_400_000_000 reads "1.2 of 3.4 GB".
+_DECIMAL_GB = 1_000_000_000
 
 _REASON_TOOLTIPS = {
     LAYA_REASON_UNVERIFIED: (
@@ -94,17 +102,37 @@ _REASON_TOOLTIPS = {
     ),
     LAYA_REASON_WRONG_REVISION: "Laya is running a different model than FlintTrade expects.",
     LAYA_REASON_KEY_REJECTED: "Laya restarted with a new key. Reconnecting…",
+    LAYA_REASON_DOWNLOAD_FAILED: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 }
 
 
-def laya_reason_detail(reason: str | None, port: int) -> str | None:
+def format_download_progress(done_bytes: int, total_bytes: int) -> str:
+    """Live download line. One decimal place, decimal gigabytes.
+
+    ``Downloading the model · 1.2 of 3.4 GB``
+    """
+    done = done_bytes / _DECIMAL_GB
+    total = total_bytes / _DECIMAL_GB
+    return f"Downloading the model · {done:.1f} of {total:.1f} GB"
+
+
+def laya_reason_detail(
+    reason: str | None,
+    port: int,
+    *,
+    progress: tuple[int, int] | None = None,
+) -> str | None:
     """Plain words for a sidecar reason code. ``None`` when the sidecar is up."""
     if reason == LAYA_REASON_PORT_IN_USE:
         return f"Port {port} in use"
+    if reason == LAYA_REASON_DOWNLOADING:
+        done, total = progress if progress is not None else (0, 0)
+        return format_download_progress(done, total)
     labels = {
         LAYA_REASON_NOT_STARTED: "Not started",
         LAYA_REASON_STOPPED: "Stopped",
         LAYA_REASON_STILL_LOADING: "Still loading",
+        LAYA_REASON_DOWNLOAD_FAILED: LAYA_DOWNLOAD_FAILED_DETAIL,
         LAYA_REASON_UNREACHABLE: "Unreachable",
         LAYA_REASON_WRONG_REVISION: "Wrong model version",
         LAYA_REASON_UNVERIFIED: "Can't verify the model",
@@ -115,11 +143,22 @@ def laya_reason_detail(reason: str | None, port: int) -> str | None:
     return labels.get(reason)
 
 
-def laya_reason_tooltip(reason: str | None, port: int) -> str | None:
-    """Hover text for a sidecar reason. ``None`` when the sidecar is up."""
+def laya_reason_tooltip(
+    reason: str | None,
+    port: int,
+    *,
+    progress: tuple[int, int] | None = None,
+) -> str | None:
+    """Hover text for a sidecar reason. ``None`` when the sidecar is up.
+
+    ``downloading`` has no tooltip and no Next line. The popover is the
+    progress sentence itself.
+    """
+    if reason == LAYA_REASON_DOWNLOADING:
+        return None
     if reason in _REASON_TOOLTIPS:
         return _REASON_TOOLTIPS[reason]
-    detail = laya_reason_detail(reason, port)
+    detail = laya_reason_detail(reason, port, progress=progress)
     if detail is None:
         return None
     return f"{detail}. Next: {LAYA_START_COMMAND}"
@@ -214,6 +253,7 @@ class Laya:
         self._live_qualified = status is not DecisionStatus.DOWN
         self._reason: str | None = LAYA_REASON_NOT_STARTED if status is DecisionStatus.DOWN else None
         self._reason_port = 8000
+        self._download_progress: tuple[int, int] | None = None
         self._decision_client: Any = None
         self._qualification: Any = None
         self._lock = threading.Lock()
@@ -242,6 +282,7 @@ class Laya:
             self._live_qualified = status is not DecisionStatus.DOWN
             if status is not DecisionStatus.DOWN:
                 self._reason = None
+                self._download_progress = None
 
     def apply_runtime_status(self, status: DecisionStatus, *, live_qualified: bool) -> None:
         """Record a probe result. Live opens only when ``live_qualified`` is set.
@@ -254,21 +295,49 @@ class Laya:
             self._live_qualified = bool(live_qualified) and status is not DecisionStatus.DOWN
             if status is not DecisionStatus.DOWN:
                 self._reason = None
+                self._download_progress = None
 
-    def set_runtime_reason(self, reason: str | None, port: int) -> None:
-        """Record why the sidecar is Down, and the port that status checked."""
+    def set_runtime_reason(
+        self,
+        reason: str | None,
+        port: int,
+        *,
+        progress: tuple[int, int] | None = None,
+    ) -> None:
+        """Record why the sidecar is Down, and the port that status checked.
+
+        ``progress`` is ``(done_bytes, total_bytes)`` while ``reason`` is
+        ``downloading``. Any other reason clears it.
+        """
         if reason is not None and reason not in LAYA_REASON_CODES:
             raise ValueError("Laya reason is not recognised")
         if not 1 <= port <= 65535:
             raise ValueError("Laya sidecar port is invalid")
+        if progress is not None and (
+            len(progress) != 2 or isinstance(progress[0], bool) or isinstance(progress[1], bool)
+        ):
+            raise ValueError("Laya download progress is invalid")
+        if progress is not None and (
+            not isinstance(progress[0], int) or not isinstance(progress[1], int) or progress[0] < 0 or progress[1] < 0
+        ):
+            raise ValueError("Laya download progress is invalid")
         with self._lock:
             self._reason = reason
             self._reason_port = port
+            if reason != LAYA_REASON_DOWNLOADING:
+                self._download_progress = None
+            elif progress is not None:
+                self._download_progress = (progress[0], progress[1])
 
     def runtime_reason(self) -> tuple[str | None, int]:
         """Reason code and port. ``None`` when Ready or Degraded has cleared it."""
         with self._lock:
             return self._reason, self._reason_port
+
+    def download_progress(self) -> tuple[int, int] | None:
+        """Bytes done and bytes expected while a download is in progress."""
+        with self._lock:
+            return self._download_progress
 
     def set_decision_client(self, client: Any) -> None:
         """Attach the host used for free-text questions. ``None`` skips that step."""

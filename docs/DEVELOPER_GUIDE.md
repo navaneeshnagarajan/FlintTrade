@@ -539,13 +539,22 @@ port and defaults to 8000. A clash on that port is Down with
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written.
 
-If the weights file or any manifest file is not in the cache yet,
-`start` downloads the pinned revision into the Hugging Face cache and
-does not start the sidecar for that step. It then hashes
-`model.safetensors` and every manifest file. A full match launches the
-offline verified boot. A changed byte is `wrong_revision`, and only the
-files that download added are removed. A missing or extra file, or a
-failed download, is `unverified`, and the sidecar does not start. The
+If the weights file or any manifest file is not already installed,
+`start` downloads the pinned commit (`[checkpoint] revision`, never the
+default branch) into `<workspace>/runtime/laya/staging`. That directory
+is not the launch path and not the shared Hugging Face cache. The step
+does not start the sidecar. While it runs, the reason is `downloading`
+and the popover is `Downloading the model · 1.2 of 3.4 GB` (live, one
+decimal, decimal GB), with no Next line. Orders stay on the Down
+refusal. It then hashes `model.safetensors` and every manifest file in
+that staging directory. A full match renames the directory onto
+`<workspace>/runtime/laya/checkpoint` and launches the offline verified
+boot. A fully downloaded file whose hash does not match is
+`wrong_revision`. A failed or incomplete download (connection drop,
+timeout, partial file, or disk error) is `download_failed` ("Can't
+download the model"; tooltip "Check your connection, then Start Laya
+again."). Either failure deletes the staging directory and does not
+touch anything else in the cache. The sidecar does not start. The
 download log line is `laya download repo=<repo> revision=<revision>`.
 The pins live in `laya_policy.toml`:
 `[checkpoint]` names `model.safetensors` and its sha256, and
@@ -589,14 +598,17 @@ tooltip is "The installed model couldn't be checked against the pinned
 version. Restart Laya. If it keeps happening, reinstall it."
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
-`still_loading`, `unreachable`, `wrong_revision`, `unverified`, or
-`key_rejected`. `identity_absent` is not a status code. The desk shows
-Not started, Stopped, `Port <n> in use`, Still loading, Unreachable,
-Wrong model version, Can't verify the model, and Can't reach Laya.
-`<n>` is the sidecar port. Tooltips for `not_started`, `stopped`,
-`port_in_use`, `still_loading`, and `unreachable` are the label followed
-by `. Next: python -m flinttrade_core.laya_runtime start`. The
-`wrong_revision` tooltip is "Laya is running a different model than
+`still_loading`, `downloading`, `download_failed`, `unreachable`,
+`wrong_revision`, `unverified`, or `key_rejected`. `identity_absent` is
+not a status code. The desk shows Not started, Stopped,
+`Port <n> in use`, Still loading, Downloading the model · 1.2 of 3.4 GB,
+Can't download the model, Unreachable, Wrong model version, Can't verify
+the model, and Can't reach Laya. `<n>` is the sidecar port. Tooltips for
+`not_started`, `stopped`, `port_in_use`, `still_loading`, and
+`unreachable` are the label followed by
+`. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
+has no tooltip. The `download_failed` tooltip is "Check your connection,
+then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than
 FlintTrade expects." That code is only a real mismatch. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
 Down and orders are refused. When a place is refused because Laya cannot

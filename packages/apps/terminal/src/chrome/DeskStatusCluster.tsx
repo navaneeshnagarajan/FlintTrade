@@ -32,6 +32,8 @@ export function DeskStatusCluster() {
   const liveQualified = useOperatorSignalStore((state) => state.layaLiveQualified);
   const layaReason = useOperatorSignalStore((state) => state.layaReason);
   const layaPort = useOperatorSignalStore((state) => state.layaPort);
+  const layaDownloadBytes = useOperatorSignalStore((state) => state.layaDownloadBytes);
+  const layaDownloadTotal = useOperatorSignalStore((state) => state.layaDownloadTotal);
   const llmChrome = useOperatorSignalStore((state) => state.llmChrome);
   const readOnly = accounts.some((account) => mondayReadChrome(account) !== null);
   const placeable = accounts.some(
@@ -59,7 +61,7 @@ export function DeskStatusCluster() {
     live: liveStatus,
     reason: shownReason,
   });
-  const plainReason = layaReasonPlain(shownReason, layaPort)
+  const plainReason = layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
     ?? liveReason
     ?? (decision === "Down" ? "Not started" : null);
   const tooltip = layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;

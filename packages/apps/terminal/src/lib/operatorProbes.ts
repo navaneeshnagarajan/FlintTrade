@@ -47,6 +47,10 @@ export interface PingProbe {
   layaReason: string | null;
   /** Sidecar port from the heartbeat. 8000 when the field is absent. */
   layaPort: number;
+  /** Bytes received while `layaReason` is `downloading`. Null otherwise. */
+  layaDownloadBytes: number | null;
+  /** Bytes expected while `layaReason` is `downloading`. Null otherwise. */
+  layaDownloadTotal: number | null;
 }
 
 const LAYA_REASON_CODES = new Set([
@@ -54,6 +58,8 @@ const LAYA_REASON_CODES = new Set([
   "stopped",
   "port_in_use",
   "still_loading",
+  "downloading",
+  "download_failed",
   "unreachable",
   "wrong_revision",
   "unverified",
@@ -94,6 +100,21 @@ export function layaPortFromBody(body: unknown): number {
   return 8000;
 }
 
+function byteCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) return null;
+  return value;
+}
+
+/** Done and total bytes. Both must be present, or both are null. */
+export function layaDownloadProgressFromBody(body: unknown): { done: number | null; total: number | null } {
+  if (body === null || typeof body !== "object") return { done: null, total: null };
+  const record = body as { laya_download_bytes?: unknown; laya_download_total?: unknown };
+  const done = byteCount(record.laya_download_bytes);
+  const total = byteCount(record.laya_download_total);
+  if (done === null || total === null) return { done: null, total: null };
+  return { done, total };
+}
+
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {
   try {
     const resp = await fetchImpl(`${getBase()}/api/v1/ping`, { method: "GET", cache: "no-store" });
@@ -106,9 +127,12 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
         layaLiveQualified: false,
         layaReason: null,
         layaPort: 8000,
+        layaDownloadBytes: null,
+        layaDownloadTotal: null,
       };
     }
     const body: unknown = await resp.json().catch(() => null);
+    const progress = layaDownloadProgressFromBody(body);
     return {
       localPing: "ok",
       transportReason: null,
@@ -117,6 +141,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaLiveQualified: layaLiveQualifiedFromBody(body),
       layaReason: layaReasonFromBody(body),
       layaPort: layaPortFromBody(body),
+      layaDownloadBytes: progress.done,
+      layaDownloadTotal: progress.total,
     };
   } catch (err) {
     return {
@@ -127,6 +153,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaLiveQualified: false,
       layaReason: null,
       layaPort: 8000,
+      layaDownloadBytes: null,
+      layaDownloadTotal: null,
     };
   }
 }

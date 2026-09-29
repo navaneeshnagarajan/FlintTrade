@@ -20,6 +20,8 @@ export const LAYA_REASON_CODES = [
   "stopped",
   "port_in_use",
   "still_loading",
+  "downloading",
+  "download_failed",
   "unreachable",
   "wrong_revision",
   "unverified",
@@ -30,6 +32,19 @@ export type LayaReasonCode = (typeof LAYA_REASON_CODES)[number];
 
 /** Next step shown with an operational reason. */
 export const LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start";
+
+/** Decimal gigabytes, matching the Python progress line. */
+const DECIMAL_GB = 1_000_000_000;
+
+export const LAYA_DOWNLOAD_FAILED_DETAIL = "Can't download the model";
+export const LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then Start Laya again.";
+
+/** Live download line. One decimal place, decimal gigabytes. */
+export function formatDownloadProgress(doneBytes: number, totalBytes: number): string {
+  const done = (doneBytes / DECIMAL_GB).toFixed(1);
+  const total = (totalBytes / DECIMAL_GB).toFixed(1);
+  return `Downloading the model · ${done} of ${total} GB`;
+}
 
 /** User guide section "Start Laya". The heading is written in the docs. */
 export const LAYA_START_DOCS_HREF =
@@ -44,11 +59,18 @@ export function layaChipStatus(input: {
   return input.practice ?? null;
 }
 
-export function layaReasonPlain(reason: string | null | undefined, port: number): string | null {
+export function layaReasonPlain(
+  reason: string | null | undefined,
+  port: number,
+  downloadBytes?: number | null,
+  downloadTotal?: number | null,
+): string | null {
   if (reason === "port_in_use") return `Port ${port} in use`;
   if (reason === "not_started") return "Not started";
   if (reason === "stopped") return "Stopped";
   if (reason === "still_loading") return "Still loading";
+  if (reason === "downloading") return formatDownloadProgress(downloadBytes ?? 0, downloadTotal ?? 0);
+  if (reason === "download_failed") return LAYA_DOWNLOAD_FAILED_DETAIL;
   if (reason === "unreachable") return "Unreachable";
   if (reason === "wrong_revision") return "Wrong model version";
   if (reason === "unverified") return "Can't verify the model";
@@ -61,10 +83,12 @@ const LAYA_REASON_TOOLTIPS: Record<string, string> = {
     "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
   wrong_revision: "Laya is running a different model than FlintTrade expects.",
   key_rejected: "Laya restarted with a new key. Reconnecting…",
+  download_failed: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 };
 
-/** Hover text. The three model and key failures keep their own sentence. */
+/** Hover text. Model, key, and download failures keep their own sentence. Downloading has none. */
 export function layaReasonTooltip(reason: string | null | undefined, port: number): string | null {
+  if (reason === "downloading") return null;
   if (reason && reason in LAYA_REASON_TOOLTIPS) return LAYA_REASON_TOOLTIPS[reason];
   const plain = layaReasonPlain(reason, port);
   if (!plain) return null;

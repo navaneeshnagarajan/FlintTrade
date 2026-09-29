@@ -37,9 +37,15 @@ changelog rebuilds itself from the first release cut after this baseline.
   index, and can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
   It is not Ready by default. A first start with the checkpoint missing
-  downloads the pinned revision without starting the sidecar, hashes the
-  weights file and the manifest, and launches only when they match. The
-  sidecar always runs offline.
+  downloads the pinned commit into `runtime/laya/staging` (not the launch
+  path and not the shared cache) without starting the sidecar, hashes the
+  weights file and the manifest there, and on a full match renames that
+  directory onto `runtime/laya/checkpoint` before the offline launch.
+  While the download runs the chip reads
+  "Downloading the model · 1.2 of 3.4 GB". A failed or incomplete download
+  is `download_failed` ("Can't download the model"). A fully downloaded
+  file whose hash does not match is still `wrong_revision`. The sidecar
+  always runs offline.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when
@@ -95,9 +101,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   button. The chip tooltip carries
   `python -m flinttrade_core.laya_runtime start`. Reason codes are
   `not_started`, `stopped`, `port_in_use`, `still_loading`,
+  `downloading` (Downloading the model · 1.2 of 3.4 GB),
+  `download_failed` (Can't download the model),
   `unreachable` (Unreachable), `wrong_revision` (Wrong model version),
   `unverified` (Can't verify the model), and `key_rejected` (Can't reach
-  Laya). A signed-in operator can start the sidecar from the popover
+  Laya). `downloading` has no Next line. The `download_failed` tooltip is
+  "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
   (`POST /api/v1/laya/start`); the chip then says Still loading until
   Laya is Ready or a failure reason arrives. A dead sidecar is reaped
   and reported Stopped. The pid file, key file, and runtime record are

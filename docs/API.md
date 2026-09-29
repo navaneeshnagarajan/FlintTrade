@@ -509,18 +509,23 @@ The terminal has two development proxy namespaces:
 `GET /api/v1/ping` is the FlintTrade process probe, not the OpenAlgo
 passthrough `ping` (POST). It is exempt from the API-key check. The
 response is JSON
-`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down", "laya_practice": "ready"|"degraded"|"down", "laya_live_qualified": true|false, "laya_reason": "<code>|null", "laya_port": 8000}`.
+`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down", "laya_practice": "ready"|"degraded"|"down", "laya_live_qualified": true|false, "laya_reason": "<code>|null", "laya_port": 8000, "laya_download_bytes": "<int>|null", "laya_download_total": "<int>|null"}`.
 `laya` is the Live-facing status. `laya_practice` is the sidecar status the
 Practice chip shows. `laya_live_qualified` is true only when a qualification
 record covers the pin. `laya_reason` is one of `not_started`, `stopped`,
-`port_in_use`, `still_loading`, `unreachable`, `wrong_revision`,
-`unverified`, or `key_rejected`, or
+`port_in_use`, `still_loading`, `downloading`, `download_failed`,
+`unreachable`, `wrong_revision`, `unverified`, or `key_rejected`, or
 `null` when Ready or Degraded has cleared it. `identity_absent` is not a
-`laya_reason`. Chip labels are Not started, Stopped, `Port <n> in use`,
-Still loading, Unreachable, Can't verify the model, Wrong model version,
+`laya_reason`. While `laya_reason` is `downloading`, `laya_download_bytes`
+and `laya_download_total` are the live byte counts; otherwise both are
+`null`. Chip labels are Not started, Stopped, `Port <n> in use`,
+Still loading, Downloading the model · 1.2 of 3.4 GB, Can't download the
+model, Unreachable, Can't verify the model, Wrong model version,
 and Can't reach Laya. `<n>` is `laya_port`. Tooltips for `not_started`,
 `stopped`, `port_in_use`, `still_loading`, and `unreachable` are the label
-followed by `. Next: python -m flinttrade_core.laya_runtime start`. The
+followed by `. Next: python -m flinttrade_core.laya_runtime start`.
+`downloading` has no tooltip. The `download_failed` tooltip is
+"Check your connection, then Start Laya again." The
 `unverified` tooltip is "The installed model couldn't be checked against
 the pinned version. Restart Laya. If it keeps happening, reinstall it."
 The `wrong_revision` tooltip is "Laya is running a different model than
@@ -546,8 +551,13 @@ is `unverified` ("Can't verify the model") and the sidecar does not start.
 A changed byte is `wrong_revision` ("Wrong model version") and the sidecar
 does not start. Neither case reaches Ready. When the weights file or a
 manifest file is not on disk, `start` downloads the pinned revision
-without starting the sidecar, then hashes those files. A failed download
-is `unverified`. A mismatch removes only the files that download added.
+without starting the sidecar, into `<workspace>/runtime/laya/staging`,
+then hashes those files there. The download asks for the pinned commit
+in `[checkpoint] revision`, not the default branch. A full match renames
+that directory onto `<workspace>/runtime/laya/checkpoint`. A failed or
+incomplete download is `download_failed`. A fully downloaded file whose
+hash does not match is `wrong_revision`. Either failure deletes the
+staging directory and does not touch the rest of the cache.
 The download log line is `laya download repo=<repo> revision=<revision>`.
 A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
