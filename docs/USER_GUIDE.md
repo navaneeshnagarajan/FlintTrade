@@ -702,7 +702,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On **Broker connect**, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
+| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -732,21 +732,25 @@ The four cards use these titles, with no " — later" suffix:
 **Two-factor authentication**, **Broker connect**, **LLM**, and
 **Trading defaults**. A card that is still open offers **Set up** and
 **Later**, except **Broker connect**, which offers
-**Continue without a broker** and **Set up**. A skipped card shows a
-**Skipped** tag and only **Set up** (no **Later**, and no
-**Continue without a broker**). A finished card shows a **Done** tag and
-no **Later**. **Broker connect** still shows
-**Continue without a broker** beside **Set up** after it is marked
-**Done**, until that card is skipped. Opening **Set up** on
-**Two-factor authentication**, **LLM**, or **Trading defaults** still
-offers **Later** inside that panel. The authenticator panel's actions
-are **Enrol** and **Later**.
+**Continue without a broker** and **Set up** only while that card is
+neither done nor skipped. A skipped card shows a **Skipped** tag and
+only **Set up** (no **Later**, and no **Continue without a broker**).
+A finished card shows a **Done** tag and only **Set up** (no **Later**,
+and no **Continue without a broker**). **Later** on the card row marks
+that card **Skipped** and updates the strip. **Later** inside an open
+authenticator, **LLM**, or trading-defaults panel only closes the
+panel. It does not mark the card **Skipped** or **Done**, and the strip
+does not change. The authenticator panel's actions are **Enrol** and
+**Later**. Card-row **Later** buttons, and **Later** in the open
+**LLM** and **Trading defaults** panels, are announced as
+`Later {title}`.
 
 Monitoring and risk limits stay in Settings. They are not cards on this
 strip. The cards never appear before the affirm, never block Practice,
 and never change Step N of 3. On the broker panel,
 **Continue without a broker** stays the first control, above
-**FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required
+**FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
+**Broker connect** **Done**. Persona is not a required
 first-run gate and is not part of that count. First run has no Live
 unlock. Live place stays fail-closed. A later Live unlock, outside this
 path, still needs the authenticator and PIN.

@@ -13,13 +13,21 @@ Practice, and land on the Practice desk. Later steps come after that.
    **Broker connect**, **LLM**, and **Trading defaults**. Risk limits
    and Monitoring stay in Settings. None of these appear ahead of the
    Practice affirm.
-4. **Continue without a broker** is the first control on
-   **Broker connect**. It sits above **FlintTrade Native** and
+4. **Continue without a broker** is the first control on the open
+   broker panel. It sits above **FlintTrade Native** and
    **OpenAlgo Bridge**.
 5. Those four cards are optional. They are not required gates.
-   Choosing **Later** does not block the Practice desk. A skipped card
-   shows **Skipped** and only **Set up**. A finished card shows
-   **Done** and no **Later**. The strip reads
+   **Later** on a card row marks that card **Skipped** and does not
+   block the Practice desk. **Later** inside an open authenticator,
+   **LLM**, or trading-defaults panel only closes the panel. It does
+   not mark the card **Skipped** or **Done**, and the strip does not
+   change. A skipped card shows **Skipped** and only **Set up**. A
+   finished card shows **Done** and only **Set up** (no **Later**).
+   A finished **Broker connect** card does not show
+   **Continue without a broker**. That control is on the card only
+   while the card is neither done nor skipped. Card-row **Later**
+   buttons, and **Later** in the open **LLM** and trading-defaults
+   panels, are announced as `Later {title}`. The strip reads
    `Optional setup · N of 4 done`, and adds `· M skipped` only when M
    is at least 1. N counts finished cards only. **Dismiss** on the desk
    moves the strip into Settings. The Settings reminder has **Show**
@@ -50,12 +58,15 @@ and does not render the optional cards, Monitoring, or Risk. Opening
 the desk mints a Practice session and leaves setup for `/trade`.
 
 The optional strip opens on the Practice desk after landing. **Later**
-stays on the desk and does not change Step N of 3. Card titles are
-plain: **Two-factor authentication**, **Broker connect**, **LLM**, and
-**Trading defaults**. On **Broker connect**,
-**Continue without a broker** is the first control, above
-**FlintTrade Native** and **OpenAlgo Bridge**. There is no Live unlock
-control on this path.
+on a card row marks the card **Skipped** and does not change Step N of
+3. **Later** inside an open authenticator, **LLM**, or trading-defaults
+panel only closes the panel and leaves the card and the strip
+unchanged. Card titles are plain: **Two-factor authentication**,
+**Broker connect**, **LLM**, and **Trading defaults**. A finished
+**Broker connect** card shows **Done** and **Set up** only. On the open
+broker panel, **Continue without a broker** is the first control, above
+**FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
+the card **Done**. There is no Live unlock control on this path.
 
 ## Out of scope
 
@@ -75,13 +86,18 @@ control on this path.
    **Trading defaults** come after that affirm. Risk limits and
    Monitoring stay in Settings. None of them can appear ahead of the
    affirm.
-4. **Continue without a broker** is the first control on
-   **Broker connect**. **FlintTrade Native** and **OpenAlgo Bridge**
-   do not sit above it.
+4. **Continue without a broker** is the first control on the open
+   broker panel. **FlintTrade Native** and **OpenAlgo Bridge** do not
+   sit above it.
 5. Skipping any of the four optional cards still leaves the operator
-   on the Practice desk. The strip counts finished cards only, and
-   omits `· M skipped` when nothing is skipped. Settings keeps the
-   reminder after **Dismiss**, without a **Dismiss** of its own.
+   on the Practice desk. **Later** on the card row marks the card
+   **Skipped** and updates the strip. **Later** inside an open
+   authenticator, **LLM**, or trading-defaults panel only closes the
+   panel and leaves the card and the strip unchanged. A finished
+   **Broker connect** card shows **Done** and **Set up** only. The
+   strip counts finished cards only, and omits `· M skipped` when
+   nothing is skipped. Settings keeps the reminder after **Dismiss**,
+   without a **Dismiss** of its own.
 6. First run has no Live unlock control and cannot mint a Live session.
 7. Step N of M counts only Create operator, vault, and Practice desk.
    Later/Skip controls are absent from that fraction.
