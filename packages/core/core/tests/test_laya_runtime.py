@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,8 @@ from flinttrade_core.laya_runtime import (
     CPU_TORCH_INDEX,
     LAYA_BIND_HOST,
     LAYA_SERVE_REQUIREMENT,
+    LAYA_WATCH_INTERVAL_SECONDS,
+    LAYA_WEIGHTS_LOG,
     ArtifactCheck,
     LayaRuntime,
     LayaRuntimeError,
@@ -27,8 +31,11 @@ from flinttrade_core.laya_runtime import (
     install_command,
     install_commands,
     main,
+    find_pinned_weight,
     set_process_runtime,
     sidecar_constraints_path,
+    snapshot_weight_path,
+    verify_installed_model,
     verify_weight_file,
     venv_python,
 )
@@ -860,13 +867,16 @@ def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path, monkeypatch: p
             super().__init__()
             self.pid = live
 
+    launched: list[object] = []
     runtime = LayaRuntime(
         tmp_path,
-        process_factory=lambda _argv, _env: _LiveProcess(),
+        process_factory=lambda _argv, _env: launched.append(1) or _LiveProcess(),
         artifact_checker=lambda: check,
         health_reader=lambda _url: _healthy(),
     )
-    runtime.start()
+    with pytest.raises(LayaRuntimeError, match="Wrong model version"):
+        runtime.start()
+    assert launched == []
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "wrong_revision"
@@ -910,4 +920,161 @@ def test_stale_api_key_is_reread_and_a_rejected_key_stays_down(
     runtime.publish_status()
     assert client._api_key == "rotated-key"  # noqa: SLF001
     assert process_laya().effective_status("practice") is DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+def _plant_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, extra: str | None) -> Path:
+    policy = load_policy()
+    root = tmp_path / "hub"
+    path = snapshot_weight_path(
+        root,
+        repo=policy.repo,
+        revision=policy.revision,
+        filename=policy.weight_file,
+    )
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"pinned-weights")
+    if extra is not None:
+        (path.parent / extra).write_bytes(b"not-the-pinned-file")
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(root))
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "extra",
+    ["model.safetensors.index.json", "pytorch_model.bin.index.json", "other.safetensors", "weights.bin", "model.pt", "model.pth", "model.gguf"],
+)
+def test_extra_snapshot_weights_are_unverified_and_do_not_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: str
+) -> None:
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=extra)
+    policy = load_policy()
+    check = verify_installed_model(
+        repo=policy.repo,
+        revision=policy.revision,
+        filename=policy.weight_file,
+        expected_sha256=policy.sha256,
+    )
+    assert check.ok is False
+    assert check.reason == "unverified"
+    assert check.weights_path
+    direct = verify_weight_file(
+        path,
+        revision=policy.revision,
+        expected_revision=policy.revision,
+        expected_sha256=policy.sha256,
+    )
+    assert direct.reason == "unverified"
+    assert find_pinned_weight(repo=policy.repo, revision=policy.revision, filename=policy.weight_file) is None
+    launched: list[object] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't verify the model"):
+        runtime.start()
+    assert launched == []
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_tampered_weight_is_wrong_revision_and_does_not_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    launched: list[object] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Wrong model version"):
+        runtime.start()
+    assert launched == []
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "wrong_revision"
+    assert laya_reason_detail("wrong_revision", runtime._port) == "Wrong model version"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_clean_weight_is_logged_and_launched_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    policy = load_policy()
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", lambda _path: policy.sha256)
+    launched: list[dict[str, str]] = []
+
+    def factory(_argv: list[str], env: dict[str, str]) -> _Process:
+        launched.append(env)
+        return _Process()
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=factory,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with caplog.at_level(logging.INFO, logger="flinttrade.laya"):
+        runtime.start()
+    assert launched
+    env = launched[0]
+    assert env["HF_HUB_OFFLINE"] == "1"
+    assert env["TRANSFORMERS_OFFLINE"] == "1"
+    assert env["LAYA_REVISION"] == policy.revision
+    assert env["HUGGINGFACE_HUB_CACHE"] == str(path.parent.parent.parent.parent)
+    expected = LAYA_WEIGHTS_LOG % (str(path.resolve()), policy.sha256)
+    assert expected in caplog.text
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_pid_and_key_changes_flip_status_within_the_watch_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert 1 <= LAYA_WATCH_INTERVAL_SECONDS <= 2
+    live = 424242
+    _accept_only(monkeypatch, live)
+    policy = load_policy()
+    key_path = tmp_path / "api.key"
+    key_path.write_text("old-key\n", encoding="utf-8")
+    runtime = LayaRuntime(
+        tmp_path,
+        watch=True,
+        watch_interval=0.05,
+        artifact_checker=lambda: ArtifactCheck(
+            ok=True, reason=None, revision=policy.revision, sha256=policy.sha256
+        ),
+        health_reader=lambda _url: _healthy(),
+    )
+    runtime.attach(key_path)
+    (runtime.runtime_root / "sidecar.pid").write_text(str(live), encoding="utf-8")
+    runtime._watch_had_pid = True  # noqa: SLF001
+    deadline = time.monotonic() + 1
+    client = process_laya()._decision_client  # noqa: SLF001
+    assert client is not None
+    key_path.write_text("rotated-key\n", encoding="utf-8")
+    while time.monotonic() < deadline and client._api_key != "rotated-key":  # noqa: SLF001
+        time.sleep(0.02)
+    assert client._api_key == "rotated-key"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    (runtime.runtime_root / "sidecar.pid").unlink()
+    while time.monotonic() < deadline and process_laya().runtime_reason()[0] != "stopped":
+        time.sleep(0.02)
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "stopped"
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    runtime.stop_watch()
     reset_process_laya_for_tests()

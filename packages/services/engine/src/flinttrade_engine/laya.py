@@ -320,6 +320,7 @@ class Laya:
         when a host is configured. Down refuses before any other rule. A
         floor refusal is final. The host cannot raise a quantity.
         """
+        self._watch_sidecar()
         status = self.effective_status(proposal.mode)
         with self._lock:
             client = self._decision_client
@@ -422,6 +423,18 @@ class Laya:
             evidence=evidence,
         )
 
+    @staticmethod
+    def _watch_sidecar() -> None:
+        """Re-read the pid, key, and runtime record before this admission."""
+        try:
+            from flinttrade_core.laya_runtime import process_runtime  # noqa: PLC0415
+        except ImportError:
+            return
+        runtime = process_runtime()
+        reconcile = getattr(runtime, "reconcile_watched_state", None)
+        if callable(reconcile):
+            reconcile()
+
     def _ceiling_for(self, status: DecisionStatus) -> int:
         if status is DecisionStatus.DEGRADED:
             return self._degraded_max_quantity
@@ -513,11 +526,18 @@ def admission_kind(verdict: Verdict, requested_quantity: int) -> str:
 
 
 def _reason_for_decision_failure(code: str) -> str | None:
-    """Map a host failure onto a chip reason. Other failures stay with the probe."""
+    """Map a host failure onto a chip reason in the same request.
+
+    A connect error or a timeout is ``unreachable``. A 401 or 403 from the
+    sidecar is ``key_rejected`` (chip "Can't reach Laya"). Other failures
+    stay with the probe.
+    """
     if code in {"revision_mismatch", "digest_mismatch"}:
         return LAYA_REASON_WRONG_REVISION
-    if code == "http_401":
+    if code in {"http_401", "http_403"}:
         return LAYA_REASON_KEY_REJECTED
+    if code in {"connection", "timeout"}:
+        return LAYA_REASON_UNREACHABLE
     return None
 
 

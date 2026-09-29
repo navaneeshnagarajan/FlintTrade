@@ -78,6 +78,7 @@ import {
   createPracticeOrderReviewSnapshot,
   isPracticeOrderReviewCurrent,
   practiceOrderIntentIdentity,
+  practiceReviewPlacedQuantity,
   type PracticeOrderReviewSnapshot,
 } from "./practiceOrderReview";
 
@@ -859,6 +860,12 @@ function OrderPadWidget(props: WidgetProps) {
     const review = practiceReviewRef.current;
     const base = review?.params ?? lastParamsRef.current;
     if (!base || quantity < 1) return;
+    if (review) {
+      const placed = practiceReviewPlacedQuantity(review, quantity);
+      practiceReviewRef.current = placed;
+      setPracticeReview(placed);
+      setValue("qty", quantity, { shouldValidate: true });
+    }
     const modeAtClick = useModeStore.getState().mode;
     const mode = review
       ? "practice"
@@ -867,7 +874,7 @@ function OrderPadWidget(props: WidgetProps) {
         : "practice";
     const succeeded = await submitOrder({ ...base, quantity }, { mode });
     if (succeeded) setPracticeReview(null);
-  }, [submitOrder]);
+  }, [setValue, submitOrder]);
 
   const handleCancelClamp = useCallback(() => {
     setAdmission(null);

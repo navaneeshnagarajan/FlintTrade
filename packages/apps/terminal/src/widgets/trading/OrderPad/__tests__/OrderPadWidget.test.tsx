@@ -379,7 +379,18 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeDisabled();
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    let releasePlaced: (value: { orderId: string }) => void = () => {};
+    mockPlaceOrder.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        releasePlaced = resolve;
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Place 1" }));
+    const review = screen.getByRole("dialog");
+    const quantityRow = within(review).getByText("Quantity").parentElement;
+    expect(quantityRow).toHaveTextContent("1");
+    expect(quantityRow).not.toHaveTextContent("4");
+    releasePlaced({ orderId: "TEST001" });
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
     expect(mockPlaceOrder).toHaveBeenLastCalledWith(
       expect.objectContaining({ quantity: 1, strategy: "FlintOrderPad" }),

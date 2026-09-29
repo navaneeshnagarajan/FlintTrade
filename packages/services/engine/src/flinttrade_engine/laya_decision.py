@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 import tomllib
 import urllib.error
 import urllib.request
@@ -34,6 +35,43 @@ _QUESTION_ORDER = ("rationale", "tilt", "side")
 _MAX_NOTE_CHARS = 4_000
 _MAX_RESPONSE_BYTES = 1_000_000
 _NEUTRAL_KEYS = ("A", "B")
+_decision_log_path: Path | None = None
+_decision_log_lock = threading.Lock()
+
+
+def set_decision_log_path(path: Path | None) -> None:
+    """Choose the file that stores ``proof=decision`` and ``proof=runtime``."""
+    global _decision_log_path
+    _decision_log_path = path
+
+
+def decision_log_path() -> Path | None:
+    """Return the decision log path, when one is configured."""
+    return _decision_log_path
+
+
+def append_decision_log(evidence: tuple[tuple[str, str], ...], *, effect: str) -> None:
+    """Persist one decision, including which proof it used.
+
+    ``proof=decision`` means the response carried the pin. ``proof=runtime``
+    means this run's record stood in. ``identity_absent`` is stored with no
+    proof. A missing path leaves the in-memory verdict unchanged.
+    """
+    path = _decision_log_path
+    if path is None:
+        return
+    proof = next((value for key, value in evidence if key == "proof"), "")
+    failure = next((value for key, value in evidence if key == "failure"), "")
+    parts = [f"effect={effect}"]
+    if proof in {"decision", "runtime"}:
+        parts.append(f"proof={proof}")
+    if failure:
+        parts.append(f"failure={failure}")
+    line = " ".join(parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _decision_log_lock:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
 
 
 class DecisionCallError(Exception):
@@ -258,15 +296,17 @@ def evaluate_free_text(
         effects = _effects_from_payload(payload, active)
     except DecisionCallError as exc:
         if exc.code == "identity_absent":
-            return TextDecision(
-                effect="unverified",
-                reason=LAYA_DECISION_UNVERIFIED,
-                applied_quantity=0,
-                evidence=(("policy_version", active.version), ("failure", "identity_absent")),
+            return _logged(
+                TextDecision(
+                    effect="unverified",
+                    reason=LAYA_DECISION_UNVERIFIED,
+                    applied_quantity=0,
+                    evidence=(("policy_version", active.version), ("failure", "identity_absent")),
+                )
             )
-        return _down_decision(active, exc.code)
+        return _logged(_down_decision(active, exc.code))
     except Exception:
-        return _down_decision(active, "malformed")
+        return _logged(_down_decision(active, "malformed"))
     evidence: list[tuple[str, str]] = [("policy_version", active.version), ("revision", active.revision)]
     evidence.extend(effects)
     proof = getattr(client, "last_proof", "")
@@ -275,26 +315,32 @@ def evaluate_free_text(
     deny = next((item for item in effects if item[0].endswith(":effect") and item[1] == "deny"), None)
     if deny is not None:
         question_id = deny[0].split(":", 1)[0]
-        return TextDecision(
-            effect="deny",
-            reason=_deny_reason(question_id),
-            applied_quantity=0,
-            evidence=tuple(evidence),
+        return _logged(
+            TextDecision(
+                effect="deny",
+                reason=_deny_reason(question_id),
+                applied_quantity=0,
+                evidence=tuple(evidence),
+            )
         )
     abstain = any(item[1] == "abstain" for item in effects if item[0].endswith(":effect"))
     if abstain:
         decision = _uncertain_decision(active, mode, requested_quantity, degraded_ceiling, "abstain")
-        return TextDecision(
-            effect=decision.effect,
-            reason=decision.reason,
-            applied_quantity=decision.applied_quantity,
+        return _logged(
+            TextDecision(
+                effect=decision.effect,
+                reason=decision.reason,
+                applied_quantity=decision.applied_quantity,
+                evidence=tuple(evidence),
+            )
+        )
+    return _logged(
+        TextDecision(
+            effect="allow",
+            reason="",
+            applied_quantity=requested_quantity,
             evidence=tuple(evidence),
         )
-    return TextDecision(
-        effect="allow",
-        reason="",
-        applied_quantity=requested_quantity,
-        evidence=tuple(evidence),
     )
 
 
@@ -493,8 +539,8 @@ class SystemOneClient:
     def decide(self, state: str, questions: Mapping[str, Mapping[str, object]]) -> Mapping[str, Any]:
         """Post one decision and return the decoded object.
 
-        A 401 re-reads the key file when a loader is set, then retries once.
-        A second 401 is the key rejection.
+        A 401 or 403 re-reads the key file when a loader is set, then retries
+        once. A second 401 or 403 is the key rejection.
 
         Raises:
             DecisionCallError: The host was unreachable, slow, or not usable.
@@ -502,13 +548,13 @@ class SystemOneClient:
         try:
             return self._post(state, questions)
         except DecisionCallError as exc:
-            if exc.code != "http_401":
+            if exc.code not in {"http_401", "http_403"}:
                 raise
         self._refresh_key()
         try:
             return self._post(state, questions)
         except DecisionCallError as exc:
-            if exc.code == "http_401" and self._on_key_rejected is not None:
+            if exc.code in {"http_401", "http_403"} and self._on_key_rejected is not None:
                 self._on_key_rejected()
             raise
 
@@ -694,6 +740,12 @@ def _uncertain_decision(
         applied_quantity=min(requested_quantity, degraded_ceiling),
         evidence=evidence,
     )
+
+
+def _logged(decision: TextDecision) -> TextDecision:
+    """Write the proof kind into the decision log, then return the same decision."""
+    append_decision_log(decision.evidence, effect=decision.effect)
+    return decision
 
 
 def _down_decision(policy: LayaPolicy, code: str) -> TextDecision:

@@ -15,12 +15,22 @@ from typing import Any
 
 import pytest
 
-from flinttrade_engine.laya import DecisionStatus, Laya, Proposal
+from flinttrade_engine.laya import (
+    LAYA_DECISION_UNVERIFIED,
+    DecisionStatus,
+    Laya,
+    Proposal,
+    laya_reason_detail,
+    place_block,
+)
 from flinttrade_engine.laya_decision import (
     DecisionCallError,
     SystemOneClient,
+    append_decision_log,
+    decision_log_path,
     load_policy,
     questions_for_note,
+    set_decision_log_path,
 )
 
 _POLICY = load_policy()
@@ -259,6 +269,8 @@ def test_timeout_is_down(laya_host: FakeLayaHost) -> None:
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
     assert engine.status is DecisionStatus.DOWN
+    assert engine.runtime_reason()[0] == "unreachable"
+    assert laya_reason_detail("unreachable", 0) == "Unreachable"
     assert ("failure", "timeout") in verdict.evidence
 
 
@@ -277,6 +289,8 @@ def test_connection_refused_is_down() -> None:
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
     assert engine.status is DecisionStatus.DOWN
+    assert engine.runtime_reason()[0] == "unreachable"
+    assert laya_reason_detail("unreachable", 0) == "Unreachable"
     assert ("failure", "connection") in verdict.evidence
 
 
@@ -536,3 +550,67 @@ def test_a_key_that_still_fails_is_rejected(laya_host: FakeLayaHost, tmp_path: P
 def test_decision_call_error_code_is_stable() -> None:
     error = DecisionCallError("timeout")
     assert error.code == "timeout"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("code", [401, 403])
+def test_key_rejection_sets_down_in_the_same_request(laya_host: FakeLayaHost, code: int) -> None:
+    laya_host.response_code = code
+    engine = _engine(laya_host)
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is False
+    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert engine.status is DecisionStatus.DOWN
+    assert engine.runtime_reason()[0] == "key_rejected"
+    assert laya_reason_detail("key_rejected", 0) == "Can't reach Laya"
+    assert ("failure", f"http_{code}") in verdict.evidence
+
+
+@pytest.mark.unit
+def test_laya_unverified_refusal_sentence(laya_host: FakeLayaHost) -> None:
+    payload = json.loads(_body(_answers()))
+    payload.pop("revision")
+    payload.pop("sha256")
+    laya_host.response_body = json.dumps(payload).encode()
+    verdict = _engine(laya_host).admit(_proposal())
+    blocked = place_block(verdict, 4)
+    assert blocked is not None
+    assert blocked["code"] == "laya_unverified"
+    assert blocked["message"] == "Not placed. Laya's decision couldn't be verified. Try again."
+    assert blocked["reason"] == LAYA_DECISION_UNVERIFIED
+    assert "limits" not in blocked
+    assert "applied_quantity" not in blocked
+
+
+@pytest.mark.unit
+def test_decision_log_records_the_proof_kind(laya_host: FakeLayaHost, tmp_path: Path) -> None:
+    log = tmp_path / "decisions.jsonl"
+    set_decision_log_path(log)
+    try:
+        laya_host.response_body = _body(_answers())
+        _engine(laya_host).admit(_proposal())
+        assert decision_log_path() == log
+        decision = log.read_text(encoding="utf-8").strip().splitlines()[-1]
+        assert "proof=decision" in decision
+
+        payload = json.loads(_body(_answers()))
+        payload.pop("revision")
+        payload.pop("sha256")
+        laya_host.response_body = json.dumps(payload).encode()
+        _engine(laya_host, verified=True).admit(_proposal())
+        runtime = log.read_text(encoding="utf-8").strip().splitlines()[-1]
+        assert "proof=runtime" in runtime
+
+        laya_host.response_body = json.dumps(payload).encode()
+        _engine(laya_host).admit(_proposal())
+        absent = log.read_text(encoding="utf-8").strip().splitlines()[-1]
+        assert "failure=identity_absent" in absent
+        assert "proof=" not in absent
+    finally:
+        set_decision_log_path(None)
+
+
+@pytest.mark.unit
+def test_append_decision_log_is_a_no_op_without_a_path() -> None:
+    set_decision_log_path(None)
+    append_decision_log((("proof", "runtime"),), effect="allow")

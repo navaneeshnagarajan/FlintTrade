@@ -19,6 +19,7 @@ import argparse
 import atexit
 import hashlib
 import json
+import logging
 import os
 import secrets
 import signal
@@ -35,6 +36,14 @@ from typing import Any
 
 from .owner_file_lock import OwnerSafeFileLock
 from .secure_file import harden, harden_directory
+
+_LOG = logging.getLogger("flinttrade.laya")
+
+# laya-serve 0.3.21 takes no snapshot-path argument. A verified boot pins the
+# file with LAYA_REVISION, HF_HUB_OFFLINE=1, and the cache that holds it.
+LAYA_WEIGHTS_LOG = "laya weights path=%s sha256=%s"
+LAYA_WATCH_INTERVAL_SECONDS = 1.5
+_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".gguf")
 
 LAYA_SERVE_REQUIREMENT = "laya[serve]==0.3.21"
 LAYA_BIND_HOST = "127.0.0.1"
@@ -202,7 +211,13 @@ def process_runtime() -> LayaRuntime | None:
 
 def reset_process_runtime_for_tests() -> None:
     """Drop the registered sidecar. Does not stop a process the test did not start."""
+    runtime = process_runtime()
+    if runtime is not None:
+        runtime.stop_watch()
     set_process_runtime(None)
+    from flinttrade_engine.laya_decision import set_decision_log_path  # noqa: PLC0415
+
+    set_decision_log_path(None)
 
 
 def refresh_process_laya_status() -> None:
@@ -278,6 +293,7 @@ class ArtifactCheck:
     sha256: str
     pid: int = 0
     token: str = ""
+    weights_path: str = ""
 
 
 def huggingface_cache_roots() -> list[Path]:
@@ -313,6 +329,38 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def snapshot_has_extra_weights(directory: Path, pinned_name: str) -> bool:
+    """True when ``directory`` holds a shard index or another weights file.
+
+    The pinned file named in ``laya_policy.toml`` is the only weight the
+    snapshot may contain. A shard index, or any other ``.safetensors``,
+    ``.bin``, ``.pt``, ``.pth``, or ``.gguf`` file, cannot be verified.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        if not entry.is_file() or entry.name == pinned_name:
+            continue
+        name = entry.name
+        if name.endswith(".safetensors.index.json") or name == "pytorch_model.bin.index.json":
+            return True
+        if name.endswith(_WEIGHT_SUFFIXES):
+            return True
+    return False
+
+
+def huggingface_cache_root_for(weight: Path) -> Path | None:
+    """Cache root that contains this Hugging Face snapshot file."""
+    revision_dir = weight.parent
+    snapshots = revision_dir.parent
+    repo_dir = snapshots.parent
+    if snapshots.name == "snapshots" and repo_dir.name.startswith("models--"):
+        return repo_dir.parent
+    return None
+
+
 def verify_weight_file(
     path: Path,
     *,
@@ -320,16 +368,68 @@ def verify_weight_file(
     expected_revision: str,
     expected_sha256: str,
 ) -> ArtifactCheck:
-    """Hash ``path`` and compare it with the pin."""
+    """Hash ``path`` and compare it with the pin.
+
+    A shard index or any other weights file in the same snapshot is
+    unverified, before the digest is compared. A readable file whose
+    digest is not the pin is a real mismatch.
+    """
+    resolved = str(path.resolve()) if path.exists() else str(path)
+    if snapshot_has_extra_weights(path.parent, path.name):
+        return ArtifactCheck(
+            ok=False,
+            reason="unverified",
+            revision=revision,
+            sha256="",
+            weights_path=resolved,
+        )
     if revision != expected_revision:
-        return ArtifactCheck(ok=False, reason="wrong_revision", revision=revision, sha256="")
+        return ArtifactCheck(
+            ok=False,
+            reason="wrong_revision",
+            revision=revision,
+            sha256="",
+            weights_path=resolved,
+        )
     try:
         actual = sha256_file(path)
     except OSError:
-        return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
+        return ArtifactCheck(
+            ok=False,
+            reason="unverified",
+            revision=revision,
+            sha256="",
+            weights_path=resolved,
+        )
     if actual != expected_sha256:
-        return ArtifactCheck(ok=False, reason="wrong_revision", revision=revision, sha256=actual)
-    return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=actual)
+        return ArtifactCheck(
+            ok=False,
+            reason="wrong_revision",
+            revision=revision,
+            sha256=actual,
+            weights_path=resolved,
+        )
+    return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=actual, weights_path=resolved)
+
+
+def snapshot_weight_file(
+    *,
+    repo: str,
+    revision: str,
+    filename: str,
+    cache_roots: list[Path] | None = None,
+) -> Path | None:
+    """Return the pinned filename when it is already on disk.
+
+    This still returns the file when the snapshot also holds other weights.
+    :func:`find_pinned_weight` is the check that refuses that snapshot.
+    """
+    roots = huggingface_cache_roots() if cache_roots is None else cache_roots
+    for root in roots:
+        candidate = snapshot_weight_path(root, repo=repo, revision=revision, filename=filename)
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def find_pinned_weight(
@@ -339,13 +439,17 @@ def find_pinned_weight(
     filename: str,
     cache_roots: list[Path] | None = None,
 ) -> Path | None:
-    """Return the pinned snapshot file, when it is already on disk."""
-    roots = huggingface_cache_roots() if cache_roots is None else cache_roots
-    for root in roots:
-        candidate = snapshot_weight_path(root, repo=repo, revision=revision, filename=filename)
-        if candidate.is_file():
-            return candidate
-    return None
+    """Return the pinned snapshot file only when it is the only weight there.
+
+    A shard index or any other weights file means the snapshot cannot be
+    verified, so this returns ``None`` rather than the extra file.
+    """
+    candidate = snapshot_weight_file(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
+    if candidate is None:
+        return None
+    if snapshot_has_extra_weights(candidate.parent, filename):
+        return None
+    return candidate
 
 
 def verify_installed_model(
@@ -358,10 +462,12 @@ def verify_installed_model(
 ) -> ArtifactCheck:
     """Verify the pinned revision and the weight file on disk.
 
-    A missing file, or a file that cannot be read, is unverified. A file
-    whose digest is not the pin is a real mismatch.
+    A missing file is unverified and may still be downloaded on first boot.
+    A snapshot that also holds a shard index or another weights file is
+    unverified and must not be launched. A file whose digest is not the pin
+    is a real mismatch.
     """
-    path = find_pinned_weight(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
+    path = snapshot_weight_file(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
     if path is None:
         return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
     return verify_weight_file(
@@ -387,6 +493,8 @@ class LayaRuntime:
         health_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
         port_probe: Callable[[int], bool] | None = None,
         artifact_checker: Callable[[], ArtifactCheck] | None = None,
+        watch: bool = True,
+        watch_interval: float | None = None,
     ) -> None:
         if host != LAYA_BIND_HOST:
             raise LayaRuntimeError("Laya sidecar must bind 127.0.0.1")
@@ -408,7 +516,14 @@ class LayaRuntime:
         self._watched_key: Path | None = None
         self._key_rejected = False
         self._artifact_check: ArtifactCheck | None = None
+        self._launch_refusal: ArtifactCheck | None = None
         self._start_token = ""
+        self._watch = watch
+        self._watch_interval = LAYA_WATCH_INTERVAL_SECONDS if watch_interval is None else watch_interval
+        self._watch_stop: threading.Event | None = None
+        self._watch_thread: threading.Thread | None = None
+        self._watch_signature: tuple[object, ...] | None = None
+        self._watch_had_pid = False
         self._generation = 0
         self._loaded_once = False
         self._child_stopped = False
@@ -452,6 +567,7 @@ class LayaRuntime:
 
         policy = load_policy()
         self._ensure_dirs()
+        self.stop_watch()
         spawned: Any | None = None
         with self._lock, self._file_lock():
             self._loaded_once = False
@@ -464,11 +580,19 @@ class LayaRuntime:
             _unlink_quiet(self._key_path)
             _unlink_quiet(self._pid_path)
             self._clear_run_record()
+            self._launch_refusal = None
+            weighed = self._weigh_before_launch(policy)
+            if self._weights_block_launch(weighed):
+                _reap_runtimes.discard(self)
+                self._record_launch_refusal(weighed)
+                raise LayaRuntimeError(_launch_refusal_message(weighed))
+            if weighed.ok and weighed.weights_path:
+                _LOG.info(LAYA_WEIGHTS_LOG, weighed.weights_path, weighed.sha256)
             api_key = secrets.token_urlsafe(32)
             token = secrets.token_urlsafe(32)
             try:
                 _write_private(self._key_path, api_key)
-                cached = self._weights_cached()
+                offline = weighed.ok or self._weights_cached()
                 threads = _thread_budget()
                 env = os.environ.copy()
                 env.update(
@@ -483,32 +607,44 @@ class LayaRuntime:
                         "LAYA_REVISION": policy.revision,
                         "LAYA_SHA256_DIGESTS": json.dumps({policy.weight_file: policy.sha256}),
                         "LAYA_THREADS": str(threads),
-                        "HF_HUB_OFFLINE": "1" if cached else "0",
+                        "HF_HUB_OFFLINE": "1" if offline else "0",
                     }
                 )
-                if cached:
+                if offline:
                     env["TRANSFORMERS_OFFLINE"] = "1"
                 else:
                     env.pop("TRANSFORMERS_OFFLINE", None)
+                if weighed.ok and weighed.weights_path:
+                    cache_root = huggingface_cache_root_for(Path(weighed.weights_path))
+                    if cache_root is not None:
+                        env["HUGGINGFACE_HUB_CACHE"] = str(cache_root)
+                        env["HF_HUB_CACHE"] = str(cache_root)
                 argv = [str(serve_executable(self.venv_dir))]
                 spawned = self._process_factory(argv, env)
                 self._process = spawned
                 pid = getattr(spawned, "pid", None)
                 if isinstance(pid, int) and pid > 0:
                     _write_private(self._pid_path, str(pid))
+                    self._watch_had_pid = True
                 self._api_key = api_key
                 self._watched_key = self._key_path
                 self._key_rejected = False
                 self._start_token = token
                 client = self._decision_client(api_key, policy)
-                self._remember_artifact(self.ensure_artifact_check(force=True))
+                if weighed.ok:
+                    self._stamp_weighed(weighed, token)
+                else:
+                    self._remember_artifact(self.ensure_artifact_check(force=True))
                 self._note_client_verification(client)
                 process_laya().set_decision_client(client)
                 set_process_runtime(self)
+                self._bind_decision_log()
+                self.start_watch()
             except Exception:
                 self._process = None
                 self._api_key = ""
                 self._attached = False
+                self.stop_watch()
                 _reap_runtimes.discard(self)
                 _unlink_quiet(self._key_path)
                 _unlink_quiet(self._pid_path)
@@ -548,6 +684,9 @@ class LayaRuntime:
             self._api_key = api_key
             process_laya().set_decision_client(client)
             set_process_runtime(self)
+            self._bind_decision_log()
+            self._watch_had_pid = self._pid_path.is_file()
+            self.start_watch()
         return self.base_url
 
     def stop(self) -> None:
@@ -559,8 +698,11 @@ class LayaRuntime:
         """
         from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
 
+        self.stop_watch()
         with self._lock, self._file_lock():
             self._generation += 1
+            self._launch_refusal = None
+            self._watch_had_pid = False
             engine = process_laya()
             engine.set_decision_client(None)
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
@@ -592,12 +734,18 @@ class LayaRuntime:
         """
         from flinttrade_engine.laya import (  # noqa: PLC0415
             LAYA_REASON_KEY_REJECTED,
+            LAYA_REASON_UNVERIFIED,
             DecisionStatus,
             process_laya,
         )
         from flinttrade_engine.laya_decision import health_identity_failure, publish_probe  # noqa: PLC0415
 
         self._sync_watched_key()
+        if self._launch_refusal is not None:
+            engine = process_laya()
+            engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            engine.set_runtime_reason(self._launch_refusal.reason or LAYA_REASON_UNVERIFIED, self._port)
+            return engine.status
         if self._key_rejected:
             engine = process_laya()
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
@@ -743,6 +891,8 @@ class LayaRuntime:
 
         if artifact_reason == LAYA_REASON_WRONG_REVISION:
             return LAYA_REASON_WRONG_REVISION
+        if self._launch_refusal is not None and self._launch_refusal.reason == LAYA_REASON_UNVERIFIED:
+            return LAYA_REASON_UNVERIFIED
         if identity_failure(payload, requested_device=self._device):
             return LAYA_REASON_WRONG_REVISION
         if not managed:
@@ -806,6 +956,7 @@ class LayaRuntime:
             sha256=raw.sha256,
             pid=self._sidecar_pid(),
             token=token,
+            weights_path=raw.weights_path,
         )
 
     def _sidecar_pid(self) -> int:
@@ -883,6 +1034,142 @@ class LayaRuntime:
     def _remember_key(self, key: str) -> None:
         self._api_key = key
         self._key_rejected = False
+
+    def _weigh_before_launch(self, policy: Any) -> ArtifactCheck:
+        """Hash the pinned file before the sidecar process exists."""
+        if self._artifact_checker is not None:
+            return self._artifact_checker()
+        return verify_installed_model(
+            repo=policy.repo,
+            revision=policy.revision,
+            filename=policy.weight_file,
+            expected_sha256=policy.sha256,
+        )
+
+    @staticmethod
+    def _weights_block_launch(check: ArtifactCheck) -> bool:
+        """A mismatch, or a snapshot that is not the single pinned file, does not launch."""
+        if check.reason == "wrong_revision":
+            return True
+        return check.reason == "unverified" and bool(check.weights_path)
+
+    def _record_launch_refusal(self, check: ArtifactCheck) -> None:
+        """Keep the chip on the pre-launch result. No sidecar is running."""
+        from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
+
+        self._launch_refusal = check
+        self._remember_artifact(check)
+        engine = process_laya()
+        engine.set_decision_client(None)
+        engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+        engine.set_runtime_reason(check.reason or "unverified", self._port)
+
+    def _stamp_weighed(self, weighed: ArtifactCheck, token: str) -> ArtifactCheck:
+        """Bind a hash taken before launch to the process that just started."""
+        check = ArtifactCheck(
+            ok=weighed.ok,
+            reason=weighed.reason,
+            revision=weighed.revision,
+            sha256=weighed.sha256,
+            pid=self._sidecar_pid(),
+            token=token,
+            weights_path=weighed.weights_path,
+        )
+        self._write_run_record(token, check.pid)
+        self._write_recorded_verification(check)
+        self._remember_artifact(check)
+        return check
+
+    def _bind_decision_log(self) -> None:
+        from flinttrade_engine.laya_decision import set_decision_log_path  # noqa: PLC0415
+
+        self._ensure_dirs()
+        set_decision_log_path(self.runtime_root / "decisions.jsonl")
+
+    def start_watch(self) -> None:
+        """Notice a CLI stop, start, or key change without waiting for the health poll."""
+        if not self._watch or self._watch_interval <= 0:
+            return
+        if self._watch_thread is not None and self._watch_thread.is_alive():
+            return
+        self._watch_signature = self._watched_signature()
+        self._watch_stop = threading.Event()
+        self._watch_thread = threading.Thread(
+            target=self._watch_loop,
+            name="laya-runtime-watch",
+            daemon=True,
+        )
+        self._watch_thread.start()
+
+    def stop_watch(self) -> None:
+        """Stop the file watch. Safe to call when it is not running."""
+        event = self._watch_stop
+        thread = self._watch_thread
+        self._watch_stop = None
+        self._watch_thread = None
+        if event is not None:
+            event.set()
+        if thread is None or thread is threading.current_thread():
+            return
+        if self._lock._is_owned():
+            return
+        thread.join(timeout=2)
+
+    def reconcile_watched_state(self) -> None:
+        """Apply a pid, key, or runtime-record change to the chip immediately."""
+        from flinttrade_engine.laya import LAYA_REASON_STOPPED, DecisionStatus, process_laya  # noqa: PLC0415
+
+        signature = self._watched_signature()
+        changed = signature != self._watch_signature
+        self._watch_signature = signature
+        pid_present = self._pid_path.is_file()
+        pid = _read_pid_file(self._pid_path)
+        with self._lock:
+            process = self._process
+        process_alive = process is not None and _process_alive(process)
+        pid_alive = _pid_alive(pid)
+        running = process_alive or pid_alive
+        stopped = self._watch_had_pid and not process_alive and (not pid_present or not pid_alive)
+        if stopped:
+            self._watch_had_pid = False
+            with self._lock:
+                self._child_stopped = True
+                self._process = None
+            engine = process_laya()
+            engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            engine.set_runtime_reason(LAYA_REASON_STOPPED, self._port)
+            self._artifact_check = None
+            return
+        key_path = self._watched_key
+        if key_path is not None and self._api_key and not key_path.is_file() and running:
+            self._mark_key_rejected()
+            return
+        if not changed and running:
+            return
+        if changed:
+            self._artifact_check = None
+            self._sync_watched_key()
+            self.publish_status()
+        self._watch_had_pid = pid_present
+
+    def _watch_loop(self) -> None:
+        event = self._watch_stop
+        while event is not None and not event.wait(self._watch_interval):
+            if process_runtime() is not self and not self._attached and self._process is None:
+                return
+            try:
+                self.reconcile_watched_state()
+            except Exception:
+                _LOG.exception("laya runtime watch failed")
+
+    def _watched_signature(self) -> tuple[object, ...]:
+        """Contents that a CLI stop, start, or key rotation changes."""
+        return (
+            _file_signature(self._pid_path),
+            _file_signature(self._key_path if self._watched_key is None else self._watched_key),
+            _file_signature(self._verification_path()),
+            _file_signature(self._run_path()),
+        )
 
     def _mark_key_rejected(self) -> None:
         from flinttrade_engine.laya import LAYA_REASON_KEY_REJECTED, DecisionStatus, process_laya  # noqa: PLC0415
@@ -1212,6 +1499,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(json.dumps(runtime.status(), sort_keys=True, default=str))
     return 0
+
+
+def _launch_refusal_message(check: ArtifactCheck) -> str:
+    """Chip words for a sidecar that was not started."""
+    if check.reason == "wrong_revision":
+        return "Wrong model version"
+    return "Can't verify the model"
+
+
+def _file_signature(path: Path) -> tuple[object, ...]:
+    """File contents, or a missing marker. Used to notice CLI stop and key rotation."""
+    try:
+        return ("present", path.read_bytes())
+    except OSError:
+        return ("missing",)
 
 
 def _thread_budget() -> int:
