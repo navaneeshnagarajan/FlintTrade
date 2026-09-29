@@ -33,7 +33,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTotpEnrolled } from "@/hooks/useTotpEnrolled";
-import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
 import {
   ENROL_2FA_AND_CONNECT_BROKER,
   liveMenuLockReasons,
@@ -154,7 +154,9 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     }
     try {
       const expectedGeneration = useAuthStore.getState().sessionGeneration;
-      const { token: newToken } = await unlockWithPin(pin, "live");
+      // Explicit Live switch. Quick unlock does not change Mode; this call
+      // does, and only after the server accepts the PIN and enrolment check.
+      const { token: newToken } = await confirmLiveMode(pin);
       if (!updateToken(newToken, expectedGeneration)) return;
     } catch (err) {
       const message = err instanceof Error ? err.message.trim() : "";

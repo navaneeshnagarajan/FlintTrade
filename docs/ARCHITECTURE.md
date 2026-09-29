@@ -445,10 +445,8 @@ not go through the write router.
 ```mermaid
 stateDiagram-v2
     [*] --> Practice
-    Practice --> Live: /auth/pin {mode:live} +\n6-digit PIN
+    Practice --> Live: /auth/live +\n6-digit PIN
     Live --> Practice: /auth/mode {mode:practice}
-    Practice --> ExampleData: /auth/mode {mode:explore}
-    Live --> ExampleData: /auth/mode {mode:explore}\n(JWT downgrade only;\nno kill-switch)
     ExampleData --> Practice: /auth/mode {mode:practice}
 
     state ExampleData {
@@ -465,10 +463,12 @@ stateDiagram-v2
     }
 ```
 
-Each transition issues a fresh JWT with the new `mode` claim and revokes
-the old token's `jti`. Practice → Live is `POST /v1/auth/pin` (PIN
-re-auth). `/v1/auth/mode` accepts only downgrades to `practice` or
-the sample-data claim `explore` and does not latch the kill switch. The Mode menu
+A downgrade to Practice issues a fresh JWT with the new `mode` claim and
+revokes the old token's `jti`. Practice → Live is `POST /v1/auth/live` (PIN
+re-auth plus authenticator enrolment). Quick unlock `POST /v1/auth/pin`
+restores the existing session and never changes Mode. `/v1/auth/mode`
+accepts only a downgrade to `practice`. Example data is not a desk
+downgrade, and that call does not latch the kill switch. The Mode menu
 lists Practice, Connected (read), and Live. A fresh browser and a finished
 password sign-in open in Practice. Example data is not a menu Mode. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.

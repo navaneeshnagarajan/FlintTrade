@@ -18,6 +18,7 @@ const {
   modeState,
   mockCaptureAuthSessionFence,
   mockSetLoggedInIfCurrent,
+  mockSetLoggedOut,
   mockSetMode,
   mockUpdateToken,
 } = vi.hoisted(() => {
@@ -72,6 +73,7 @@ const {
     authState.sessionGeneration += 1;
     return true;
   });
+  const mockSetLoggedOut = vi.fn();
   const modeState = { mode: "explore" as "explore" | "practice" | "live" };
   const mockSetMode = vi.fn((mode: "explore" | "practice" | "live") => {
     modeState.mode = mode;
@@ -81,6 +83,7 @@ const {
     modeState,
     mockCaptureAuthSessionFence,
     mockSetLoggedInIfCurrent,
+    mockSetLoggedOut,
     mockSetMode,
     mockUpdateToken,
     fenceIsCurrent,
@@ -103,7 +106,7 @@ vi.mock("@/stores/authStore", () => ({
       ...authState,
       setLoggedInIfCurrent: mockSetLoggedInIfCurrent,
       updateToken: mockUpdateToken,
-      setLoggedOut: vi.fn(),
+      setLoggedOut: mockSetLoggedOut,
     }),
     setState: vi.fn(),
   }),
@@ -551,6 +554,129 @@ describe("LoginRoute", () => {
     expect(authState).toMatchObject({ token: "newer-token", username: "bob", sessionGeneration: 8 });
     expect(mockSetMode).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  function sessionJwt(mode: string): string {
+    const payload = btoa(JSON.stringify({ mode, type: "session" }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return `header.${payload}.sig`;
+  }
+
+  it("names the unlock button from the session Mode", () => {
+    modeState.mode = "practice";
+    const named = [
+      ["practice", "Unlock Practice desk"],
+      ["live", "Unlock Live desk"],
+    ] as const;
+
+    for (const [mode, label] of named) {
+      Object.assign(authState, {
+        status: "pin-required",
+        token: null,
+        reauthToken: sessionJwt(mode),
+        username: "testuser",
+      });
+      const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+      const heading = mode === "practice" ? "Practice desk locked" : "Live desk locked";
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      view.unmount();
+    }
+
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
+  });
+
+  it("keeps the plain Unlock button for an example-data session", () => {
+    modeState.mode = "live";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("explore"),
+      username: "testuser",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
+    expect(mockSetMode).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain Unlock button for an unknown session value", () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("not-a-mode"),
+      username: "testuser",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+  });
+
+  it("restores the session after Quick Unlock and leaves Mode unchanged", async () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: "practice-session",
+      username: "testuser",
+      sessionGeneration: 4,
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { token: "restored-token", mode: "live", live_mode_unlocked: true },
+      }),
+    );
+    const onSuccess = vi.fn();
+    render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
+
+    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/pin",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ pin: "123456" }),
+      }),
+    );
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "restored-token",
+      "testuser",
+      "",
+      expect.objectContaining({ principal: "testuser", generation: 4 }),
+    );
+  });
+
+  it("Use password instead leaves Quick Unlock without changing Mode", () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      username: "testuser",
+      reauthToken: "practice-session",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /use password instead/i }));
+
+    expect(mockSetLoggedOut).toHaveBeenCalledOnce();
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
   });
 
   it("does not install a PIN response after the locked session is terminated", async () => {
