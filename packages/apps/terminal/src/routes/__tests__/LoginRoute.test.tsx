@@ -296,6 +296,45 @@ describe("LoginRoute", () => {
     );
   });
 
+  it("signs in when Enter is pressed in the password field", async () => {
+    const onSuccess = vi.fn();
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: false,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "alice", expires_at: "" },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" greeting="Good evening" />);
+
+    expect(screen.getByTestId("login-greeting")).toHaveTextContent("Good evening");
+    const password = screen.getByLabelText("Enter your password");
+    fireEvent.change(password, { target: { value: "password" } });
+    fireEvent.submit(password.closest("form") as HTMLFormElement);
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(
+      fetchSpy.mock.calls.filter(([url]) => String(url).includes("/v1/auth/login")),
+    ).toHaveLength(1);
+  });
+
+  it("does not submit an empty password on Enter", () => {
+    const fetchSpy = mockAuthFetch({ totpEnabled: false });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    const password = screen.getByLabelText("Enter your password");
+    fireEvent.submit(password.closest("form") as HTMLFormElement);
+
+    expect(
+      fetchSpy.mock.calls.filter(([url]) => String(url).includes("/v1/auth/login")),
+    ).toHaveLength(0);
+  });
+
   it("clears a stale Live UI mode after normal password and 2FA login", async () => {
     modeState.mode = "live";
     const onSuccess = vi.fn();
