@@ -246,7 +246,7 @@ describe("QuickTradeWidget", () => {
   it("sends the admission note with the place", async () => {
     renderQuickTrade({ symbol: "RELIANCE", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
-    fireEvent.change(screen.getByLabelText("Admission note"), {
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Planned breakout" },
     });
     fireEvent.click(screen.getByRole("button", { name: /sell 1 lots/i }));

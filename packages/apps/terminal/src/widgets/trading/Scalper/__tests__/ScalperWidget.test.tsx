@@ -356,7 +356,7 @@ describe("ScalperWidget", () => {
   it("sends the admission note with the confirmed place", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("×75");
-    fireEvent.change(screen.getByLabelText("Admission note"), {
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Scalp the open" },
     });
     await buyCeWithConfirm();

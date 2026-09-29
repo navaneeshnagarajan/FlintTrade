@@ -196,13 +196,10 @@ match the pin is `wrong_revision`, staging is deleted, and the checkpoint
 already on disk stays. An extra loadable file in a complete download is
 `unverified`. A dropped connection, a partial or missing file, or a read
 error is also `download_failed`. The sidecar does not start on files that
-do not match the pin. If the download does not finish and the runtime
-checkpoint is still on disk, or an older copy's bytes are not the pin,
-the chip is `download_failed`, not `wrong_revision`. If there is no
-checkpoint and the older snapshot is unverified with a weights path — an
-extra weights file or other loadable file, or a missing companion whose
-weight digest matches the pin — that snapshot stays `unverified`. A
-snapshot already on disk is `wrong_revision` only when this start did not
+do not match the pin. If the download does not finish, the chip is `download_failed`, not
+`wrong_revision` and not `unverified`, whatever older snapshot is on
+disk. `unverified` stays when this start did not download. A snapshot
+already on disk is `wrong_revision` only when this start did not
 download. Those failures delete the staging directory and leave the shared
 model cache alone. Leftover staging directories and `checkpoint.old-*`
 copies are removed at the start of `start` once a checkpoint is in place,

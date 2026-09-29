@@ -974,7 +974,7 @@ describe("PositionsWidget", () => {
       render(<PositionsWidget {...defaultProps} />);
 
       fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
-      fireEvent.change(screen.getByLabelText("Admission note"), {
+      fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
         target: { value: "Flatten the open risk" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));

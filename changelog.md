@@ -55,12 +55,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   "Laya is Down. Orders are paused until it's Ready." A dropped
   connection, a partial download, or a failed swap is `download_failed`
   ("Can't download the model"; tooltip "Check your connection, then
-  Start Laya again.") and deletes only the staging directory. That chip
+  Start Laya again.") and deletes only the staging directory.   That chip
   stays `download_failed` even when an older snapshot is still on disk,
-  including when that snapshot's own bytes are not the pin. A snapshot
-  with no checkpoint in place that is unverified for an extra file, or
-  for a missing companion whose weight digest matches the pin, keeps
-  `unverified`. `wrong_revision` is only a complete download whose files
+  whether that snapshot would be `wrong_revision` or `unverified`.
+  `unverified` stays when this start did not download. `wrong_revision`
+  is only a complete download whose files
   do not match the pin, a snapshot already on disk that this start is not
   replacing, or a running sidecar that reports another revision or digest.
   Leftover staging directories and `checkpoint.old-*` copies are removed

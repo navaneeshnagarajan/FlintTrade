@@ -537,7 +537,7 @@ describe("OrderLadderWidget derivative lot validation", () => {
     mockWsTicks.value = { "NFO:NIFTY": { ltp: 100 } };
     render(<OrderLadderWidget symbol="NIFTY" exchange="NFO" />);
     fireEvent.change(screen.getByLabelText("Order quantity"), { target: { value: "75" } });
-    fireEvent.change(screen.getByLabelText("Admission note"), {
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Ladder bid" },
     });
     await waitFor(() => {

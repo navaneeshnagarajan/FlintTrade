@@ -1268,7 +1268,7 @@ def test_changed_companion_is_wrong_revision_and_does_not_launch(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("name", ["encoder/config.json", "tokenizer/tokenizer.json"])
-def test_missing_companion_is_unverified_and_does_not_launch(
+def test_missing_companion_failed_download_is_download_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
     path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
@@ -1282,17 +1282,14 @@ def test_missing_companion_is_unverified_and_does_not_launch(
         health_reader=lambda _url: _healthy(),
         watch=False,
     )
-    with pytest.raises(LayaRuntimeError, match="Can't verify the model"):
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
         runtime.start()
     assert launched == []
-    refusal = runtime._launch_refusal  # noqa: SLF001
-    assert refusal is not None
-    assert refusal.reason == "unverified"
-    assert refusal.weights_path.endswith(name)
+    assert not (path.parent / name).exists()
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
-    assert process_laya().runtime_reason()[0] == "unverified"
-    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    assert laya_reason_detail("download_failed", runtime._port) == "Can't download the model"  # noqa: SLF001
     reset_process_laya_for_tests()
 
 
@@ -1824,6 +1821,77 @@ def test_failed_download_with_old_snapshot_is_download_failed_not_wrong_revision
     assert report["detail"] == "Can't download the model"
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "download_failed"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("extra", ["config.json", "tokenizer/added_tokens.json"])
+def test_failed_download_with_extra_loadable_snapshot_is_download_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: str
+) -> None:
+    policy = load_policy()
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=extra)
+    (path.parent / "encoder" / "config.json").unlink()
+    _accept_pinned_digests(monkeypatch, policy)
+    launched: list[object] = []
+
+    def download(_argv: list[str], env: dict[str, str]) -> int:
+        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"partial")
+        return 1
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
+        runtime.start()
+    assert launched == []
+    assert (path.parent / extra).is_file()
+    assert not runtime.staging_dir.exists()
+    assert not runtime.checkpoint_dir.exists()
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    assert laya_reason_detail("download_failed", runtime._port) == "Can't download the model"  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["encoder/config.json", "tokenizer/tokenizer.json"])
+def test_failed_download_with_missing_companion_is_download_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    policy = load_policy()
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    (path.parent / name).unlink()
+    _accept_pinned_digests(monkeypatch, policy)
+    launched: list[object] = []
+
+    def download(_argv: list[str], env: dict[str, str]) -> int:
+        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"partial")
+        return 1
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
+        runtime.start()
+    assert launched == []
+    assert path.is_file()
+    assert not (path.parent / name).exists()
+    assert not runtime.staging_dir.exists()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    assert laya_reason_detail("download_failed", runtime._port) == "Can't download the model"  # noqa: SLF001
     reset_process_laya_for_tests()
 
 

@@ -29,7 +29,7 @@ export function AdmissionNoteField({
       value={value}
       maxLength={ADMISSION_NOTE_MAX}
       rows={2}
-      aria-label="Admission note"
+      aria-label="Add a reason (optional)"
       placeholder="Optional note for this order"
       onChange={(event) => onChange(event.target.value.slice(0, ADMISSION_NOTE_MAX))}
     />
@@ -67,7 +67,7 @@ export function OrderPadReasonField({
       id={id}
       value={value}
       maxLength={ADMISSION_NOTE_MAX}
-      aria-label="Admission note"
+      aria-label="Add a reason (optional)"
       placeholder="Optional note for this order"
       onChange={(event) => onChange(event.target.value.slice(0, ADMISSION_NOTE_MAX))}
     />

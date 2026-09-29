@@ -1568,12 +1568,11 @@ class LayaRuntime:
 
         A failed or incomplete download deletes the staging directory and
         leaves the shared cache alone. That failure is ``download_failed``,
-        including when an older snapshot in the cache or the runtime
-        checkpoint would itself be ``wrong_revision``. A missing companion
-        in a snapshot this start could not replace is still that snapshot.
-        An empty cache is ``download_failed``. A staging tree whose hashes
-        do not match is ``wrong_revision``. The sidecar starts only after
-        the launch directory matches the pin.
+        whatever older snapshot is on disk. ``wrong_revision`` and
+        ``unverified`` stay for a start that did not download. An empty
+        cache is ``download_failed``. A staging tree whose hashes do not
+        match is ``wrong_revision``. The sidecar starts only after the
+        launch directory matches the pin.
         """
         self._downloading = True
         try:
@@ -1581,12 +1580,7 @@ class LayaRuntime:
             downloaded = self._download_checkpoint(policy)
             if not downloaded:
                 self._discard_staging()
-                if self.checkpoint_dir.exists():
-                    self._refuse_download()
-                existing = self._weigh_before_launch(policy)
-                if existing.reason == "wrong_revision" or not existing.weights_path:
-                    self._refuse_download()
-                self._refuse_before_launch(existing)
+                self._refuse_download()
             try:
                 _materialise_tree(self.staging_dir)
                 staged = verify_model_directory(

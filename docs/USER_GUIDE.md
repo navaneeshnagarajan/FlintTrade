@@ -609,13 +609,10 @@ A complete download whose files do not match the pin shows **Wrong model
 version**. Staging is deleted and a checkpoint already on disk is left in
 place. A dropped connection, a partial or missing file, or a read error
 shows **Can't download the model**, with the same tooltip. A failed
-download or swap is that same chip, not **Wrong model version**, when the
-runtime checkpoint is still on disk or when an older copy's bytes are not
-the pin. If there is no checkpoint and the older snapshot is unverified
-with a weights path — an extra weights file or other loadable file, or a
-missing companion whose weight digest matches the pin — the chip stays
-**Can't verify the model**. An extra loadable file in a complete download
-shows **Can't verify the model**. On any of those results the staging
+download or swap is that same chip, not **Wrong model version** and not
+**Can't verify the model**, whatever older snapshot is on disk. **Can't
+verify the model** stays when this start did not download. An extra
+loadable file in a complete download shows **Can't verify the model**. On any of those results the staging
 directory is deleted and the shared model cache is left alone. The
 sidecar does not start on files that do not match the pin. A copy already
 on disk is **Wrong model version** only when this start did not download.

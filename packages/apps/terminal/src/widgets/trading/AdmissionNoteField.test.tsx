@@ -13,13 +13,13 @@ describe("AdmissionNoteField", () => {
     const view = render(
       <AdmissionNoteField id="note" value={value} onChange={(next) => { value = next; }} />,
     );
-    fireEvent.change(screen.getByLabelText("Admission note"), {
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Planned breakout" },
     });
     expect(value).toBe("Planned breakout");
     view.rerender(
       <AdmissionNoteField id="note" value={value} onChange={(next) => { value = next; }} />,
     );
-    expect(screen.getByLabelText("Admission note")).toHaveValue("Planned breakout");
+    expect(screen.getByLabelText("Add a reason (optional)")).toHaveValue("Planned breakout");
   });
 });

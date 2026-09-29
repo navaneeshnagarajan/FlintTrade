@@ -278,9 +278,9 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     expect(screen.getByRole("button", { name: "Add a reason (optional)" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Admission note")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Add a reason (optional)")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
-    const note = screen.getByLabelText("Admission note");
+    const note = screen.getByLabelText("Add a reason (optional)");
     expect(note.tagName).toBe("INPUT");
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
   });
@@ -289,7 +289,7 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
-    fireEvent.change(screen.getByLabelText("Admission note"), {
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Planned breakout" },
     });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
@@ -423,7 +423,7 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     expect(screen.getByRole("button", { name: "Add a reason (optional)" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Admission note")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Add a reason (optional)")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     fireEvent.click(await screen.findByRole("button", {
       name: /confirm (simulated practice|sample) order/i,

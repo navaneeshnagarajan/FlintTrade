@@ -566,14 +566,11 @@ status word for `downloading` and `download_failed` is Down, not Still
 loading, and orders use "Laya is Down. Orders are paused until it's
 Ready." Those failures delete the staging directory and leave the shared
 model cache alone. The sidecar does not start on files that do not match
-the pin. If the download does not finish and the runtime checkpoint is
-still on disk, or an older copy's bytes are not the pin, the reason is
-`download_failed`, not `wrong_revision`. An empty cache is
-`download_failed`. If there is no checkpoint and the older snapshot is
-unverified with a weights path — an extra weights file or other loadable
-file, or a missing companion whose weight digest matches the pin — that
-snapshot stays `unverified`. A snapshot already on disk is
-`wrong_revision` only when this start did not download. Leftover staging
+the pin. If the download does not finish, the reason is `download_failed`, not
+`wrong_revision` and not `unverified`, whatever older snapshot is on
+disk. An empty cache is `download_failed`. `unverified` stays when this
+start did not download. A snapshot already on disk is `wrong_revision`
+only when this start did not download. Leftover staging
 directories and `checkpoint.old-*` copies are removed at the start of
 `start` once a checkpoint is in place, with no chip change and no
 message. If `checkpoint` is missing and one or more `checkpoint.old-*`

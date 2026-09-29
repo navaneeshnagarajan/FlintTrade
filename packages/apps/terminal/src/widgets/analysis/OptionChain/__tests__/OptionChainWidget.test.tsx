@@ -755,7 +755,7 @@ describe("OptionChainWidget", () => {
       "NIFTY",
       "NFO",
     ])).toEqual({ lotsize: 50 }));
-    fireEvent.change(screen.getByLabelText("Admission note"), {
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Buy the call" },
     });
     act(() => gridMocks.onCellClicked?.([0, 0]));
