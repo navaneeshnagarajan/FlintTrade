@@ -11,7 +11,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getDemoHoldings } from "@/hooks/useModeData";
-import { accountCharges, accountNetWorth, markedValue, positionsUnrealisedPnl } from "@/lib/accountNetWorth";
+import { accountCharges, accountLedgerCash, accountNetWorth } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
 
@@ -23,7 +23,13 @@ const holdingsQuery = vi.hoisted(() => ({
 }));
 
 const fundsQuery = vi.hoisted(() => ({
-  data: undefined as { availableCash: number; usedMargin: number; totalBalance: number } | undefined,
+  data: undefined as {
+    availableCash: number;
+    usedMargin: number;
+    totalBalance: number;
+    ledgerBalance?: number;
+    futuresMtmInLedger?: boolean;
+  } | undefined,
   isLoading: false,
 }));
 
@@ -168,18 +174,24 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
 
     expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
     expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
-    expect(screen.getByTestId("net-worth")).toHaveTextContent("999200");
+    expect(screen.getByTestId("net-worth")).toHaveTextContent("1000000");
     expect(getDemoHoldings().length).toBeGreaterThan(0);
   });
 
   it("is cash + holdings + positions − the practice charges source", () => {
     useModeStore.setState({ mode: "practice" });
     brokerConnected.current = false;
-    const funds = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+    const funds = {
+      availableCash: 999_200,
+      usedMargin: 800,
+      totalBalance: 1_000_000,
+      ledgerBalance: 999_200,
+      futuresMtmInLedger: false,
+    };
     const positions = [{
       symbol: "SBIN",
       exchange: "NSE",
-      product: "CNC",
+      product: "MIS",
       quantity: 1,
       averagePrice: 800,
       ltp: 800,
@@ -189,13 +201,13 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
     fundsQuery.data = funds;
     positionsQuery.data = positions;
     const charges = accountCharges(funds);
-    const expected = accountNetWorth([], funds.availableCash, positions, charges);
+    const cash = accountLedgerCash(funds);
+    const expected = accountNetWorth([], cash, positions, charges, funds.futuresMtmInLedger);
 
     renderProbe();
 
-    expect(positionsUnrealisedPnl(positions)).toBe(0);
-    expect(expected).toBe(funds.availableCash - charges);
-    expect(expected).not.toBe(markedValue(positions) + funds.availableCash - charges);
+    expect(expected).toBe(1_000_000);
+    expect(expected).not.toBe(funds.availableCash - charges);
     expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
     expect(screen.getByTestId("position-book-ready")).toHaveTextContent("true");
     expect(screen.getByTestId("net-worth")).toHaveTextContent(String(expected));
@@ -205,7 +217,13 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
     useModeStore.setState({ mode: "practice" });
     accountReadsEnabled.current = true;
     brokerConnected.current = false;
-    fundsQuery.data = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+    fundsQuery.data = {
+      availableCash: 999_200,
+      usedMargin: 800,
+      totalBalance: 1_000_000,
+      ledgerBalance: 1_000_000 + 235 * 65,
+      futuresMtmInLedger: false,
+    };
     fundsQuery.isLoading = false;
     holdingsQuery.data = [];
     holdingsQuery.isLoading = false;
@@ -242,10 +260,10 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
       </QueryClientProvider>,
     );
 
-    const expected = 999_200 + 1_950;
+    const expected = 1_000_000 + (235 - 205) * 65;
     expect(screen.getByTestId("position-book-ready")).toHaveTextContent("true");
     expect(screen.getByTestId("net-worth")).toHaveTextContent(String(expected));
-    expect(screen.getByTestId("net-worth").textContent).not.toContain(String(999_200 + 205 * 65));
+    expect(screen.getByTestId("net-worth").textContent).not.toContain(String(1_000_000 + 205 * 65));
   });
 
   it("does not publish net worth when the position book fails after funds and holdings are ready", () => {

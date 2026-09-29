@@ -736,14 +736,20 @@ is known, its line is plain `Good morning`, `Good afternoon`, or
 `Good evening` from the Asia/Kolkata hour. Once that name is known, the
 line uses it. There is no greeting toast.
 
-Home and Invest share one net-worth figure: cash, plus the market value of
-holdings, plus the unrealised P&L of open positions, minus charges.
-Charges come from the account book and are 0 in Practice for now.
-Positions count at unrealised P&L, not gross notional. The Home portfolio
-card labels that figure `Net Worth`. Invest Dashboard labels it
-`Net Worth (Cash + Holdings + Positions)`. The Net Worth view labels it
-`Known Total (Cash + Holdings + Positions)`. Those labels do not name
-charges; the figure still subtracts them.
+Home and Invest share one net-worth figure: ledger cash, plus the market
+value of holdings, plus open positions, minus charges. Ledger cash includes
+blocked margin. It is not the available margin. Charges come from the
+account book and are 0 in Practice for now. Options add signed market
+value, because the premium has already gone through cash. Futures add
+unrealised P&L, from the last settlement price when that ledger already
+includes earlier days' mark-to-market, and from the entry price when it
+does not. Equity positions that are not already holdings add signed market
+value. The positions note reads
+`Options at market value, futures at unrealised P&L.`
+The Home portfolio card labels the total `Net Worth`. Invest Dashboard
+labels it `Net Worth (Cash + Holdings + Positions)`. The Net Worth view
+labels it `Known Total (Cash + Holdings + Positions)`. Those labels do not
+name charges; the figure still subtracts them.
 
 Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
 until funds, holdings, and positions have all loaded successfully. If any
@@ -785,10 +791,11 @@ state.
 **Example views.** Sample figures on Baskets, Sector Rotation, Benchmark,
 Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
 carry the Example chip. On Benchmark, index rows keep the Example chip.
-With real holdings, the portfolio row is labelled
-`Your Portfolio (Unrealised return on holdings)`, because the figure is
-the unrealised return on current holdings (total P&L ÷ invested), and it
-carries no chip. When the holdings are
+With real holdings, the series legend is `Your holdings (unrealised)`.
+Its tooltip reads
+`Gain or loss on the shares you hold now, compared with what you paid. Sold shares and dividends aren't included.`
+The comparison's accessible name is `Unrealised return on holdings`.
+The row carries no chip. When the holdings are
 Example, that row is plain `Your Portfolio` and keeps the Example chip.
 Benchmarks beaten, alpha, and the other outperformance figures are
 replaced by
@@ -805,7 +812,7 @@ Dashboard allocation reads
 `Practice account. Debt / MF requires NAV data source.`
 The Net Worth view reads
 `Practice account. Other asset classes require additional data sources.`
-On that view, Equity Holdings and Available Cash read `Practice account`
+On that view, Equity Holdings and Cash read `Practice account`
 once the figures are the account book. While those figures are the sample
 feed they read `Example book` and `Example cash`. The connect banner
 `Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here.`
@@ -814,8 +821,10 @@ is hidden in Practice.
 **XIRR.** With no holdings, Portfolio XIRR shows `—` and the net-worth
 subline shows `XIRR —`. That figure has no Example chip.
 
-**Cash.** Available Funds on Dashboard and Available Cash on the Net Worth
-view show full rupees, in Indian grouping, with no paise. They use the
+**Cash.** Available Funds on Dashboard is the balance left after blocked
+margin. The Net Worth view's Cash line is the ledger, including that
+blocked margin, so opening a position does not shrink the total by the
+margin. Both show full rupees, in Indian grouping, with no paise, in the
 same format as the net-worth headline.
 
 **Holdings and funds.** While the sample book is showing, the Invest

@@ -20,7 +20,13 @@ import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountCharges, accountNetWorth, positionsUnrealisedPnl } from "@/lib/accountNetWorth";
+import {
+  accountCharges,
+  accountLedgerCash,
+  accountNetWorth,
+  fundsFuturesMtmInLedger,
+  positionsNetWorthContribution,
+} from "@/lib/accountNetWorth";
 import { classifySector } from "@/lib/sectors";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
@@ -33,9 +39,14 @@ export interface PortfolioSummary {
   totalPnl: number;
   totalPnlPercent: number;
   availableCash: number;
-  /** Unrealised P&L of open positions. Included in net worth, separate from holdings. */
+  /**
+   * Ledger cash used in net worth, including blocked margin.
+   * Absent on older snapshots; callers fall back to available cash.
+   */
+  ledgerCash?: number;
+  /** Open positions' contribution to net worth, separate from holdings. */
   positionValue: number;
-  /** Cash, holdings market value, and open positions' unrealised P&L. */
+  /** Ledger cash, holdings market value, and open positions. */
   netWorth: number;
   sectorCount: number;
   holdingCount: number;
@@ -141,8 +152,11 @@ export function InvestProvider({ children }: { children: ReactNode }) {
     hasAccountSnapshot,
   );
   const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
-  const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
-  const charges = accountCharges(mode === "explore" ? getDemoFunds() : funds);
+  const fundsBook = mode === "explore" ? getDemoFunds() : funds;
+  const availableCash = fundsBook?.availableCash ?? 0;
+  const ledgerCash = accountLedgerCash(fundsBook);
+  const futuresMtmInLedger = fundsFuturesMtmInLedger(fundsBook);
+  const charges = accountCharges(fundsBook);
   // Funds and holdings can settle first. Publishing then would treat the
   // still-loading position book as empty and understate net worth. A failed
   // position book is not an empty one either.
@@ -150,7 +164,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   const positionBookReady = !expectsPositionBook
     || (positionsSuccess && !positionsError && !positionsLoading);
   const positions = isSampleData || !positionBookReady ? [] : (livePositions ?? []);
-  const positionValue = positionsUnrealisedPnl(positions);
+  const positionValue = positionsNetWorthContribution(positions, holdings, futuresMtmInLedger);
 
   // Derive portfolio totals — memoised so tabs get stable references
   const totalInvested = useMemo(
@@ -175,7 +189,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
     [holdings],
   );
 
-  const netWorth = accountNetWorth(holdings, availableCash, positions, charges);
+  const netWorth = accountNetWorth(holdings, ledgerCash, positions, charges, futuresMtmInLedger);
 
   const summary: PortfolioSummary = useMemo(
     () => ({
@@ -184,6 +198,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       totalPnl,
       totalPnlPercent,
       availableCash,
+      ledgerCash,
       positionValue,
       netWorth,
       sectorCount,
@@ -195,6 +210,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       totalPnl,
       totalPnlPercent,
       availableCash,
+      ledgerCash,
       positionValue,
       netWorth,
       sectorCount,

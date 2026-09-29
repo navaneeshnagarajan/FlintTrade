@@ -1,98 +1,199 @@
 import { describe, expect, it } from "vitest";
 import {
   accountCharges,
+  accountLedgerCash,
   accountNetWorth,
   markedValue,
   NET_WORTH_LABEL,
   NET_WORTH_POSITIONS_NOTE,
-  positionsUnrealisedPnl,
+  positionNetWorthContribution,
+  positionsNetWorthContribution,
   type MarkedLine,
   type PositionLine,
 } from "../accountNetWorth";
 
-const shortOption: PositionLine = {
-  quantity: -65,
-  averagePrice: 235,
-  ltp: 205,
-  pnl: 0,
-};
-
-const longFuture: PositionLine = {
-  quantity: 50,
-  averagePrice: 22_000,
-  ltp: 22_100,
-  pnl: 0,
-};
-
-const flatPosition: PositionLine = {
-  quantity: 0,
-  averagePrice: 235,
-  ltp: 205,
-  pnl: 1_950,
-};
+const STARTING_CASH = 1_000_000;
 
 describe("accountNetWorth", () => {
-  it("keeps one total label and describes positions at unrealised P&L", () => {
+  it("keeps the total label and the positions note", () => {
     expect(NET_WORTH_LABEL).toBe("Net Worth (Cash + Holdings + Positions)");
-    expect(NET_WORTH_POSITIONS_NOTE).toBe("Positions count at unrealised P&L.");
+    expect(NET_WORTH_POSITIONS_NOTE).toBe(
+      "Options at market value, futures at unrealised P&L.",
+    );
   });
 
-  it("adds a short option's unrealised P&L and never its notional", () => {
-    const contribution = positionsUnrealisedPnl([shortOption]);
-    const notional = 205 * 65;
+  it("stays flat when a long option is bought and nothing else changes", () => {
+    const premium = 235 * 65;
+    const longOption: PositionLine = {
+      symbol: "NIFTY24SEP23500CE",
+      exchange: "NFO",
+      quantity: 65,
+      averagePrice: 235,
+      ltp: 235,
+    };
+    const cashAfterPremium = STARTING_CASH - premium;
 
-    expect(contribution).toBe(1_950);
-    expect(contribution).not.toBe(notional);
-    expect(contribution).not.toBe(235 * 65);
-    expect(accountNetWorth([], 0, [shortOption])).toBe(1_950);
-    expect(accountNetWorth([], 0, [shortOption])).not.toBe(notional);
+    expect(positionNetWorthContribution(longOption)).toBe(premium);
+    expect(accountNetWorth([], cashAfterPremium, [longOption])).toBe(STARTING_CASH);
   });
 
-  it("adds a long F&O position's unrealised P&L and never its notional", () => {
-    const contribution = positionsUnrealisedPnl([longFuture]);
-    const notional = 22_100 * 50;
+  it("stays flat when a short option is sold, then moves with LTP", () => {
+    const premium = 235 * 65;
+    const cashAfterCredit = STARTING_CASH + premium;
+    const atEntry: PositionLine = {
+      symbol: "NIFTY24SEP23500PE",
+      exchange: "NFO",
+      quantity: -65,
+      averagePrice: 235,
+      ltp: 235,
+    };
+    const markedDown: PositionLine = { ...atEntry, ltp: 205 };
 
-    expect(contribution).toBe(5_000);
-    expect(contribution).not.toBe(notional);
-    expect(accountNetWorth([], 0, [longFuture])).toBe(5_000);
+    expect(accountNetWorth([], cashAfterCredit, [atEntry])).toBe(STARTING_CASH);
+    expect(positionNetWorthContribution(markedDown)).toBe(-205 * 65);
+    expect(accountNetWorth([], cashAfterCredit, [markedDown])).toBe(STARTING_CASH + 30 * 65);
+    expect(accountNetWorth([], cashAfterCredit, [markedDown])).not.toBe(205 * 65);
+  });
+
+  it("does not drop net worth by the margin blocked to open a future", () => {
+    const blockedMargin = 50_000;
+    const ledger = STARTING_CASH;
+    const opened: PositionLine = {
+      symbol: "NIFTY24APRFUT",
+      exchange: "NFO",
+      quantity: 50,
+      averagePrice: 22_000,
+      settlementPrice: 22_000,
+      ltp: 22_000,
+      futuresMtmInLedger: true,
+    };
+
+    expect(accountLedgerCash({
+      availableCash: ledger - blockedMargin,
+      usedMargin: blockedMargin,
+      ledgerBalance: ledger,
+    })).toBe(ledger);
+    expect(positionNetWorthContribution(opened, [], true)).toBe(0);
+    expect(accountNetWorth([], ledger, [opened], 0, true)).toBe(ledger);
+    expect(accountNetWorth([], ledger, [opened], 0, true)).not.toBe(ledger - blockedMargin);
+  });
+
+  it("does not count settled futures MTM twice", () => {
+    const carried: PositionLine = {
+      symbol: "NIFTY24APRFUT",
+      exchange: "NFO",
+      quantity: 50,
+      averagePrice: 22_000,
+      settlementPrice: 22_100,
+      ltp: 22_150,
+    };
+    const fromSettlement = (22_150 - 22_100) * 50;
+    const fromEntry = (22_150 - 22_000) * 50;
+
+    expect(positionNetWorthContribution(carried, [], true)).toBe(fromSettlement);
+    expect(positionNetWorthContribution(carried, [], true)).not.toBe(fromEntry);
+    expect(accountNetWorth([], STARTING_CASH, [carried], 0, true)).toBe(STARTING_CASH + fromSettlement);
+    expect(positionNetWorthContribution(carried, [], false)).toBe(fromEntry);
   });
 
   it("adds nothing for a flat position, even when a broker pnl field is set", () => {
-    expect(positionsUnrealisedPnl([flatPosition])).toBe(0);
+    const flatPosition: PositionLine = {
+      symbol: "NIFTY24SEP23500CE",
+      quantity: 0,
+      averagePrice: 235,
+      ltp: 205,
+      pnl: 1_950,
+    };
+
+    expect(positionsNetWorthContribution([flatPosition])).toBe(0);
     expect(accountNetWorth([], 10_000, [flatPosition])).toBe(10_000);
   });
 
-  it("is cash + holdings market value + unrealised P&L − charges on a mixed book", () => {
-    const holdings: MarkedLine[] = [{ ltp: 100, quantity: 10 }];
-    const positions = [shortOption, longFuture, flatPosition];
+  it("mixes holdings, options, a settled future, and an equity position", () => {
+    const holdings: MarkedLine[] = [
+      { symbol: "RELIANCE", exchange: "NSE", ltp: 100, quantity: 10 },
+    ];
+    const positions: PositionLine[] = [
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        product: "CNC",
+        quantity: 10,
+        averagePrice: 90,
+        ltp: 100,
+      },
+      {
+        symbol: "INFY",
+        exchange: "NSE",
+        product: "MIS",
+        quantity: 2,
+        averagePrice: 40,
+        ltp: 50,
+      },
+      {
+        symbol: "NIFTY24SEP23500CE",
+        exchange: "NFO",
+        quantity: 65,
+        averagePrice: 20,
+        ltp: 20,
+      },
+      {
+        symbol: "NIFTY24SEP23500PE",
+        exchange: "NFO",
+        quantity: -65,
+        averagePrice: 10,
+        ltp: 10,
+      },
+      {
+        symbol: "NIFTY24APRFUT",
+        exchange: "NFO",
+        quantity: 50,
+        averagePrice: 22_000,
+        settlementPrice: 22_100,
+        ltp: 22_150,
+      },
+      {
+        symbol: "NIFTY24APRFUT",
+        exchange: "NFO",
+        quantity: 0,
+        averagePrice: 22_000,
+        ltp: 22_150,
+        pnl: 9_999,
+      },
+    ];
     const cash = 500_000;
     const charges = 25;
-    const positionPnl = 1_950 + 5_000;
-    const notional = 205 * 65 + 22_100 * 50;
+    const positionsTerm = 0 + 100 + 1_300 + -650 + 2_500 + 0;
 
-    expect(positionsUnrealisedPnl(positions)).toBe(positionPnl);
-    expect(accountNetWorth(holdings, cash, positions, charges)).toBe(
-      markedValue(holdings) + positionPnl + cash - charges,
-    );
-    expect(accountNetWorth(holdings, cash, positions, charges)).not.toBe(
-      markedValue(holdings) + notional + cash - charges,
+    expect(positionsNetWorthContribution(positions, holdings, true)).toBe(positionsTerm);
+    expect(accountNetWorth(holdings, cash, positions, charges, true)).toBe(
+      markedValue(holdings) + positionsTerm + cash - charges,
     );
   });
 
-  it("uses the practice charges source, which is 0 today, and ignores flat notional", () => {
+  it("uses the practice charges source, which is 0 today, and keeps blocked margin in cash", () => {
     const practiceBook = {
       availableCash: 999_200,
       usedMargin: 800,
       totalBalance: 1_000_000,
+      ledgerBalance: 1_000_000,
+      futuresMtmInLedger: false as const,
     };
-    const holdings: MarkedLine[] = [];
-    const positions: PositionLine[] = [{ ltp: 800, quantity: 1, averagePrice: 800, pnl: 0 }];
+    const positions: PositionLine[] = [{
+      symbol: "NIFTY24APRFUT",
+      exchange: "NFO",
+      ltp: 22_000,
+      quantity: 1,
+      averagePrice: 22_000,
+    }];
     const charges = accountCharges(practiceBook);
-    const total = accountNetWorth(holdings, practiceBook.availableCash, positions, charges);
+    const cash = accountLedgerCash(practiceBook);
+    const total = accountNetWorth([], cash, positions, charges, practiceBook.futuresMtmInLedger);
 
     expect(charges).toBe(0);
-    expect(positionsUnrealisedPnl(positions)).toBe(0);
-    expect(total).toBe(practiceBook.availableCash);
-    expect(total).not.toBe(practiceBook.availableCash + 800);
+    expect(cash).toBe(1_000_000);
+    expect(positionsNetWorthContribution(positions)).toBe(0);
+    expect(total).toBe(1_000_000);
+    expect(total).not.toBe(practiceBook.availableCash);
   });
 });

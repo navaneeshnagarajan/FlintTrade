@@ -10,10 +10,12 @@ import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import {
   accountCharges,
+  accountLedgerCash,
   accountNetWorth,
   formatAccountNetWorth,
-  markedValue,
+  fundsFuturesMtmInLedger,
   NET_WORTH_POSITIONS_NOTE,
+  positionsNetWorthContribution,
 } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
@@ -74,13 +76,15 @@ export function PortfolioCard() {
     (sum, holding) => sum + holding.ltp * Math.abs(holding.quantity),
     0,
   );
-  const positionValue = markedValue(positions);
-  const cash = funds?.availableCash ?? 0;
+  const futuresMtmInLedger = fundsFuturesMtmInLedger(funds);
+  const positionValue = positionsNetWorthContribution(positions, holdings ?? [], futuresMtmInLedger);
+  const cash = accountLedgerCash(funds);
   const netWorth = accountNetWorth(
     holdings ?? [],
     cash,
     positions,
     accountCharges(isExplore ? getDemoFunds() : funds),
+    futuresMtmInLedger,
   );
   const netWorthIsExample = isExplore && netWorth > 0;
   const allocation = allocationIsAccount

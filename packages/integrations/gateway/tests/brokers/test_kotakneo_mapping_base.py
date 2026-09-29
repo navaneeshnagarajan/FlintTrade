@@ -306,6 +306,8 @@ def test_from_kotak_funds_real_limits_shape():
     assert funds["available_balance"] == "19.41"   # Net
     assert funds["used_margin"] == "18.78"          # MarginUsed
     assert funds["total_balance"] == "38.19"        # Net + MarginUsed
+    assert funds["ledger_balance"] == "38.19"
+    assert funds["futures_mtm_in_ledger"] is True
 
 
 def test_from_kotak_funds_check_margin_fallback():

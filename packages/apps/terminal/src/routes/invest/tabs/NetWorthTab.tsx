@@ -71,6 +71,7 @@ export function NetWorthTab() {
   const { holdings, summary, isLoading, isError, isSampleData, positionBookReady } = useInvest();
   const isPractice = useModeStore((s) => s.mode === "practice");
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
+  const ledgerCash = summary.ledgerCash ?? availableCash;
   const positionValue = summary.positionValue ?? 0;
   const sourceNote = isPractice ? "Practice account" : "Live from broker";
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
@@ -97,8 +98,8 @@ export function NetWorthTab() {
       addTooltip: "Buy via your connected broker — holdings sync automatically.",
     },
     {
-      label: "Available Cash",
-      value: isLoading ? null : availableCash,
+      label: "Cash",
+      value: isLoading ? null : ledgerCash,
       note: isSampleData ? "Example cash" : sourceNote,
       hexColor: "#22c55e",
       tailwindBg: "bg-emerald-500",
@@ -302,10 +303,10 @@ export function NetWorthTab() {
                   {cat.value !== null ? (
                     <span
                       className="font-mono tabular-nums text-xs text-text-primary"
-                      data-testid={cat.label === "Available Cash" ? "net-worth-available-cash" : undefined}
+                      data-testid={cat.label === "Cash" ? "net-worth-available-cash" : undefined}
                     >
                       {maskValue(
-                        cat.label === "Available Cash" || cat.label === "Open Positions"
+                        cat.label === "Cash" || cat.label === "Open Positions"
                           ? formatAccountNetWorth(cat.value)
                           : formatINRCompact(cat.value),
                         valuesHidden,

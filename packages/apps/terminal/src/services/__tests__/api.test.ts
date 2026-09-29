@@ -3077,7 +3077,13 @@ describe("OpenAlgo API client (api.ts)", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({
       status: "success",
       data: {
-        capital: { initial: 1_000_000, current: 1_012_500, available: 900_000, used_margin: 112_500 },
+        funds: {
+          available_balance: 900_000,
+          used_margin: 112_500,
+          current_balance: 1_012_500,
+          ledger_balance: 1_000_000,
+          futures_mtm_in_ledger: false,
+        },
       },
     }));
 
@@ -3085,9 +3091,11 @@ describe("OpenAlgo API client (api.ts)", () => {
       availableCash: 900_000,
       usedMargin: 112_500,
       totalBalance: 1_012_500,
+      ledgerBalance: 1_000_000,
+      futuresMtmInLedger: false,
     });
     const urls = fetchSpy.mock.calls.map(([url]) => String(url));
-    expect(urls).toEqual([expect.stringContaining("/v1/sandbox/capital")]);
+    expect(urls).toEqual([expect.stringContaining("/v1/sandbox/funds")]);
     expect(urls.some((url) => url.includes("/api/v1/funds"))).toBe(false);
     expect(urls.some((url) => url.includes("/api/v1/native/accounts"))).toBe(false);
   });

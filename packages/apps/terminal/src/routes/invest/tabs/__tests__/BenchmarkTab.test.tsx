@@ -68,7 +68,13 @@ vi.mock("../../InvestContext", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { BenchmarkTab, HOLDINGS_RETURN_LABEL, portfolioBookReturn } from "../BenchmarkTab";
+import {
+  BenchmarkTab,
+  HOLDINGS_RETURN_LABEL,
+  HOLDINGS_RETURN_LEGEND,
+  HOLDINGS_RETURN_TOOLTIP,
+  portfolioBookReturn,
+} from "../BenchmarkTab";
 
 function holding(pnl: number, averagePrice = 100, quantity = 2) {
   return { symbol: "SBIN", averagePrice, quantity, pnl };
@@ -102,8 +108,11 @@ describe("BenchmarkTab", () => {
       "+25.00%",
     );
     expect(HOLDINGS_RETURN_LABEL).toBe("Unrealised return on holdings");
-    expect(within(portfolio).getByText(`Your Portfolio (${HOLDINGS_RETURN_LABEL})`)).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: `Your Portfolio (${HOLDINGS_RETURN_LABEL})` })).toBe(portfolio);
+    expect(HOLDINGS_RETURN_LEGEND).toBe("Your holdings (unrealised)");
+    expect(within(portfolio).getByText(HOLDINGS_RETURN_LEGEND)).toBeInTheDocument();
+    expect(screen.getByTitle(HOLDINGS_RETURN_TOOLTIP)).toHaveTextContent(HOLDINGS_RETURN_LEGEND);
+    expect(screen.getByRole("table", { name: HOLDINGS_RETURN_LABEL })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: (name) => name.includes(HOLDINGS_RETURN_LEGEND) })).toBe(portfolio);
     expect(within(portfolio).queryByText("Example")).not.toBeInTheDocument();
     expect(screen.queryByText(/Showing sample data/)).not.toBeInTheDocument();
 
@@ -130,9 +139,22 @@ describe("BenchmarkTab", () => {
     expect(screen.queryByTestId("benchmark-empty-note")).not.toBeInTheDocument();
   });
 
+  it("keeps Your Portfolio and the Example chip on a sample book", () => {
+    investState.isSampleData = true;
+    investState.holdings = [holding(50)];
+    render(<BenchmarkTab />);
+
+    const portfolio = screen.getByTestId("benchmark-portfolio-row");
+    expect(within(portfolio).getByText("Your Portfolio")).toBeInTheDocument();
+    expect(within(portfolio).queryByText(HOLDINGS_RETURN_LEGEND)).not.toBeInTheDocument();
+    expect(within(portfolio).getByTestId("benchmark-portfolio-example")).toHaveTextContent("Example");
+    expect(screen.queryByRole("table", { name: HOLDINGS_RETURN_LABEL })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(HOLDINGS_RETURN_TOOLTIP)).not.toBeInTheDocument();
+  });
+
   it("shows the portfolio row", () => {
     render(<BenchmarkTab />);
-    expect(screen.getByRole("row", { name: `Your Portfolio (${HOLDINGS_RETURN_LABEL})` })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: (name) => name.includes(HOLDINGS_RETURN_LEGEND) })).toBeInTheDocument();
   });
 
   it("renders all five benchmark indices", () => {
@@ -158,9 +180,11 @@ describe("BenchmarkTab", () => {
     const portfolio = screen.getByTestId("benchmark-portfolio-row");
     expect(screen.getByText("NIFTY 50")).toBeInTheDocument();
     expect(within(portfolio).getByText("Your Portfolio")).toBeInTheDocument();
+    expect(within(portfolio).queryByText(HOLDINGS_RETURN_LEGEND)).not.toBeInTheDocument();
     expect(within(portfolio).queryByText(HOLDINGS_RETURN_LABEL)).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: HOLDINGS_RETURN_LABEL })).not.toBeInTheDocument();
     expect(within(portfolio).queryByText(/since first buy/)).not.toBeInTheDocument();
-    expect(screen.getByRole("row", { name: "Your Portfolio" })).toBe(portfolio);
+    expect(screen.getByRole("row", { name: (name) => name.includes("Your Portfolio") })).toBe(portfolio);
     expect(within(portfolio).queryByTestId("benchmark-portfolio-return")).not.toBeInTheDocument();
     expect(within(portfolio).getAllByText("—").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("benchmark-empty-note")).toHaveTextContent(

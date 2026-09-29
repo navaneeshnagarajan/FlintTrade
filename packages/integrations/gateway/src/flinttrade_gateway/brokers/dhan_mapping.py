@@ -1331,7 +1331,46 @@ def from_dhan_position(d: dict[str, Any]) -> dict[str, Any]:
         ):
             raise BrokerReadResponseInvalid from None
         position["accounting_complete"] = True
+    _attach_dhan_futures_settlement(d, position, net_quantity)
     return position
+
+
+def _attach_dhan_futures_settlement(d: dict[str, Any], position: dict[str, Any], net_quantity: Any) -> None:
+    """Record the futures mark base for net worth.
+
+    Dhan's positions payload has no settlement price and no previous close.
+    ``buyAvg`` / ``sellAvg`` are the mark-to-market average; ``costPrice`` is
+    the actual cost. The fund limit's ``sodLimit`` is the start-of-day
+    balance, so earlier days' futures MTM are already in the ledger
+    (``futures_mtm_in_ledger`` on funds). A carried future marks from the
+    MTM average. A same-day future's MTM average is the trade average.
+
+    Fallback: when that MTM average is absent, use ``costPrice``. That is
+    the actual cost, not the daily settlement, and can recount MTM already
+    in the start-of-day balance.
+    """
+    option_type = str(position.get("option_type") or "").upper()
+    if option_type in {"CE", "PE", "CALL", "PUT"}:
+        return
+    if position.get("exchange") not in {"NFO", "BFO", "CDS", "MCX"}:
+        return
+    try:
+        net = _response_decimal(net_quantity)
+    except BrokerReadResponseInvalid:
+        return
+    if net > 0:
+        mtm_field = "buyAvg"
+    elif net < 0:
+        mtm_field = "sellAvg"
+    else:
+        return
+    mtm = _response_number(d, mtm_field)
+    if mtm is not _RESPONSE_MISSING:
+        position["settlement_price"] = mtm
+        return
+    cost = _response_number(d, "costPrice")
+    if cost is not _RESPONSE_MISSING:
+        position["settlement_price"] = cost
 
 
 def from_dhan_holding(d: dict[str, Any]) -> dict[str, Any]:
@@ -1411,13 +1450,38 @@ def from_dhan_funds(resp: Any) -> dict[str, Any]:
     available = d.get("availabelBalance", d.get("availableBalance", 0))
     used = d.get("utilizedAmount", 0)
     total = d.get("sodLimit", available)
+    # Net-worth cash is the running ledger, not availabelBalance and not
+    # sodLimit. availabelBalance is what is left to trade. sodLimit is the
+    # start-of-day balance and already includes earlier days' futures MTM,
+    # but it does not move when today's option premium is paid.
+    # availabelBalance + utilizedAmount keeps blocked margin inside the
+    # figure and follows today's cash debits and credits.
+    # futures_mtm_in_ledger is true because that start-of-day MTM is in the
+    # ledger. Positions have no settlement field; the mark base is attached
+    # in ``_attach_dhan_futures_settlement``.
+    ledger = _dhan_money(available) + _dhan_money(used)
     return {
         "available_balance": str(available),
         "used_margin": str(used),
         "total_balance": str(total),
         "opening_risk_capital": str(d.get("sodLimit", 0)),
+        "ledger_balance": str(ledger),
+        "futures_mtm_in_ledger": True,
         "extra": d,
     }
+
+
+def _dhan_money(value: Any) -> Decimal:
+    """Finite decimal for a fund-limit amount, or 0 when the value is unusable."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return Decimal(0)
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return Decimal(0)
+    if not number.is_finite():
+        return Decimal(0)
+    return number
 
 
 # ---------------------------------------------------------------------------

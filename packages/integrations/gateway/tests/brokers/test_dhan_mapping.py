@@ -134,6 +134,7 @@ def test_dhan_option_position_preserves_contract_identity_for_portfolio_greeks()
     )
 
     assert position["option_type"] == "CE"
+    assert "settlement_price" not in position
     assert position["expiry"] == "2026-07-30"
     assert position["strike_price"] == 25_000.0
     assert position["underlying"] == "NIFTY"
@@ -350,6 +351,38 @@ def test_dhan_rejects_inconsistent_complete_portfolio_accounting() -> None:
         })
 
 
+def test_dhan_future_marks_from_the_mtm_average_and_falls_back_to_cost() -> None:
+    marked = m.from_dhan_position({
+        "tradingSymbol": "NIFTY-JUN2026-FUT",
+        "exchangeSegment": "NSE_FNO",
+        "productType": "MARGIN",
+        "netQty": 50,
+        "costPrice": 22000,
+        "buyAvg": 22100,
+    })
+    short = m.from_dhan_position({
+        "tradingSymbol": "NIFTY-JUN2026-FUT",
+        "exchangeSegment": "NSE_FNO",
+        "productType": "MARGIN",
+        "netQty": -50,
+        "costPrice": 22000,
+        "sellAvg": 21900,
+    })
+    fallback = m.from_dhan_position({
+        "tradingSymbol": "NIFTY-JUN2026-FUT",
+        "exchangeSegment": "NSE_FNO",
+        "productType": "MARGIN",
+        "netQty": 50,
+        "costPrice": 22000,
+    })
+
+    assert marked["exchange"] == "NFO"
+    assert marked["average_price"] == "22000"
+    assert marked["settlement_price"] == "22100"
+    assert short["settlement_price"] == "21900"
+    assert fallback["settlement_price"] == "22000"
+
+
 def test_dhan_funds_keep_sod_limit_as_opening_risk_capital() -> None:
     funds = m.from_dhan_funds(
         {
@@ -364,6 +397,8 @@ def test_dhan_funds_keep_sod_limit_as_opening_risk_capital() -> None:
 
     assert funds["available_balance"] == "80000.0"
     assert funds["opening_risk_capital"] == "125000.0"
+    assert funds["ledger_balance"] == "100000.0"
+    assert funds["futures_mtm_in_ledger"] is True
 
 
 # ---------------------------------------------------------------------------

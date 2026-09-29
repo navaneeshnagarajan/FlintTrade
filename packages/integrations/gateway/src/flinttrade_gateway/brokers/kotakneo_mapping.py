@@ -1255,6 +1255,13 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     per-unit factor used for the avg, so the value is amount-consistent on
     multiplier≠1 scrips). The open leg's unrealised P&L needs a live LTP not in
     the record and is left to merge from quotes; no LTP is fabricated.
+
+    There is no settlement price and no previous close on a position (holdings
+    expose ``closingPrice``; positions do not). Limits already include earlier
+    days' futures MTM in the ledger (see ``from_kotak_funds``). The documented
+    net-worth fallback is this open-leg average: the trade average, or the
+    carry average when the open leg is carry-forward. That average is not the
+    daily settlement, so a carried future can recount MTM already in the ledger.
     """
     d = _response_record(d)
     quantity_names = ("cfBuyQty", "flBuyQty", "cfSellQty", "flSellQty")
@@ -1691,6 +1698,14 @@ def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:
     the available balance and ``MarginUsed`` as the used margin, falling back to
     the ``data``-wrapped check-margin keys (``avlCash``/``totMrgnUsd``) only if a
     gateway build returns that shape instead.
+
+    ``ledger_balance`` is ``Net + MarginUsed``: available margin plus blocked
+    margin, which is the cash figure net worth uses. ``UnrealizedMtomPrsnt`` is
+    a separate limits field and is not inside ``Net``, so today's futures MTM
+    is not in the ledger. Earlier days' MTM has been settled into that cash,
+    so ``futures_mtm_in_ledger`` is true. Positions expose no settlement or
+    previous-close price; the mark falls back to the open-leg average
+    (see ``from_kotak_position``).
     """
     validate_read_envelope(resp, operation="limits")
     data = resp.get("data", resp)
@@ -1698,9 +1713,12 @@ def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:
         raise BrokerReadResponseInvalid from None
     available = _response_decimal(data, "Net", "avlCash", "avlMrgn", required=True)
     used = _response_decimal(data, "MarginUsed", "totMrgnUsd", "mrgnUsd", required=True)
+    ledger = available + used
     return {
         "available_balance": f"{available:.2f}",
         "used_margin": f"{used:.2f}",
-        "total_balance": f"{available + used:.2f}",
+        "total_balance": f"{ledger:.2f}",
+        "ledger_balance": f"{ledger:.2f}",
+        "futures_mtm_in_ledger": True,
         "extra": data,
     }

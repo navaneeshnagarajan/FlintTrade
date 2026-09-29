@@ -90,7 +90,7 @@ describe("NetWorthTab", () => {
     render(<NetWorthTab />);
     // "Equity Holdings" appears in both the donut legend and the category cards
     expect(screen.getAllByText("Equity Holdings").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Available Cash").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Cash").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Mutual Funds")).toBeInTheDocument();
     expect(screen.getByText("Gold")).toBeInTheDocument();
     expect(screen.getByText("Fixed Deposits")).toBeInTheDocument();

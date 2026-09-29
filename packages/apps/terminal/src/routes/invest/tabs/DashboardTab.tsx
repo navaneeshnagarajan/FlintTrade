@@ -90,6 +90,7 @@ export function DashboardTab() {
   const totalPnl = liveSummary.totalPnl;
   const totalPnlPercent = liveSummary.totalPnlPercent;
   const availableCash = liveSummary.availableCash;
+  const ledgerCash = liveSummary.ledgerCash ?? availableCash;
   // Same helper as Home. A sample book is labelled Example; a Practice
   // snapshot never mixes the demo portfolio into this figure.
   const netWorth = typeof liveSummary.netWorth === "number"
@@ -125,7 +126,7 @@ export function DashboardTab() {
     { label: "Equity", value: equityValue, color: "text-neutral-text", bg: "bg-neutral-text", hex: "#60a5fa" },
     { label: "Positions", value: positionValue, color: "text-profit", bg: "bg-profit", hex: "#22c55e" },
     { label: "Commodity", value: commodityValue, color: "text-warning", bg: "bg-warning", hex: "#fbbf24" },
-    { label: "Cash", value: availableCash, color: "text-profit", bg: "bg-profit", hex: "#34d399" },
+    { label: "Cash", value: ledgerCash, color: "text-profit", bg: "bg-profit", hex: "#34d399" },
   ].filter((b) => b.value > 0);
 
   const sortedByPnl = useMemo(

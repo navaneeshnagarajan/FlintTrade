@@ -94,6 +94,10 @@ export interface Funds {
   availableCash: number;
   usedMargin: number;
   totalBalance: number;
+  /** Ledger cash including blocked margin, when an adapter has normalised it. */
+  ledgerBalance?: number;
+  /** True when earlier days' futures MTM are already in that ledger. */
+  futuresMtmInLedger?: boolean;
 }
 
 // --- Options ---

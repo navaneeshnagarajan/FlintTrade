@@ -20,6 +20,8 @@ const fundsQuery = vi.hoisted(() => ({
     availableCash: number;
     usedMargin: number;
     totalBalance: number;
+    ledgerBalance?: number;
+    futuresMtmInLedger?: boolean;
   } | undefined,
   isLoading: false,
   isError: false,
@@ -35,6 +37,9 @@ const holdingsQuery = vi.hoisted(() => ({
 
 const positionsQuery = vi.hoisted(() => ({
   data: undefined as {
+    symbol?: string;
+    exchange?: string;
+    product?: string;
     ltp: number;
     quantity: number;
     averagePrice?: number;
@@ -52,7 +57,7 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => true,
 }));
 
-import { accountCharges, accountNetWorth, markedValue, positionsUnrealisedPnl } from "@/lib/accountNetWorth";
+import { accountCharges, accountLedgerCash, accountNetWorth, NET_WORTH_POSITIONS_NOTE } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { PortfolioCard } from "../PortfolioCard";
 
@@ -72,7 +77,13 @@ function resetBooks() {
   positionsQuery.isLoading = false;
 }
 
-const PRACTICE_FUNDS = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+const PRACTICE_FUNDS = {
+  availableCash: 999_200,
+  usedMargin: 800,
+  totalBalance: 1_000_000,
+  ledgerBalance: 1_000_000,
+  futuresMtmInLedger: false,
+};
 
 afterEach(() => {
   resetBooks();
@@ -97,30 +108,39 @@ describe("PortfolioCard allocation provenance (Slice 3)", () => {
     useModeStore.setState({ mode: "practice" });
     render(<PortfolioCard />);
 
-    expect(screen.getByTestId("portfolio-net-worth")).toHaveAttribute("data-value", "999200");
+    expect(screen.getByTestId("portfolio-net-worth")).toHaveAttribute("data-value", "1000000");
     expect(screen.queryByTestId("portfolio-net-worth-example")).not.toBeInTheDocument();
     expect(screen.queryByTestId("allocation-example-label")).not.toBeInTheDocument();
     expect(screen.getByTestId("portfolio-allocation")).toHaveTextContent("Cash 100%");
     expect(screen.queryByText(/Equity 45%/)).not.toBeInTheDocument();
   });
 
-  it("splits cash and the open position after a fill without adding flat notional to net worth", () => {
-    const positions = [{ ltp: 800, quantity: 1, averagePrice: 800, pnl: 0 }];
-    setBook(fundsQuery, "success", PRACTICE_FUNDS);
+  it("splits cash and the open position after a fill without dropping blocked margin", () => {
+    const positions = [{
+      symbol: "SBIN",
+      exchange: "NSE",
+      product: "MIS",
+      ltp: 800,
+      quantity: 1,
+      averagePrice: 800,
+      pnl: 0,
+    }];
+    const funds = { ...PRACTICE_FUNDS, ledgerBalance: 999_200 };
+    setBook(fundsQuery, "success", funds);
     setBook(holdingsQuery, "success", []);
     setBook(positionsQuery, "success", positions);
     useModeStore.setState({ mode: "practice" });
-    const charges = accountCharges(PRACTICE_FUNDS);
-    const expected = accountNetWorth([], PRACTICE_FUNDS.availableCash, positions, charges);
+    const charges = accountCharges(funds);
+    const cash = accountLedgerCash(funds);
+    const expected = accountNetWorth([], cash, positions, charges, funds.futuresMtmInLedger);
     render(<PortfolioCard />);
 
-    expect(positionsUnrealisedPnl(positions)).toBe(0);
-    expect(expected).toBe(PRACTICE_FUNDS.availableCash - charges);
-    expect(expected).not.toBe(markedValue(positions) + PRACTICE_FUNDS.availableCash - charges);
+    expect(expected).toBe(1_000_000);
+    expect(expected).not.toBe(funds.availableCash);
     expect(screen.getByTestId("portfolio-net-worth")).toHaveAttribute("data-value", String(expected));
     expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute(
       "title",
-      "Positions count at unrealised P&L.",
+      NET_WORTH_POSITIONS_NOTE,
     );
     expect(screen.queryByTestId("allocation-example-label")).not.toBeInTheDocument();
     expect(screen.getByTestId("portfolio-allocation")).toHaveTextContent("Cash 99.92%");

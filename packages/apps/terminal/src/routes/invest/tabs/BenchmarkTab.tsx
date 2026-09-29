@@ -42,10 +42,14 @@ const PERIODS: PeriodKey[] = ["1D", "1W", "1M", "3M", "6M", "1Y", "3Y", "5Y"];
 
 const COMPARISON_NOTE = "Comparison needs real index data.";
 
-/**
- * Wording for the holdings-book figure. The Designer owns the final phrase.
- * Change this constant only.
- */
+/** Visible series name when the holdings book is the account. */
+export const HOLDINGS_RETURN_LEGEND = "Your holdings (unrealised)";
+
+/** Tooltip on that series. Sold shares and dividends stay out of the figure. */
+export const HOLDINGS_RETURN_TOOLTIP =
+  "Gain or loss on the shares you hold now, compared with what you paid. Sold shares and dividends aren't included.";
+
+/** Accessible name of the comparison when the holdings book is the account. */
 export const HOLDINGS_RETURN_LABEL = "Unrealised return on holdings";
 
 const BENCHMARKS: BenchmarkRow[] = [
@@ -152,9 +156,7 @@ export function BenchmarkTab() {
   const hasHoldings = holdings.length > 0;
   const hasRealHoldings = hasHoldings && !isSampleData;
   const bookReturn = portfolioBookReturn(holdings);
-  const portfolioLabel = hasRealHoldings
-    ? `Your Portfolio (${HOLDINGS_RETURN_LABEL})`
-    : "Your Portfolio";
+  const portfolioLegend = hasRealHoldings ? HOLDINGS_RETURN_LEGEND : "Your Portfolio";
 
   return (
     <div className="space-y-6">
@@ -176,7 +178,11 @@ export function BenchmarkTab() {
       {/* Main comparison table */}
       <GlassCard className="p-0 gap-0 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs" role="table">
+          <table
+            className="w-full text-xs"
+            role="table"
+            aria-label={hasRealHoldings ? HOLDINGS_RETURN_LABEL : undefined}
+          >
             <thead>
               <tr className="border-b border-border-default bg-surface-elevated/50">
                 <th className="text-left px-4 py-3 font-heading font-semibold text-text-secondary whitespace-nowrap sticky left-0 bg-surface-elevated/50 z-10">
@@ -197,12 +203,13 @@ export function BenchmarkTab() {
               <tr
                 className="border-b border-border-default bg-accent/5"
                 data-testid="benchmark-portfolio-row"
-                aria-label={portfolioLabel}
               >
                 <td className="px-4 py-3 font-heading font-semibold text-accent whitespace-nowrap sticky left-0 bg-accent/5 z-10">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="size-3.5" />
-                    {portfolioLabel}
+                    <span title={hasRealHoldings ? HOLDINGS_RETURN_TOOLTIP : undefined}>
+                      {portfolioLegend}
+                    </span>
                     {hasHoldings && (
                       <span
                         data-testid="benchmark-portfolio-return"
