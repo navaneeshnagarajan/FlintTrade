@@ -539,42 +539,51 @@ port and defaults to 8000. A clash on that port is Down with
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written.
 
-If the weights file or any manifest file is not already installed,
 `start` downloads the pinned commit (`[checkpoint] revision`, never the
-default branch) into `<workspace>/runtime/laya/staging`. That directory
-is not the launch path and not the shared Hugging Face cache. The step
-does not start the sidecar. While it runs, the reason is `downloading`
-and the popover is `Downloading the model · 1.2 of 3.4 GB` (live, one
-decimal, decimal GB), with no Next line. Orders stay on the Down
-refusal. It then hashes `model.safetensors` and every manifest file in
-that staging directory. A full match renames any current
-`<workspace>/runtime/laya/checkpoint` aside to `checkpoint.old-<random>`
-in the same runtime directory, renames staging onto `checkpoint`, deletes
-the old copy, and launches the offline verified boot, with hub access off.
-If that second rename fails, the old checkpoint is renamed back and the
-reason is `download_failed`, not `wrong_revision`. A complete download
-whose files do not match the pin is `wrong_revision`; staging is deleted
-and a checkpoint already on disk is left in place. An extra loadable file
-in a complete download is `unverified`. A dropped connection, a partial
-or missing file, or a read error is `download_failed` ("Can't download
-the model"; tooltip "Check your connection, then Start Laya again.").
-The status word for `downloading` and `download_failed` is Down, not
-Still loading, and orders use "Laya is Down. Orders are paused until
-it's Ready." Any of those failures deletes the staging directory and
-does not touch anything else in the model cache. The sidecar does not
-start, including on a checkpoint whose hashes do not match the pin. If
-the download does not finish, the reason is `download_failed`, not
-`wrong_revision`, even when an older snapshot is already in the cache or
-checkpoint. An empty cache is `download_failed`. A snapshot already on
-disk is `wrong_revision` only when this start did not download. A runtime
-checkpoint that does not match the pin is replaced by this download; if
-the download does not finish, that
-checkpoint stays and the reason is `download_failed`. Leftover staging
+default branch) into `<workspace>/runtime/laya/staging` when the weights
+file or any manifest file is not already installed, and when the runtime
+checkpoint is on disk but its hashes are not the pin. That directory is
+not the launch path and not the shared Hugging Face cache. The step does
+not start the sidecar. While it runs, including a pin change, the reason
+is `downloading` and the popover is `Downloading the model · 1.2 of 3.4 GB`
+(live, one decimal, decimal GB), with no Next line and no Updating label.
+Orders stay on the Down refusal. It then hashes `model.safetensors` and
+every manifest file in that staging directory. When no checkpoint is
+already there, a full match renames staging onto
+`<workspace>/runtime/laya/checkpoint` and launches the offline verified
+boot, with hub access off. When a checkpoint is already there, a full
+match renames it aside to `checkpoint.old-<random>` in the same runtime
+directory, renames staging onto `checkpoint`, then deletes the old copy.
+The current copy stays in place until that match. If the second rename
+fails, the old checkpoint is renamed back and the reason is
+`download_failed`, not `wrong_revision`. A complete download whose files
+do not match the pin is `wrong_revision`; staging is deleted and a
+checkpoint already on disk is left in place. An extra loadable file in a
+complete download is `unverified`. A dropped connection, a partial or
+missing file, or a read error is `download_failed` ("Can't download the
+model"; tooltip "Check your connection, then Start Laya again."). The
+status word for `downloading` and `download_failed` is Down, not Still
+loading, and orders use "Laya is Down. Orders are paused until it's
+Ready." Those failures delete the staging directory and leave the shared
+model cache alone. The sidecar does not start on files that do not match
+the pin. If the download does not finish and the runtime checkpoint is
+still on disk, or an older copy's bytes are not the pin, the reason is
+`download_failed`, not `wrong_revision`. An empty cache is
+`download_failed`. If there is no checkpoint and the older snapshot is
+unverified with a weights path — an extra weights file or other loadable
+file, or a missing companion whose weight digest matches the pin — that
+snapshot stays `unverified`. A snapshot already on disk is
+`wrong_revision` only when this start did not download. Leftover staging
 directories and `checkpoint.old-*` copies are removed at the start of
-`start`, with no chip change and no message. If `checkpoint` is missing
-and a `checkpoint.old-*` copy remains, that copy is restored and then
-checked against the pin. The
-download log line is `laya download repo=<repo> revision=<revision>`.
+`start` once a checkpoint is in place, with no chip change and no
+message. If `checkpoint` is missing and one or more `checkpoint.old-*`
+copies remain, the last `checkpoint.old-*` name is restored onto
+`checkpoint` and any other aside copies are removed. If that restore fails, the aside copy stays
+where it is and that cleanup is skipped. A copy that was restored is then
+checked against the pin. If it does not match, the sidecar does not start
+on it; the pinned download runs instead, and a failed download leaves
+`download_failed` with that copy still on disk. The download log line is
+`laya download repo=<repo> revision=<revision>`.
 The pins live in `laya_policy.toml`:
 `[checkpoint]` names `revision` beside `sha256`, the weights file `model.safetensors`, and
 `[checkpoint.manifest]` pins `rl_agent_config.json`,
@@ -593,11 +602,11 @@ modification time in nanoseconds
 also in `run.json`). When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index, or any extra weights file or other
 file the launcher could read is `unverified` ("Can't verify the model")
-and the sidecar does not start. A changed byte in a snapshot this start
-is not replacing is `wrong_revision` ("Wrong model version") and the
+and the sidecar does not start. A changed byte in a snapshot that this
+start is not replacing is `wrong_revision` ("Wrong model version") and the
 sidecar does not start. A changed byte in the runtime checkpoint is the
-upgrade above; the sidecar does not start on that tree. Neither case
-reaches Ready. A verified boot sets
+download above; the sidecar does not start on that tree. Laya does not
+reach Ready in these cases. A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. The launch log line is
@@ -631,11 +640,11 @@ the model, and Can't reach Laya. `<n>` is the sidecar port. Tooltips for
 has no tooltip. The `download_failed` tooltip is "Check your connection,
 then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than
 FlintTrade expects." That code is only a real mismatch: a complete
-download whose files do not match the pin, a changed byte in a snapshot
-this start is not replacing, or a running sidecar that claims another
-revision or digest. A dropped connection, a partial download, or a failed
-upgrade that puts the previous checkpoint back is `download_failed`, not
-this code. The `key_rejected`
+download whose files do not match the pin, a snapshot already on disk
+that this start is not replacing, or a running sidecar that reports
+another revision or digest. A dropped connection, a partial download, or
+a failed download or swap, including one that puts the previous
+checkpoint back, is `download_failed`, not this code. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
 Down and orders are refused. When a place is refused because Laya cannot
 be reached, or because it rejects the key, the chip updates on that same

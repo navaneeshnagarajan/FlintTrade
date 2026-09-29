@@ -41,21 +41,35 @@ changelog rebuilds itself from the first release cut after this baseline.
   (not the model repository's default branch) into `runtime/laya/staging`,
   hashes the files there against the `[checkpoint]` and
   `[checkpoint.manifest]` pins, and on a full match moves that directory
-  onto `runtime/laya/checkpoint` before the offline launch. An upgrade
-  over a checkpoint already on disk uses the same download. On a full
-  match the current checkpoint is renamed aside to
+  onto `runtime/laya/checkpoint` before the offline launch. When a new
+  pin replaces a checkpoint already on disk, the next start downloads it
+  the same way and the current copy stays in place until the new files
+  match. On a full match that checkpoint is renamed aside to
   `checkpoint.old-<random>` in the same runtime directory, staging is
   renamed onto `checkpoint`, and the old copy is deleted. If that second
   rename fails, the old checkpoint is renamed back, the chip is
   `download_failed`, and the sidecar does not start. While the download
-  runs the status word is Down, not Still loading, and the chip
-  reads "Downloading the model · 1.2 of 3.4 GB". Orders are refused with
-  "Laya is Down. Orders are paused until it's Ready."   A dropped connection
-  or a partial download is `download_failed` ("Can't download the model";
-  tooltip "Check your connection, then Start Laya again.") and deletes
-  only the staging directory, even when an older snapshot is already on
-  disk. A complete download whose files do not match the pin is
-  `wrong_revision`. The sidecar always runs offline.
+  runs, including a pin change, the status word is Down, not Still
+  loading, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
+  There is no separate Updating label. Orders are refused with
+  "Laya is Down. Orders are paused until it's Ready." A dropped
+  connection, a partial download, or a failed swap is `download_failed`
+  ("Can't download the model"; tooltip "Check your connection, then
+  Start Laya again.") and deletes only the staging directory. That chip
+  stays `download_failed` even when an older snapshot is still on disk,
+  including when that snapshot's own bytes are not the pin. A snapshot
+  with no checkpoint in place that is unverified for an extra file, or
+  for a missing companion whose weight digest matches the pin, keeps
+  `unverified`. `wrong_revision` is only a complete download whose files
+  do not match the pin, a snapshot already on disk that this start is not
+  replacing, or a running sidecar that reports another revision or digest.
+  Leftover staging directories and `checkpoint.old-*` copies are removed
+  at the start of `start` once a checkpoint is in place, with no chip change and
+  no message. If `checkpoint` is missing after a crash between the two
+  renames, the last `checkpoint.old-*` name is restored and checked
+  against the pin.
+  The sidecar does not start on files that do not match the pin, including
+  that restored copy. The sidecar always runs offline.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when
