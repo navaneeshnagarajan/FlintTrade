@@ -424,6 +424,7 @@ function OrderPadWidget(props: WidgetProps) {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastParamsRef = useRef<PlaceOrderParams | null>(null);
   const lastSubmissionModeRef = useRef<"practice" | "live" | null>(null);
+  const lastExitRef = useRef(false);
   const practiceConfirmInFlightRef = useRef(false);
 
   // Practice review/confirm state — paper path for Practice and Explore.
@@ -934,6 +935,7 @@ function OrderPadWidget(props: WidgetProps) {
     }
     lastParamsRef.current = params;
     lastSubmissionModeRef.current = "live";
+    lastExitRef.current = false;
     await submitOrder(params, { mode: "live" });
   };
 
@@ -1015,6 +1017,7 @@ function OrderPadWidget(props: WidgetProps) {
     const authorityMode = appMode === "live" ? "live" as const : "practice" as const;
     lastParamsRef.current = params;
     lastSubmissionModeRef.current = authorityMode;
+    lastExitRef.current = true;
     await submitOrder(params, { mode: authorityMode }, { exit: true });
   }, [appMode, exitAlreadyPending, exitSide, getValues, loading, ltp, openQty, setValue, submitOrder]);
 
@@ -1028,7 +1031,11 @@ function OrderPadWidget(props: WidgetProps) {
       return;
     }
     if (mode === "live" && lastSubmissionModeRef.current === "live" && lastParamsRef.current) {
-      void submitOrder(lastParamsRef.current, { mode: "live" });
+      void submitOrder(
+        lastParamsRef.current,
+        { mode: "live" },
+        lastExitRef.current ? { exit: true } : undefined,
+      );
       return;
     }
     showToast("error", "A Practice order cannot be retried after switching to Live mode.", 5000);

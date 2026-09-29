@@ -2982,7 +2982,14 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
 
 /** Place one opposite MARKET order per open Practice position. */
 async function squareOffPracticePositions(): Promise<void> {
+  const pinnedMode = "practice" as const;
   const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
+  const modeAfterFetch = useModeStore.getState().mode;
+  if (modeAfterFetch !== pinnedMode) {
+    throw new Error(
+      `Order blocked: mode changed from ${pinnedMode} to ${modeAfterFetch} before submission.`,
+    );
+  }
   const positions = (payload.positions ?? [])
     .map(normalisePracticePosition)
     .filter((position): position is Position => position !== undefined)
@@ -3012,7 +3019,7 @@ async function squareOffPracticePositions(): Promise<void> {
         price,
         triggerPrice: 0,
         strategy: "FlintPositions",
-      }, undefined, { exit: true });
+      }, { mode: pinnedMode }, { exit: true });
     } catch (err) {
       failures.push(practiceSquareOffFailure(position.symbol, err));
     }

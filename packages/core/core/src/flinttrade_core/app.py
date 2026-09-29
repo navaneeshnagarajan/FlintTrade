@@ -5194,17 +5194,23 @@ def create_flask_app(
 
         auth_header = request.headers.get("Authorization", "")
         bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
-        if bearer:
+        header_token = request.headers.get("X-FlintTrade-Token", "").strip()
+
+        def _is_session_token(token: str) -> bool:
+            if not token:
+                return False
             try:
                 from .auth_routes import decode_token  # noqa: PLC0415
 
-                payload = decode_token(bearer)
-                if payload.get("type") == "session":
-                    return None
+                payload = decode_token(token)
             except Exception:
-                # Preserve the legacy ``Authorization: Bearer <api-key>`` path
-                # below when the bearer is not a FlintTrade session JWT.
-                pass
+                return False
+            return payload.get("type") == "session"
+
+        # A session may arrive as Authorization or as the fallback header
+        # existing clients already send. The fallback is a session JWT only.
+        if _is_session_token(bearer) or _is_session_token(header_token):
+            return None
 
         api_key = request.headers.get("X-API-Key") or bearer
         expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")

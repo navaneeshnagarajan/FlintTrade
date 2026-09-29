@@ -450,6 +450,40 @@ class TestPinSetEndpoint:
         assert resp.status_code == 401
         assert resp.get_json()["message"] == "Unauthorized"
 
+    def test_session_on_x_flinttrade_token_passes_the_global_guard(self, client, monkeypatch):
+        """The fallback session header is a JWT, not an API key."""
+        c, _svc = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("nav", mode="explore")
+        missing = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert missing.status_code == 401
+        assert missing.get_json()["message"] == "Unauthorized"
+
+        accepted = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "X-FlintTrade-Token": token},
+        )
+        assert accepted.status_code == 200
+
+        monkeypatch.setenv("FLINTTRADE_API_KEY", "desk-key")
+        rejected = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "X-FlintTrade-Token": "desk-key"},
+        )
+        assert rejected.status_code == 401
+        assert rejected.get_json()["message"] == "Unauthorized"
+
     def test_set_pin_rejects_wrong_password(self, client):
         c, _ = client
         self._setup_without_pin(c)

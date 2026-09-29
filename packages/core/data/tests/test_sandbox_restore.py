@@ -158,6 +158,52 @@ def test_restore_outside_practice_is_refused(restore_app, monkeypatch) -> None:
     assert engine.get_trades() == []
 
 
+def test_reset_backup_imports_and_pending_orders_do_not_fill(restore_app) -> None:
+    """A reset snapshot is a valid restore, and its resting orders stay resting."""
+    client, _svc, engine = restore_app
+    _setup(client)
+    limit_order = engine.place_order(
+        "INFY", "NSE", "BUY", 1, 100.0, order_type="LIMIT", strategy="limit-desk",
+    )
+    stop_order = engine.place_order(
+        "INFY", "NSE", "BUY", 1, 100.0, order_type="SL", trigger_price=90.0, strategy="stop-desk",
+    )
+    stop_market = engine.place_order(
+        "INFY", "NSE", "BUY", 1, 100.0, order_type="SL-M", trigger_price=90.0, strategy="stop-market-desk",
+    )
+    assert limit_order["status"] == "PENDING"
+    assert stop_order["status"] == "PENDING"
+    assert stop_market["status"] == "PENDING"
+    backup = engine.reset()
+    assert "reset_at" in backup
+    resp = client.post(
+        "/v1/sandbox/import",
+        json={"data": json.dumps(backup)},
+        headers=_practice_headers(),
+    )
+    assert resp.status_code == 200, resp.get_json()
+    orders = engine.get_orders()
+    assert len(orders) == 3
+    assert {row["strategy"] for row in orders} == {RESTORED_FROM_BACKUP}
+    assert {row["status"] for row in orders} == {"PENDING"}
+    # 95 is through the limit and both stop triggers. None of them may fill.
+    assert engine.check_pending_fills({"NSE:INFY": 95.0}) == []
+    assert {row["status"] for row in engine.get_orders()} == {"PENDING"}
+
+
+def test_restore_still_rejects_fields_outside_the_schema(restore_app) -> None:
+    client, _svc, engine = restore_app
+    _setup(client)
+    resp = client.post(
+        "/v1/sandbox/import",
+        json={"data": json.dumps({"schema_version": 2, "reset_at": "2026-01-01T00:00:00+00:00", "note": "no"})},
+        headers=_practice_headers(),
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["message"] == "The backup does not match the Practice schema."
+    assert engine.get_trades() == []
+
+
 def test_restore_rejects_a_backup_outside_the_schema(restore_app) -> None:
     client, _svc, engine = restore_app
     _setup(client)

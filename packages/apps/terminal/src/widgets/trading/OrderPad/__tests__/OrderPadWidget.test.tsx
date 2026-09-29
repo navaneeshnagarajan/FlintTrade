@@ -432,6 +432,39 @@ describe("OrderPadWidget", () => {
     );
   });
 
+  it("keeps Close as a reduce-only exit when the operator retries it", async () => {
+    mockMode.current = "live";
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder
+      .mockRejectedValueOnce(new Error("Connection failed"))
+      .mockResolvedValueOnce({ orderId: "CLOSE2" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
+
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 4 }),
+      { mode: "live" },
+      { exit: true },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(mockPlaceOrder).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 4 }),
+      { mode: "live" },
+      { exit: true },
+    );
+  });
+
   it("keeps GTT visible and disabled", async () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");

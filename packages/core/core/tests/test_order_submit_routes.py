@@ -23,6 +23,7 @@ _ALLOWED_SUBMIT_ROUTES = frozenset({
     ("POST", "/api/v1/orders/place"),
     ("POST", "/api/v1/orders/<broker>/place"),
     ("POST", "/api/v1/positions/exit-all"),
+    ("POST", "/api/v1/orders/bracket"),
 })
 
 _RESTORE_ROUTE = ("POST", "/v1/sandbox/import")
@@ -179,12 +180,14 @@ def _local_names(func: FunctionType, tree: ast.AST) -> dict[str, object]:
         if not isinstance(node, ast.ImportFrom):
             continue
         package = module_name
+        module = node.module or ""
         if node.level:
             parts = module_name.split(".")
             keep = len(parts) - node.level
             package = ".".join(parts[:keep]) if keep > 0 else ""
+            module = ".".join(part for part in (package, node.module or "") if part)
         try:
-            imported = importlib.import_module(node.module or "", package or None)
+            imported = importlib.import_module(module)
         except (ImportError, TypeError, ValueError):
             continue
         for alias in node.names:
@@ -433,6 +436,18 @@ def test_only_admitted_routes_can_submit_an_order(monkeypatch: pytest.MonkeyPatc
     )
     assert missing_gtt == []
 
+    from flinttrade_core.agent_routes import dispatch_action_center_approval
+    from flinttrade_core.webhook_dispatch import WebhookOrderDispatcher
+
+    for submitter in (
+        dispatch_action_center_approval,
+        WebhookOrderDispatcher.place_order,
+    ):
+        assert _reaches_submit(submitter)
+        assert _reaches_admit(submitter)
+        assert _reaches_gtt_check(submitter)
+        assert _submits_without_gtt_check(submitter) is False
+
 
 def _route_that_skips_the_gtt_check(router: object) -> None:
     """Synthetic submit used only to prove the walker notices a missing check."""
@@ -576,6 +591,17 @@ def test_submit_routes_never_request_dhan_forever_or_super(
     )
     assert exit_all.status_code == 422, exit_all.get_json()
     assert exit_all.get_json()["code"] == "gtt_unsupported"
+    bracket = http.post(
+        "/api/v1/orders/bracket",
+        json={
+            "entry": place_body,
+            "stoploss": 2800,
+            "variety": "gtt",
+        },
+        headers=headers,
+    )
+    assert bracket.status_code == 422, bracket.get_json()
+    assert bracket.get_json()["code"] == "gtt_unsupported"
     for variety in ("bracket", "cover"):
         http.post(
             "/api/v1/orders/dhan/place",

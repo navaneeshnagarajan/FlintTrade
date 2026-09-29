@@ -49,6 +49,7 @@ _IMPORT_KEYS = frozenset({
     "trades",
     "pnl_history",
     "exported_at",
+    "reset_at",
 })
 
 _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
@@ -629,8 +630,10 @@ class SandboxEngine:
             pending = self._conn.execute(
                 """SELECT order_id, symbol, exchange, action, quantity, price,
                           trigger_price, stop_triggered, pricetype, product, strategy
-                   FROM orders WHERE status = 'PENDING'
-                   ORDER BY created_at, order_id"""
+                   FROM orders
+                   WHERE status = 'PENDING' AND strategy != ?
+                   ORDER BY created_at, order_id""",
+                (RESTORED_FROM_BACKUP,),
             ).fetchall()
             filled: list[str] = []
             for row in pending:
@@ -1381,7 +1384,14 @@ class SandboxEngine:
                         "stop_triggered": bool(order.get("stop_triggered", False)),
                         "order_type": order_type,
                         "product": str(order.get("product", "MIS")).strip().upper(),
-                        "strategy": str(order.get("strategy", "")),
+                        # Every resting kind (LIMIT, SL, SL-M) is marked so a
+                        # later tick cannot fill it. A completed order keeps
+                        # the strategy it was placed with.
+                        "strategy": (
+                            RESTORED_FROM_BACKUP
+                            if status == "PENDING"
+                            else str(order.get("strategy", ""))
+                        ),
                         "status": status,
                         "filled_qty": int(
                             order.get("filled_qty", quantity if status == "COMPLETE" else 0)

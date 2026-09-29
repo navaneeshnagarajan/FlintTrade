@@ -126,11 +126,13 @@ def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
 @require_live_unlocked
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_bracket() -> Response:
-    """Refuse a bracket place. Each leg is posted to ``/api/v1/orders/place``.
+    """Place a bracket: entry plus exactly one protective exit leg.
 
-    Practice-mode JWTs are refused with 403 ``practice_unsupported`` by the
-    route guard. A valid entry plus one exit does not reach a broker from
-    this route.
+    Each leg is admitted through Laya, then placed by the bracket service
+    through SafetySystem, ``gate_order``, and ``BrokerRouter``. Practice-mode
+    JWTs are refused with 403 ``practice_unsupported`` by the route guard.
+    GTT and broker-held varieties are refused before that admission. An OCO
+    pair and a trailing stop stay refused.
 
     Supported today: entry + EXACTLY ONE of ``stoploss`` (stop-loss exit leg)
     or ``target`` (limit exit leg). Refused honestly with HTTP 422:
@@ -164,11 +166,11 @@ def place_bracket() -> Response:
     ``brokers.execution.default`` selector is the fallback target.
 
     Returns:
-        501 after a valid single-exit payload; 400 on bad input; 401/403 from
-        the mode guard; 422 for an OCO pair or a trailing stop; 503 when the
-        bracket service is not configured.
+        201 with bracket details on success; 400 on bad input; 401/403 from
+        the mode guard; 422 for an OCO pair, a trailing stop, GTT, or a
+        broker-held variety; 503 when the bracket service is not configured.
     """
-    _svc, err = _service_required()
+    svc, err = _service_required()
     if err:
         return err
 
@@ -247,14 +249,79 @@ def place_bracket() -> Response:
             400,
         )
 
+    from flinttrade_core.order_routes import (  # noqa: PLC0415
+        _gtt_contract_refusal,
+        _gtt_variety_token,
+        _laya_place_response,
+    )
+
+    variety = body.get("variety") if body.get("variety") is not None else entry.get("variety")
+    gtt_refusal = _gtt_contract_refusal({"variety": variety})
+    if gtt_refusal is not None:
+        return gtt_refusal
+    if _gtt_variety_token(variety) in {"super", "forever"}:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "broker_held_unsupported",
+                    "message": (
+                        "Not placed. Broker-held bracket legs aren't supported. "
+                        "Use one stop-loss or one target."
+                    ),
+                }
+            ),
+            422,
+        )
+
+    entry_action = str(entry.get("action") or "").strip().upper()
+    exit_action = "SELL" if entry_action == "BUY" else "BUY"
+    exit_price = stoploss if stoploss is not None else target
+    exit_body = {
+        "symbol": entry.get("symbol"),
+        "exchange": entry.get("exchange"),
+        "action": exit_action,
+        "quantity": entry.get("quantity"),
+        "product": entry.get("product") or "MIS",
+        "price": exit_price,
+        "trigger_price": exit_price if stoploss is not None else 0,
+        "pricetype": "SL" if stoploss is not None else "LIMIT",
+    }
+    entry_block = _laya_place_response(dict(entry), mode="live", source="operator")
+    if entry_block is not None:
+        return entry_block
+    exit_block = _laya_place_response(exit_body, mode="live", source="operator")
+    if exit_block is not None:
+        return exit_block
+
+    principal = _request_principal(body)
+    result = svc.place_bracket(
+        entry,
+        stoploss=stoploss,
+        target=target,
+        trailing_sl=None,
+        principal=principal,
+    )
+
+    if not result.success:
+        payload: dict[str, Any] = {
+            "status": "error",
+            "message": result.message,
+            "error": result.error,
+        }
+        if result.bracket is not None:
+            payload["data"] = result.bracket.to_dict()
+        return jsonify(payload), 422
+
     return (
         jsonify(
             {
-                "status": "error",
-                "message": "Orders are placed through /api/v1/orders/place.",
+                "status": "success",
+                "message": result.message,
+                "data": result.bracket.to_dict() if result.bracket else None,
             }
         ),
-        501,
+        201,
     )
 
 

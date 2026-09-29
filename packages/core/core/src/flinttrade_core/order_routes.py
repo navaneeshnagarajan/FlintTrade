@@ -629,8 +629,6 @@ def _normalise_exit_positions(raw: Any) -> list[dict[str, Any]]:
 
     positions: list[dict[str, Any]] = []
     for row in _rows(raw, "data", "positions", "net", "day"):
-        if not isinstance(row, Mapping):
-            continue
         symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol")).strip().upper()
         exchange = _text(_field(row, "exchange")).strip().upper()
         product = _text(_field(row, "product")).strip().upper() or "MIS"
@@ -656,8 +654,6 @@ def _normalise_exit_orders(raw: Any) -> list[dict[str, Any]]:
 
     orders: list[dict[str, Any]] = []
     for row in _rows(raw, "data", "orders", "orderbook", "order_book"):
-        if not isinstance(row, Mapping):
-            continue
         symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol")).strip().upper()
         exchange = _text(_field(row, "exchange")).strip().upper()
         product = _text(_field(row, "product")).strip().upper() or "MIS"
@@ -758,28 +754,65 @@ def _live_exit_books(
     return positions, [], broker_orders
 
 
+def _position_net(positions: Sequence[Mapping[str, Any]], body: Mapping[str, Any]) -> int:
+    """Signed open quantity for the contract on ``body``, or ``0``."""
+    symbol = str(body.get("symbol") or "").strip().upper()
+    exchange = str(body.get("exchange") or "").strip().upper()
+    product = str(body.get("product") or "MIS").strip().upper() or "MIS"
+    for row in positions:
+        row_symbol = str(row.get("symbol") or "").strip().upper()
+        row_exchange = str(row.get("exchange") or "").strip().upper()
+        row_product = str(row.get("product") or "MIS").strip().upper() or "MIS"
+        if row_symbol != symbol or row_exchange != exchange or row_product != product:
+            continue
+        raw = row.get("net_qty", row.get("quantity"))
+        try:
+            return int(float(raw))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _placed_order_id(result: Any) -> str:
+    """Broker order id from a router place result."""
+    if isinstance(result, str):
+        return result.strip()
+    if isinstance(result, Mapping):
+        for name in ("orderid", "order_id", "orderId"):
+            value = result.get(name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        nested = result.get("data")
+        if nested is not None and nested is not result:
+            return _placed_order_id(nested)
+    return ""
+
+
 def _prepare_live_reduce_only(
     body: dict[str, Any],
     *,
     adapter_id: str,
     account_id: str,
-) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str], int] | None]:
+) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str, str], int, int] | None]:
     """Classify one live place under the contract lock.
 
     Returns ``(laya_block, reservation)``. A reservation is held only when
     the order qualifies, so a second close sees it before the broker book does.
+    The reservation tuple is ``(key, quantity, position_net)``.
     """
     from flinttrade_engine.reduce_only import (  # noqa: PLC0415
         contract_key,
         contract_lock,
         cover_reserved_exit,
         pending_exit_quantity,
+        reconcile_reserved_exit,
         reserve_exit,
         reserved_exit,
     )
 
     key = contract_key(
         mode=_MODE_LIVE,
+        adapter=adapter_id,
         account=account_id,
         symbol=str(body.get("symbol") or ""),
         exchange=str(body.get("exchange") or ""),
@@ -787,6 +820,12 @@ def _prepare_live_reduce_only(
     )
     with contract_lock(key):
         positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
+        position_net = _position_net(positions, body)
+        reconcile_reserved_exit(
+            key,
+            orders=broker_orders if broker_orders is not None else our_orders,
+            position_net=position_net,
+        )
         if broker_orders is not None:
             exit_action = "SELL" if str(body.get("action") or "").strip().upper() == "SELL" else "BUY"
             covered = pending_exit_quantity(
@@ -815,7 +854,7 @@ def _prepare_live_reduce_only(
             return block, None
         quantity = _quantity_from_body(body)
         reserve_exit(key, quantity)
-        return None, (key, quantity)
+        return None, (key, quantity, position_net)
 
 
 def _safety_state_unavailable_response() -> tuple[Any, int]:
@@ -1444,7 +1483,7 @@ def _dispatch_live_order(
         )
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
-    reduce_hold: tuple[tuple[str, str, str, str, str], int] | None = None
+    reduce_hold: tuple[tuple[str, str, str, str, str, str], int, int] | None = None
     if ft_action == "place":
         laya_block, reduce_hold = _prepare_live_reduce_only(
             body,
@@ -1457,6 +1496,7 @@ def _dispatch_live_order(
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
     admitted_place = False
+    result: Any = None
     try:
         admitted, outcome = _admit_and_route_live_order(
             safety=safety,
@@ -1546,6 +1586,15 @@ def _dispatch_live_order(
             from flinttrade_engine.reduce_only import release_exit  # noqa: PLC0415
 
             release_exit(reduce_hold[0], reduce_hold[1])
+        elif reduce_hold is not None and admitted_place:
+            from flinttrade_engine.reduce_only import note_reserved_order  # noqa: PLC0415
+
+            note_reserved_order(
+                reduce_hold[0],
+                _placed_order_id(result),
+                reduce_hold[1],
+                reduce_hold[2],
+            )
 
     # Audit trail (best-effort — never break the order path).
     try:
@@ -2401,6 +2450,7 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
 
     key = contract_key(
         mode=_MODE_PRACTICE,
+        adapter="sandbox",
         account="sandbox",
         symbol=str(body.get("symbol") or ""),
         exchange=str(body.get("exchange") or ""),

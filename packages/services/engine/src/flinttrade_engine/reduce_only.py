@@ -316,17 +316,26 @@ def own_exit_already_pending(
     return pending > 0
 
 
+ContractKey = tuple[str, str, str, str, str, str]
+
+
 def contract_key(
     *,
     mode: str,
+    adapter: str,
     account: str,
     symbol: str,
     exchange: str,
     product: str,
-) -> tuple[str, str, str, str, str]:
-    """Identity of one contract for the reduce-only lock and reservation."""
+) -> ContractKey:
+    """Identity of one contract for the reduce-only lock and reservation.
+
+    ``adapter`` is its own slot. Two brokers that both use account ``default``
+    do not share a reservation.
+    """
     return (
         _norm(mode),
+        _norm(adapter) or "openalgo",
         _norm(account) or "default",
         _norm(symbol),
         _norm(exchange),
@@ -334,12 +343,22 @@ def contract_key(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _BoundExit:
+    """One successful reduce-only place still holding reserved quantity."""
+
+    order_id: str
+    quantity: int
+    position_net: int
+
+
 _lock_guard = threading.Lock()
-_contract_locks: dict[tuple[str, str, str, str, str], threading.Lock] = {}
-_reserved: dict[tuple[str, str, str, str, str], int] = {}
+_contract_locks: dict[ContractKey, threading.Lock] = {}
+_reserved: dict[ContractKey, int] = {}
+_bound_exits: dict[ContractKey, list[_BoundExit]] = {}
 
 
-def contract_lock(key: tuple[str, str, str, str, str]) -> threading.Lock:
+def contract_lock(key: ContractKey) -> threading.Lock:
     """Return the lock that serialises reduce-only decisions for one contract."""
     with _lock_guard:
         lock = _contract_locks.get(key)
@@ -349,13 +368,13 @@ def contract_lock(key: tuple[str, str, str, str, str]) -> threading.Lock:
         return lock
 
 
-def reserved_exit(key: tuple[str, str, str, str, str]) -> int:
+def reserved_exit(key: ContractKey) -> int:
     """In-flight reduce-only quantity not yet released for ``key``."""
     with _lock_guard:
         return _reserved.get(key, 0)
 
 
-def reserve_exit(key: tuple[str, str, str, str, str], quantity: int) -> None:
+def reserve_exit(key: ContractKey, quantity: int) -> None:
     """Hold ``quantity`` against the cap until the place finishes or is visible."""
     if quantity < 1:
         return
@@ -363,7 +382,7 @@ def reserve_exit(key: tuple[str, str, str, str, str], quantity: int) -> None:
         _reserved[key] = _reserved.get(key, 0) + quantity
 
 
-def release_exit(key: tuple[str, str, str, str, str], quantity: int) -> None:
+def release_exit(key: ContractKey, quantity: int) -> None:
     """Return a reserved exit quantity to the cap."""
     if quantity < 1:
         return
@@ -375,14 +394,84 @@ def release_exit(key: tuple[str, str, str, str, str], quantity: int) -> None:
             _reserved[key] = left
 
 
-def cover_reserved_exit(key: tuple[str, str, str, str, str], covered: int) -> None:
+def cover_reserved_exit(key: ContractKey, covered: int) -> None:
     """Drop reserved quantity the broker book already shows as an open exit."""
     if covered < 1:
         return
     release_exit(key, covered)
 
 
+def note_reserved_order(
+    key: ContractKey,
+    order_id: str,
+    quantity: int,
+    position_net: int,
+) -> None:
+    """Remember a successful reduce-only place so a later read can release it.
+
+    An empty ``order_id`` is still recorded. The next read then releases the
+    hold only when the position has moved by the reserved quantity.
+    """
+    if quantity < 1:
+        return
+    bound = _BoundExit(str(order_id or "").strip(), quantity, position_net)
+    with _lock_guard:
+        _bound_exits.setdefault(key, []).append(bound)
+
+
+def _order_by_id(orders: Sequence[Mapping[str, object]], order_id: str) -> Mapping[str, object] | None:
+    if not order_id:
+        return None
+    for order in orders:
+        if isinstance(order, Mapping) and _order_id(order) == order_id:
+            return order
+    return None
+
+
+def reconcile_reserved_exit(
+    key: ContractKey,
+    *,
+    orders: Sequence[Mapping[str, object]] | None,
+    position_net: int,
+) -> None:
+    """Release a successful reduce-only hold once its order is finished.
+
+    An order that is still open stays reserved until ``cover_reserved_exit``
+    sees it on the book. An order id that has not appeared, and a position
+    that has not moved, stays reserved so a second exit cannot race the fill.
+    A terminal order, or a missing order whose position has already moved by
+    the reserved quantity, is released.
+    """
+    with _lock_guard:
+        bound = list(_bound_exits.get(key, ()))
+    if not bound:
+        return
+    kept: list[_BoundExit] = []
+    for item in bound:
+        row = _order_by_id(orders, item.order_id) if orders is not None and item.order_id else None
+        moved = abs(position_net - item.position_net) >= item.quantity
+        if row is not None and not _order_is_open(row):
+            release_exit(key, item.quantity)
+            continue
+        if row is not None and _order_is_open(row):
+            remaining = _remaining_quantity(row)
+            filled = item.quantity - remaining
+            if filled >= 1:
+                release_exit(key, filled)
+            continue
+        if moved:
+            release_exit(key, item.quantity)
+            continue
+        kept.append(item)
+    with _lock_guard:
+        if kept:
+            _bound_exits[key] = kept
+        else:
+            _bound_exits.pop(key, None)
+
+
 def reset_reduce_only_for_tests() -> None:
     """Drop in-flight reservations. Locks stay so a waiter cannot miss one."""
     with _lock_guard:
         _reserved.clear()
+        _bound_exits.clear()

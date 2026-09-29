@@ -24,6 +24,17 @@ from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _laya_ready() -> None:
+    """Single-exit brackets admit through Laya before the service places them."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya, reset_process_laya_for_tests
+
+    reset_process_laya_for_tests()
+    process_laya().set_status(DecisionStatus.READY)
+    yield
+    reset_process_laya_for_tests()
+
 _JWT_SECRET = "test-secret-for-bracket-routes-hs256"
 
 
@@ -165,19 +176,21 @@ def guarded_client(service, pinned_jwt_secret):
 
 class TestPlaceBracket:
     def test_place_success_returns_201(self, client, service) -> None:
-        """A valid single-exit payload is refused before the bracket service.
+        """A valid stop-loss bracket is admitted and placed.
 
         Args:
             client: Flask test client.
             service: Mock service backing the client.
         """
         resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
-        service.place_bracket.assert_not_called()
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert "bracket_id" in data["data"]
+        service.place_bracket.assert_called_once()
 
     def test_place_with_target_only_returns_201(self, client, service) -> None:
-        """A target-only exit leg is refused before the bracket service.
+        """A target-only exit leg is the other supported bracket shape.
 
         Args:
             client: Flask test client.
@@ -186,7 +199,29 @@ class TestPlaceBracket:
         resp = client.post(
             "/api/v1/orders/bracket", json={"entry": _ENTRY, "target": 22500.0}
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 201
+        service.place_bracket.assert_called_once()
+        assert service.place_bracket.call_args.kwargs["target"] == 22500.0
+
+    def test_gtt_variety_is_refused_before_the_service(self, client, service) -> None:
+        """GTT is refused before Laya admission reaches the bracket service."""
+        resp = client.post(
+            "/api/v1/orders/bracket",
+            json={**_BRACKET_BODY, "variety": "G.T.T"},
+        )
+        assert resp.status_code == 422
+        assert resp.get_json()["code"] == "gtt_unsupported"
+        assert resp.get_json()["message"] == "Not placed. GTT orders aren't supported right now."
+        service.place_bracket.assert_not_called()
+
+    def test_broker_held_variety_is_refused(self, client, service) -> None:
+        """A broker-held super or forever variety does not place legs."""
+        resp = client.post(
+            "/api/v1/orders/bracket",
+            json={**_BRACKET_BODY, "entry": {**_ENTRY, "variety": "super"}},
+        )
+        assert resp.status_code == 422
+        assert resp.get_json()["code"] == "broker_held_unsupported"
         service.place_bracket.assert_not_called()
 
     def test_place_missing_entry_returns_400(self, client) -> None:
@@ -254,31 +289,40 @@ class TestPlaceBracket:
         assert "stoploss" in resp.get_json()["message"]
 
     def test_place_forwards_no_trailing_to_service(self, client, service) -> None:
-        """A valid bracket does not reach the bracket service.
+        """The route always passes ``trailing_sl=None`` to the service.
 
         Args:
             client:  Flask test client.
             service: Mock service backing the client.
         """
-        resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+        client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        kwargs = service.place_bracket.call_args.kwargs
+        assert kwargs["trailing_sl"] is None
+        assert kwargs["stoploss"] == 22000.0
+        assert isinstance(kwargs["principal"], BracketPrincipal)
 
     def test_place_service_rejection_returns_422(self) -> None:
-        """The route refuses before a service-level rejection can run."""
+        """Service-level rejection surfaces as HTTP 422."""
         service = _make_service(success=False)
         with _make_app(service).test_client() as c:
             resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+        assert resp.status_code == 422
+        assert resp.get_json()["status"] == "error"
+        service.place_bracket.assert_called_once()
 
     def test_place_partial_bracket_surfaces_data(self) -> None:
-        """A partial bracket result is unreachable because the route refuses first."""
+        """A partial bracket (entry live, exit failed) is included in the 422 body."""
         svc = _make_service(success=False)
+        partial = MagicMock()
+        partial.to_dict.return_value = {"bracket_id": "br-p1", "status": "partial"}
+        svc.place_bracket.return_value.bracket = partial
+        svc.place_bracket.return_value.message = "UNPROTECTED"
         with _make_app(svc).test_client() as c:
             resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        svc.place_bracket.assert_not_called()
+        assert resp.status_code == 422
+        data = resp.get_json()
+        assert data["data"]["status"] == "partial"
+        assert data["data"]["bracket_id"] == "br-p1"
 
     def test_no_service_returns_503(self, client_no_service) -> None:
         """Missing BRACKET_SERVICE returns HTTP 503.
@@ -296,53 +340,60 @@ class TestPlaceBracket:
 
 
 class TestPrincipalDerivation:
+    def _placed_principal(self, service: MagicMock) -> BracketPrincipal:
+        return service.place_bracket.call_args.kwargs["principal"]
+
     def test_explicit_broker_and_account_win(self, client, service) -> None:
-        """A targeted bracket payload is refused before the bracket service.
+        """Explicit ``broker``/``account_id`` body fields set the principal target.
 
         Args:
             client:  Flask test client.
             service: Mock service backing the client.
         """
-        resp = client.post(
+        client.post(
             "/api/v1/orders/bracket",
             json={**_BRACKET_BODY, "broker": "DHAN", "account_id": "acct-7"},
         )
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+        principal = self._placed_principal(service)
+        assert principal.adapter_id == "dhan"
+        assert principal.account_id == "acct-7"
 
     def test_account_only_defaults_adapter(self, client, service) -> None:
-        """An account-only payload is refused before the bracket service.
+        """An account_id without a broker targets the default openalgo adapter.
 
         Args:
             client:  Flask test client.
             service: Mock service backing the client.
         """
-        resp = client.post(
+        client.post(
             "/api/v1/orders/bracket", json={**_BRACKET_BODY, "account_id": "acct-9"}
         )
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+        principal = self._placed_principal(service)
+        assert principal.adapter_id == "openalgo"
+        assert principal.account_id == "acct-9"
 
     def test_default_selector_from_router_config(self, service) -> None:
-        """A default-selector payload is refused before the bracket service."""
+        """Without body fields, ``brokers.execution.default`` sets the target."""
         flask_app = _make_app(service)
         flask_app.config["BROKER_ROUTER"] = SimpleNamespace(default_selector="dhan:acct-live")
         with flask_app.test_client() as c:
-            resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+            c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        principal = self._placed_principal(service)
+        assert principal.adapter_id == "dhan"
+        assert principal.account_id == "acct-live"
 
     def test_malformed_default_selector_falls_back(self, service) -> None:
-        """A malformed selector still does not reach the bracket service."""
+        """A selector without a colon is ignored — fallback is openalgo:default."""
         flask_app = _make_app(service)
         flask_app.config["BROKER_ROUTER"] = SimpleNamespace(default_selector="no-colon-here")
         with flask_app.test_client() as c:
-            resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+            c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        principal = self._placed_principal(service)
+        assert principal.adapter_id == "openalgo"
+        assert principal.account_id == "default"
 
     def test_identity_comes_from_session_jwt(self, client, service, pinned_jwt_secret) -> None:
-        """A live unlocked session is still refused before the bracket service.
+        """actor_id/jti on the principal come from the verified session JWT.
 
         Args:
             client:            Flask test client.
@@ -352,20 +403,22 @@ class TestPrincipalDerivation:
         from flinttrade_core.auth_routes import _create_token
 
         tok = _create_token("alice", mode="live", live_mode_unlocked=True)
-        resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY, headers=_bearer(tok))
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+        client.post("/api/v1/orders/bracket", json=_BRACKET_BODY, headers=_bearer(tok))
+        principal = self._placed_principal(service)
+        assert principal.actor_id == "alice"
+        assert principal.jti
 
     def test_missing_token_yields_unknown_actor(self, client, service) -> None:
-        """TESTING bypass still refuses before the bracket service.
+        """Without a decodable JWT (TESTING bypass) the actor is 'unknown'.
 
         Args:
             client:  Flask test client.
             service: Mock service backing the client.
         """
-        resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        assert resp.status_code == 501
-        service.place_bracket.assert_not_called()
+        client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        principal = self._placed_principal(service)
+        assert principal.actor_id == "unknown"
+        assert principal.jti == ""
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +496,7 @@ class TestModeGuard:
         resp = guarded_client.post(
             "/api/v1/orders/bracket", json=_BRACKET_BODY, headers=_bearer(tok)
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 201
 
     def test_cancel_practice_mode_returns_403(self, guarded_client) -> None:
         """DELETE (a live broker write) is guarded exactly like placement.

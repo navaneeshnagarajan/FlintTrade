@@ -4294,6 +4294,45 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(apiErr.body).toEqual(failureBody);
   });
 
+  it("pins Practice on every exit-all leg and stops when the mode changes", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+    mockModeState.mode = "practice";
+    const positions = [
+      { symbol: "INFY", exchange: "NSE", product: "MIS", net_qty: 2, avg_price: 100, unrealised_pnl: 0 },
+      { symbol: "TCS", exchange: "NSE", product: "MIS", net_qty: -1, avg_price: 200, unrealised_pnl: 0 },
+    ];
+    fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (target.includes("/v1/sandbox/positions")) {
+        return jsonResponse({ status: "success", data: { positions } });
+      }
+      return jsonResponse({ status: "success", orderid: "P1" });
+    });
+
+    await exitAllPositions();
+
+    const placeCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("/api/v1/orders/place"));
+    expect(placeCalls).toHaveLength(2);
+    for (const [, init] of placeCalls) {
+      expect(new Headers((init as RequestInit).headers).get("X-FlintTrade-Mode")).toBe("practice");
+    }
+
+    fetchSpy.mockReset();
+    mockModeState.mode = "practice";
+    fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (target.includes("/v1/sandbox/positions")) {
+        mockModeState.mode = "live";
+        return jsonResponse({ status: "success", data: { positions } });
+      }
+      return jsonResponse({ status: "success", orderid: "LIVE" });
+    });
+    await expect(exitAllPositions()).rejects.toThrow(/mode changed from practice to live/);
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/v1/orders/place"))).toBe(false);
+  });
+
   it("routes live exit-all through the confirmed account-scoped safety endpoint", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";

@@ -155,9 +155,20 @@ def test_custom_place_order_runs_through_gate_and_router(*, backend_lease_factor
 
     result = asyncio.run(dispatcher.place_order(payload))
 
-    assert result["status"] == "error"
-    assert "Orders are placed through /api/v1/orders/place." in result["message"]
-    router.place_order.assert_not_called()
+    assert result["status"] == "placed"
+    assert result["orderid"] == "ORDER-1"
+    router.place_order.assert_awaited_once()
+    request_ctx = router.place_order.await_args.args[0]
+    kwargs = router.place_order.await_args.kwargs
+    expected_hash = hashlib.sha256(b"verified-nonce-1").hexdigest()
+    assert request_ctx.actor_type == "external_intent"
+    assert request_ctx.actor_id == "external_intent:webhook:test-endpoint"
+    assert request_ctx.intent_source == "custom"
+    assert request_ctx.selector == "openalgo:default"
+    assert request_ctx.external_nonce_hash == expected_hash
+    assert kwargs["hint"].adapter_id == "openalgo"
+    assert kwargs["hint"].account_id == "default"
+    assert kwargs["safety_ctx"].verify(kwargs["order"], request_ctx, "openalgo", "default")
 
 
 def test_webhook_dispatch_refuses_revoked_backend(backend_lease_factory) -> None:
@@ -193,9 +204,10 @@ def test_parsed_custom_place_order_threads_side_through_gate_and_router(*, backe
 
     result = asyncio.run(dispatcher.place_order(payload))
 
-    assert result["status"] == "error"
-    assert "Orders are placed through /api/v1/orders/place." in result["message"]
-    router.place_order.assert_not_called()
+    assert result["status"] == "placed"
+    assert result["orderid"] == "ORDER-CUSTOM-1"
+    router.place_order.assert_awaited_once()
+    assert router.place_order.await_args.kwargs["order"].action.value == "BUY"
 
 
 def test_place_order_rejects_conflicting_side_aliases_before_router(*, backend_lease_factory) -> None:
@@ -293,9 +305,11 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     app = _app(router, backend_lease_factory=backend_lease_factory)
-    app.config["SAFETY"] = SafetySystem(
+    safety = SafetySystem(
         SafetyConfig(qty_limits={"NSE": 1}, check_market_hours=False),
     )
+    safety.check_order = MagicMock(return_value=[SimpleNamespace(passed=True)])
+    app.config["SAFETY"] = safety
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
         source="custom",
@@ -317,7 +331,9 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["status"] == "error"
-    assert "Second-leg quantity 2 exceeds NSE limit of 1" in result["message"]
+    assert result["code"] == "gtt_unsupported"
+    assert result["message"] == "Not placed. GTT orders aren't supported right now."
+    app.config["SAFETY"].check_order.assert_not_called()
     router.place_order.assert_not_called()
 
 
@@ -350,11 +366,13 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
 
     result = asyncio.run(dispatcher.place_order(payload))
 
-    assert result["status"] == "error"
-    assert "Orders are placed through /api/v1/orders/place." in result["message"]
-    router.place_order.assert_not_called()
-    audit.log_event.assert_not_called()
-    journal.assert_not_called()
+    assert result["status"] == "placed"
+    assert result["orderid"] == "ORDER-SUBMITTED"
+    assert "verify broker status before retrying" in result["warning"].lower()
+    router.place_order.assert_awaited_once()
+    audit.log_event.assert_called_once()
+    assert audit.log_event.call_args.args[0] == "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED"
+    journal.assert_called_once()
 
 
 def test_place_order_refuses_unvalidated_safety_runtime(*, backend_lease_factory) -> None:

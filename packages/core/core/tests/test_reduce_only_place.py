@@ -380,3 +380,108 @@ def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refuse
         assert body.get("code") != "laya_denied"
     safety.check_order.assert_not_called()
     assert process_laya().decision_log() == ()
+
+
+def _books(net_qty: int, orders: list[dict[str, object]] | None = None):
+    position = {"symbol": "INFY", "exchange": "NSE", "product": "MIS", "net_qty": net_qty}
+
+    def hook(_adapter_id: str, _account_id: str):
+        return [position], [], orders if orders is not None else []
+
+    return hook
+
+
+@pytest.mark.unit
+def test_successful_reduce_only_reservation_releases_when_the_fill_lands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed exit must not keep its reservation after the position moves."""
+    from flinttrade_core import order_routes
+
+    app = _live_app(_passing_safety())
+    state = {"net": 10, "orders": []}
+
+    def hook(_adapter_id: str, _account_id: str):
+        position = {"symbol": "INFY", "exchange": "NSE", "product": "MIS", "net_qty": state["net"]}
+        return [position], [], state["orders"]
+
+    app.config["REDUCE_ONLY_LIVE_BOOKS"] = hook
+    monkeypatch.setattr(order_routes, "_admit_and_route_live_order", lambda *_a, **_k: (True, "OID-1"))
+    client = app.test_client()
+    headers = _headers("live", unlocked=True)
+    first = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 4, 0), headers=headers)
+    assert first.status_code == 200, first.get_json()
+
+    blocked = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    assert blocked.status_code == 409
+    assert blocked.get_json()["code"] == "exit_pending"
+
+    state["net"] = 6
+    state["orders"] = [{
+        "symbol": "INFY",
+        "exchange": "NSE",
+        "product": "MIS",
+        "action": "SELL",
+        "quantity": 4,
+        "status": "COMPLETE",
+        "order_id": "OID-1",
+    }]
+    remainder = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    assert remainder.status_code == 200, remainder.get_json()
+
+
+@pytest.mark.unit
+def test_reduce_only_reservation_is_scoped_to_the_broker_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Account id ``default`` on two adapters does not share one exit lock."""
+    from flinttrade_core import order_routes
+
+    app = _live_app(_passing_safety())
+    app.config["REDUCE_ONLY_LIVE_BOOKS"] = _books(10)
+    monkeypatch.setattr(order_routes, "_admit_and_route_live_order", lambda *_a, **_k: (True, "OID-2"))
+    client = app.test_client()
+    headers = _headers("live", unlocked=True)
+    body = _order("INFY", "SELL", 4, 0)
+    first = client.post("/api/v1/orders/openalgo/place", json=body, headers=headers)
+    other = client.post("/api/v1/orders/dhan/place", json=body, headers=headers)
+    assert first.status_code == 200, first.get_json()
+    assert other.status_code == 200, other.get_json()
+    same = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    assert same.status_code == 409
+    assert same.get_json()["code"] == "exit_pending"
+
+
+@pytest.mark.unit
+def test_typed_openalgo_position_rows_can_prove_a_reduce_only_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attribute rows from a broker position book are not dropped."""
+    from flinttrade_core import l2_state, order_routes
+
+    class _Position:
+        symbol = "INFY"
+        exchange = "NSE"
+        product = "MIS"
+        net_qty = 10
+
+    async def _read(_source: object, *names: str) -> list[object]:
+        if "positionbook" in names:
+            return [_Position()]
+        return []
+
+    monkeypatch.setattr(l2_state, "_read", _read)
+    monkeypatch.setattr(l2_state, "_resolve_account_source", lambda *_a, **_k: object())
+    monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_a, **_k: _portfolio_state())
+    safety = _passing_safety()
+    app = _live_app(safety)
+    client = app.test_client()
+    closed = client.post(
+        "/api/v1/orders/openalgo/place",
+        json=_order("INFY", "SELL", 10, 0),
+        headers=_headers("live", unlocked=True),
+    )
+    assert closed.status_code == 403, closed.get_json()
+    assert closed.get_json().get("code") != "laya_denied"
+    assert "L1_ORDER" in closed.get_json()["message"]
+    assert process_laya().decision_log()[-1].proof_kind == "reduce_only"
