@@ -313,10 +313,10 @@ sample data, not a Mode. The public web demo (`/demo-app`) is
 
 | Label | What it means |
 |---|---|
-| **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Submit labels: **Practice Buy** / **Practice Sell**. |
+| **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
 | **Connected (read)** | Read-only posture on a Practice session after a broker is connected. Until then the menu item stays disabled and shows `Connect a broker first`. It is not a separate session claim. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
-| **Example** | Sample data. The chip reads **Example**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. |
+| **Example** | Sample data. The chip reads **Example**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. |
 
 **Switching Mode.** Open the Mode chip. Its accessible name is the current
 label plus `mode. Open the mode menu.` Choose **Practice** for simulated
@@ -340,11 +340,16 @@ this order:
 **Example-data marker.** Where a sample figure still uses the shared banner,
 that banner reads `Example data. Connect a broker to see your own.` It never
 shows in Practice. On Invest, an **Example** chip on the view replaces that
-banner. The sample Dashboard carries that chip on the sample XIRR figure
-(`XIRR` plus one `Example` chip). Practice leaves the XIRR unmarked.
+banner. The sample Dashboard carries that chip on the single inline sample
+XIRR figure (`XIRR` plus one `Example` chip). There is no Portfolio XIRR
+card. Practice leaves the XIRR unmarked.
 
 **Order review.** Practice reads `Confirm places this simulated order.`
-Example data reads `Example only. Nothing is sent to a broker and no order is placed.`
+The confirm button reads **Confirm simulation** (accessible name
+`Confirm simulated Practice order`). Example data reads `Example only. Nothing is sent to a broker and no order is placed.`
+The confirm button reads **Continue** (accessible name `Confirm Example order`).
+Both reviews offer **Back to edit**. While the confirm is in flight the
+button reads `Confirming…`.
 
 **Practice fills.** This is the shipped Practice path. Example is sample data.
 Practice is the shipped simulated-fill path: orders place and record simulated fills.
@@ -558,11 +563,13 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    auto-fills Quantity from that instrument's current lot size — do
    not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
    figures separately. Choose **MARKET**. Side = **BUY**.
-6. Click **Practice Buy** and confirm the review. The sandbox order
-   appears in the **Positions** widget immediately; the **Orders**
-   widget shows it as filled (simulated). **Example Buy** on example data
-   records an example fill after review. Review reads `Example only. Nothing is sent to a broker and no order is placed.`
-   That fill does not call the order API.
+6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
+   The sandbox order appears in the **Positions** widget immediately; the
+   **Orders** widget shows it as filled (simulated). **Example Buy** on
+   example data records an example fill after review. Review reads
+   `Example only. Nothing is sent to a broker and no order is placed.`
+   The example-data confirm button reads **Continue**. That fill does not
+   call the order API.
 7. Close the position from the Positions widget. Confirm your simulated
    P&L is recorded in the **P&L Monitor** widget.
 
@@ -777,8 +784,9 @@ never the password Welcome Back gate. That gate stays on `/welcome`
 for unauthenticated visitors only (FT-HOME-003).
 
 With example data, `/invest#mutual-funds` labels the static
-fixture `Sample NAVs · as of 10-Sep-2026`
-and does not claim "Updated daily after market close." The as-of is the
+fixture `Example NAVs · as of 10-Sep-2026`
+on the view header and again on the disclaimer, and does not claim
+"Updated daily after market close." The as-of is the
 fixture date and does not auto-update. Practice and Live keep the live
 AMFI sentence ("Updated daily after market close") when the live feed is
 in use.
@@ -788,7 +796,18 @@ badge matches the visible table (`N holdings`). The badge is never `0 holdings` 
 sample table. Example data shows one Example chip on the view. The banner
 `Example data. Connect a broker to see your own.` is not repeated there, and
 it never shows in Practice. The sample Dashboard marks the sample XIRR with
-that same one **Example** chip and does not add a second marker. The Mode line on example data is
+that same one **Example** chip. There is no Portfolio XIRR card. On sample
+figures, `/invest#networth` reads `Example equity and cash. Connect a broker to see yours.`
+The allocation label is `Allocation` with the Example chip, and each
+`Live from broker` note on Equity Holdings and Available Cash is that
+chip. Those sentences follow the sample-figure flag, including a Practice
+book that has fallen back to sample holdings. A connected book
+keeps `Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
+the label `Allocation (live assets only)`, and the note `Live from broker`.
+The Example chip itself paints only on example data, so that Practice
+fallback shows the example sentences without the chip. On the sample
+Dashboard, Portfolio Allocation replaces `Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
+with the Example chip; a connected book keeps that sentence. The Mode line on example data is
 `Example data. No broker is connected and no orders are sent.`
 The Practice Mode line (`Practice — simulated fills, no real money.`)
 does not call that book Example. Dashboard and "N stocks"
