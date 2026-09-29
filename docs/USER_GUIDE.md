@@ -496,6 +496,11 @@ the model**. A shard index (`model.safetensors.index.json`), or any
 weights file other than the pinned `model.safetensors` in the pinned
 snapshot, shows **Can't verify the model** (`unverified`) and never
 reaches **Ready**. The sidecar loads exactly the file that was hashed.
+The runtime record stores that file's inode, size, and modification
+time. Those three are rechecked, without hashing again, when Laya
+reports Ready and about every 1.5 seconds. If one changes, the chip
+shows **Can't verify the model** and the log names the path and the
+field that changed (`inode`, `size`, or `mtime`).
 
 **Command line.** From the FlintTrade environment (the project `.venv`
 after setup, or `uv run python`):

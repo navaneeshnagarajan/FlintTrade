@@ -549,9 +549,18 @@ the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
 attaches on its health probe. The host must stay loopback. The attached
 client uses the same revision and digest checks. On each sidecar start
 the verified record is hashed from `model.safetensors` and stamped with
-that run's pid and a fresh start token. It is deleted on stop and on a
-failed start. A record from an earlier run is rejected. A health document
-without the weight digest is Ready when that record matches the pin. If
+that run's pid and a fresh start token, plus the file's inode, size,
+and modification time in nanoseconds. A verified boot passes that exact
+file path to the sidecar with `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1`, and does not pass a repo id or revision.
+Those three values are rechecked, without hashing again, when Laya
+reports Ready and about every 1.5 seconds. A mismatch is `unverified`
+("Can't verify the model"). The log line is
+`laya weights path=<path> changed=<field>` where `<field>` is `inode`,
+`size`, `mtime`, or a comma-separated list of those. It is deleted on
+stop and on a failed start. A record from an earlier run is rejected. A
+health document without the weight digest is Ready when that record
+matches the pin. If
 the record cannot be checked, the reason is `unverified` ("Can't verify
 the model"). The tooltip is "The installed model couldn't be checked
 against the pinned version. Restart Laya. If it keeps happening, reinstall

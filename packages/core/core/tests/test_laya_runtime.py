@@ -21,6 +21,7 @@ from flinttrade_core.laya_runtime import (
     LAYA_BIND_HOST,
     LAYA_SERVE_REQUIREMENT,
     LAYA_WATCH_INTERVAL_SECONDS,
+    LAYA_WEIGHTS_DRIFT_LOG,
     LAYA_WEIGHTS_LOG,
     ArtifactCheck,
     LayaRuntime,
@@ -1015,10 +1016,10 @@ def test_clean_weight_is_logged_and_launched_offline(
     policy = load_policy()
     path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
     monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", lambda _path: policy.sha256)
-    launched: list[dict[str, str]] = []
+    launched: list[tuple[list[str], dict[str, str]]] = []
 
-    def factory(_argv: list[str], env: dict[str, str]) -> _Process:
-        launched.append(env)
+    def factory(argv: list[str], env: dict[str, str]) -> _Process:
+        launched.append((argv, env))
         return _Process()
 
     runtime = LayaRuntime(
@@ -1030,13 +1031,30 @@ def test_clean_weight_is_logged_and_launched_offline(
     with caplog.at_level(logging.INFO, logger="flinttrade.laya"):
         runtime.start()
     assert launched
-    env = launched[0]
+    argv, env = launched[0]
+    resolved = str(path.resolve())
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["TRANSFORMERS_OFFLINE"] == "1"
-    assert env["LAYA_REVISION"] == policy.revision
-    assert env["HUGGINGFACE_HUB_CACHE"] == str(path.parent.parent.parent.parent)
-    expected = LAYA_WEIGHTS_LOG % (str(path.resolve()), policy.sha256)
+    assert env["LAYA_WEIGHTS_PATH"] == resolved
+    assert "LAYA_REVISION" not in env
+    assert "LAYA_MODELS" not in env
+    assert policy.repo not in env.values()
+    assert policy.revision not in env.values()
+    child = "\n".join(argv)
+    assert "LAYA_WEIGHTS_PATH" in child
+    assert "HF_HUB_OFFLINE" in child
+    assert "TRANSFORMERS_OFFLINE" in child
+    assert policy.repo not in child
+    assert policy.revision not in child
+    expected = LAYA_WEIGHTS_LOG % (resolved, policy.sha256)
     assert expected in caplog.text
+    recorded = json.loads((runtime.runtime_root / "verification.json").read_text(encoding="utf-8"))
+    stat = path.stat()
+    assert recorded["weights_path"] == resolved
+    assert recorded["sha256"] == policy.sha256
+    assert recorded["inode"] == stat.st_ino
+    assert recorded["size"] == stat.st_size
+    assert recorded["mtime_ns"] == stat.st_mtime_ns
     reset_process_laya_for_tests()
 
 
@@ -1077,4 +1095,79 @@ def test_pid_and_key_changes_flip_status_within_the_watch_interval(
     assert process_laya().runtime_reason()[0] == "stopped"
     assert process_laya().effective_status("practice") is not DecisionStatus.READY
     runtime.stop_watch()
+    reset_process_laya_for_tests()
+
+
+def _shift_weight_identity(path: Path, field: str) -> None:
+    """Change one of inode, size, or mtime without touching the other two."""
+    before = path.stat()
+    if field == "mtime":
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+        return
+    if field == "size":
+        path.write_bytes(path.read_bytes() + b"x")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        return
+    replacement = path.with_name(path.name + ".swap")
+    replacement.write_bytes(path.read_bytes())
+    os.replace(replacement, path)
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["mtime", "size", "inode"])
+@pytest.mark.parametrize("when", ["ready", "watch"])
+def test_weight_identity_drift_is_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    field: str,
+    when: str,
+) -> None:
+    live = 424242
+    _accept_only(monkeypatch, live)
+    policy = load_policy()
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", lambda _path: policy.sha256)
+
+    class _LiveProcess(_Process):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pid = live
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _LiveProcess(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime.start()
+
+    def hashed_again(_path: Path) -> str:
+        raise AssertionError("re-hash")
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", hashed_again)
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    _shift_weight_identity(path, field)
+    with caplog.at_level(logging.INFO, logger="flinttrade.laya"):
+        if when == "ready":
+            runtime.publish_status()
+        else:
+            runtime.reconcile_watched_state()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    stat = path.stat()
+    recorded = json.loads((runtime.runtime_root / "verification.json").read_text(encoding="utf-8"))
+    changed: list[str] = []
+    if stat.st_ino != recorded["inode"]:
+        changed.append("inode")
+    if stat.st_size != recorded["size"]:
+        changed.append("size")
+    if stat.st_mtime_ns != recorded["mtime_ns"]:
+        changed.append("mtime")
+    assert field in changed
+    assert LAYA_WEIGHTS_DRIFT_LOG % (recorded["weights_path"], ",".join(changed)) in caplog.text
     reset_process_laya_for_tests()

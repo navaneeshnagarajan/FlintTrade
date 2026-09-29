@@ -151,7 +151,13 @@ shows Can't verify the model (`unverified`). A shard index
 pinned `model.safetensors` in the pinned snapshot, shows Can't verify the
 model (`unverified`) and never reaches Ready. The sidecar loads exactly
 the file that was hashed. On start, the sidecar logs the exact weights
-path it was handed and that file's sha256.
+path it was handed and that file's sha256. The runtime record stores
+that file's inode, size, and modification time. Those three are
+rechecked, without hashing again, when Laya reports Ready and about
+every 1.5 seconds. If one changes, the chip shows Can't verify the
+model and the log names the path and the field that changed (`inode`,
+`size`, or `mtime`). New orders stay paused. A reduce-only close is
+unchanged.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position

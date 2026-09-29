@@ -6,8 +6,9 @@ environment, from the PyTorch CPU index, before the pinned ``laya[serve]``
 package. CUDA and ROCm builds stay opt-in. It binds ``127.0.0.1`` (the
 upstream default binds every interface with no authentication), mints a
 fresh API key on each boot, and pins the checkpoint revision and weight
-digest. After the first successful load, later boots stay offline. CPU is
-the only device this runtime starts.
+digest. A verified boot starts the sidecar on the exact file that was
+hashed, with hub lookups switched off. After the first successful load,
+later boots stay offline. CPU is the only device this runtime starts.
 
 Run ``python -m flinttrade_core.laya_runtime install|start|stop|status``
 with the FlintTrade interpreter.
@@ -26,6 +27,7 @@ import signal
 import socket
 import subprocess
 import sys
+import textwrap
 import threading
 import urllib.error
 import urllib.request
@@ -39,10 +41,48 @@ from .secure_file import harden, harden_directory
 
 _LOG = logging.getLogger("flinttrade.laya")
 
-# laya-serve 0.3.21 takes no snapshot-path argument. A verified boot pins the
-# file with LAYA_REVISION, HF_HUB_OFFLINE=1, and the cache that holds it.
+# laya-serve 0.3.21 only preloads a checkpoint name. A verified boot does not
+# pass a repo id or revision: the child reads LAYA_WEIGHTS_PATH and loads
+# that file's directory, with hub lookups switched off.
 LAYA_WEIGHTS_LOG = "laya weights path=%s sha256=%s"
+LAYA_WEIGHTS_DRIFT_LOG = "laya weights path=%s changed=%s"
 LAYA_WATCH_INTERVAL_SECONDS = 1.5
+LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
+    """\
+    import os
+    import sys
+
+    path = os.environ.get("LAYA_WEIGHTS_PATH", "")
+    if not path or not os.path.isfile(path):
+        sys.stderr.write("laya weights path is not a file\\n")
+        raise SystemExit(1)
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ.pop("LAYA_REVISION", None)
+    directory = os.path.dirname(os.path.abspath(path))
+    weight = os.path.join(directory, "model.safetensors")
+    if os.path.abspath(weight) != os.path.abspath(path):
+        sys.stderr.write("laya weights path is not the checkpoint file\\n")
+        raise SystemExit(1)
+    from laya.router import Router
+    from laya.serve import create_app
+    import uvicorn
+
+    router = Router(
+        models={"english": directory},
+        device=os.environ.get("LAYA_DEVICE") or "cpu",
+        auto_task_detection=False,
+        max_loaded=1,
+    )
+    router.preload(["english"])
+    uvicorn.run(
+        create_app(router),
+        host=os.environ.get("LAYA_HOST", "127.0.0.1"),
+        port=int(os.environ.get("LAYA_PORT", "8000")),
+        log_level=os.environ.get("LAYA_LOG_LEVEL", "info"),
+    )
+    """
+)
 _WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".gguf")
 
 LAYA_SERVE_REQUIREMENT = "laya[serve]==0.3.21"
@@ -294,6 +334,9 @@ class ArtifactCheck:
     pid: int = 0
     token: str = ""
     weights_path: str = ""
+    inode: int = 0
+    size: int = 0
+    mtime_ns: int = 0
 
 
 def huggingface_cache_roots() -> list[Path]:
@@ -315,6 +358,26 @@ def snapshot_weight_path(root: Path, *, repo: str, revision: str, filename: str)
     """Hugging Face snapshot path for one pinned revision."""
     folder = "models--" + repo.replace("/", "--")
     return root / folder / "snapshots" / revision / filename
+
+
+def _file_identity(path: Path) -> tuple[int, int, int]:
+    """Inode, size, and mtime in nanoseconds. Symlinks are followed. Does not hash."""
+    stat = path.stat()
+    return stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
+def _record_int(value: object) -> int:
+    """Non-negative integer from a runtime record, or zero when it is absent."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
+def _has_weight_identity(check: ArtifactCheck | None) -> bool:
+    """True when ``check`` remembers the hashed file's inode, size, and mtime."""
+    if check is None or not check.ok or not check.weights_path:
+        return False
+    return bool(check.inode or check.size or check.mtime_ns)
 
 
 def sha256_file(path: Path) -> str:
@@ -409,7 +472,26 @@ def verify_weight_file(
             sha256=actual,
             weights_path=resolved,
         )
-    return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=actual, weights_path=resolved)
+    try:
+        inode, size, mtime_ns = _file_identity(path)
+    except OSError:
+        return ArtifactCheck(
+            ok=False,
+            reason="unverified",
+            revision=revision,
+            sha256=actual,
+            weights_path=resolved,
+        )
+    return ArtifactCheck(
+        ok=True,
+        reason=None,
+        revision=revision,
+        sha256=actual,
+        weights_path=resolved,
+        inode=inode,
+        size=size,
+        mtime_ns=mtime_ns,
+    )
 
 
 def snapshot_weight_file(
@@ -517,6 +599,7 @@ class LayaRuntime:
         self._key_rejected = False
         self._artifact_check: ArtifactCheck | None = None
         self._launch_refusal: ArtifactCheck | None = None
+        self._weight_drift: tuple[str, str] | None = None
         self._start_token = ""
         self._watch = watch
         self._watch_interval = LAYA_WATCH_INTERVAL_SECONDS if watch_interval is None else watch_interval
@@ -581,6 +664,7 @@ class LayaRuntime:
             _unlink_quiet(self._pid_path)
             self._clear_run_record()
             self._launch_refusal = None
+            self._weight_drift = None
             weighed = self._weigh_before_launch(policy)
             if self._weights_block_launch(weighed):
                 _reap_runtimes.discard(self)
@@ -593,6 +677,7 @@ class LayaRuntime:
             try:
                 _write_private(self._key_path, api_key)
                 offline = weighed.ok or self._weights_cached()
+                pinned = weighed.ok and bool(weighed.weights_path)
                 threads = _thread_budget()
                 env = os.environ.copy()
                 env.update(
@@ -601,25 +686,35 @@ class LayaRuntime:
                         "LAYA_PORT": str(self._port),
                         "LAYA_DEVICE": "cpu",
                         "LAYA_PRELOAD": "1",
-                        "LAYA_MODELS": policy.checkpoint,
                         "LAYA_MAX_LOADED": "1",
                         "LAYA_API_KEY": api_key,
-                        "LAYA_REVISION": policy.revision,
                         "LAYA_SHA256_DIGESTS": json.dumps({policy.weight_file: policy.sha256}),
                         "LAYA_THREADS": str(threads),
                         "HF_HUB_OFFLINE": "1" if offline else "0",
                     }
                 )
-                if offline:
+                if pinned:
+                    env["LAYA_WEIGHTS_PATH"] = weighed.weights_path
+                    env["HF_HUB_OFFLINE"] = "1"
                     env["TRANSFORMERS_OFFLINE"] = "1"
+                    for name in (
+                        "LAYA_REVISION",
+                        "LAYA_MODELS",
+                        "HUGGINGFACE_HUB_CACHE",
+                        "HF_HUB_CACHE",
+                        "HF_HOME",
+                        "HF_TOKEN",
+                    ):
+                        env.pop(name, None)
+                    argv = [str(venv_python(self.venv_dir)), "-c", LAYA_PINNED_WEIGHT_BOOTSTRAP]
                 else:
-                    env.pop("TRANSFORMERS_OFFLINE", None)
-                if weighed.ok and weighed.weights_path:
-                    cache_root = huggingface_cache_root_for(Path(weighed.weights_path))
-                    if cache_root is not None:
-                        env["HUGGINGFACE_HUB_CACHE"] = str(cache_root)
-                        env["HF_HUB_CACHE"] = str(cache_root)
-                argv = [str(serve_executable(self.venv_dir))]
+                    env["LAYA_MODELS"] = policy.checkpoint
+                    env["LAYA_REVISION"] = policy.revision
+                    if offline:
+                        env["TRANSFORMERS_OFFLINE"] = "1"
+                    else:
+                        env.pop("TRANSFORMERS_OFFLINE", None)
+                    argv = [str(serve_executable(self.venv_dir))]
                 spawned = self._process_factory(argv, env)
                 self._process = spawned
                 pid = getattr(spawned, "pid", None)
@@ -702,6 +797,7 @@ class LayaRuntime:
         with self._lock, self._file_lock():
             self._generation += 1
             self._launch_refusal = None
+            self._weight_drift = None
             self._watch_had_pid = False
             engine = process_laya()
             engine.set_decision_client(None)
@@ -752,6 +848,11 @@ class LayaRuntime:
             engine.set_runtime_reason(LAYA_REASON_KEY_REJECTED, self._port)
             return engine.status
         artifact = self.ensure_artifact_check()
+        drift = self._weight_drift_now()
+        if drift is not None:
+            self._refuse_weight_drift(*drift)
+            return process_laya().status
+        self._weight_drift = None
         verified = (artifact.revision, artifact.sha256) if artifact.ok else None
         self._note_client_verification(process_laya()._decision_client)  # noqa: SLF001
         with self._lock:
@@ -957,6 +1058,9 @@ class LayaRuntime:
             pid=self._sidecar_pid(),
             token=token,
             weights_path=raw.weights_path,
+            inode=raw.inode,
+            size=raw.size,
+            mtime_ns=raw.mtime_ns,
         )
 
     def _sidecar_pid(self) -> int:
@@ -1074,6 +1178,9 @@ class LayaRuntime:
             pid=self._sidecar_pid(),
             token=token,
             weights_path=weighed.weights_path,
+            inode=weighed.inode,
+            size=weighed.size,
+            mtime_ns=weighed.mtime_ns,
         )
         self._write_run_record(token, check.pid)
         self._write_recorded_verification(check)
@@ -1143,6 +1250,21 @@ class LayaRuntime:
         key_path = self._watched_key
         if key_path is not None and self._api_key and not key_path.is_file() and running:
             self._mark_key_rejected()
+            return
+        drift = self._weight_drift_now()
+        if drift is not None:
+            if changed:
+                self._sync_watched_key()
+            self._refuse_weight_drift(*drift)
+            self._watch_had_pid = pid_present
+            return
+        if self._weight_drift is not None:
+            self._weight_drift = None
+            if changed:
+                self._artifact_check = None
+                self._sync_watched_key()
+            self.publish_status()
+            self._watch_had_pid = pid_present
             return
         if not changed and running:
             return
@@ -1249,8 +1371,25 @@ class LayaRuntime:
             return None
         if not isinstance(revision, str) or not isinstance(digest, str):
             return None
+        weights_path = payload.get("weights_path")
+        if not isinstance(weights_path, str):
+            weights_path = ""
+        inode = _record_int(payload.get("inode"))
+        size = _record_int(payload.get("size"))
+        mtime_ns = _record_int(payload.get("mtime_ns"))
         if payload.get("ok") is True:
-            return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=digest, pid=pid, token=token)
+            return ArtifactCheck(
+                ok=True,
+                reason=None,
+                revision=revision,
+                sha256=digest,
+                pid=pid,
+                token=token,
+                weights_path=weights_path,
+                inode=inode,
+                size=size,
+                mtime_ns=mtime_ns,
+            )
         if payload.get("reason") == "wrong_revision":
             return ArtifactCheck(
                 ok=False,
@@ -1259,6 +1398,10 @@ class LayaRuntime:
                 sha256=digest,
                 pid=pid,
                 token=token,
+                weights_path=weights_path,
+                inode=inode,
+                size=size,
+                mtime_ns=mtime_ns,
             )
         return None
 
@@ -1273,8 +1416,56 @@ class LayaRuntime:
                 "sha256": check.sha256,
                 "pid": check.pid,
                 "token": check.token,
+                "weights_path": check.weights_path,
+                "inode": check.inode,
+                "size": check.size,
+                "mtime_ns": check.mtime_ns,
             },
         )
+
+    def _weight_drift_now(self) -> tuple[str, str] | None:
+        """Return the hashed path and which identity field changed.
+
+        Compares inode, size, and mtime in nanoseconds. Does not hash the file.
+        """
+        check = self._identity_record()
+        if check is None:
+            return None
+        try:
+            inode, size, mtime_ns = _file_identity(Path(check.weights_path))
+        except OSError:
+            return check.weights_path, "inode,size,mtime"
+        changed: list[str] = []
+        if inode != check.inode:
+            changed.append("inode")
+        if size != check.size:
+            changed.append("size")
+        if mtime_ns != check.mtime_ns:
+            changed.append("mtime")
+        if not changed:
+            return None
+        return check.weights_path, ",".join(changed)
+
+    def _identity_record(self) -> ArtifactCheck | None:
+        """The hashed file's inode, size, and mtime, from memory or the record."""
+        check = self._artifact_check
+        if not _has_weight_identity(check):
+            check = self._read_recorded_verification()
+        if not _has_weight_identity(check):
+            return None
+        return check
+
+    def _refuse_weight_drift(self, path: str, changed: str) -> None:
+        """Mark the sidecar unverified. New orders stay paused."""
+        from flinttrade_engine.laya import LAYA_REASON_UNVERIFIED, DecisionStatus, process_laya  # noqa: PLC0415
+
+        marker = (path, changed)
+        if marker != self._weight_drift:
+            _LOG.info(LAYA_WEIGHTS_DRIFT_LOG, path, changed)
+            self._weight_drift = marker
+        engine = process_laya()
+        engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+        engine.set_runtime_reason(LAYA_REASON_UNVERIFIED, self._port)
 
     def read_health(self) -> Mapping[str, Any] | None:
         """Return the sidecar health document, or ``None`` when it cannot be read."""

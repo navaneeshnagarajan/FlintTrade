@@ -531,7 +531,13 @@ Orders are paused until it's Ready." When the chip is Ready and a single
 decision carries no proof, place returns `laya_unverified` and "Not placed.
 Laya's decision couldn't be verified. Try again." On each sidecar start
 the verified record is hashed from `model.safetensors` and stamped with
-that run's pid and a fresh start token. It is deleted on stop and on a
+that run's pid and a fresh start token, plus the file's inode, size, and
+modification time. A verified boot passes that exact file path to the
+sidecar with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, and does
+not pass a repo id or revision. Those three values are rechecked, without
+hashing again, when Laya reports Ready and about every 1.5 seconds. A
+mismatch is `unverified` ("Can't verify the model"). The log line is
+`laya weights path=<path> changed=<field>`. It is deleted on stop and on a
 failed start. A record from an earlier run is rejected. A decision without
 `revision` or `sha256` is checked against that record for both admitted
 and clamped orders. The decision log stores `proof=decision` or
