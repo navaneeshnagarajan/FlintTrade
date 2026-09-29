@@ -629,6 +629,24 @@ describe("TerminalRoute", () => {
     expect(doc.match(/"component":"orderpad"/g)).toHaveLength(1);
   });
 
+  it("does not add a second Order Pad when + Widget adds one without a symbol", async () => {
+    renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    const api = mockLayoutState.workspaceApi as unknown as WorkspaceApi;
+    const before = api.panelCount();
+
+    window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+      detail: { widgetId: "orderpad", title: "Order Pad" },
+    }));
+    expect(api.panelCount()).toBe(before + 1);
+
+    window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+      detail: { widgetId: "orderpad", title: "Order Pad" },
+    }));
+    expect(api.panelCount()).toBe(before + 1);
+    expect(JSON.stringify(api.toJSON()).match(/"component":"orderpad"/g)).toHaveLength(1);
+  });
+
   it("adds a widget when the command palette dispatches flinttrade:addWidget", async () => {
     renderTerminalRoute();
 

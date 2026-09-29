@@ -36,9 +36,12 @@ describe("PracticeLaterSetup", () => {
     markPracticeLaterPending();
     render(<PracticeLaterSetup />);
 
-    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 0 skipped")).toBeInTheDocument();
+    const show = screen.getByRole("button", { name: "Show" });
+    expect(show).toHaveAttribute("aria-expanded", "false");
+    expect(show.className).toContain("w-16");
+    const dismiss = screen.getByRole("button", { name: "Dismiss" });
+    expect(dismiss.className).toContain("hover:text-text-primary");
     expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Set up Monitoring" })).not.toBeInTheDocument();
@@ -51,7 +54,8 @@ describe("PracticeLaterSetup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
 
     expect(screen.getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 0 skipped")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide" }).className).toContain("w-16");
     expect(screen.getByRole("button", { name: "Skip Two-factor authentication" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue without a broker" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "FlintTrade Native" })).not.toBeInTheDocument();
@@ -70,16 +74,20 @@ describe("PracticeLaterSetup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Skip Two-factor authentication" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue without a broker" }));
 
-    expect(screen.getByText("Optional setup · 2 of 4 done")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 2 skipped")).toBeInTheDocument();
     expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBe("1");
     expect(localStorage.getItem(OPTIONAL_SETUP_STATE_KEY)).toContain("totp");
     first.unmount();
 
     render(<PracticeLaterSetup />);
-    expect(screen.getByText("Optional setup · 2 of 4 done")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 2 skipped")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(screen.getByText(/Two-factor authentication/)).toHaveTextContent("later");
     expect(screen.getByText(/Broker connect/)).toHaveTextContent("later");
+    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up Two-factor authentication" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up Broker connect" })).toBeInTheDocument();
   });
 
   it("Dismiss moves the reminder into Settings and leaves the desk", () => {
@@ -90,7 +98,8 @@ describe("PracticeLaterSetup", () => {
     expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBeNull();
 
     render(<PracticeLaterSetup surface="settings" />);
-    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 0 skipped")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Optional setup" }).className).toContain("mb-4");
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
   });
 
@@ -129,7 +138,8 @@ describe("PracticeLaterSetup", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Later" }));
     expect(screen.getByRole("button", { name: "Set up Two-factor authentication" })).toBeInTheDocument();
-    expect(screen.getByText("Optional setup · 1 of 4 done")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
   });
 
   it("Enrol without a stored QR asks for the account password", () => {
@@ -155,6 +165,8 @@ describe("PracticeLaterSetup", () => {
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Skip Trading defaults" }));
-    expect(screen.getByText("Optional setup · 1 of 4 done")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip Trading defaults" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up Trading defaults" })).toBeInTheDocument();
   });
 });

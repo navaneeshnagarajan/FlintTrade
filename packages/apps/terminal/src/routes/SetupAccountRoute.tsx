@@ -81,6 +81,7 @@ import {
   loadOptionalSetupState,
   markPracticeLaterPending,
   optionalSetupDoneCount,
+  optionalSetupSkippedCount,
   optionalSetupStripLabel,
   practiceLaterPending,
   saveOptionalSetupState,
@@ -1260,12 +1261,17 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
     }
   }
 
-  const strip = optionalSetupStripLabel(optionalSetupDoneCount(tray));
+  const strip = optionalSetupStripLabel(
+    optionalSetupDoneCount(tray),
+    optionalSetupSkippedCount(tray),
+  );
 
   return (
     <section
       aria-label="Optional setup"
-      className="shrink-0 border-b border-border-default bg-surface-card/80"
+      className={`shrink-0 border-b border-border-default bg-surface-card/80${
+        surface === "settings" ? " mb-4" : ""
+      }`}
     >
       <div className="flex h-9 items-center gap-2 px-3">
         <p className="min-w-0 flex-1 truncate text-sm text-text-primary">{strip}</p>
@@ -1273,7 +1279,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
           type="button"
           variant="outline"
           size="sm"
-          className="h-7 px-2 text-xs"
+          className="h-7 w-16 shrink-0 px-2 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
           aria-expanded={expanded}
           onClick={() => {
             setExpanded((open) => !open);
@@ -1287,7 +1293,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs"
+            className="h-7 shrink-0 px-2 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
             onClick={dismiss}
           >
             Dismiss
@@ -1316,7 +1322,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                     <p className="text-xs text-text-muted">{item.detail}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {item.id === "broker" && (
+                    {!tray.skipped.includes(item.id) && item.id === "broker" && (
                       <Button type="button" size="sm" onClick={() => skip("broker")}>
                         Continue without a broker
                       </Button>
@@ -1330,7 +1336,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                     >
                       Set up
                     </Button>
-                    {item.id !== "broker" && (
+                    {!tray.skipped.includes(item.id) && item.id !== "broker" && (
                       <Button
                         type="button"
                         variant="ghost"

@@ -756,8 +756,12 @@ export default function TerminalRoute() {
       if (!api) return;
 
       const meta = widgetCatalog.find((widget) => widget.id === widgetId);
-      if (widgetId === "orderpad" && detail.props && api.retargetOrderPad(detail.props, detail.title)) {
-        return;
+      if (widgetId === "orderpad") {
+        const reused = api.retargetOrderPad(
+          detail.props ?? {},
+          detail.props ? detail.title : undefined,
+        );
+        if (reused) return;
       }
       api.addPanel({
         id: `${widgetId}-${Date.now()}`,
@@ -883,7 +887,7 @@ export default function TerminalRoute() {
                     />
                   )}
                   {panelCount !== null && panelCount > 0 && (
-                    <div className="pointer-events-none absolute right-2 top-1 z-20">
+                    <div className="pointer-events-none absolute right-14 top-1 z-20">
                       <Button
                         type="button"
                         size="sm"

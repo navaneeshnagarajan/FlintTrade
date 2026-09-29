@@ -94,14 +94,27 @@ export function clearOptionalSetupState(): void {
   }
 }
 
+/** Completed cards only. Skipping a card is not the same as finishing it. */
 export function optionalSetupDoneCount(state: OptionalSetupTrayState): number {
-  const done = new Set<OptionalSetupCardId>([...state.skipped, ...state.completed]);
+  const done = new Set<OptionalSetupCardId>(state.completed);
+  for (const id of state.skipped) done.delete(id);
   return done.size;
 }
 
+/** Skipped cards that are not also completed. */
+export function optionalSetupSkippedCount(state: OptionalSetupTrayState): number {
+  const skipped = new Set<OptionalSetupCardId>(state.skipped);
+  for (const id of state.completed) skipped.delete(id);
+  return skipped.size;
+}
+
 /** One-line reminder. `done` of `total` uses the live card count. */
-export function optionalSetupStripLabel(done: number, total = OPTIONAL_SETUP_CARDS.length): string {
-  return `Optional setup · ${done} of ${total} done`;
+export function optionalSetupStripLabel(
+  done: number,
+  skipped = 0,
+  total = OPTIONAL_SETUP_CARDS.length,
+): string {
+  return `Optional setup · ${done} of ${total} done · ${skipped} skipped`;
 }
 
 export function markPracticeLaterPending(): void {
