@@ -41,7 +41,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { motionConfig } from "@/lib/motion";
 import SpotlightTour from "@/components/demo/ExploreTour";
 import type { TourStep } from "@/components/demo/ExploreTour";
-import { markDemoSessionActive } from "@/lib/demoSession";
+import { EXAMPLE_USER_DISPLAY_NAME, markDemoSessionActive } from "@/lib/demoSession";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -601,7 +601,7 @@ export default function ExploreRoute() {
   const startExploreMode = useCallback(() => {
     useModeStore.getState().setMode("explore");
     markDemoSessionActive();
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
     navigate("/home");
   }, [navigate]);
 

@@ -246,7 +246,7 @@ describe("WelcomeRoute", () => {
     render(<WelcomeRoute />);
 
     await waitFor(() =>
-      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", ""),
+      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Guest", ""),
     );
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -268,7 +268,7 @@ describe("WelcomeRoute", () => {
       fireEvent.click(screen.getByLabelText("Try with example data without creating an account"));
 
       expect(mockSetMode).toHaveBeenCalledWith("explore");
-      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
+      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Guest", "");
       expect(mockNavigate).toHaveBeenCalledWith("/home");
       expect(mockNavigate).not.toHaveBeenCalledWith("/explore");
     });

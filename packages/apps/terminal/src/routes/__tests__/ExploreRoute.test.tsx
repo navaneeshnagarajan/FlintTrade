@@ -166,7 +166,7 @@ describe("ExploreRoute", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /^demo \(example data\)$/i })[0]);
 
     expect(mockSetMode).toHaveBeenCalledWith("explore");
-    expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
+    expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Guest", "");
     expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
     expect(mockNavigate).toHaveBeenCalledWith("/home");
   });

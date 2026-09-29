@@ -1,4 +1,7 @@
 const DEMO_SESSION_KEY = "flinttrade:demo-session";
+
+/** Display name for an example-data session. The mode key stays `explore`. */
+export const EXAMPLE_USER_DISPLAY_NAME = "Guest";
 const MODE_STORAGE_KEY = "flinttrade:mode";
 const ACTIVE_VALUE = "active";
 const PUBLIC_DEMO_BASE = "/demo-app/";

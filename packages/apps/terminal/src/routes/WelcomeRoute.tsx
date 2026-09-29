@@ -25,7 +25,7 @@ import LoginRoute from "@/routes/LoginRoute";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
+import { EXAMPLE_USER_DISPLAY_NAME, isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
 import { readPersistedAuthSession } from "@/lib/homeEntry";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -314,7 +314,7 @@ export default function WelcomeRoute() {
       return;
     }
     if (isDemoSessionActive()) {
-      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
       return;
     }
 
@@ -329,7 +329,7 @@ export default function WelcomeRoute() {
       .then((data) => {
         if (cancelled) return;
         if (isDemoSessionActive()) {
-          useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+          useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
           return;
         }
         if (!data.data?.is_setup) {
@@ -430,7 +430,7 @@ export default function WelcomeRoute() {
     // British English: "Try with sample data".
     useModeStore.getState().setMode("explore");
     markDemoSessionActive();
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
     navigate("/home");
   }
 
