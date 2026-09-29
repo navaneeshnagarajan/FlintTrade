@@ -192,7 +192,7 @@ export default function LoginRoute({
   // AND their backup codes can still mint fresh ones with just their password.
   if (mode === "full" && recovering) {
     return (
-      <div className="flex min-h-screen flex-col bg-surface-base p-6">
+      <main aria-label="Recover two-factor access" className="flex min-h-screen flex-col bg-surface-base p-6">
         <div className="m-auto w-full max-w-sm space-y-6">
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
@@ -202,25 +202,28 @@ export default function LoginRoute({
             authenticatorEnrolled={totpEnabled}
           />
         </div>
-      </div>
+      </main>
     );
   }
 
   if (mode === "full" && resettingPassword) {
     return (
-      <div className="flex min-h-screen flex-col bg-surface-base p-6">
+      <main aria-label="Reset password" className="flex min-h-screen flex-col bg-surface-base p-6">
         <div className="m-auto w-full max-w-sm space-y-6">
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
           </div>
           <PasswordReset onBack={() => setResettingPassword(false)} />
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-base p-6">
+    <main
+      aria-label={mode === "pin" ? "Unlock FlintTrade" : "Welcome back"}
+      className="flex min-h-screen flex-col bg-surface-base p-6"
+    >
       <div className="m-auto w-full max-w-sm space-y-6 rounded-2xl border border-border-default bg-surface-card p-7 shadow-floating">
         {/* Logo */}
         <div className="flex justify-center">
@@ -384,7 +387,7 @@ export default function LoginRoute({
           </form>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 
