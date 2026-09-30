@@ -23,7 +23,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the pid
   file, the key file, and the runtime record the same way an order
   does, so the chip and the order gate read the same state. A
-  command-line stop or start shows on the chip within 1.5 seconds.
+  command-line stop or start shows on the chip by the next 1.5-second check.
   After Start Laya, until that ping confirms the new state, the chip
   says Checking in the neutral colour and the popover says Checking
   Laya…. It does not show a stale Ready during that wait. An admitted
@@ -42,10 +42,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Practice place with an empty note skips the model and writes one
   decision-log line, `effect=clamp` with `failure=note_absent` and no
   proof. When this run's record stood in, each model allow keeps its own
-  `effect=allow` `proof=runtime` line. Three admits in that case (a note,
-  an empty note, a note) write `effect=allow` `proof=runtime`, then
-  `effect=clamp` `failure=note_absent`, then `effect=allow`
-  `proof=runtime`, and the model is called twice.
+  `effect=allow` `proof=runtime` line.
 
 ### Added
 
@@ -180,7 +177,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   seconds. That ping reconciles the pid file, the key file, and the
   runtime record the same way an order does, so the chip and the order
   gate read the same state. A command-line stop or start, or a key
-  rotation, shows on the chip within 1.5 seconds. When a place is refused
+  rotation, shows on the chip by the next 1.5-second check. When a place is refused
   because Laya cannot be reached, or because it rejects the key, the
   chip updates on that same order. A place refused with exactly
   "Laya is Down. Orders are paused until it's Ready." sets the chip to
@@ -200,8 +197,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   hard reject. An admitted Practice place skips the model and writes one
   decision-log line, `effect=clamp` with `failure=note_absent` and no
   proof. When this run's record stood in, each model allow keeps its own
-  `effect=allow` `proof=runtime` line. Three admits in that case write
-  allow, clamp, allow, and the model is called twice. Desk place
+  `effect=allow` `proof=runtime` line. Desk place
   surfaces go through this admission.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**

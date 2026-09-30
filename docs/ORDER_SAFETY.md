@@ -165,10 +165,7 @@ or `proof=runtime`. An admitted Practice place with an empty note skips
 the model and writes one line, `effect=clamp` with `failure=note_absent`
 and no proof, including when the quantity already fits. When this run's
 record stood in, each model allow keeps its own `effect=allow`
-`proof=runtime` line. Three admitted places in that case (a note, an
-empty note, a note) write `effect=allow` `proof=runtime`, then
-`effect=clamp` `failure=note_absent`, then `effect=allow`
-`proof=runtime`, and the model is called twice. There is no dedupe. A model decision with no proof is refused with "Not placed.
+`proof=runtime` line. There is no dedupe. A model decision with no proof is refused with "Not placed.
 Laya's decision couldn't be verified. Try again." A health document that
 omits the digest is Ready when that record matches the pin. If the
 record cannot be checked, the chip reason is `unverified`. Stopping the
@@ -248,7 +245,7 @@ stop or start, or a key rotation, is reconciled by that watch. The desk
 polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the
 pid, the key, and the runtime record the same way an order does, so the
 chip and the order gate read the same state. A stop or a start shows on
-the chip within 1.5 seconds. After Start Laya, until the ping confirms
+the chip by the next 1.5-second check. After Start Laya, until the ping confirms
 the new state, the chip says Checking in the neutral colour and the
 popover says Checking Laya…. It does not show a stale Ready during that
 wait. An admitted place while the chip is not Ready or Degraded also

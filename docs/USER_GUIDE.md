@@ -532,10 +532,7 @@ when this run's record stood in. An empty note does not call the model.
 An admitted Practice place still writes one line, `effect=clamp` with
 `failure=note_absent` and no proof, including when the quantity already
 fits. When this run's record stood in, each model allow keeps its own
-`effect=allow` `proof=runtime` line. Three admitted places in that case
-(a note, an empty note, a note) write `effect=allow` `proof=runtime`,
-then `effect=clamp` `failure=note_absent`, then `effect=allow`
-`proof=runtime`, and the model is called twice. There is no dedupe. A model decision with no proof is refused
+`effect=allow` `proof=runtime` line. There is no dedupe. A model decision with no proof is refused
 with `Not placed. Laya's decision couldn't be verified. Try again.`
 A health document that omits the digest is **Ready** when that record
 matches the pin. Laya is not **Ready** by default.
@@ -574,7 +571,7 @@ reads the pid file (`runtime/laya/sidecar.pid`), the key file
 `GET /api/v1/ping` every 1.5 seconds. That ping reconciles those same
 files the same way an order does, so the chip and the order gate read
 the same state. A command-line stop or start, or a key rotation, shows
-on the chip within 1.5 seconds. After **Start Laya**, until the ping
+on the chip by the next 1.5-second check. After **Start Laya**, until the ping
 confirms the new state, the chip says **Checking** in the neutral
 colour and the popover says **Checking Laya…**. It does not show a
 stale **Ready** during that wait. An admitted place while the chip is
