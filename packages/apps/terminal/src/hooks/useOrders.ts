@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getOrderbook } from "@/services/api";
 import type { Order } from "@/types/api";
+import { isDocumentHidden } from "@/lib/deskPolling";
+import { useRearmPollingWhenVisible } from "@/hooks/useRearmPollingWhenVisible";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
 import {
@@ -54,6 +56,11 @@ export function useOrders(options: BrokerDataQueryOptions = {}) {
   const context = options.context ?? currentContext;
   const enabled = (options.enabled ?? true) && context.enabled;
   const queryClient = useQueryClient();
+  const listKey = useMemo(
+    () => queryKeys.orders.list(context.identity.scopeKey),
+    [context.identity.scopeKey],
+  );
+  useRearmPollingWhenVisible(listKey, enabled);
 
   // Refetch on order placement events. Two triggers:
   //   1. The dedicated ORDERS_CHANGED_EVENT (dispatch via emitOrdersChanged).
@@ -64,7 +71,7 @@ export function useOrders(options: BrokerDataQueryOptions = {}) {
   //      too — a "failed" order may still have partially reached the broker.
   useEffect(() => {
     if (!enabled) return;
-    const currentKey = queryKeys.orders.list(context.identity.scopeKey);
+    const currentKey = listKey;
     const invalidate = () => {
       void queryClient.invalidateQueries({ queryKey: currentKey, exact: true });
     };
@@ -84,16 +91,16 @@ export function useOrders(options: BrokerDataQueryOptions = {}) {
       window.removeEventListener(ORDERS_CHANGED_EVENT, invalidate);
       window.removeEventListener("flinttrade:notify", onNotify);
     };
-  }, [context.identity.scopeKey, enabled, queryClient]);
+  }, [context.identity.scopeKey, enabled, listKey, queryClient]);
 
   return useQuery<Order[]>({
-    queryKey: queryKeys.orders.list(context.identity.scopeKey),
+    queryKey: listKey,
     queryFn: ({ signal }) => getOrderbook(context, signal),
     enabled,
     retry: false,
     staleTime: 5_000,
     refetchInterval: () => {
-      if (!enabled) return false;
+      if (!enabled || isDocumentHidden()) return false;
       return isAnyOrderSessionOpen() ? ORDERS_REFETCH_ACTIVE_MS : ORDERS_REFETCH_IDLE_MS;
     },
   });

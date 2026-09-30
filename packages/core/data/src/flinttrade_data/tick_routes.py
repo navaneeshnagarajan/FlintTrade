@@ -27,6 +27,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from .storage import read_stored_timestamp
 from .tick_recorder import MAX_WATCHLIST_INSTRUMENTS, WatchlistCapacityError, _canonical_instrument
 
 logger = logging.getLogger("flinttrade.data.tick_routes")
@@ -198,10 +199,16 @@ def query_ticks() -> Any:
     if truncated:
         rows = rows[-limit:]  # keep the most recent rows in the window
 
-    # DuckDB timestamps serialise via str() — make each row JSON-safe.
+    # Stored timestamps are naive UTC. Publish an explicit offset so a
+    # reader does not treat the wall clock as IST.
     for row in rows:
         ts = row.get("ts")
-        if ts is not None and not isinstance(ts, (str, int, float)):
+        if isinstance(ts, bool) or isinstance(ts, (int, float)):
+            continue
+        aware = read_stored_timestamp(ts)
+        if aware is not None:
+            row["ts"] = aware.isoformat()
+        elif ts is not None and not isinstance(ts, str):
             row["ts"] = str(ts)
 
     return jsonify(
