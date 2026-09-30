@@ -80,7 +80,7 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
     expect(useOperatorSignalStore.getState().decisionStatus).not.toBe("ready");
   });
 
-  it("shows a stop and a start on the chip within 1.5 seconds", async () => {
+  it("shows a stop and a start on the chip by the next status poll", async () => {
     notifyManager.setScheduler((callback) => {
       callback();
     });

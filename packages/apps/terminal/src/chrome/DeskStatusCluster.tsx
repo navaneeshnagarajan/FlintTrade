@@ -23,6 +23,7 @@ import {
   layaChipLabel,
   layaChipStatus,
   layaDisabledLiveReason,
+  type LayaChipLabel,
   layaReasonPlain,
   layaReasonTooltip,
 } from "@/lib/layaStatus";
@@ -36,13 +37,13 @@ const layaStartWatch: {
 
 export interface DeskStatus {
   broker: string;
-  decision: "Ready" | "Degraded" | "Down" | "Still loading" | "Checking";
+  decision: LayaChipLabel;
   decisionStatus: DecisionStatus | null | undefined;
   chat: string;
 }
 
 interface LayaChipView {
-  decision: DeskStatus["decision"];
+  decision: LayaChipLabel;
   chipStatus: DecisionStatus | null;
   shownReason: string | null;
   plainReason: string | null;
@@ -191,7 +192,7 @@ function brokerTone(broker: string): "ok" | "warn" | "down" | "idle" {
 function decisionDot(decision: DeskStatus["decision"]): "ok" | "warn" | "down" | "idle" {
   if (decision === "Ready") return "ok";
   if (decision === "Down") return "down";
-  if (decision === "Checking" || decision === "Still loading") return "idle";
+  if (decision === "Checking" || decision === "Still loading" || decision === "Downloading") return "idle";
   return "warn";
 }
 
@@ -210,7 +211,7 @@ function decisionTextClass(decision: DeskStatus["decision"]): string {
 function StatusRow({
   testId,
   name,
-  description,
+  description = null,
   value,
   tone,
   valueClassName,
@@ -218,7 +219,7 @@ function StatusRow({
 }: {
   testId: string;
   name: string;
-  description: string;
+  description?: string | null;
   value: string;
   tone: "ok" | "warn" | "down" | "idle";
   valueClassName?: string;
@@ -232,7 +233,7 @@ function StatusRow({
           <span className="font-medium text-text-primary">{name}</span>{" "}
           <span className={cn("text-text-secondary", valueClassName)}>{value}</span>
         </p>
-        <p className="text-xs text-text-muted">{description}</p>
+        {description ? <p className="text-xs text-text-muted">{description}</p> : null}
         {children}
       </div>
     </div>
@@ -241,12 +242,20 @@ function StatusRow({
 
 function LayaActions({
   chip,
+  showFallbackReason = true,
 }: {
   chip: LayaChipView;
+  /** The popover always names the state. The stacked row already shows it as its value. */
+  showFallbackReason?: boolean;
 }) {
+  const reason = chip.plainReason ?? (showFallbackReason ? `Laya ${chip.decision}` : null);
   return (
     <div className="mt-2 space-y-2">
-      <p data-testid="laya-reason">{chip.plainReason ?? `Laya ${chip.decision}`}</p>
+      {reason ? (
+        <p data-testid="laya-reason" className="font-medium text-text-primary">
+          {reason}
+        </p>
+      ) : null}
       {chip.tooltip && chip.plainReason && !chip.tooltip.startsWith(chip.plainReason) ? (
         <p data-testid="laya-reason-tooltip">{chip.tooltip}</p>
       ) : null}
@@ -268,7 +277,9 @@ function LayaActions({
 export function DeskStatusCluster({ variant = "inline" }: { variant?: "inline" | "stacked" }) {
   const chip = useLayaChip();
   const decisionTextTone = decisionTextClass(chip.decision);
-  const description = chip.plainReason ?? "Checks every order before it is placed.";
+  // The reason is the one bold line inside the row, so the grey description
+  // only appears when there is no reason to show.
+  const description = chip.plainReason ? null : "Checks every order before it is placed.";
 
   if (variant === "stacked") {
     return (
@@ -293,7 +304,7 @@ export function DeskStatusCluster({ variant = "inline" }: { variant?: "inline" |
           tone={decisionDot(chip.decision)}
           valueClassName={decisionTextTone}
         >
-          <LayaActions chip={chip} />
+          <LayaActions chip={chip} showFallbackReason={false} />
           <LayaDegradedLimitsNote status={chip.layaChecking ? null : chip.chipStatus} />
         </StatusRow>
         <StatusRow
