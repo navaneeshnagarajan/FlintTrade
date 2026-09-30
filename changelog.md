@@ -21,16 +21,22 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **GTT is refused on every submit route.** `"variety": "gtt"`, in any
   case or separator spelling, is HTTP 422 `gtt_unsupported` on place,
-  routed place, and exit-all, before Laya, SafetySystem, and any broker
-  call. The message is `Not placed. GTT orders aren't supported right now.`
+  routed place, exit-all, and a bracket, before Laya, SafetySystem, and
+  any broker call. The message is `Not placed. GTT orders aren't supported right now.`
   No submit route reaches a broker forever or super-order endpoint. The
   Kotak Neo adapter refuses a `gtt` place. Order Pad keeps GTT visible and
   disabled, with the tooltip `GTT orders aren't supported right now.`
   `POST /api/v1/orders/forever` does not place: a valid body is HTTP 501
-  `Orders are placed through /api/v1/orders/place.` A second exit while
-  this desk's exit is unfilled is HTTP 409 `exit_pending`: `Not placed.
+  `Orders are placed through /api/v1/orders/place.` A Live bracket with
+  exactly one stop-loss or one target submits on
+  `POST /api/v1/orders/bracket` after admission. Practice on that route is
+  HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and
+  a target together, and a trailing stop are refused before admission. A
+  second exit on the same broker account, while this desk's exit on that
+  contract is unfilled, is HTTP 409 `exit_pending`: `Not placed.
   An exit for <symbol> is already pending. Wait for it to fill, or cancel
-  it and try again.` The row keeps **Exit pending**. When the broker
+  it and try again.` The row keeps **Exit pending**. The Live hold is
+  for that broker account. When the broker
   order book cannot be read, that refusal is HTTP 409
   `exit_orders_unreadable`: `Not placed. One exit at a time for <symbol>
   until your broker's orders load.` A signed-out reset with no
@@ -81,9 +87,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Changed
 
 - **Order, session, and probe reference.** Orders are submitted on
-  `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and
-  `POST /api/v1/positions/exit-all`. `"variety": "gtt"` on those routes
-  is HTTP 422 `gtt_unsupported`. A reduce-only close can be admitted while
+  `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,
+  `POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket`
+  when the body has exactly one stop-loss or one target. `"variety": "gtt"`
+  on those routes is HTTP 422 `gtt_unsupported`. A session JWT on
+  `Authorization: Bearer` or `X-FlintTrade-Token` passes the global check.
+  An API key on `X-FlintTrade-Token` does not. A reduce-only close can be admitted while
   new orders are paused. PIN unlock replaces the session token. Reset of
   a finished account needs a session and the password. An authenticator
   code is required only once one is enrolled. A wipe ends other sessions. Practice restore marks fills and leaves them out

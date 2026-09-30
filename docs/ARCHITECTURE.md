@@ -379,17 +379,22 @@ deployment can split that state.
 Every order FlintTrade submits goes through admission when it's placed.
 Every **Live** order placed through FlintTrade is then checked by five
 safety layers inside `packages/services/engine/`. Practice orders skip this
-safety chain. The only submit routes are `POST /api/v1/orders/place`,
-`POST /api/v1/orders/<broker>/place` (Live only), and
+safety chain. The submit routes are `POST /api/v1/orders/place`,
+`POST /api/v1/orders/<broker>/place` (Live only),
 `POST /api/v1/positions/exit-all` (a server reduce-only proof, then the
-flatten verb). Explore placement is refused by the backend
+flatten verb), and `POST /api/v1/orders/bracket` when the body has exactly
+one stop-loss or one target. Each bracket leg is admitted, then placed
+through SafetySystem. Practice on that route is HTTP 403
+`practice_unsupported`. GTT, a broker-held variety, a stop-loss and a
+target together, and a trailing stop are refused before that admission.
+Explore placement is refused by the backend
 (`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
 **place** run the mode guard, then `Laya.admit`. Live place is checked
 by Laya admission and then SafetySystem L1–L5, `gate_order`, and
 `BrokerRouter` on that place. `"variety": "gtt"` is HTTP 422
-`gtt_unsupported` before that admission, on place, routed place, and
-exit-all. A refusal or a quantity clamp stops before SafetySystem.
+`gtt_unsupported` before that admission, on place, routed place,
+exit-all, and a bracket. A refusal or a quantity clamp stops before SafetySystem.
 Practice place is admitted before `SandboxEngine` and does not enter
 those Live layers. Practice square-off is place. The sandbox book
 cancels and modifies; it does not place. `cancel-all` only cancels.
@@ -666,8 +671,10 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
   authenticator code only once one is enrolled.
 - Revocation blocklist keyed by `jti` in
   `packages/core/core/src/flinttrade_core/auth_state.py`.
-- Non-public routes accept a session JWT or `FLINTTRADE_API_KEY`. An
-  API key is not a session. `GET /healthz` and `GET /readyz` are public
+- Non-public routes accept a session JWT or `FLINTTRADE_API_KEY`. The
+  session JWT is read from `Authorization: Bearer` or from
+  `X-FlintTrade-Token`. An API key on `X-FlintTrade-Token` does not pass.
+  An API key is not a session. `GET /healthz` and `GET /readyz` are public
   and return status only. `GET /health` is not public. The allowlist is
   `flinttrade_core.public_routes.PUBLIC_ROUTES`. `POST /csp-report`
   accepts `application/csp-report` and `application/reports+json`.
@@ -680,7 +687,9 @@ Live requires `live_mode_unlocked` plus the gated `BrokerRouter`.
 Executor-direct engine routes (basket, split, bracket, options-strategy)
 use `mode_guard.require_live_unlocked`: Explore is `mode_blocked`,
 Practice is `practice_unsupported` (no sandbox parity yet), and Live
-without PIN unlock is `live_locked`. Order Pad Sample Buy on `/trade`
+without PIN unlock is `live_locked`. A Live bracket with exactly one
+stop-loss or one target places through that guard. Basket, split, and
+options-strategy place return HTTP 501 and do not place. Order Pad Sample Buy on `/trade`
 in Explore is a local client-side sample fill — no HTTP order route,
 SafetySystem, or broker.
 

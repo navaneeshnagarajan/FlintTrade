@@ -61,7 +61,7 @@ rejected GTT — the sandbox does not simulate price triggers. Live requires
 the unlocked JWT, then `gtt-*` returns HTTP 501 (they do not call
 `gate_order` → `BrokerRouter`, and they do not forward an upstream
 OpenAlgo 501). A body with `"variety": "gtt"` (any case or separator
-spelling) on place, routed place, or exit-all is HTTP 422
+spelling) on place, routed place, exit-all, or a bracket is HTTP 422
 `gtt_unsupported`: `Not placed. GTT orders aren't supported right now.`
 That refusal is before Laya, SafetySystem, and any broker call. No submit
 route reaches a broker forever or super-order endpoint. The Kotak Neo
@@ -147,7 +147,7 @@ the WSGI prefix-strip.
 
 ### Order submission
 
-Three routes submit an order. Every order FlintTrade submits goes
+Four routes submit an order. Every order FlintTrade submits goes
 through admission when it's placed. Nothing else does, including
 `POST /api/v1/orders/place-smart`, `POST /api/v1/orders/open-position`,
 and `POST /api/v1/orders/close-position`, which are not mounted. The
@@ -158,9 +158,10 @@ adjusts virtual capital and square-off times; it does not place.
 
 | Route | What it does |
 |---|---|
-| `POST /api/v1/orders/place` | The only place route for Practice and Live. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Explore is HTTP 403 `mode_blocked`. |
+| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Explore is HTTP 403 `mode_blocked`. |
 | `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before admission, including when the variety spelling differs only by case or separators. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
 | `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before the live check, the reduce-only proof, and any broker call. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
+| `POST /api/v1/orders/bracket` | Live, PIN-unlocked. Entry plus exactly one of a stop-loss or a target. Each leg is admitted through Laya, then placed through SafetySystem, `gate_order`, and `BrokerRouter`. Success is HTTP 201. Practice is HTTP 403 `practice_unsupported`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. A broker-held variety is HTTP 422 `broker_held_unsupported` (`Not placed. Broker-held bracket legs aren't supported. Use one stop-loss or one target.`). A stop-loss and a target together are HTTP 422 `oco_unsupported`. A trailing stop is HTTP 422 `trailing_unsupported`. |
 
 `POST /api/v1/orders/cancel-all` cancels open orders. Practice cancels
 pending sandbox orders. Live uses the gated `cancel_all_orders` verb and
@@ -174,12 +175,14 @@ broker's open orders on that contract when that book can be read. When
 the broker order book cannot be read, the cap is the open quantity minus
 this desk's own pending exits, and the close can still qualify. When the
 position book cannot be read, the place is not classified as a close.
-A second exit while one of this desk's exits on that contract is still
-unfilled is HTTP 409 `exit_pending`, with `message` and `reason` both
+A second exit on the same broker account, while one of this desk's exits
+on that contract is still unfilled, is HTTP 409 `exit_pending`, with
+`message` and `reason` both
 `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.`
-Practice uses this code. On Live it is the code when the broker order
-book can be read. When that second exit is refused because the broker
-order book cannot be read, the code is `exit_orders_unreadable`, and
+Practice uses this code on the Practice book. On Live it is the code when
+the broker order book can be read. The Live hold is for that broker
+account. When that second exit is refused because
+the broker order book cannot be read, the code is `exit_orders_unreadable`, and
 `message` and `reason` are both
 `Not placed. One exit at a time for <symbol> until your broker's orders load.`
 The Positions row shows **Exit pending** for the unfilled exit. The
@@ -682,6 +685,7 @@ A non-public route behaves as follows.
 | Credential | Result |
 |---|---|
 | `Authorization: Bearer` session JWT (`type` `session`) | The global check allows the request. Handlers may still require a mode, a Live unlock, or an operator scope. |
+| `X-FlintTrade-Token` session JWT (`type` `session`) | The global check allows the request. An API key in this header does not. Handlers may still require a mode, a Live unlock, or an operator scope. |
 | `X-API-Key`, or the same Bearer value, matching `FLINTTRADE_API_KEY` | The global check allows the request. `OPENALGO_API_KEY` is the fallback when `FLINTTRADE_API_KEY` is unset. An API key is not a session: it has no mode and no account epoch. Order place still requires a JWT mode claim. Practice restore still requires a Practice session. Account recovery on a finished account still requires a session. |
 | Missing, revoked, or non-matching credential | HTTP 401 `{"status": "error", "message": "Unauthorized"}`. When an API key is configured, a presented credential that fails is recorded as an auth failure. When no key is configured, a missing session is still HTTP 401 and is not recorded as a ban event. |
 
@@ -818,7 +822,7 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that sandbox. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The only submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and `POST /api/v1/positions/exit-all`. Both place routes run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed, except a GTT body (`"variety": "gtt"`, any case or separator spelling), which is HTTP 422 `gtt_unsupported` on all three submit routes before Laya, SafetySystem, and any broker call. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place. A `"variety": "gtt"` body on place is HTTP 422 `gtt_unsupported`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, `POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket` when the body has exactly one stop-loss or one target. Both place routes, and each bracket leg, run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed, except a GTT body (`"variety": "gtt"`, any case or separator spelling), which is HTTP 422 `gtt_unsupported` on those submit routes before Laya, SafetySystem, and any broker call. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place. A `"variety": "gtt"` body on place is HTTP 422 `gtt_unsupported`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. A Practice bracket is HTTP 403 `practice_unsupported`. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Switching
@@ -1061,9 +1065,9 @@ Not every endpoint emits `code`:
 | `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text), and `limits.max_quantity`. There is no `applied_quantity`. |
 | `laya_clamp` | Operator place asked for more than the active quantity ceiling — HTTP 409. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Qty reduced to <applied_quantity> (Laya limit)`), `reason` (empty string), `limits.max_quantity`, and `applied_quantity`. Neither quantity is placed. The caller places `applied_quantity` itself if it still wants that size. |
-| `exit_pending` | A second reduce-only exit while one of this desk's exits on that contract is still unfilled — HTTP 409. Practice uses this code. On Live it is the code when the broker order book can be read. `message` and `reason` are `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.` The Positions row shows **Exit pending**. The label is the symbol, or `this contract` when the symbol is empty. |
-| `exit_orders_unreadable` | On Live, that second exit while the broker order book cannot be read — HTTP 409. `message` and `reason` are `Not placed. One exit at a time for <symbol> until your broker's orders load.` The label is the symbol, or `this contract` when the symbol is empty. |
-| `gtt_unsupported` | `"variety": "gtt"` (any case or separator spelling) on place, routed place, or exit-all — HTTP 422. `message` is `Not placed. GTT orders aren't supported right now.` The refusal is before Laya, SafetySystem, and any broker call. |
+| `exit_pending` | A second reduce-only exit on the same broker account while one of this desk's exits on that contract is still unfilled — HTTP 409. Practice uses this code on the Practice book. On Live it is the code when the broker order book can be read. The Live hold is for that broker account. `message` and `reason` are `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.` The Positions row shows **Exit pending**. The label is the symbol, or `this contract` when the symbol is empty. |
+| `exit_orders_unreadable` | On Live, that second exit on the same broker account while the broker order book cannot be read — HTTP 409. `message` and `reason` are `Not placed. One exit at a time for <symbol> until your broker's orders load.` The label is the symbol, or `this contract` when the symbol is empty. |
+| `gtt_unsupported` | `"variety": "gtt"` (any case or separator spelling) on place, routed place, exit-all, or a bracket — HTTP 422. `message` is `Not placed. GTT orders aren't supported right now.` The refusal is before Laya, SafetySystem, and any broker call. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true`, issued by the Live switch `POST /v1/auth/live`. |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
@@ -1078,8 +1082,10 @@ Modify, cancel, and cancel-all are not admitted as place. Forever,
 basket, split, and conditional-trigger place do not submit.
 `POST /api/v1/orders/forever` returns HTTP 501
 `Orders are placed through /api/v1/orders/place.` and does not call a
-broker. A GTT body on place, routed place, or exit-all is HTTP 422
-`gtt_unsupported` before that admission.
+broker. A Live bracket with exactly one stop-loss or one target does
+submit on `POST /api/v1/orders/bracket`. A GTT body on place, routed
+place, exit-all, or that bracket is HTTP 422 `gtt_unsupported` before
+that admission.
 Chat is not an admission source.
 Details of the place path are in [ORDER_SAFETY.md](ORDER_SAFETY.md).
 

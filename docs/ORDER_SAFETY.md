@@ -18,13 +18,18 @@ directly. Placement, regular modify/cancel, and extended verbs use different
 gates — pick the matching one.
 
 **Placement.** Every order FlintTrade submits goes through admission
-when it's placed. The only HTTP routes that submit an order are
-`POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and
-`POST /api/v1/positions/exit-all`. Operator and automate place (core
-`/orders/place`, strategy dispatch, and webhook place) share the admission
-below. `place-smart`, `open-position`, and `close-position` are not
-mounted. The Practice sandbox has no place or square-off route. Settings
-→ Practice does not place.
+when it's placed. The HTTP routes that submit an order are
+`POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,
+`POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket`
+when the body has exactly one stop-loss or one target. Each bracket leg
+is admitted, then placed through SafetySystem, `gate_order`, and
+`BrokerRouter`. Practice on that route is HTTP 403 `practice_unsupported`.
+GTT, a broker-held variety, a stop-loss and a target together, and a
+trailing stop are refused before that admission. Operator and automate
+place (core `/orders/place`, strategy dispatch, and webhook place) share
+the admission below. `place-smart`, `open-position`, and `close-position`
+are not mounted. The Practice sandbox has no place or square-off route.
+Settings → Practice does not place.
 
 1. The mode guard runs first. Explore stays `mode_blocked` and does not
    enter `Laya.admit`.
@@ -47,7 +52,7 @@ place route is Live only and uses the same Live admission. Modify and
 cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 before Laya, SafetySystem, and any broker call, on place, routed place,
-and exit-all. The message is `Not placed. GTT orders aren't supported right now.`
+exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.`
 No submit route reaches a broker forever or super-order endpoint. The
 Kotak Neo adapter refuses a `gtt` place. `POST /api/v1/orders/forever` returns
 HTTP 501 `Orders are placed through /api/v1/orders/place.` and does not
@@ -104,7 +109,8 @@ require the operator to place that reduced quantity. An automate clamp is
 a dispatcher error and does not place the reduced quantity on its own.
 Chat is not an admission source. Modify, cancel, and cancel-all are not
 admitted as place. Forever place, basket, split, and conditional-trigger
-place do not submit. A GTT body is refused on every submit route
+place do not submit. A Live bracket with exactly one stop-loss or one
+target does submit. A GTT body is refused on every submit route
 before Laya admission and SafetySystem. No submit route reaches a broker
 forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
 
@@ -121,11 +127,13 @@ close, capped at the open quantity minus this desk's own pending exits. An
 unreadable position book is not classified as a close. Laya records a
 qualifying close with proof kind `reduce_only` and does not deny or clamp
 it. Down and Degraded do not block it. Live still runs
-SafetySystem after that record. A second exit while one of this desk's
-exits on that contract is still unfilled is HTTP 409 `exit_pending`:
+SafetySystem after that record. A second exit on the same broker account,
+while one of this desk's exits on that contract is still unfilled, is
+HTTP 409 `exit_pending`:
 "Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."
-Practice uses this code. On Live it is the code when the broker order book
-can be read. When the broker order book cannot be read, that refusal is HTTP 409
+Practice uses this code on the Practice book. On Live it is the code when
+the broker order book can be read. The Live hold is for that broker
+account. When the broker order book cannot be read, that refusal is HTTP 409
 `exit_orders_unreadable`: "Not placed. One exit at a time for <symbol> until your broker's orders load."
 `message` and `reason` are that same text. The label is the symbol, or `this contract` when the symbol is empty.
 The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has

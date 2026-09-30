@@ -155,7 +155,7 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
   registers `/api/v1/orders/gtt-{place,modify,cancel}` so Explore and
   Practice are refused; Live `gtt-*` returns HTTP 501 rather than
   forwarding that upstream 501. A body with `"variety": "gtt"` on
-  place, routed place, or exit-all is HTTP 422 `gtt_unsupported`
+  place, routed place, exit-all, or a single-exit bracket is HTTP 422 `gtt_unsupported`
   (`Not placed. GTT orders aren't supported right now.`) before Laya,
   SafetySystem, and any broker call. No submit route reaches a broker
   forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
