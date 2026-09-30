@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useLocation } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
@@ -52,6 +52,7 @@ import {
   type SafetyConfig,
 } from "@/services/ftApi";
 import { TradeBottomPanel } from "./trade/TradeBottomPanel";
+import { TRADE_BOOK_PANEL_DEFAULT_PERCENT, tradeBookTabFromHash } from "./trade/tradeBookPanel";
 import { applyCompactDeskToolsDisclosure, defaultTradePresetId } from "@/lib/tradeDeskDensity";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
@@ -475,15 +476,32 @@ export default function TerminalRoute() {
     id: "trade-h-layout-v2",
     storage: localStorage,
   });
-  // Vertical layout: [main, bottom-panel]
+  // Vertical layout: [main, bottom book]. v2 ignores layouts saved while the
+  // book started collapsed at height 0.
   const { defaultLayout: vLayout, onLayoutChanged: onVLayoutChanged } = useDefaultLayout({
-    id: "trade-v-layout",
+    id: "trade-v-layout-v2",
     storage: localStorage,
   });
 
-  // Imperative refs for programmatic collapse/expand (future toolbar buttons).
+  // Imperative refs for programmatic collapse/expand.
   const bottomPanelRef = usePanelRef();
   const rightPanelRef = usePanelRef();
+  const location = useLocation();
+  const bookTab = tradeBookTabFromHash(location.hash);
+
+  const openTradeBook = useCallback((tab: "positions" | "orders") => {
+    const panel = bottomPanelRef.current;
+    panel?.expand();
+    panel?.resize(`${TRADE_BOOK_PANEL_DEFAULT_PERCENT}%`);
+    navigate({ hash: tab }, { replace: true });
+  }, [bottomPanelRef, navigate]);
+
+  useEffect(() => {
+    if (!bookTab) return;
+    const panel = bottomPanelRef.current;
+    panel?.expand();
+    panel?.resize(`${TRADE_BOOK_PANEL_DEFAULT_PERCENT}%`);
+  }, [bookTab, bottomPanelRef]);
 
   const level = useSkillLevel("trade");
   const skillContent = useSkillContent();
@@ -795,6 +813,17 @@ export default function TerminalRoute() {
         <span aria-hidden="true" className="h-4 w-px bg-border-default" />
         <WorkspaceSwitcher />
         <div className="ml-auto flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-text-secondary"
+            aria-label="Positions and orders"
+            data-testid="trade-book-toggle"
+            onClick={() => openTradeBook(bookTab ?? "positions")}
+          >
+            Positions and orders
+          </Button>
           {progressive && (
             <Button
               type="button"
@@ -882,7 +911,9 @@ export default function TerminalRoute() {
         ) : (
         /* ------------------------------------------------------------------ *
          * Resizable panel shell — vertical outer split + horizontal inner split
-         * Bottom panel is collapsed by default (collapsedSize={0}).
+         * Bottom book opens at TRADE_BOOK_PANEL_DEFAULT_PERCENT so Practice
+         * positions and orders are visible. The right-hand panel may still
+         * start collapsed.
          * The workspace canvas MUST sit inside overflow-hidden to prevent splitter drift.
          * ------------------------------------------------------------------ */
         <Group
@@ -892,7 +923,7 @@ export default function TerminalRoute() {
           onLayoutChanged={onVLayoutChanged}
         >
           {/* ---- Main row: workspace canvas + right panel ---- */}
-          <Panel id="trade-main" defaultSize={75} minSize={40}>
+          <Panel id="trade-main" defaultSize={72} minSize={40}>
             <Group
               orientation="horizontal"
               className="h-full"
@@ -997,12 +1028,12 @@ export default function TerminalRoute() {
           <Panel
             id="trade-bottom"
             panelRef={bottomPanelRef}
-            defaultSize={0}
+            defaultSize={TRADE_BOOK_PANEL_DEFAULT_PERCENT}
             minSize={8}
             collapsible
             collapsedSize={0}
           >
-            <TradeBottomPanel />
+            <TradeBottomPanel requestedTab={bookTab} />
           </Panel>
         </Group>
         )
