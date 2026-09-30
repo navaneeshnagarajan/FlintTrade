@@ -53,6 +53,11 @@ export interface Position {
   pnlPercent: number;
   /** True when every fill on this contract was restored from a backup. */
   restored?: boolean;
+  /** How the mark was chosen. Absent when the figure is a live quote. */
+  ltpBasis?: "ltp" | "last_close" | "fill_price";
+  priceSource?: "ltp" | "last_close";
+  priceAgeS?: number;
+  priceLabel?: string;
   /** Futures mark base. `fallback` means the figure is approximate. */
   markSource?: "avg" | "fallback";
   settlementPrice?: number;
@@ -212,6 +217,11 @@ export interface PlaceOrderParams {
    * and Live denies. It is not a broker instruction.
    */
   rationale?: string;
+  /**
+   * Marks `price` as a live LTP. Practice ignores an unmarked number so a
+   * typed price cannot bypass the shared fill rule.
+   */
+  priceBasis?: "ltp";
 }
 
 export interface SmartOrderParams extends PlaceOrderParams {

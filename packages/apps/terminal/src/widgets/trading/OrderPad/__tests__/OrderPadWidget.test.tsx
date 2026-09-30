@@ -1116,6 +1116,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
         orderType: "MARKET",
         quantity: 1,
         price: 250.5,
+        priceBasis: "ltp",
         triggerPrice: 0,
         strategy: "FlintOrderPad",
         rationale: "",

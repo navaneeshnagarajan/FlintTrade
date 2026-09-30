@@ -39,6 +39,7 @@ _PRACTICE_BODY = {
     "action": "BUY",
     "quantity": 1,
     "price": 100.0,
+    "price_basis": "ltp",
     "product": "MIS",
     "order_type": "MARKET",
 }

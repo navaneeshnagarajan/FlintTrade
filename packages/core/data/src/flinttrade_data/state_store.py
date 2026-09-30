@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS orders (
     filled_qty  INTEGER NOT NULL DEFAULT 0,
     avg_fill_px REAL,
     fill_time   REAL,
+    price_source TEXT,
+    price_age_s INTEGER,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
@@ -91,6 +93,8 @@ CREATE TABLE IF NOT EXISTS trades (
     price         REAL NOT NULL,
     product       TEXT NOT NULL DEFAULT 'MIS',
     strategy      TEXT NOT NULL DEFAULT '',
+    price_source  TEXT,
+    price_age_s   INTEGER,
     traded_at     REAL NOT NULL,
     charges       REAL NOT NULL DEFAULT 0.0,
     charges_json  TEXT NOT NULL DEFAULT ''
@@ -111,6 +115,8 @@ CREATE TABLE IF NOT EXISTS positions (
     sell_value      REAL NOT NULL DEFAULT 0.0,
     realised_pnl    REAL NOT NULL DEFAULT 0.0,
     unrealised_pnl  REAL NOT NULL DEFAULT 0.0,
+    price_source    TEXT,
+    price_age_s     INTEGER,
     updated_at      REAL NOT NULL,
     UNIQUE (symbol, exchange, product)
 );
@@ -152,6 +158,14 @@ END;
 _MTM_RETENTION_ROWS = 100_000
 
 
+def _add_missing_columns(conn, table: str, columns: dict[str, str]) -> None:
+    """Add nullable columns that an older sandbox database does not have yet."""
+    present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for column, definition in columns.items():
+        if column not in present:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def ensure_schema(conn) -> None:
     """Idempotently create the §9.2 sandbox schema (tables, indexes, trigger)."""
     conn.executescript(_SCHEMA_DDL)
@@ -165,10 +179,22 @@ def ensure_schema(conn) -> None:
         "pricetype": "TEXT NOT NULL DEFAULT 'MARKET'",
         "strategy": "TEXT NOT NULL DEFAULT ''",
         "fill_time": "REAL",
+        "price_source": "TEXT",
+        "price_age_s": "INTEGER",
     }
     for column, definition in migrations.items():
         if column not in order_columns:
             conn.execute(f"ALTER TABLE orders ADD COLUMN {column} {definition}")
+    _add_missing_columns(
+        conn,
+        "trades",
+        {"price_source": "TEXT", "price_age_s": "INTEGER"},
+    )
+    _add_missing_columns(
+        conn,
+        "positions",
+        {"price_source": "TEXT", "price_age_s": "INTEGER"},
+    )
     pnl_columns = {
         row[1]
         for row in conn.execute("PRAGMA table_info(pnl)").fetchall()

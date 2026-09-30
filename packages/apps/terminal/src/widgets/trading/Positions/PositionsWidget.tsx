@@ -145,6 +145,7 @@ import {
   fmtUpdatedAt,
   netPositions,
   normalisePositions,
+  ltpMarker,
   positionRowKey,
   type PositionRow,
 } from "./positionBook";
@@ -1273,11 +1274,19 @@ function PositionsWidget(props: WidgetProps) {
       {
         accessorKey: "ltp",
         header: "LTP",
-        cell: ({ row }) => (
-          <span className="font-mono tabular-nums text-text-secondary">
-            {fmtPrice(row.original.ltp)}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const marker = ltpMarker(row.original);
+          return (
+            <span className="inline-flex items-center gap-1 font-mono tabular-nums text-text-secondary">
+              {fmtPrice(row.original.ltp)}
+              {marker ? (
+                <span className="text-xxs text-text-muted" title={marker.title}>
+                  {marker.label}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "mtm",

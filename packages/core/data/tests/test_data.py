@@ -54,7 +54,7 @@ class TestStorageManager:
 
     def test_insert_and_query_tick(self):
         storage = self._make_storage()
-        ts = datetime(2026, 3, 16, 10, 0, 0)
+        ts = datetime(2026, 3, 16, 10, 0, 0, tzinfo=timezone.utc)
         storage.insert_tick(
             ts=ts,
             symbol="RELIANCE",
@@ -75,7 +75,7 @@ class TestStorageManager:
 
     def test_insert_ticks_batch(self):
         storage = self._make_storage()
-        ts = datetime(2026, 3, 16, 10, 0, 0)
+        ts = datetime(2026, 3, 16, 10, 0, 0, tzinfo=timezone.utc)
         rows = [
             (ts, "RELIANCE", "NSE", "ltp", 2500.0, None, None, None, None, None, None, None, None, None, None),
             (ts, "TCS", "NSE", "ltp", 3500.0, None, None, None, None, None, None, None, None, None, None),
@@ -98,7 +98,7 @@ class TestStorageManager:
         # TickRecorder retain-and-retry a failed buffer WITHOUT duplicating rows
         # the failed attempt already wrote (the ticks table has no unique key).
         storage = self._make_storage()
-        ts = datetime(2026, 3, 16, 10, 0, 0)
+        ts = datetime(2026, 3, 16, 10, 0, 0, tzinfo=timezone.utc)
 
         def good(ltp: float) -> tuple:
             return (ts, "TCS", "NSE", "ltp", ltp, None, None, None, None, None, None, None, None, None, None)
@@ -121,7 +121,7 @@ class TestStorageManager:
         from datetime import datetime, timedelta
 
         storage = self._make_storage()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         def row(ts, ltp):
             return (ts, "TCS", "NSE", "ltp", ltp, None, None, None, None, None, None, None, None, None, None)
@@ -143,7 +143,7 @@ class TestStorageManager:
         from datetime import datetime
 
         storage = self._make_storage()
-        row = (datetime.now(), "TCS", "NSE", "ltp", 1.0, None, None, None, None, None, None, None, None, None, None)
+        row = (datetime.now(timezone.utc), "TCS", "NSE", "ltp", 1.0, None, None, None, None, None, None, None, None, None, None)
         storage.insert_ticks_batch([row])
 
         assert storage.prune_ticks(0) == 0
@@ -153,14 +153,14 @@ class TestStorageManager:
     def test_query_ticks_date_range_filters(self):
         storage = self._make_storage()
         storage.insert_tick(
-            ts=datetime(2026, 3, 15, 10, 0, 0),
+            ts=datetime(2026, 3, 15, 10, 0, 0, tzinfo=timezone.utc),
             symbol="RELIANCE",
             exchange="NSE",
             mode="ltp",
             ltp=2490.0,
         )
         storage.insert_tick(
-            ts=datetime(2026, 3, 16, 10, 0, 0),
+            ts=datetime(2026, 3, 16, 10, 0, 0, tzinfo=timezone.utc),
             symbol="RELIANCE",
             exchange="NSE",
             mode="ltp",
@@ -177,7 +177,7 @@ class TestStorageManager:
         storage = self._make_storage()
         for index in range(5):
             storage.insert_tick(
-                ts=datetime(2026, 3, 16, 10, 0, index),
+                ts=datetime(2026, 3, 16, 10, 0, index, tzinfo=timezone.utc),
                 symbol="RELIANCE",
                 exchange="NSE",
                 mode="ltp",
@@ -227,7 +227,7 @@ class TestStorageManager:
         storage = StorageManager(str(db_path))
         storage.initialise()
         storage.insert_tick(
-            timestamp,
+            timestamp.replace(tzinfo=timezone.utc),
             "RELIANCE",
             "NSE",
             "ltp",
@@ -344,7 +344,7 @@ class TestStorageManager:
 
     def test_insert_and_query_trade(self):
         storage = self._make_storage()
-        ts = datetime(2026, 3, 16, 10, 30, 0)
+        ts = datetime(2026, 3, 16, 10, 30, 0, tzinfo=timezone.utc)
         storage.insert_trade(
             ts=ts,
             orderid="ORD001",
@@ -364,7 +364,7 @@ class TestStorageManager:
 
     def test_get_trades_by_date(self):
         storage = self._make_storage()
-        ts = datetime(2026, 3, 16, 10, 30, 0)
+        ts = datetime(2026, 3, 16, 10, 30, 0, tzinfo=timezone.utc)
         storage.insert_trade(
             ts=ts,
             orderid="ORD001",
@@ -464,7 +464,7 @@ class TestStorageManager:
 
     def test_export_trades_csv(self):
         storage = self._make_storage()
-        ts = datetime(2026, 3, 16, 10, 30, 0)
+        ts = datetime(2026, 3, 16, 10, 30, 0, tzinfo=timezone.utc)
         storage.insert_trade(
             ts=ts,
             orderid="ORD001",
@@ -494,7 +494,7 @@ class TestStorageManager:
         storage = self._make_storage()
         for day, oid, sym in ((1, "D1", "AAA"), (2, "D2", "BBB"), (3, "D3", "CCC")):
             storage.insert_trade(
-                ts=datetime(2026, 3, day, 10, 0, 0),
+                ts=datetime(2026, 3, day, 10, 0, 0, tzinfo=timezone.utc),
                 orderid=oid,
                 symbol=sym,
                 exchange="NSE",
@@ -514,7 +514,7 @@ class TestStorageManager:
         with StorageManager(":memory:") as storage:
             storage.initialise()
             storage.insert_tick(
-                ts=datetime(2026, 3, 16, 10, 0, 0),
+                ts=datetime(2026, 3, 16, 10, 0, 0, tzinfo=timezone.utc),
                 symbol="INFY",
                 exchange="NSE",
                 mode="ltp",

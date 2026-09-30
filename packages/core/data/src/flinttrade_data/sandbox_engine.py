@@ -565,6 +565,8 @@ class SandboxEngine:
         trigger_price: float = 0.0,
         strategy: str = "",
         instrument_token: str = "",
+        price_source: str | None = None,
+        price_age_s: int | None = None,
     ) -> dict[str, Any]:
         """Validate a paper order and either fill it or leave it pending.
 
@@ -684,6 +686,10 @@ class SandboxEngine:
             status = "COMPLETE" if order_type == "MARKET" else "PENDING"
             fill_price = price if status == "COMPLETE" else None
             fill_time = now if status == "COMPLETE" else None
+            stored_source, stored_age = _fill_provenance(
+                price_source if status == "COMPLETE" else None,
+                price_age_s if status == "COMPLETE" else None,
+            )
 
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -691,8 +697,9 @@ class SandboxEngine:
                     """INSERT INTO orders
                        (order_id, symbol, exchange, action, quantity, price,
                         trigger_price, pricetype, product, strategy, status,
-                        filled_qty, avg_fill_px, fill_time, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        filled_qty, avg_fill_px, fill_time, price_source,
+                        price_age_s, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         order_id,
                         symbol,
@@ -708,6 +715,8 @@ class SandboxEngine:
                         quantity if status == "COMPLETE" else 0,
                         fill_price,
                         fill_time,
+                        stored_source,
+                        stored_age,
                         now,
                         now,
                     ),
@@ -723,6 +732,8 @@ class SandboxEngine:
                         product=product,
                         strategy=strategy,
                         traded_at=now,
+                        price_source=stored_source,
+                        price_age_s=stored_age,
                     )
                 self._update_used_margin(now)
                 self._conn.execute("COMMIT")
@@ -744,7 +755,17 @@ class SandboxEngine:
             if status == "COMPLETE"
             else f"Paper {order_type} order is pending a matching live tick"
         )
-        return {"order_id": order_id, "status": status, "message": message}
+        if status == "COMPLETE" and stored_source == "last_close" and stored_age is not None:
+            from flinttrade_data.practice_price import last_close_fill_label
+
+            message = last_close_fill_label(price, stored_age)
+        result: dict[str, Any] = {"order_id": order_id, "status": status, "message": message}
+        if stored_source:
+            result["price_source"] = stored_source
+            result["price"] = price
+        if stored_age is not None:
+            result["price_age_s"] = stored_age
+        return result
 
     def check_pending_fills(self, latest_ticks: dict[str, float]) -> list[str]:
         """Fill pending LIMIT/SL/SL-M orders whose tick condition is met."""
@@ -871,6 +892,7 @@ class SandboxEngine:
                         product=str(product),
                         strategy=str(strategy),
                         traded_at=now,
+                        price_source="ltp",
                     )
                     self._update_used_margin(now)
                     self._conn.execute("COMMIT")
@@ -1035,15 +1057,17 @@ class SandboxEngine:
         rows = self._conn.execute(
             """SELECT symbol, exchange, product, net_qty, avg_price,
                       buy_qty, buy_value, sell_qty, sell_value,
-                      realised_pnl, unrealised_pnl, updated_at
+                      realised_pnl, unrealised_pnl, updated_at,
+                      price_source, price_age_s
                FROM positions
                WHERE net_qty != 0
                ORDER BY updated_at DESC"""
         ).fetchall()
 
         restored_contracts = self._restored_contracts()
-        return [
-            {
+        positions: list[dict[str, Any]] = []
+        for r in rows:
+            row = {
                 "symbol": r[0],
                 "exchange": r[1],
                 "product": r[2],
@@ -1061,8 +1085,12 @@ class SandboxEngine:
                 "updated_at": _format_ts(r[11]),
                 "restored": (r[0], r[1], r[2]) in restored_contracts,
             }
-            for r in rows
-        ]
+            if r[12]:
+                row["price_source"] = r[12]
+            if r[13] is not None:
+                row["price_age_s"] = r[13]
+            positions.append(row)
+        return positions
 
     # ------------------------------------------------------------------
     # Orders
@@ -1815,6 +1843,8 @@ class SandboxEngine:
         product: str,
         strategy: str,
         traded_at: float,
+        price_source: str | None = None,
+        price_age_s: int | None = None,
     ) -> None:
         charges, charges_json = _charges_for_fill(
             symbol=symbol,
@@ -1825,11 +1855,13 @@ class SandboxEngine:
             price=price,
             traded_at=traded_at,
         )
+        source, age = _fill_provenance(price_source, price_age_s)
         self._conn.execute(
             """INSERT INTO trades
                (trade_id, order_id, symbol, exchange, action, quantity, price,
-                product, strategy, traded_at, charges, charges_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                product, strategy, price_source, price_age_s, traded_at,
+                charges, charges_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(uuid.uuid4()),
                 order_id,
@@ -1840,6 +1872,8 @@ class SandboxEngine:
                 price,
                 product,
                 strategy,
+                source,
+                age,
                 traded_at,
                 charges,
                 charges_json,
@@ -1853,6 +1887,8 @@ class SandboxEngine:
             quantity=quantity,
             price=price,
             now=traded_at,
+            price_source=source,
+            price_age_s=age,
         )
         self._record_daily_pnl(traded_at)
 
@@ -1872,7 +1908,8 @@ class SandboxEngine:
             for position_id, net_qty, avg_price in rows:
                 unrealised = (ltp - float(avg_price)) * int(net_qty)
                 self._conn.execute(
-                    """UPDATE positions SET unrealised_pnl = ?, updated_at = ?
+                    """UPDATE positions SET unrealised_pnl = ?, updated_at = ?,
+                           price_source = NULL, price_age_s = NULL
                        WHERE position_id = ?""",
                     (unrealised, now, position_id),
                 )
@@ -1955,7 +1992,8 @@ class SandboxEngine:
         """Fetch a single position row or None if not found."""
         row = self._conn.execute(
             """SELECT position_id, net_qty, avg_price, buy_qty, buy_value,
-                      sell_qty, sell_value, realised_pnl, unrealised_pnl
+                      sell_qty, sell_value, realised_pnl, unrealised_pnl,
+                      price_source, price_age_s
                FROM positions
                WHERE symbol = ? AND exchange = ? AND product = ?""",
             (symbol, exchange, product),
@@ -1974,6 +2012,8 @@ class SandboxEngine:
             "sell_value": row[6],
             "realised_pnl": row[7],
             "unrealised_pnl": row[8],
+            "price_source": row[9],
+            "price_age_s": row[10],
         }
 
     def _update_position(
@@ -1986,6 +2026,8 @@ class SandboxEngine:
         quantity: int,
         price: float,
         now: float,
+        price_source: str | None = None,
+        price_age_s: int | None = None,
     ) -> None:
         """Upsert a position row after a fill."""
         notional = quantity * price
@@ -2000,16 +2042,18 @@ class SandboxEngine:
             sell_qty = quantity if action == "SELL" else 0
             sell_value = notional if action == "SELL" else 0.0
 
+            source, age = _fill_provenance(price_source, price_age_s)
             self._conn.execute(
                 """INSERT INTO positions
                    (position_id, symbol, exchange, product,
                     net_qty, avg_price, buy_qty, buy_value,
-                    sell_qty, sell_value, realised_pnl, unrealised_pnl, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?)""",
+                    sell_qty, sell_value, realised_pnl, unrealised_pnl,
+                    price_source, price_age_s, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?, ?, ?)""",
                 (
                     pos_id, symbol, exchange, product,
                     net_qty, avg_price, buy_qty, buy_value,
-                    sell_qty, sell_value, now,
+                    sell_qty, sell_value, source, age, now,
                 ),
             )
         else:
@@ -2066,13 +2110,21 @@ class SandboxEngine:
                    SET net_qty = ?, avg_price = ?,
                        buy_qty = ?, buy_value = ?,
                        sell_qty = ?, sell_value = ?,
-                       realised_pnl = ?, unrealised_pnl = ?, updated_at = ?
+                       realised_pnl = ?, unrealised_pnl = ?,
+                       price_source = ?, price_age_s = ?, updated_at = ?
                    WHERE position_id = ?""",
                 (
                     new_net_qty, new_avg_price,
                     new_buy_qty, new_buy_value,
                     new_sell_qty, new_sell_value,
-                    new_realised, new_unrealised, now,
+                    new_realised, new_unrealised,
+                    *_kept_position_provenance(
+                        price_source,
+                        price_age_s,
+                        new_net_qty,
+                        existing,
+                    ),
+                    now,
                     pos_id,
                 ),
             )
@@ -2180,3 +2232,42 @@ class SandboxEngine:
             self._conn.close()
         except Exception:  # pragma: no cover
             pass
+
+
+def _fill_provenance(
+    price_source: str | None,
+    price_age_s: int | None,
+) -> tuple[str | None, int | None]:
+    """Normalise a fill's price tag. Unknown sources are dropped."""
+    source = str(price_source or "").strip().lower()
+    if source == "ltp":
+        return "ltp", None
+    if source != "last_close" or price_age_s is None:
+        return None, None
+    try:
+        age = int(price_age_s)
+    except (TypeError, ValueError):
+        return None, None
+    if age < 0:
+        return None, None
+    return "last_close", age
+
+
+def _kept_position_provenance(
+    source: str | None,
+    age: int | None,
+    net_qty: int,
+    existing: dict[str, Any] | None,
+) -> tuple[str | None, int | None]:
+    """Keep the last-close marker only while the open position has no live price."""
+    if net_qty == 0 or source == "ltp":
+        return None, None
+    if source == "last_close" and age is not None:
+        return source, age
+    if existing is None:
+        return None, None
+    previous = existing.get("price_source")
+    previous_age = existing.get("price_age_s")
+    if previous == "last_close" and previous_age is not None:
+        return "last_close", int(previous_age)
+    return None, None

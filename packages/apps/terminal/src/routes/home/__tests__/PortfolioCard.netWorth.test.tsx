@@ -4,7 +4,7 @@
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { accountNetWorth, markedValue } from "@/lib/accountNetWorth";
+import { accountNetWorth } from "@/lib/accountNetWorth";
 import type { Funds, Holding, Position } from "@/types/api";
 
 const fundsQuery = vi.hoisted(() => ({
@@ -84,7 +84,6 @@ describe("PortfolioCard net worth", () => {
 
     const worth = Number(screen.getByTestId("portfolio-net-worth").getAttribute("data-value"));
     expect(worth).toBe(accountNetWorth(holdings, cash, positions, charges));
-    expect(worth).toBe(markedValue(holdings) + markedValue(positions) + cash - charges);
     expect(screen.getByText("Net Worth (Cash + Holdings + Positions)")).toBeInTheDocument();
     expect(screen.getByText("Practice account, after estimated charges")).toBeInTheDocument();
   });

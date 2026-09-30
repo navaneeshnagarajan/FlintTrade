@@ -58,6 +58,7 @@ def _order(symbol: str, action: str, quantity: int, price: float = 100.0) -> dic
         "action": action,
         "quantity": quantity,
         "price": price,
+        "price_basis": "ltp",
         "product": "MIS",
         "order_type": "MARKET",
     }

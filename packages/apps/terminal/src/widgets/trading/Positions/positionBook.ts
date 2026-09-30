@@ -30,6 +30,7 @@
  */
 
 import { positionMtm } from "@/lib/pnl";
+import { formatPriceAge, lastCloseRowTag } from "@/lib/practicePrice";
 import { isRestoredFromBackup } from "@/lib/restoredFills";
 import { classifySector, symbolRoot } from "@/lib/sectors";
 import type { Position } from "@/types/api";
@@ -127,6 +128,24 @@ export function positionExposure(quantity: number, ltp: number, averagePrice: nu
   return Math.abs(quantity) * mark;
 }
 
+/** Short LTP tag when the figure is not a live quote. The title names the source. */
+export function ltpMarker(
+  row: Pick<Position, "ltpBasis" | "priceAgeS">,
+): { label: string; title: string } | null {
+  if (row.ltpBasis === "last_close") {
+    const age = row.priceAgeS;
+    const label = age !== undefined ? lastCloseRowTag(age) : "Last close";
+    const title = age !== undefined
+      ? `Source: last close (${formatPriceAge(age)})`
+      : "Source: last close";
+    return { label, title };
+  }
+  if (row.ltpBasis === "fill_price") {
+    return { label: "Fill price", title: "Source: fill price" };
+  }
+  return null;
+}
+
 /**
  * Normalise one positionbook row.
  *
@@ -169,6 +188,13 @@ export function normalisePosition(raw: unknown): PositionRow {
     sector: classifySector(symbol),
     underlying: underlyingOf(symbol),
     restored: wire["restored"] === true || isRestoredFromBackup(str(wire["strategy"])),
+    ...(wire["ltpBasis"] === "last_close" || wire["ltpBasis"] === "fill_price" || wire["ltpBasis"] === "ltp"
+      ? { ltpBasis: wire["ltpBasis"] }
+      : {}),
+    ...(typeof wire["priceAgeS"] === "number" ? { priceAgeS: wire["priceAgeS"] } : {}),
+    ...(wire["priceSource"] === "ltp" || wire["priceSource"] === "last_close"
+      ? { priceSource: wire["priceSource"] }
+      : {}),
   };
 }
 

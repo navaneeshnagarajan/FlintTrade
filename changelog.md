@@ -23,6 +23,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Desk routes, one Practice place path, and desk polling.** `/positions`,
+  `/holdings`, `/monitoring`, `/schedules`, and `/glossary` open the screen
+  that owns that book. `/login` opens sign-in. Practice places go through
+  the admitted order route only; Settings does not place. A missing price
+  says so plainly, or fills at the last stored close. The Trade book starts
+  open. Desk reads pause while the tab is hidden and back off after HTTP 429.
+
 - **Laya chip, runtime key, and snapshot launch.** The desk polls
   `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the pid
   file, the key file, and the runtime record the same way an order
