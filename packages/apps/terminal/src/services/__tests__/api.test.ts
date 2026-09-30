@@ -3127,6 +3127,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       ltp: 1505,
       pnl: 150,
       pnlPercent: 1,
+      restored: false,
     }]);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/v1/sandbox/positions");
   });
@@ -3723,8 +3724,30 @@ describe("OpenAlgo API client (api.ts)", () => {
     } as unknown as Parameters<typeof placeOrder>[0];
 
     try {
-      await expect(placeOrder(order)).rejects.toThrow(/Live orders stay closed/i);
+      await expect(placeOrder(order)).rejects.toThrow(
+        "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      );
       expect(fetchSpy).not.toHaveBeenCalled();
+
+      mockConnectionState.apiKey = "";
+      mockBrokerState.accounts = [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ];
+      mockBrokerState.activeAccountId = "native:upstox:U1";
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse({ status: "success", data: { orderId: "EX-1" } }),
+      );
+      await placeOrder(
+        { ...order, action: "SELL" },
+        undefined,
+        { exit: true },
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const exitInit = (fetchSpy.mock.calls[0] as [string, RequestInit])[1];
+      const exitBody = JSON.parse(String(exitInit.body)) as Record<string, unknown>;
+      expect(exitBody).not.toHaveProperty("exit");
+      expect(exitBody).not.toHaveProperty("reduce_only");
+      expect(exitBody.action).toBe("SELL");
 
       mockModeState.mode = "practice";
       fetchSpy.mockResolvedValueOnce(
@@ -4279,6 +4302,45 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(apiErr.body).toEqual(failureBody);
   });
 
+  it("pins Practice on every exit-all leg and stops when the mode changes", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+    mockModeState.mode = "practice";
+    const positions = [
+      { symbol: "INFY", exchange: "NSE", product: "MIS", net_qty: 2, avg_price: 100, unrealised_pnl: 0 },
+      { symbol: "TCS", exchange: "NSE", product: "MIS", net_qty: -1, avg_price: 200, unrealised_pnl: 0 },
+    ];
+    fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (target.includes("/v1/sandbox/positions")) {
+        return jsonResponse({ status: "success", data: { positions } });
+      }
+      return jsonResponse({ status: "success", orderid: "P1" });
+    });
+
+    await exitAllPositions();
+
+    const placeCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("/api/v1/orders/place"));
+    expect(placeCalls).toHaveLength(2);
+    for (const [, init] of placeCalls) {
+      expect(new Headers((init as RequestInit).headers).get("X-FlintTrade-Mode")).toBe("practice");
+    }
+
+    fetchSpy.mockReset();
+    mockModeState.mode = "practice";
+    fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (target.includes("/v1/sandbox/positions")) {
+        mockModeState.mode = "live";
+        return jsonResponse({ status: "success", data: { positions } });
+      }
+      return jsonResponse({ status: "success", orderid: "LIVE" });
+    });
+    await expect(exitAllPositions()).rejects.toThrow(/mode changed from practice to live/);
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/v1/orders/place"))).toBe(false);
+  });
+
   it("routes live exit-all through the confirmed account-scoped safety endpoint", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
@@ -4345,7 +4407,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     });
 
     const [placeUrl, placeInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(placeUrl).toContain("/api/v1/orders/forever");
+    expect(placeUrl).toContain("/api/v1/orders/place");
     expect(placeInit.method).toBe("POST");
     const placeBody = JSON.parse(placeInit.body as string);
     expect(placeBody).toMatchObject({

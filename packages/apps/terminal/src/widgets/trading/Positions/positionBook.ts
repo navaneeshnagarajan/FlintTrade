@@ -30,6 +30,7 @@
  */
 
 import { positionMtm } from "@/lib/pnl";
+import { isRestoredFromBackup } from "@/lib/restoredFills";
 import { classifySector, symbolRoot } from "@/lib/sectors";
 import type { Position } from "@/types/api";
 
@@ -146,6 +147,7 @@ export function normalisePosition(raw: unknown): PositionRow {
     exposure: positionExposure(quantity, ltp, averagePrice),
     sector: classifySector(symbol),
     underlying: underlyingOf(symbol),
+    restored: wire["restored"] === true || isRestoredFromBackup(str(wire["strategy"])),
   };
 }
 

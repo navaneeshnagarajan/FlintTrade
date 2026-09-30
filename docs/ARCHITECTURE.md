@@ -376,18 +376,32 @@ deployment can split that state.
 
 ### Safety layers
 
-Every **Live** order placed through FlintTrade is checked by five safety
-layers inside `packages/services/engine/`. Practice orders skip this
-safety chain. Example-data placement is refused by the backend
-(`mode_blocked`); Order Pad Example Buy is a local client fill (no HTTP
+Every order FlintTrade submits goes through admission when it's placed.
+Every **Live** order placed through FlintTrade is then checked by five
+safety layers inside `packages/services/engine/`. Practice orders skip this
+safety chain. The submit routes are `POST /api/v1/orders/place`,
+`POST /api/v1/orders/<broker>/place` (Live only),
+`POST /api/v1/positions/exit-all` (a server reduce-only proof, then the
+flatten verb), and `POST /api/v1/orders/bracket` when the body has exactly
+one stop-loss or one target. Each bracket leg is admitted, then placed
+through SafetySystem. Practice on that route is HTTP 403
+`practice_unsupported`. GTT, a broker-held variety, a stop-loss and a
+target together, and a trailing stop are refused before that admission.
+Example-data placement is refused by the backend
+(HTTP 403 `mode_blocked`,
+`Orders are not available for Example. Switch to Practice or Live to trade.`)
+and does not enter `Laya.admit`.
+Order Pad Example Buy is a local client fill (no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
-**place** run the mode guard, then `Laya.admit`. Live place then runs
-SafetySystem L1–L5, `gate_order`, and `BrokerRouter`. A refusal or a
-quantity clamp stops before SafetySystem. Practice place is admitted
-before the Practice fill path and does not enter those Live layers; other
-Practice verbs go straight to that path. Example data remains
-`mode_blocked` and does not enter `Laya.admit`. Other Live write verbs
-still reach SafetySystem without this admission. See
+**place** run the mode guard, then `Laya.admit`. Live place is checked
+by Laya admission and then SafetySystem L1–L5, `gate_order`, and
+`BrokerRouter` on that place. `"variety": "gtt"` is HTTP 422
+`gtt_unsupported` before that admission, on place, routed place,
+exit-all, and a bracket. A refusal or a quantity clamp stops before SafetySystem.
+Practice place is admitted before the Practice fill path and does not enter
+those Live layers. Practice square-off is place. That book
+cancels and modifies; it does not place. `cancel-all` only cancels.
+Other Live write verbs still reach SafetySystem without this admission. See
 [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 `_check_order_locked` fail-fasts in this runtime order (not L1–L5
@@ -411,9 +425,14 @@ sandbox (Practice). It does not place an order and does not mint
 clamp stops before those next steps. Only Down mutes Live place and
 Position Mirror start. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
-smart, multi, forever, and the other write verbs still reach
-SafetySystem without this place admission. Laya starts Down; the three
-statuses are Ready, Degraded, and Down. The desk ping publishes the
+smart, multi, forever modify and cancel, and the other non-place write
+verbs still reach SafetySystem without this place admission.
+`POST /api/v1/orders/forever` does not place. A valid body is HTTP 501
+`Orders are placed through /api/v1/orders/place.` and the route does not
+call a broker. A GTT body is HTTP 422 `gtt_unsupported` before Laya,
+SafetySystem, and any broker call. No submit route reaches a broker
+forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
+Laya starts Down; the three statuses are Ready, Degraded, and Down. The desk ping publishes the
 stored status and does not invent Ready. Ready and Degraded are recorded
 by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
@@ -643,19 +662,41 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (`explore` for example data, `practice`, or
-  `live`), `jti` (unique ID). Operators see Example, Practice, Connected (read), or Live.
+  `live`), `jti` (unique ID), plus `oid` and `epoch`. Operators see Example, Practice, Connected (read), or Live.
+- PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and
+  returns a new token. The previous token stops working. The Live
+  switch does the same rotation when it enters Live.
+- Reset of a finished account needs an active session. Once an
+  authenticator is enrolled it also needs the password and the current
+  authenticator code. The wipe bumps `epoch`, so other sessions end. A
+  signed-out reset with no authenticator enrolled is refused with
+  "Sign in to reset this account. You'll need your password." With an
+  authenticator enrolled it is "Sign in to reset this account. You'll
+  need your password and authenticator code." Recovery asks for an
+  authenticator code only once one is enrolled.
 - Revocation blocklist keyed by `jti` in
   `packages/core/core/src/flinttrade_core/auth_state.py`.
+- Non-public routes accept a session JWT or `FLINTTRADE_API_KEY`. The
+  session JWT is read from `Authorization: Bearer` or from
+  `X-FlintTrade-Token`. An API key on `X-FlintTrade-Token` does not pass.
+  An API key is not a session. `GET /healthz` and `GET /readyz` are public
+  and return status only. `GET /health` is not public. The allowlist is
+  `flinttrade_core.public_routes.PUBLIC_ROUTES`. `POST /csp-report`
+  accepts `application/csp-report` and `application/reports+json`.
 
 ### Server-side mode enforcement
 
 The core `/api/v1/orders/*` proxy fans out by JWT mode: example data is
-HTTP 403 `mode_blocked`, Practice routes to the Practice fill path, and
+HTTP 403 `mode_blocked`
+(`Orders are not available for Example. Switch to Practice or Live to trade.`),
+Practice routes to the Practice fill path, and
 Live requires `live_mode_unlocked` plus the gated `BrokerRouter`.
 Executor-direct engine routes (basket, split, bracket, options-strategy)
 use `mode_guard.require_live_unlocked`: example data is `mode_blocked`,
 Practice is `practice_unsupported` (no Practice parity yet), and Live
-without PIN unlock is `live_locked`. Order Pad Example Buy on `/trade`
+without PIN unlock is `live_locked`. A Live bracket with exactly one
+stop-loss or one target places through that guard. Basket, split, and
+options-strategy place return HTTP 501 and do not place. Order Pad Example Buy on `/trade`
 with example data is a local example fill — no HTTP order route,
 SafetySystem, or broker.
 

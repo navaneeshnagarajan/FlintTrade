@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
@@ -298,7 +299,10 @@ function getSelectedDoc(state: unknown): SelectedDoc | null {
 
 async function fetchDocsDocument(path: string, signal?: AbortSignal): Promise<{ title: string; content: string }> {
   const params = new URLSearchParams({ path });
-  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, { signal });
+  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, {
+    signal,
+    headers: buildHeaders(false),
+  });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = (await response.json()) as { title?: unknown; content?: unknown };
   if (typeof body.title !== "string" || typeof body.content !== "string") {

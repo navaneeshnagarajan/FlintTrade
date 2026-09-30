@@ -14,6 +14,7 @@ import { RefreshCw, Cpu, HardDrive, MemoryStick, Clock, Network, AlertCircle } f
 import { Button } from "@/components/ui/button";
 import { SystemMetricsResponseSchema } from "@/lib/schemas/ftApi";
 import { useAuthStore } from "@/stores/authStore";
+import { buildHeaders } from "@/services/ftApi.helpers";
 
 // ---------------------------------------------------------------------------
 // Types (matches the backend schema from core/monitoring.py)
@@ -53,7 +54,7 @@ interface SystemMetrics {
 const REFETCH_INTERVAL_MS = 30_000;
 
 async function fetchSystemMetrics(): Promise<SystemMetrics> {
-  const res = await fetch("/ft-api/v1/admin/system");
+  const res = await fetch("/ft-api/v1/admin/system", { headers: buildHeaders(false) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const raw: unknown = await res.json();
   const result = SystemMetricsResponseSchema.safeParse(raw);

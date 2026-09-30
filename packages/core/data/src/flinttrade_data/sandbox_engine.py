@@ -29,12 +29,28 @@ from pathlib import Path
 from typing import Any
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_core.restored_fills import RESTORED_FROM_BACKUP
 from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
 
 from .sandbox_migration import LegacySandboxConflict, migrate_workspace
 from .state_store import IST, ensure_schema, init_capital
 
 logger = logging.getLogger("flinttrade.data.sandbox_engine")
+
+# Fills restored from a backup are stored as records. They are not new orders.
+# The marker string lives in flinttrade_core.restored_fills so every scoring
+# reader filters on the same value. Re-exported here for existing imports.
+_IMPORT_KEYS = frozenset({
+    "schema_version",
+    "config",
+    "capital",
+    "positions",
+    "orders",
+    "trades",
+    "pnl_history",
+    "exported_at",
+    "reset_at",
+})
 
 _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
 
@@ -680,8 +696,10 @@ class SandboxEngine:
             pending = self._conn.execute(
                 """SELECT order_id, symbol, exchange, action, quantity, price,
                           trigger_price, stop_triggered, pricetype, product, strategy
-                   FROM orders WHERE status = 'PENDING'
-                   ORDER BY created_at, order_id"""
+                   FROM orders
+                   WHERE status = 'PENDING' AND strategy != ?
+                   ORDER BY created_at, order_id""",
+                (RESTORED_FROM_BACKUP,),
             ).fetchall()
             filled: list[str] = []
             for row in pending:
@@ -932,6 +950,25 @@ class SandboxEngine:
     # Positions
     # ------------------------------------------------------------------
 
+    def _restored_contracts(self) -> set[tuple[str, str, str]]:
+        """Contracts whose fills are all restored from backup.
+
+        A contract is restored only when it has at least one restored fill
+        and no fill with any other strategy. A later live fill clears it.
+        """
+        rows = self._conn.execute(
+            "SELECT symbol, exchange, product, strategy FROM trades"
+        ).fetchall()
+        restored: set[tuple[str, str, str]] = set()
+        live: set[tuple[str, str, str]] = set()
+        for symbol, exchange, product, strategy in rows:
+            key = (symbol, exchange, product)
+            if strategy == RESTORED_FROM_BACKUP:
+                restored.add(key)
+            else:
+                live.add(key)
+        return restored - live
+
     def get_positions(self) -> list[dict[str, Any]]:
         """Return all open sandbox positions (net_qty != 0).
 
@@ -948,6 +985,7 @@ class SandboxEngine:
                ORDER BY updated_at DESC"""
         ).fetchall()
 
+        restored_contracts = self._restored_contracts()
         return [
             {
                 "symbol": r[0],
@@ -965,6 +1003,7 @@ class SandboxEngine:
                 "realized_pnl": r[9],
                 "unrealized_pnl": r[10],
                 "updated_at": _format_ts(r[11]),
+                "restored": (r[0], r[1], r[2]) in restored_contracts,
             }
             for r in rows
         ]
@@ -1291,6 +1330,9 @@ class SandboxEngine:
 
         if not isinstance(data, dict):
             raise ValueError("Import data must be a JSON object")
+        unknown = set(data) - _IMPORT_KEYS
+        if unknown:
+            raise ValueError("Import data contains unsupported fields")
 
         schema_version = data.get("schema_version", 1)
         if isinstance(schema_version, bool) or schema_version not in {1, 2}:
@@ -1408,7 +1450,14 @@ class SandboxEngine:
                         "stop_triggered": bool(order.get("stop_triggered", False)),
                         "order_type": order_type,
                         "product": str(order.get("product", "MIS")).strip().upper(),
-                        "strategy": str(order.get("strategy", "")),
+                        # Every resting kind (LIMIT, SL, SL-M) is marked so a
+                        # later tick cannot fill it. A completed order keeps
+                        # the strategy it was placed with.
+                        "strategy": (
+                            RESTORED_FROM_BACKUP
+                            if status == "PENDING"
+                            else str(order.get("strategy", ""))
+                        ),
                         "status": status,
                         "filled_qty": int(
                             order.get("filled_qty", quantity if status == "COMPLETE" else 0)
@@ -1459,7 +1508,7 @@ class SandboxEngine:
                             "quantity": row["filled_qty"],
                             "price": row["avg_fill_px"],
                             "product": row["product"],
-                            "strategy": row["strategy"],
+                            "strategy": RESTORED_FROM_BACKUP,
                             "traded_at": row["fill_time"] or row["created_at"],
                         }
                         for row in imported_orders
@@ -1480,7 +1529,7 @@ class SandboxEngine:
                             int(trade.get("quantity", 0)),
                             float(trade.get("price", 0.0)),
                             str(trade.get("product", "MIS")).strip().upper(),
-                            str(trade.get("strategy", "")),
+                            RESTORED_FROM_BACKUP,
                             _coerce_timestamp(trade.get("traded_at"), now),
                         ),
                     )
@@ -1836,14 +1885,21 @@ class SandboxEngine:
                 new_buy_qty = buy_qty + quantity
                 new_buy_value = buy_value + notional
                 new_net_qty = net_qty + quantity
-                new_avg_price = (
-                    ((net_qty * avg_price) + notional) / new_net_qty
-                    if new_net_qty > 0
-                    else price
-                )
                 new_sell_qty = sell_qty
                 new_sell_value = sell_value
-                new_realised = realised_pnl
+                # Covering a short realises (entry − cover) on the closed quantity.
+                # A buy that flips through flat starts the new long at the cover price.
+                if net_qty < 0:
+                    close_qty = min(quantity, -net_qty)
+                    new_realised = realised_pnl + close_qty * (avg_price - price)
+                    new_avg_price = price if new_net_qty > 0 else avg_price
+                else:
+                    new_avg_price = (
+                        ((net_qty * avg_price) + notional) / new_net_qty
+                        if new_net_qty > 0
+                        else price
+                    )
+                    new_realised = realised_pnl
                 new_unrealised = (
                     (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
                 )

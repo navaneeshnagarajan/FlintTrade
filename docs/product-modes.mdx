@@ -11,6 +11,10 @@ FlintTrade distinguishes Modes from sample data and from data provenance.
 
 A fresh browser with no saved Mode opens in Practice. Password sign-in and account setup open in Practice. A fresh login opens Practice. Quick Unlock restores the existing session and keeps its Mode. Live is entered only through the Live switch (`POST /v1/auth/live`). `POST /v1/auth/mode` accepts only a switch to Practice.
 
+Practice orders are placed on `POST /api/v1/orders/place` after Laya admission. Square-off is that same place. Settings → Practice does not place. Restore of a Practice backup is Practice only; restored fills are tagged **Restored** and left out of Laya, strategy, benchmark, and training readers.
+
+Live place is `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, or `POST /api/v1/orders/bracket` when the body has exactly one stop-loss or one target (Laya, then SafetySystem). Practice on the bracket route is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Every order FlintTrade submits goes through admission when it's placed. `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` on that place, on routed place, on `POST /api/v1/positions/exit-all`, and on that bracket, before Laya, SafetySystem, and any broker call. The refusal is `Not placed. GTT orders aren't supported right now.` The Order Pad GTT option stays visible and disabled, with the tooltip `GTT orders aren't supported right now.` Exit-all requires a server reduce-only proof. Non-funded live reads are never placeable Live orders. Laya is not Ready by default.
+
 The Mode chip in the TopBar opens the Mode menu: **Practice**, **Connected (read)**, and **Live**.
 
 - **Practice**: simulated fills, no real money. The Mode line reads `Practice — simulated fills, no real money.` Order review reads `Confirm places this simulated order.` The confirm button reads **Confirm simulation**. Kotak Neo has no sandbox — never offer “Neo Practice”.

@@ -132,7 +132,7 @@ vi.mock("@/components/brand/Logo", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import LoginRoute, { isTotpEnabledFlag } from "../LoginRoute";
+import LoginRoute, { isTotpEnabledFlag, signedOutResetCopy } from "../LoginRoute";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -983,6 +983,64 @@ describe("LoginRoute", () => {
 
     await waitFor(() => expect(screen.getByText("Invalid password.")).toBeInTheDocument());
     // Stays on the confirm view — no QR minted.
+    expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
+  });
+
+  it("reset copy follows authenticator enrolment", () => {
+    expect(signedOutResetCopy(false)).toBe(
+      "Sign in to reset this account. You'll need your password.",
+    );
+    expect(signedOutResetCopy(true)).toBe(
+      "Sign in to reset this account. You'll need your password and authenticator code.",
+    );
+  });
+
+  it("shows the password-only reset line when no authenticator is enrolled", async () => {
+    mockAuthFetch({
+      totpEnabled: false,
+      onOther: (url) => {
+        if (url.includes("regenerate-2fa") || url.includes("setup/reset")) {
+          return jsonResponse({
+            status: "error",
+            message: signedOutResetCopy(false),
+            authenticator_enrolled: false,
+          }, 401);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /lost your authenticator/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/authenticator code/i)).not.toBeInTheDocument();
+    expect(signedOutResetCopy(false)).not.toMatch(/authenticator code/);
+  });
+
+  it("shows the sign-in message when a finished account is reset while signed out", async () => {
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("regenerate-2fa")) {
+          return jsonResponse({
+            status: "error",
+            message: "Sign in to reset this account. You'll need your password and authenticator code.",
+          }, 403);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /lost your authenticator/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
+    expect(screen.getByText(signedOutResetCopy(true))).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Confirm your password to reset 2FA"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset 2fa$/i }));
+
+    expect(await screen.findByText(
+      "Sign in to reset this account. You'll need your password and authenticator code.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("Authentication required.")).not.toBeInTheDocument();
     expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
   });
 });

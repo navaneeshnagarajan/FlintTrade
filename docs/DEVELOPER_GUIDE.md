@@ -470,16 +470,40 @@ gated-session model; never add plaintext credential storage.
 ### Safety layers
 
 The 5-layer safety system lives in `packages/services/engine/`. Every
-**Live** order placed through FlintTrade is checked by those layers.
-Practice orders skip L1–L5 and go to the Practice fill path. Practice **place**
-runs `Laya.admit` before that path; a refusal or a quantity clamp
-stops before a simulated fill. Other Practice verbs go straight to the
-Practice fill path. Live operator and automate **place** is Mode guard →
-`Laya.admit` → SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
-Example-data placement is refused by the backend (`mode_blocked`); Order Pad
-Example Buy is a local example fill (no HTTP order route, no Laya admit,
-no SafetySystem). Other Live write verbs still reach SafetySystem
-without this place admission. Runtime fail-fast order in
+order FlintTrade submits goes through admission when it's placed. Every
+**Live** order placed through FlintTrade is then checked by those layers.
+The submit routes are `POST /api/v1/orders/place`,
+`POST /api/v1/orders/<broker>/place`,
+`POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket`
+when the body has exactly one stop-loss or one target. Each bracket leg
+is admitted, then placed through SafetySystem. Practice on that route is
+HTTP 403 `practice_unsupported`. GTT, a broker-held variety, a stop-loss
+and a target together, and a trailing stop are refused before that
+admission. Practice orders skip L1–L5 and go to the Practice fill path.
+Practice **place** runs `Laya.admit` before that path; a refusal or a
+quantity clamp stops before a simulated fill. A Practice close and a
+Practice square-off are opposite orders on place. The Practice fill path
+cancels and modifies only. Settings → Practice does not place. Live
+operator and automate **place** is checked when it's placed: Mode guard
+→ `Laya.admit` → SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
+`"variety": "gtt"` is HTTP 422 `gtt_unsupported`
+(`Not placed. GTT orders aren't supported right now.`) before that
+path, on place, routed place, exit-all, and a bracket. No submit route reaches a
+broker forever or super-order endpoint. The Kotak Neo adapter refuses a
+`gtt` place. `POST /api/v1/orders/forever` returns HTTP 501 and does not
+place.
+Exit-all records a server reduce-only proof before `exit_all_positions`.
+`cancel-all` only cancels. Example-data
+placement is refused by the backend (HTTP 403 `mode_blocked`,
+`Orders are not available for Example. Switch to Practice or Live to trade.`);
+Order Pad Example Buy is a local example fill (no HTTP order route, no Laya admit, no
+SafetySystem). Other Live write verbs still reach SafetySystem without
+this place admission. The global auth check covers both a session JWT
+and `FLINTTRADE_API_KEY`. The session JWT is read from
+`Authorization: Bearer` or from `X-FlintTrade-Token`. An API key on
+`X-FlintTrade-Token` does not pass. An API key is not a session, and
+place still needs a JWT mode claim. `GET /healthz` and `GET /readyz` are the public
+status-only probes. Runtime fail-fast order in
 `_check_order_locked` is **L5 → L4 → L1 → L2 → L3** (not L1–L5 numerical
 order):
 

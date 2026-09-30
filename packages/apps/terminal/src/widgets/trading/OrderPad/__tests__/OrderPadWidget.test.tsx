@@ -41,6 +41,37 @@ vi.mock("@/hooks/useBrokerCapabilities", () => ({
   useBrokerCapabilities: () => ({ data: null }),
 }));
 
+const mockOpenPositions = vi.hoisted(() => ({
+  rows: [] as Array<{
+    symbol: string;
+    exchange: string;
+    product: string;
+    quantity: number;
+    averagePrice: number;
+    ltp: number;
+    pnl: number;
+    pnlPercent: number;
+  }>,
+}));
+
+vi.mock("@/hooks/usePositions", () => ({
+  usePositions: () => ({ data: mockOpenPositions.rows, isFetching: false }),
+}));
+
+const mockOpenOrders = vi.hoisted(() => ({
+  rows: [] as Array<{
+    symbol: string;
+    exchange: string;
+    product: string;
+    action: "BUY" | "SELL";
+    status: string;
+  }>,
+}));
+
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false }),
+}));
+
 const mockMode = vi.hoisted(() => ({ current: "practice" }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -98,6 +129,8 @@ describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockMode.current = "practice";
+    mockOpenPositions.rows = [];
+    mockOpenOrders.rows = [];
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -397,10 +430,13 @@ describe("OrderPadWidget", () => {
   });
 
   it("clears a Laya denial when decision status changes and leaves confirm retryable", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      403,
+      {
       code: "laya_denied",
-      reason: "Laya is Down. Live orders are blocked.",
-      message: "Laya is Down. Live orders are blocked.",
+      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
       limits: { max_quantity: 100 },
     }));
     useOperatorSignalStore.setState({ decisionStatus: "down" });
@@ -442,6 +478,153 @@ describe("OrderPadWidget", () => {
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
     expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
+  });
+
+  it("caps Close at the open quantity and keeps it enabled while Laya is Down", async () => {
+    mockMode.current = "live";
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE1" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+
+    expect(screen.getByRole("button", { name: /place buy order/i })).toBeDisabled();
+    expect(screen.getByTestId("live-write-rectify")).toHaveTextContent(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
+    const close = screen.getByTestId("orderpad-close");
+    expect(close).toBeEnabled();
+    expect(close).toHaveTextContent("Close");
+
+    fireEvent.click(screen.getByRole("radio", { name: "SELL" }));
+    const qty = screen.getByLabelText("Quantity") as HTMLInputElement;
+    fireEvent.change(qty, { target: { value: "10" } });
+    expect(Number(qty.value)).toBe(4);
+    fireEvent.click(screen.getByLabelText("Increase Quantity"));
+    expect(Number((screen.getByLabelText("Quantity") as HTMLInputElement).value)).toBe(4);
+
+    fireEvent.click(close);
+    expect(screen.queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "NIFTY",
+        exchange: "NSE",
+        action: "SELL",
+        product: "MIS",
+        quantity: 4,
+      }),
+      { mode: "live" },
+      { exit: true },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Closed. Exits are allowed while Laya is Down.",
+    );
+  });
+
+  it("keeps Close as a reduce-only exit when the operator retries it", async () => {
+    mockMode.current = "live";
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder
+      .mockRejectedValueOnce(new Error("Connection failed"))
+      .mockResolvedValueOnce({ orderId: "CLOSE2" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
+
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 4 }),
+      { mode: "live" },
+      { exit: true },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(mockPlaceOrder).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 4 }),
+      { mode: "live" },
+      { exit: true },
+    );
+  });
+
+  it("keeps GTT visible and disabled", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    const gtt = screen.getByRole("button", { name: "GTT" });
+    expect(gtt).toBeDisabled();
+    expect(gtt).toHaveAttribute("title", "GTT orders aren't supported right now.");
+  });
+
+  it("shows the GTT refusal when a stale client is rejected", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("rejected", 422, {
+      code: "gtt_unsupported",
+      message: "Not placed. GTT orders aren't supported right now.",
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    await reviewAndConfirmPractice(/practice buy/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not placed. GTT orders aren't supported right now.",
+    );
+  });
+
+  it("shows the unreadable-book exit refusal", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("rejected", 409, {
+      code: "exit_orders_unreadable",
+      message: "Not placed. One exit at a time for NIFTY until your broker's orders load.",
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    await reviewAndConfirmPractice(/practice buy/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not placed. One exit at a time for NIFTY until your broker's orders load.",
+    );
+  });
+
+  it("does not send Close while an exit for the contract is pending", async () => {
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockOpenOrders.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      action: "SELL",
+      status: "OPEN",
+    }];
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    expect(screen.getByTestId("exit-already-pending")).toHaveTextContent(
+      "Not placed. An exit for NIFTY is already pending. Wait for it to fill, or cancel it and try again.",
+    );
+    const close = screen.getByTestId("orderpad-close");
+    expect(close).toBeDisabled();
+    fireEvent.click(close);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
   it("shows tighter Degraded limits without Blocked chrome", async () => {

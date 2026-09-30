@@ -50,6 +50,8 @@ import { istToday } from "@/lib/ist";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/formatters";
 import { Badge } from "@/components/ui/badge";
+import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
+import { isRestoredFromBackup } from "@/lib/restoredFills";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -477,9 +479,13 @@ export function FillsTable({
         accessorKey: "strategy",
         header: "Strategy",
         cell: ({ row }) => (
-          <span className="text-text-muted truncate max-w-20 inline-block align-bottom" title={row.original.strategy ?? undefined}>
-            {row.original.strategy ?? "—"}
-          </span>
+          isRestoredFromBackup(row.original.strategy) ? (
+            <RestoredFillTag />
+          ) : (
+            <span className="text-text-muted truncate max-w-20 inline-block align-bottom" title={row.original.strategy ?? undefined}>
+              {row.original.strategy ?? "—"}
+            </span>
+          )
         ),
       },
       {

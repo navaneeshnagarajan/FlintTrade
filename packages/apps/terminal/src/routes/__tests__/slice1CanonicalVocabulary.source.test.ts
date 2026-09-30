@@ -106,9 +106,10 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
 
   it("SandboxControls user-visible copy uses Practice terminology (not Paper/sandbox data)", () => {
     const src = stripComments(read(sandboxControlsPath));
-    // Required canonical visible strings
-    expect(src).toMatch(/Place Practice Order/);
-    expect(src).toMatch(/aria-label=["']Place Practice [Oo]rder["']/);
+    // The panel no longer places an order. Remaining copy stays Practice.
+    expect(src).not.toMatch(/Place Practice Order/);
+    expect(src).not.toMatch(/aria-label=["']Place Practice [Oo]rder["']/);
+    expect(src).not.toMatch(/\$\{BASE\}\/order/);
     expect(src).toMatch(/Import Practice data/);
     expect(src).toMatch(/Reset all Practice data\?/);
     expect(src).toMatch(/Practice trades/);

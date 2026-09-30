@@ -51,6 +51,8 @@ export interface Position {
   ltp: number;
   pnl: number;
   pnlPercent: number;
+  /** True when every fill on this contract was restored from a backup. */
+  restored?: boolean;
   /** Futures mark base. `fallback` means the figure is approximate. */
   markSource?: "avg" | "fallback";
   settlementPrice?: number;
@@ -81,6 +83,8 @@ export interface Trade {
   quantity: number;
   price: number;
   timestamp: string;
+  /** Present when the fill carries a strategy label, including the restore marker. */
+  strategy?: string;
 }
 
 export interface Holding {

@@ -459,7 +459,41 @@ class TestPinSetEndpoint:
                       headers={"Content-Type": "application/json",
                                "Authorization": f"Bearer {reset}"})
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
+
+    def test_session_on_x_flinttrade_token_passes_the_global_guard(self, client, monkeypatch):
+        """The fallback session header is a JWT, not an API key."""
+        c, _svc = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("nav", mode="explore")
+        missing = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert missing.status_code == 401
+        assert missing.get_json()["message"] == "Unauthorized"
+
+        accepted = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "X-FlintTrade-Token": token},
+        )
+        assert accepted.status_code == 200
+
+        monkeypatch.setenv("FLINTTRADE_API_KEY", "desk-key")
+        rejected = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "X-FlintTrade-Token": "desk-key"},
+        )
+        assert rejected.status_code == 401
+        assert rejected.get_json()["message"] == "Unauthorized"
 
     def test_set_pin_rejects_wrong_password(self, client):
         c, _ = client
@@ -839,6 +873,51 @@ class TestUnlockRestoresSession:
         assert resp.status_code == 400
         assert "no mode" in resp.get_json()["message"].lower()
 
+    def test_pin_unlock_rotates_the_session_token_and_keeps_the_mode(self, client):
+        import jwt
+
+        from flinttrade_core.auth_routes import _create_token, decode_token
+
+        c = self._setup(client)
+        old = _create_token("nav", mode="practice")
+        old_payload = decode_token(old)
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {old}",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        new = data["token"]
+        assert data["mode"] == "practice"
+        new_payload = decode_token(new)
+        assert new_payload["mode"] == "practice"
+        assert new_payload["jti"] != old_payload["jti"]
+        with pytest.raises(jwt.InvalidTokenError):
+            decode_token(old)
+        stale = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {old}",
+            },
+        )
+        assert stale.status_code == 401
+        wrong = c.post(
+            "/v1/auth/pin",
+            json={"pin": "000000", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {new}",
+            },
+        )
+        assert wrong.status_code == 401
+        assert wrong.get_json()["message"] == "Invalid PIN."
+
 
 class TestRateLimitRegistration:
     """Codex stop-gate caught that the new `/mode`, `/forgot-password`,
@@ -908,7 +987,7 @@ class TestPinIsSessionBound:
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                       headers={"Content-Type": "application/json"})
         assert resp.status_code == 401
-        assert "sign in with password" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_correct_pin_with_garbage_session_is_rejected(self, client):
         c, _ = client
@@ -956,7 +1035,7 @@ class TestGuardsRejectResetTokens:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_reset_token_rejected_by_pin_unlock(self, client):
         c, _ = client
@@ -969,7 +1048,7 @@ class TestGuardsRejectResetTokens:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
 
 class TestSetupSessionReset:
@@ -1044,6 +1123,124 @@ class TestSetupSessionReset:
         assert resp.status_code == 401
         assert svc.is_setup() is True
 
+    def test_password_alone_does_not_wipe_existing_account(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password."
+        )
+        assert resp.get_json()["authenticator_enrolled"] is False
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "nav"
+
+    def test_invalid_bearer_and_password_do_not_wipe(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-session"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_reset_token_and_password_do_not_wipe(self, client):
+        c, svc = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+        reset = _create_reset_token("nav")
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_session_and_password_wipes(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers=_session_headers(),
+        )
+        assert resp.status_code == 200
+        assert svc.is_setup() is False
+
+
+class TestSetupRegenerateRequiresSession:
+    """Once an account exists, authenticator regeneration needs a session."""
+
+    def _setup(self, c):
+        return c.post("/v1/auth/setup", json={
+            "username": "nav",
+            "email": "nav@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_password_alone_does_not_rekey(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password."
+        )
+        assert resp.get_json()["authenticator_enrolled"] is False
+        assert svc.get_totp_secret() == before
+        assert "totp_uri" not in resp.get_data(as_text=True)
+
+    def test_invalid_bearer_does_not_rekey(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-session"},
+        )
+        assert resp.status_code == 401
+        assert svc.get_totp_secret() == before
+
+    def test_session_and_password_rekeys(self, client):
+        c, svc = client
+        created = self._setup(c)
+        before = svc.get_totp_secret()
+        setup_token = created.get_json()["data"]["token"]
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert resp.status_code == 200
+        assert svc.get_totp_secret() != before
+        assert resp.get_json()["data"]["totp_uri"]
+
+    def test_daily_session_and_password_rekeys(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers=_session_headers(),
+        )
+        assert resp.status_code == 200
+        assert svc.get_totp_secret() != before
+
 
 class TestSetupMintsSession:
     """/v1/auth/setup returns a practice session token so the rest of the
@@ -1099,7 +1296,7 @@ class TestModeSwitchRejectsResetToken:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_session_token_can_still_downgrade(self, client):
         c, _ = client
@@ -1160,3 +1357,93 @@ def test_verified_operator_session_rejects_non_full_or_invalid_identity(monkeypa
     verify = getattr(auth_routes, "verify_operator_session_token", lambda token: None)
     with pytest.raises(Exception):
         verify("signed.jwt.value")
+
+
+class TestEnrolledAccountRecovery:
+    """Once an authenticator is enrolled, recovery needs a session, password, and code."""
+
+    def _setup(self, c):
+        return c.post("/v1/auth/setup", json={
+            "username": "nav",
+            "email": "nav@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_signed_out_reset_and_regenerate_are_refused(self, client, monkeypatch):
+        c, svc = client
+        self._setup(c)
+        _enable_totp(svc)
+        before = svc.get_totp_secret()
+        monkeypatch.setenv("FLINTTRADE_API_KEY", "tester-api-key")
+        headers = {"Content-Type": "application/json", "X-API-Key": "tester-api-key"}
+        body = {"password": "StrongP@ss123!"}
+        reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
+        regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
+        assert reset.status_code == 403
+        assert regenerate.status_code == 403
+        assert reset.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password and authenticator code."
+        )
+        assert reset.get_json()["authenticator_enrolled"] is True
+        assert regenerate.get_json()["message"] == reset.get_json()["message"]
+        assert regenerate.get_json()["authenticator_enrolled"] is True
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "nav"
+        assert svc.get_totp_secret() == before
+        assert svc.is_totp_enabled() is True
+
+    def test_signed_in_without_code_is_refused(self, client):
+        c, svc = client
+        self._setup(c)
+        _enable_totp(svc)
+        before = svc.get_totp_secret()
+        headers = _session_headers()
+        body = {"password": "StrongP@ss123!"}
+        reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
+        regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
+        assert reset.status_code == 403
+        assert regenerate.status_code == 403
+        assert reset.get_json()["message"] == (
+            "Account recovery requires your password and the current authenticator code."
+        )
+        assert svc.is_setup() is True
+        assert svc.get_totp_secret() == before
+        assert svc.is_totp_enabled() is True
+
+    def test_reset_invalidates_earlier_tokens(self, client):
+        import pyotp
+
+        from flinttrade_core.auth_routes import _create_token
+
+        c, svc = client
+        created = self._setup(c)
+        setup_token = created.get_json()["data"]["token"]
+        _enable_totp(svc)
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        daily = _create_token("nav", mode="practice")
+        epoch_before = svc.current_session_binding()[1]
+        reset = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!", "totp_code": code},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert reset.status_code == 200
+        assert svc.is_setup() is False
+        assert svc.current_session_binding()[1] == epoch_before + 1
+        assert c.get("/health", headers={"Authorization": f"Bearer {daily}"}).status_code == 401
+        config = c.get("/v1/config/openalgo", headers={"Authorization": f"Bearer {setup_token}"})
+        assert config.status_code == 401
+        assert c.get("/v1/config/openalgo").status_code != 401
+
+        recreated = c.post("/v1/auth/setup", json={
+            "username": "bob",
+            "email": "bob@example.com",
+            "password": "AnotherP@ss123!",
+            "pin": "654321",
+        }, headers={"Content-Type": "application/json"})
+        assert recreated.status_code == 201
+        fresh = recreated.get_json()["data"]["token"]
+        assert svc.current_session_binding()[1] == epoch_before + 2
+        assert c.get("/health", headers={"Authorization": f"Bearer {daily}"}).status_code == 401
+        assert c.get("/health", headers={"Authorization": f"Bearer {fresh}"}).status_code != 401

@@ -458,7 +458,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. | While the strip is open, Live place stays muted on that strip. Ready and Degraded allow a place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place and Position Mirror start stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live those pending exits include the broker's open orders when that book can be read. If the broker order book cannot be read, the cap is the open quantity minus this desk's own pending exits, and the close can still be admitted. A larger close takes the full check and is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."` and the row shows **Exit pending**. The Live hold is for that broker account. When the broker's orders cannot be read, that refusal is `"Not placed. One exit at a time for <symbol> until your broker's orders load."` The label is the symbol, or "this contract" when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. It is not Ready until recorded Ready. Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent. A filled one can show **Closed. Exits are allowed while Laya is Down.** Ready and Degraded allow a place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -471,15 +471,23 @@ regulator's — not a FlintTrade claims desk:
 - Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
 - SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
 
+<a id="start-laya"></a>
+
 ### Laya on place
 
-**Ready** and **Degraded** allow a place attempt. On Live, operator place
+**Ready** and **Degraded** allow a place attempt. Every order FlintTrade
+submits goes through admission when it's placed. On Live, operator place
 and automate place run Mode guard → Laya.admit → SafetySystem →
-gate_order → BrokerRouter. Laya does not place the order and does not
-replace those layers. A refusal or a quantity clamp stops before
-SafetySystem. Practice place is admitted before the sandbox and does not
-enter SafetySystem. Example data stays a refusal before admission. Chat is not an
-admission source.
+gate_order → BrokerRouter. A body with `"variety": "gtt"`, in any
+case or separator spelling, is HTTP 422 `gtt_unsupported` before Laya,
+SafetySystem, and any broker call, on place, routed place, exit-all, and a bracket. The message is
+`Not placed. GTT orders aren't supported right now.`
+Laya does not place the order and does not replace those layers. A
+refusal or a quantity clamp stops before SafetySystem. Practice place
+is admitted before the sandbox and does not enter SafetySystem. Example data
+is HTTP 403 `mode_blocked` before admission:
+`Orders are not available for Example. Switch to Practice or Live to trade.`
+Chat is not an admission source.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
@@ -499,10 +507,16 @@ limits** on the status cluster and under those place controls. That line
 is not the Blocked strip, and it does not mute Live place or Position
 Mirror start.
 
-**Down.** Laya starts **Down**. Only **Down** opens the Laya Blocked
-strip and mutes Live place and Position Mirror start. While that mute
-is up, the place control does not also show **Laya denied**. Kill All
-stays reachable. Broker may stay **Connected** or **Connected (read)**.
+**Down.** Laya starts **Down**. It is not Ready until a status of Ready
+is recorded. Only **Down** opens the Laya Blocked strip and mutes Live
+place and Position Mirror start. While that mute is up, the place
+control does not also show **Laya denied**. A close the server classifies
+as reduce-only is still admitted. The success line is **Closed. Exits
+are allowed while Laya is Down.** Cancel-all only cancels and stays
+reachable. Layer 5 and Ditto Kill All cancel resting orders and then
+flatten; they are separate from cancel-all. Broker may stay
+**Connected** or **Connected (read)**. Connected (read) is a broker
+status, not a Mode.
 
 **Chat.** Chat never shows **Admit** or **Approved by Laya**. Chat being
 offline does not close Live.
@@ -510,8 +524,11 @@ offline does not close Live.
 Order Pad and Quick Trade are the surfaces that show the deny and clamp
 notices. Scalper, Positions, Order Ladder, and Option Chain may still
 show a place error as a toast. An automate clamp is a dispatcher error,
-not a desk confirm. Modify, cancel, smart, multi, forever, and other
-write verbs are not on this admission.
+not a desk confirm. Modify, cancel, smart, multi, and other non-place
+write verbs are not on this admission. `POST /api/v1/orders/forever`
+does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.`
+No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
+with the tooltip `GTT orders aren't supported right now.`
 
 **Feed freshness.** Feed provenance lives on the ticker chip, not in the
 Mode line. Example data reads **Example**. Practice and Live may read
@@ -578,15 +595,28 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    `Example only. Nothing is sent to a broker and no order is placed.`
    The example-data confirm button reads **Continue**. That fill does not
    call the order API.
-7. Close the position from the Positions widget. Confirm your simulated
-   P&L is recorded in the **P&L Monitor** widget.
+7. Close the position from the Positions widget. Practice square-off
+   posts an opposite order to `POST /api/v1/orders/place`. Confirm your
+   simulated P&L is recorded in the **P&L Monitor** widget. Settings →
+   Practice changes virtual capital and square-off times. It does not
+   place an order.
 
 A Practice place is admitted before the sandbox. While Laya is Down
-that place is refused and nothing is filled. When admission allows the
-quantity, the path is front-end → JWT guard → mode guard → Laya.admit →
-FlintTrade sandbox → simulated fill → REST refresh of Positions and
-Orders. No real money moved. A refusal or a quantity clamp stops before
-the Practice fill path. Example Buy never enters that path.
+a new place is refused and nothing is filled. A close that only reduces
+an open position is still filled, and the success line is **Closed. Exits
+are allowed while Laya is Down.** A second exit on that contract, while
+one of yours is still unfilled, is refused with **Not placed. An exit for
+`<symbol>` is already pending. Wait for it to fill, or cancel it and
+try again.** and the row shows **Exit pending**. The label is the symbol,
+or **this contract** when the symbol is empty. When admission
+allows the quantity, the path is front-end → JWT guard → mode guard →
+Laya.admit → FlintTrade sandbox → simulated fill → REST refresh of
+Positions and Orders. No real money moved. A refusal or a quantity clamp
+stops before the sandbox. Example Buy never enters that path.
+Restoring a Practice backup marks those fills **Restored** (tooltip
+**Restored from backup. Not sent to a broker or checked by Laya.**).
+Performance shows **Excludes N restored fills** when N is at least 1,
+and hides that line when N is 0.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
@@ -703,8 +733,8 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Laya is **Ready** or **Degraded** if you intend a place attempt.
-      **Down** shows **Laya is Down — Live orders paused.** and mutes
-      Live place. **Degraded** keeps Live open and shows **Laya Degraded —
+      **Down** shows **Laya is Down. New orders are paused until it's Ready. You can still close positions.** and mutes
+      a new Live place. Close and Square off stay available. **Degraded** keeps Live open and shows **Laya Degraded —
       tighter limits**.
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 - [ ] You have read the risk and user-responsibility notes in
@@ -738,11 +768,12 @@ See [Laya on place](#laya-on-place).
 
 If anything looks wrong during live-capable testing, hit the **Kill Switch** on
 the `/trade` workspace (Live mode only). Activate and reset also live under
-`/automate` → Settings. It cancels open orders and asks the configured broker
-path to close positions via the supported close-position endpoint. The kill
-switch fires only when you explicitly activate it from the UI, API, or
-configured Telegram command. Layer 4 daily-loss thresholds block subsequent new
-orders but do not cancel orders or flatten positions.
+`/automate` → Settings. It cancels open orders and then flattens positions
+through the emergency broker path. It does not use a separate close-position
+route. **Cancel all** only cancels open orders. The kill switch fires only
+when you explicitly activate it from the UI, API, or configured Telegram
+command. Layer 4 daily-loss thresholds block subsequent new orders but do
+not cancel orders or flatten positions.
 
 ---
 
@@ -1578,11 +1609,21 @@ accessible name is `Enter your 6-digit PIN`. The PIN submits itself
 when six digits are entered. The overlay has no Unlock button.
 
 Quick Unlock reopens the same Mode the session already had, with the
-correct PIN. It keeps that Mode. The request is `POST /v1/auth/pin` with
-body `{ "pin" }`. Live is entered only through `POST /v1/auth/live`, which
-requires the PIN and authenticator enrolment. Until the authenticator is
-enabled, that call refuses 403 `totp_required`. A session that is already
-Live keeps that enrolment check when Quick Unlock reopens it.
+correct PIN. It keeps that Mode. The request is
+`POST /v1/auth/pin` with body `{ "pin" }`. A successful unlock replaces
+the session token. The previous token stops working. Live is entered
+only through `POST /v1/auth/live`, which requires the PIN and
+authenticator enrolment and also replaces the session token. Until the
+authenticator is enabled, that call refuses 403 `totp_required`. A
+session that is already Live keeps that enrolment check when Quick
+Unlock reopens it.
+
+Resetting a finished account needs you to be signed in. Recovery asks
+for an authenticator code only once an authenticator is enrolled. That
+ends your other sessions. Signed out, with no authenticator enrolled,
+the desk says **Sign in to reset this account. You'll need your password.**
+With an authenticator enrolled it says **Sign in to reset this account.
+You'll need your password and authenticator code.**
 
 With example data, `/settings` → **LLM Config**, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
@@ -1615,7 +1656,9 @@ TopBar **Broker**, **Laya**, and **LLM** labels are a different cluster
 **Down**, or **Unknown**. The OpenAlgo bridge can also show a round-trip in
 milliseconds. These rows are connection state.
 
-**System Health** keeps service rows and machine rows apart.
+**System Health** keeps service rows and machine rows apart. Signed-out
+checks use `GET /healthz` and `GET /readyz`, which return status only.
+`GET /health` needs a session.
 
 **Subsystem status** lists **Broker** and **DuckDB** on their own lines.
 Broker shows its note, otherwise its status, otherwise **unknown** — for
@@ -1774,8 +1817,8 @@ as a toast.
 1. **Laya denied** — read the server reason under the headline. Place
    controls stay off until Laya or the mode changes. **Max quantity N.**
    is the ceiling the server sent.
-   While the strip reads **Laya is Down — Live orders paused.**, Live place
-   is already muted there. Ready or Degraded allows another attempt. Chat
+   While the strip reads **Laya is Down. New orders are paused until it's Ready. You can still close positions.**, a new Live place
+   is already muted there. A close that only reduces an open position can still be sent. A filled one can show **Closed. Exits are allowed while Laya is Down.** A close larger than the position is refused with that Down line. A second exit while one is already unfilled is **Not placed. An exit for `<symbol>` is already pending. Wait for it to fill, or cancel it and try again.** and the row shows **Exit pending**. When the broker's orders cannot be read, that refusal is **Not placed. One exit at a time for `<symbol>` until your broker's orders load.** If the position flips after the broker book loads, that row is tagged **Unexpected** and stays on screen with `Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.` Ready or Degraded allows another attempt. Laya is not Ready by default. Chat
    cannot place instead.
 2. **Qty reduced to N (Laya limit)** — nothing was placed. Place quantity N
    yourself if you still want that order. **Laya Degraded — tighter limits**

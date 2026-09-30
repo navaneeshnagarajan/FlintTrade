@@ -700,7 +700,8 @@ def test_native_L2_blocks_when_at_max_positions_from_live_state(backend_lease_pr
     assert resp.status_code == 403
     assert "L2_POSITION" in resp.get_json()["message"]
     router.place_order.assert_not_called()
-    assert adapter.positions.await_count == 2
+    # Reduce-only reads positions once. The stable L2 snapshot reads them twice.
+    assert adapter.positions.await_count == 3
     adapter.funds.assert_awaited_once()
 
 
@@ -723,7 +724,8 @@ def test_native_L2_blocks_when_margin_over_limit_from_live_funds(backend_lease_p
     assert resp.status_code == 403
     assert "Margin usage" in resp.get_json()["message"]
     router.place_order.assert_not_called()
-    assert adapter.positions.await_count == 2
+    # Reduce-only reads positions once. The stable L2 snapshot reads them twice.
+    assert adapter.positions.await_count == 3
     adapter.funds.assert_awaited_once()
 
 
@@ -745,7 +747,8 @@ def test_native_portfolio_state_fetch_failure_blocks_order(backend_lease_proof) 
     )
     assert resp.status_code == 503
     router.place_order.assert_not_called()
-    adapter.positions.assert_awaited_once()
+    # The reduce-only book read and the L2 read both attempt positions.
+    assert adapter.positions.await_count == 2
 
 
 def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:

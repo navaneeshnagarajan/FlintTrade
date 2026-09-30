@@ -17,11 +17,23 @@ or script must not call a broker adapter or `OpenAlgoClient.place_order`
 directly. Placement, regular modify/cancel, and extended verbs use different
 gates — pick the matching one.
 
-**Placement** (operator and automate place: core `/orders/place`, strategy
-dispatch, and webhook place):
+**Placement.** Every order FlintTrade submits goes through admission
+when it's placed. The HTTP routes that submit an order are
+`POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,
+`POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket`
+when the body has exactly one stop-loss or one target. Each bracket leg
+is admitted, then placed through SafetySystem, `gate_order`, and
+`BrokerRouter`. Practice on that route is HTTP 403 `practice_unsupported`.
+GTT, a broker-held variety, a stop-loss and a target together, and a
+trailing stop are refused before that admission. Operator and automate
+place (core `/orders/place`, strategy dispatch, and webhook place) share
+the admission below. `place-smart`, `open-position`, and `close-position`
+are not mounted. The Practice sandbox has no place or square-off route.
+Settings → Practice does not place.
 
-1. The mode guard runs first. Example data stays `mode_blocked` and does not
-   enter `Laya.admit`.
+1. The mode guard runs first. Example data stays HTTP 403 `mode_blocked`
+   (`Orders are not available for Example. Switch to Practice or Live to trade.`)
+   and does not enter `Laya.admit`.
 2. `Laya.admit` then admits or refuses the proposal. A refusal
    (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
    SafetySystem on Live and before the native sandbox on Practice.
@@ -36,9 +48,18 @@ dispatch, and webhook place):
    ACL, and consumes the one-shot gate.
 
 An allowed Practice place is admitted, then goes to the native sandbox. It
-does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Modify,
-cancel, smart, multi, forever, and the other write verbs are not this
-admission.
+does not enter SafetySystem, `gate_order`, or `BrokerRouter`. The routed
+place route is Live only and uses the same Live admission. Modify and
+cancel are not this admission. `POST /api/v1/orders/cancel-all` only
+cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
+before Laya, SafetySystem, and any broker call, on place, routed place,
+exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.`
+No submit route reaches a broker forever or super-order endpoint. The
+Kotak Neo adapter refuses a `gtt` place. `POST /api/v1/orders/forever` returns
+HTTP 501 `Orders are placed through /api/v1/orders/place.` and does not
+call a broker. Practice and Live both refuse that variety before the
+sandbox or a broker. The Order Pad GTT option stays visible and disabled,
+with the tooltip `GTT orders aren't supported right now.`
 
 **Regular modify and cancel:**
 
@@ -51,8 +72,11 @@ admission.
 4. `BrokerRouter.modify_order` / `cancel_order` re-verify and consume the
    gate.
 
-**Extended verbs** (forever/GTT, super-order, conditional trigger, convert,
-exit-all, reducing, multi, cancel-all, smart-cancel):
+**Extended verbs** (forever modify/cancel, super-order, conditional
+trigger modify/cancel, convert, exit-all, reducing, multi, cancel-all,
+smart-cancel). Exit-all is a submit route: the server records a
+reduce-only proof for each open contract before `exit_all_positions`.
+Forever, basket, split, and trigger *place* are not submit routes.
 
 1. Risk-increasing legs still run `SafetySystem.check_order` where the
    route admits exposure.
@@ -84,12 +108,46 @@ SafetySystem on Live and before the sandbox on Practice. A clamp names
 the reduced quantity. Neither size is placed. Order Pad and Quick Trade
 require the operator to place that reduced quantity. An automate clamp is
 a dispatcher error and does not place the reduced quantity on its own.
-Chat is not an admission source. Modify, cancel, smart, multi, forever,
-and the other write verbs are not admitted.
+Chat is not an admission source. Modify, cancel, and cancel-all are not
+admitted as place. Forever place, basket, split, and conditional-trigger
+place do not submit. A Live bracket with exactly one stop-loss or one
+target does submit. A GTT body is refused on every submit route
+before Laya admission and SafetySystem. No submit route reaches a broker
+forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
-Down — Live orders paused."). That class closes Live place and Position
-Mirror start on the shared client place path. Kill All stays reachable.
+Down. New orders are paused until it's Ready. You can still close positions.").
+That class closes a new Live place and Position Mirror start on the shared
+client place path. The server decides reduce-only. A client flag is ignored.
+A close qualifies inside either place route when it is the same contract,
+the opposite side, and the quantity is no more than the open quantity minus
+pending exits. Pending exits are this desk's unfilled opposite orders. On
+Live they also include the broker's open orders on that contract when that
+book can be read. An unreadable broker order book still admits a reduce-only
+close, capped at the open quantity minus this desk's own pending exits. An
+unreadable position book is not classified as a close. Laya records a
+qualifying close with proof kind `reduce_only` and does not deny or clamp
+it. Down and Degraded do not block it. Live still runs
+SafetySystem after that record. A second exit on the same broker account,
+while one of this desk's exits on that contract is still unfilled, is
+HTTP 409 `exit_pending`:
+`"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."`
+Practice uses this code on the Practice book. On Live it is the code when
+the broker order book can be read. The Live hold is for that broker
+account. When the broker order book cannot be read, that refusal is HTTP 409
+`exit_orders_unreadable`: `"Not placed. One exit at a time for <symbol> until your broker's orders load."`
+`message` and `reason` are that same text. The label is the symbol, or `this contract` when the symbol is empty.
+The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has
+loaded keeps that row, tagged **Unexpected**, and the book shows
+`Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.`
+until dismissed.
+Anything that would flip or add to a position takes the full admit.
+`POST /api/v1/positions/exit-all` uses the same classification as a
+server-side proof before it flattens. `POST /api/v1/orders/cancel-all`
+only cancels. Layer 5 and Ditto Kill All cancel resting orders and then
+flatten; they stay reachable while Laya is Down, and they are not
+cancel-only. A filled reducing close can show "Closed. Exits are allowed
+while Laya is Down."
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 Ready and Degraded are recorded only by `Laya.set_status`; the desk ping
 and `note_heartbeat` publish the stored status and do not invent Ready.

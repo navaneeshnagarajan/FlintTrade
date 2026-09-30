@@ -155,25 +155,42 @@ class TestPublicEndpointBypass:
         """Documented public liveness probe stays reachable without an API key."""
         resp = client.get("/api/v1/ping")
         assert resp.status_code == 200
-        assert resp.get_json()["status"] == "ok"
+        body = resp.get_json()
+        assert set(body) == {"status", "timestamp", "laya"}
+        assert body["status"] == "ok"
+        assert body["laya"] in {"ready", "degraded", "down"}
+        text = resp.get_data(as_text=True).lower()
+        assert "version" not in text
+        assert "/home/" not in text
+        for detail in ("broker", "duckdb", "disk", "memory", "checks", "path"):
+            assert detail not in text
 
-    def test_api_v1_health_no_key_required(self, client: Any) -> None:
-        """Documented public aggregated health surface stays reachable without a key."""
+    def test_api_v1_health_requires_a_session(self, client: Any) -> None:
+        """Aggregated health includes subsystem detail and stays behind a session."""
         resp = client.get("/api/v1/health")
-        assert resp.status_code in (200, 503)
-        assert resp.get_json()["status"] in ("ok", "degraded", "error")
+        assert resp.status_code == 401
 
-    def test_process_health_paths_require_api_key_when_configured(self, client: Any) -> None:
-        """``/healthz`` and ``/health/detail`` stay key-gated when a key is set.
+    def test_process_probes_are_status_only(self, client: Any) -> None:
+        """``/healthz`` and ``/readyz`` are public and return only a status.
 
-        ``docs/API.md`` tells operators to probe ``/api/v1/ping`` and
-        ``/api/v1/health`` instead. Opening the whole health blueprint would
-        also publish workspace paths from ``/health/detail``.
+        ``/health`` and ``/health/detail`` stay behind a session so a probe
+        cannot publish workspace paths or config.
         """
         healthz = client.get("/healthz")
-        assert healthz.status_code == 401
-        detail = client.get("/health/detail")
-        assert detail.status_code == 401
+        assert healthz.status_code == 200
+        assert set(healthz.get_json()) == {"status"}
+        assert healthz.get_json()["status"] == "ok"
+        readyz = client.get("/readyz")
+        assert readyz.status_code in (200, 503)
+        assert set(readyz.get_json()) == {"status"}
+        assert readyz.get_json()["status"] in {"ready", "not_ready"}
+        for resp in (healthz, readyz):
+            text = resp.get_data(as_text=True).lower()
+            assert "version" not in text
+            assert "path" not in text
+            assert "config" not in text
+        assert client.get("/health").status_code == 401
+        assert client.get("/health/detail").status_code == 401
 
 
 # ---------------------------------------------------------------------------

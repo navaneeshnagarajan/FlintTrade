@@ -33,11 +33,14 @@ describe("layaNoticeFromOrderError", () => {
   });
 
   it("does not turn a Live Down mute into a deny", () => {
-    const muted = new Error("Laya is Down — Live orders paused.");
+    const muted = new Error(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
     expect(layaNoticeFromOrderError(muted)).toBeNull();
-    const denied = new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+    const downReason = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    const denied = new OrderApiError(downReason, 403, {
       code: "laya_denied",
-      reason: "Laya is Down. Live orders are blocked.",
+      reason: downReason,
       limits: { max_quantity: 100 },
     });
     expect(layaNoticeFromOrderError(denied, { suppressDeny: true })).toBeNull();
