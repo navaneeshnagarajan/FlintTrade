@@ -361,6 +361,20 @@ def _create_token(
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
+def _mint_setup_session(username: str, *, setup_bound: str) -> str:
+    """Mint the first-run setup session.
+
+    Account create and a mid-setup resume share this call. The mode is
+    ``_create_token``'s Practice default. Example data is reserved for the
+    web demo and is not minted here.
+    """
+    return _create_token(
+        username,
+        setup_session=True,
+        setup_bound=setup_bound,
+    )
+
+
 def _session_binding_claims() -> dict[str, Any]:
     """Stamp the current operator id and account epoch, when one exists.
 
@@ -638,16 +652,12 @@ def auth_setup() -> tuple[Any, int]:
     # authenticated (broker connection + mode selection are behind the G9
     # write guard / D6 session-bound PIN). Legitimate: the operator is
     # physically creating the account right now, so this first session needs no
-    # separate TOTP step. It is non-live (mode=practice, live_mode_unlocked
+    # separate TOTP step. It is non-live (Practice, live_mode_unlocked
     # false). Authenticator enrolment is optional for Practice;
     # arming Live still requires PIN and a confirmed authenticator.
     # Example data is reserved for the web demo and is not minted here.
-    token = _create_token(
-        username,
-        mode="practice",
-        setup_session=True,
-        setup_bound=svc.get_created_at(),
-    )
+    # Resume uses the same helper, so a reload stays on that Practice session.
+    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
     return jsonify({
         "status": "success",
         "data": {
@@ -1022,7 +1032,7 @@ def auth_setup_resume() -> tuple[Any, int]:
     The account-create JWT lives in the browser tab. Reloading ``/setup``
     drops it, and the vault and Start over routes then refuse the operator.
     Password proof (and the authenticator, once enrolled) mints the same
-    kind of setup session the account-create response minted. A finished
+    Practice setup session the account-create response minted. A finished
     install uses daily sign-in instead.
     """
     svc = _get_auth_service()
@@ -1060,12 +1070,7 @@ def auth_setup_resume() -> tuple[Any, int]:
     username = str(profile.get("username") or "")
     if not username:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
-    token = _create_token(
-        username,
-        mode="explore",
-        setup_session=True,
-        setup_bound=svc.get_created_at(),
-    )
+    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
     return jsonify({
         "status": "success",
         "data": {"token": token, "username": username},

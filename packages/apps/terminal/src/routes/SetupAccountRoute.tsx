@@ -199,7 +199,7 @@ function requiredStepFor(progress: { accountCreated: boolean; vaultOpened: boole
 // Module-scoped, in-memory-only cache of the step-2 recovery material (TOTP
 // URI + backup codes). Recovery material is deliberately NEVER written to
 // browser storage, but the wizard's component state is lost when the route
-// remounts — and installing the explore-mode session token right after
+// remounts — and installing the setup-session token right after
 // account creation flips the auth store and remounts the tree. Without this
 // cache a brand-new account landed on step 2 with the QR button disabled and
 // a misleading "closed or refreshed" recovery message. Module scope survives

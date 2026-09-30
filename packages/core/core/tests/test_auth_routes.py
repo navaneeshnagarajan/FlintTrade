@@ -436,6 +436,30 @@ class TestSetupResumeAndComplete:
                        headers={"Content-Type": "application/json"})
         assert again.status_code == 409
 
+    def test_resume_mints_the_same_practice_session_as_setup(self, client):
+        """A password-proven resume carries the Practice mode setup minted."""
+        from flinttrade_core.auth_routes import decode_token
+
+        c, _svc = client
+        created = c.post("/v1/auth/setup", json={
+            "username": "operator",
+            "email": "operator@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        assert created.status_code == 201
+        setup_payload = decode_token(created.get_json()["data"]["token"])
+        assert setup_payload["mode"] == "practice"
+
+        resumed = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                         headers={"Content-Type": "application/json"})
+        assert resumed.status_code == 200
+        resume_payload = decode_token(resumed.get_json()["data"]["token"])
+        assert resume_payload["mode"] == "practice"
+        assert resume_payload["mode"] == setup_payload["mode"]
+        assert resume_payload["setup_session"] is True
+        assert resume_payload["live_mode_unlocked"] is False
+
     def test_resume_requires_authenticator_once_enrolled(self, client):
         c, svc = client
         self._create_operator(c)
