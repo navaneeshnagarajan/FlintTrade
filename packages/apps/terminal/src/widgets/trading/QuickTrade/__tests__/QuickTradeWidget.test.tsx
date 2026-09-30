@@ -249,7 +249,7 @@ describe("QuickTradeWidget", () => {
     fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
       target: { value: "Planned breakout" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /sell 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /sell 1 lot of/i }));
     await waitFor(() => {
       expect(mockPlaceOrder).toHaveBeenCalledWith(
         expect.objectContaining({ action: "SELL", quantity: 1, rationale: "Planned breakout" }),
