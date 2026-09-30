@@ -263,19 +263,31 @@ def test_asset_manifest_selects_the_pinned_official_release() -> None:
     windows = _asset_for_platform(system="Windows", machine="AMD64")
 
     assert mac.name == "ollama-darwin.tgz"
-    assert mac.sha256 == "3b12a49c6c4cbafd7ffba5ccba60cbf80274cdc22eea3ead79c646aba888174c"
+    assert mac.sha256 == "2608dbb0a0f0136a198db9d48b4f74ece55f452314a39452fca35b7cf20c2589"
     assert linux.name == "ollama-linux-amd64.tar.zst"
-    assert linux.sha256 == "56362d7609dfa9e35aaebb7c9cab25605d8f0528ec3d5d585dc83d6642002bab"
+    assert linux.sha256 == "1c114a6b220c5efca2ef2b1e5f01d1e535e26f6cd6d1678c8489325d2835e525"
     assert windows.name == "ollama-windows-amd64.zip"
-    assert windows.sha256 == "56561a8f0a904483303c610e61af61c5a7b6f5496ce3707e207d25d4ff67b89e"
-    assert mac.url.endswith(f"/v0.32.0/{mac.name}")
-    assert mac.size_bytes == 145_356_966
-    assert linux.size_bytes == 1_436_128_693
-    assert windows.size_bytes == 1_503_047_573
-    assert mac.max_extracted_bytes == 512 * 1024 * 1024
-    assert linux.max_extracted_bytes == 6 * 1024 * 1024 * 1024
+    assert windows.sha256 == "d6f7d3dd4f5d013553a78c1e78b2521fcf41d43dd2863e4596cdc046fe6036db"
+    windows_arm = _asset_for_platform(system="Windows", machine="arm64")
+    assert windows_arm.name == "ollama-windows-arm64.zip"
+    assert windows_arm.sha256 == "99d061915a68fb563da0fb9316fd112cfc6fce0c9478601b2765b1f973cb715e"
+    assert mac.url.endswith(f"/v0.35.0/{mac.name}")
+    assert mac.size_bytes == 160_167_937
+    assert linux.size_bytes == 1_427_765_407
+    assert windows.size_bytes == 1_461_196_158
+    assert windows_arm.size_bytes == 208_072_407
+    assert mac.max_extracted_bytes == 1024 * 1024 * 1024
+    linux_arm = _asset_for_platform(system="Linux", machine="arm64")
+    assert linux_arm.name == "ollama-linux-arm64.tar.zst"
+    assert linux_arm.sha256 == "cb627d332b1fe5055bd5485ca10d595da8429e447648209e375390ec3bd09374"
+    assert linux_arm.size_bytes == 1_550_231_393
+    assert linux_arm.max_extracted_bytes == 6 * 1024 * 1024 * 1024
     assert windows.max_extracted_bytes == 6 * 1024 * 1024 * 1024
+    assert windows_arm.max_extracted_bytes == 512 * 1024 * 1024
 
+    previous = _asset_for_platform(system="Darwin", machine="arm64", version="v0.32.0")
+    assert previous.sha256 == "3b12a49c6c4cbafd7ffba5ccba60cbf80274cdc22eea3ead79c646aba888174c"
+    assert previous.url.endswith(f"/v0.32.0/{previous.name}")
     rollback = _asset_for_platform(system="Darwin", machine="arm64", version="v0.31.2")
     assert rollback.sha256 == "d72381baa260f6ce014c8e942e605eac76cac5313fcb3401eaf5495f659cfd6d"
     assert rollback.url.endswith(f"/v0.31.2/{rollback.name}")
@@ -294,14 +306,21 @@ def test_linux_accelerator_overlays_are_pinned_to_the_same_release(tmp_path: Pat
         "ollama-linux-amd64.tar.zst",
         "ollama-linux-amd64-rocm.tar.zst",
     ]
-    assert rocm[1].sha256 == "f0fad39e184daab11d172a855580abd7338b2f049afa462435fee15d76b4e437"
-    assert rocm[1].size_bytes == 1_047_646_096
+    assert rocm[1].sha256 == "77b6ef06adf34b1fa5232d4372d0e988bcb862363e4b81002ed59a1d0b91bb4c"
+    assert rocm[1].size_bytes == 1_051_878_032
     assert rocm[1].max_extracted_bytes == 5 * 1024 * 1024 * 1024
     assert [asset.name for asset in jetpack] == [
         "ollama-linux-arm64.tar.zst",
         "ollama-linux-arm64-jetpack6.tar.zst",
     ]
-    assert jetpack[1].sha256 == "89244534ec56a68093334d3957dd968a53328a02a8f155cbabc1f977c7c4537b"
+    jetpack5 = _assets_for_platform(system="Linux", machine="arm64", accelerator="jetpack5")
+    assert jetpack5[1].name == "ollama-linux-arm64-jetpack5.tar.zst"
+    assert jetpack5[1].sha256 == "f7f1a7e890f2a493014f01cf8de948b5aa4641f34c05d2cb61983649b9c20f5b"
+    assert jetpack5[1].size_bytes == 297_201_571
+    assert jetpack5[1].max_extracted_bytes == 2 * 1024 * 1024 * 1024
+    assert jetpack[1].sha256 == "609be1fb0f0d28ea3b10df7194508562da431200568157eef36de5745edd2753"
+    assert jetpack[1].size_bytes == 269_692_742
+    assert jetpack[1].max_extracted_bytes == 2 * 1024 * 1024 * 1024
 
     runtime = OllamaRuntime(tmp_path, asset=rocm[0], overlay_assets=(rocm[1],))
     status = runtime._status_snapshot()
@@ -709,7 +728,7 @@ def test_repeated_install_preserves_a_ready_managed_runtime(tmp_path: Path) -> N
         tmp_path / "workspace",
         asset=_fake_asset(archive),
         downloader=_copy_download(archive),
-        probe=lambda: "0.32.0" if process.poll() is None else None,
+        probe=lambda: "0.35.0" if process.poll() is None else None,
         listener_owner=lambda owned_process: owned_process is process,
     )
     runtime.install()
@@ -722,7 +741,7 @@ def test_repeated_install_preserves_a_ready_managed_runtime(tmp_path: Path) -> N
     assert result["state"] == "ready"
     assert result["ready"] is True
     assert result["managed_process"] is True
-    assert result["server_version"] == "0.32.0"
+    assert result["server_version"] == "0.35.0"
     assert runtime._phase == "ready"
 
 
@@ -1151,7 +1170,7 @@ def test_repair_refuses_to_touch_files_while_any_ollama_listener_is_present(tmp_
             max_extracted_bytes=1,
             executable_candidates=("bin/ollama.exe",),
         ),
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
     )
     corrupt_file = runtime.install_dir / "bin" / "ollama.exe"
     corrupt_file.parent.mkdir(parents=True)
@@ -1197,7 +1216,7 @@ def test_runtime_refuses_a_symlinked_managed_runtime_ancestor_before_repair(tmp_
         bundle.writestr("bin/ollama.exe", b"replacement")
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside-runtime"
-    corrupt_file = outside / "v0.32.0" / "bin" / "ollama.exe"
+    corrupt_file = outside / "v0.35.0" / "bin" / "ollama.exe"
     corrupt_file.parent.mkdir(parents=True)
     corrupt_file.write_bytes(b"outside-corrupt")
     (workspace / "runtime").mkdir(parents=True)
@@ -1416,7 +1435,7 @@ def test_pull_failure_after_transport_handoff_is_indeterminate(tmp_path: Path) -
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
     )
     runtime._process = _FakeProcess()
@@ -1439,7 +1458,7 @@ def test_pull_failure_after_remote_progress_is_indeterminate(tmp_path: Path) -> 
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         request_json=lambda *_args: (_ for _ in ()).throw(OllamaRuntimeError("model inventory unavailable")),
     )
@@ -1645,7 +1664,7 @@ def test_concurrent_runtime_instances_cannot_split_process_ownership(
         monkeypatch.setattr(
             runtime,
             "_probe",
-            lambda _runtime=runtime: "0.32.0"
+            lambda _runtime=runtime: "0.35.0"
             if _runtime._process is not None and _runtime._process.poll() is None
             else None,
         )
@@ -1901,7 +1920,7 @@ def _prove_fake_process_listener_ownership(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_status_distinguishes_an_external_ollama_server(tmp_path: Path) -> None:
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
 
     status = runtime.status()
 
@@ -1909,7 +1928,7 @@ def test_status_distinguishes_an_external_ollama_server(tmp_path: Path) -> None:
     assert status["state"] == "conflict"
     assert status["managed_process"] is False
     assert status["external_process"] is True
-    assert status["server_version"] == "0.32.0"
+    assert status["server_version"] == "0.35.0"
 
 
 def test_start_rejects_an_already_listening_unowned_process(tmp_path: Path) -> None:
@@ -1979,7 +1998,7 @@ def test_start_uses_loopback_workspace_models_and_disables_cloud(
     asset = _fake_asset(archive)
     process = _FakeProcess()
     captured: dict[str, Any] = {}
-    probes = iter([None, "0.32.0"])
+    probes = iter([None, "0.35.0"])
 
     def process_factory(args: list[str], **kwargs: Any) -> _FakeProcess:
         captured["args"] = args
@@ -1991,7 +2010,7 @@ def test_start_uses_loopback_workspace_models_and_disables_cloud(
         asset=asset,
         downloader=_copy_download(archive),
         process_factory=process_factory,
-        probe=lambda: next(probes, "0.32.0"),
+        probe=lambda: next(probes, "0.35.0"),
         sleep=lambda _seconds: None,
         port_allocator=lambda: 43127,
     )
@@ -2058,7 +2077,7 @@ def test_start_uses_atomic_ephemeral_binding_and_discovers_the_owned_listener(
         bundle.writestr("bin/ollama.exe", b"binary")
     process = _FakeProcess()
     captured: dict[str, Any] = {}
-    probes = iter([None, "0.32.0"])
+    probes = iter([None, "0.35.0"])
 
     def process_factory(args: list[str], **kwargs: Any) -> _FakeProcess:
         captured["args"] = args
@@ -2070,7 +2089,7 @@ def test_start_uses_atomic_ephemeral_binding_and_discovers_the_owned_listener(
         asset=_fake_asset(archive),
         downloader=_copy_download(archive),
         process_factory=process_factory,
-        probe=lambda: next(probes, "0.32.0"),
+        probe=lambda: next(probes, "0.35.0"),
         sleep=lambda _seconds: None,
         port_discoverer=lambda _process: 43127,
     )
@@ -2454,7 +2473,7 @@ def test_start_refuses_to_publish_a_matching_unowned_listener_that_wins_the_bind
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr("bin/ollama.exe", b"binary")
     process = _FakeProcess()
-    probes = iter([None, "0.32.0"])
+    probes = iter([None, "0.35.0"])
 
     if os.name != "nt":
         def killpg(_process_group: int, sent_signal: int) -> None:
@@ -2469,7 +2488,7 @@ def test_start_refuses_to_publish_a_matching_unowned_listener_that_wins_the_bind
         asset=_fake_asset(archive),
         downloader=_copy_download(archive),
         process_factory=lambda *_args, **_kwargs: process,
-        probe=lambda: next(probes, "0.32.0"),
+        probe=lambda: next(probes, "0.35.0"),
         sleep=lambda _seconds: None,
     )
     runtime.install()
@@ -2548,7 +2567,7 @@ def test_stop_returns_truthful_state_after_resetting_the_private_endpoint(
     tmp_path: Path,
 ) -> None:
     process = _FakeProcess()
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
     runtime._process = process
     runtime._port = 43127
     monkeypatch.setattr(
@@ -2742,7 +2761,7 @@ def test_stop_retains_failed_ownership_when_tree_teardown_is_unproved(
     assert status["state"] == "failed"
     assert status["managed_process"] is True
 
-    external = OllamaRuntime(tmp_path / "external", probe=lambda: "0.32.0")
+    external = OllamaRuntime(tmp_path / "external", probe=lambda: "0.35.0")
     external.stop()
     assert external.status()["external_process"] is True
 
@@ -2811,7 +2830,7 @@ def test_stop_holds_the_process_lock_while_signalling_the_owned_group(
 
 def test_status_holds_the_process_lock_while_proving_listener_ownership(tmp_path: Path) -> None:
     process = _FakeProcess()
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
     runtime._process = process
     observer_started = threading.Event()
     observer_finished = threading.Event()
@@ -2855,7 +2874,7 @@ def test_status_holds_the_process_lock_while_probing_the_captured_process(tmp_pa
         observer = threading.Thread(target=observe_process_lock)
         observer.start()
         assert observer_finished.wait(timeout=0.05) is False
-        return "0.32.0"
+        return "0.35.0"
 
     runtime = OllamaRuntime(tmp_path, probe=probe, listener_owner=lambda owned: owned is process)
     runtime._process = process
@@ -3090,7 +3109,7 @@ def test_stop_bounds_its_post_teardown_status_verification(
 def test_list_models_returns_a_bounded_live_server_shape(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=lambda method, path, payload: {
             "models": [
                 {
@@ -3133,7 +3152,7 @@ def test_model_inventory_rejects_more_than_the_authoritative_limit_without_recon
     models.append({"name": locked_alias, "model": locked_alias, "digest": digest})
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=lambda _method, _path, _payload: {"models": models},
     )
     runtime._process = _FakeProcess()
@@ -3168,7 +3187,7 @@ def test_model_inventory_cannot_erase_a_concurrent_digest_acceptance(
             ]
         }
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", request_json=request_json)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
     reconcile = runtime._reconcile_model_trust_state
 
@@ -3216,7 +3235,7 @@ def test_model_inventory_cannot_erase_a_concurrent_digest_acceptance(
 def test_external_listener_cannot_be_used_for_managed_model_operations(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=lambda *_args: {"models": []},
         puller=lambda *_args: None,
     )
@@ -3229,7 +3248,7 @@ def test_external_listener_cannot_be_used_for_managed_model_operations(tmp_path:
 
 @pytest.mark.parametrize("model", ["", " qwen3:8b", "qwen3 8b", "../qwen", "qwen\n3"])
 def test_pull_model_rejects_non_canonical_identifiers(tmp_path: Path, model: str) -> None:
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
 
     with pytest.raises(ValueError, match="canonical model identifier"):
         runtime.pull_model(model)
@@ -3246,7 +3265,7 @@ def test_pull_model_reports_streamed_progress(tmp_path: Path) -> None:
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]
@@ -3274,7 +3293,7 @@ def test_pull_model_reports_streamed_progress(tmp_path: Path) -> None:
 def test_pull_model_rejects_a_reported_total_above_the_hard_limit(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             0,
             10**18,
@@ -3296,7 +3315,7 @@ def test_pull_model_enforces_the_aggregate_model_store_limit(
     monkeypatch.setattr(ollama_runtime, "_MAX_MODEL_STORE_BYTES", 100)
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             0,
             30,
@@ -3323,7 +3342,7 @@ def test_pull_model_enforces_the_aggregate_managed_workspace_limit(
     monkeypatch.setattr(ollama_runtime, "_MAX_LOG_STORAGE_BYTES", 0)
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             0,
             30,
@@ -3343,7 +3362,7 @@ def test_pull_model_enforces_the_aggregate_managed_workspace_limit(
 def test_pull_model_refuses_an_unsafe_model_store(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             0,
             1,
@@ -3373,7 +3392,7 @@ def test_pull_model_caps_the_aggregate_of_unique_layers(tmp_path: Path) -> None:
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         disk_usage=lambda _path: SimpleNamespace(free=100 * gibibyte),
     )
@@ -3386,7 +3405,7 @@ def test_pull_model_caps_the_aggregate_of_unique_layers(tmp_path: Path) -> None:
 def test_pull_model_rejects_negative_layer_progress(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             -1,
             10,
@@ -3407,7 +3426,7 @@ def test_pull_model_rejects_a_changed_layer_total(tmp_path: Path) -> None:
         progress(0, 100, "pulling layer", digest)
         progress(1, 101, "pulling layer", digest)
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", puller=puller)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", puller=puller)
     runtime._process = _FakeProcess()
 
     with pytest.raises(OllamaRuntimeError, match="changed model layer total"):
@@ -3417,7 +3436,7 @@ def test_pull_model_rejects_a_changed_layer_total(tmp_path: Path) -> None:
 def test_pull_model_rejects_byte_progress_without_a_digest(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(1, 10, "pulling layer"),
     )
     runtime._process = _FakeProcess()
@@ -3431,7 +3450,7 @@ def test_pull_model_rejects_mixed_aggregate_and_layer_progress(tmp_path: Path) -
         progress(0, 100, "pulling aggregate", "sha256:model")
         progress(0, 50, "pulling layer", f"sha256:{'a' * 64}")
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", puller=puller)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", puller=puller)
     runtime._process = _FakeProcess()
 
     with pytest.raises(OllamaRuntimeError, match="mixed model pull progress modes"):
@@ -3447,7 +3466,7 @@ def test_pull_model_accepts_the_aggregate_progress_sentinel(tmp_path: Path) -> N
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]
@@ -3480,7 +3499,7 @@ def test_pull_model_aggregates_duplicate_and_out_of_order_layer_progress(tmp_pat
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "c" * 64}]
@@ -3514,7 +3533,7 @@ def test_pull_model_rejects_malformed_layer_counters(
 ) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             completed,
             total,
@@ -3537,7 +3556,7 @@ def test_pull_model_projects_disk_across_interleaved_layers(tmp_path: Path) -> N
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         disk_usage=lambda _path: SimpleNamespace(free=reserve + 149),
     )
@@ -3550,7 +3569,7 @@ def test_pull_model_projects_disk_across_interleaved_layers(tmp_path: Path) -> N
 def test_pull_model_rejects_a_reported_total_that_cannot_fit(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(
             0,
             5_000_000_000,
@@ -3568,7 +3587,7 @@ def test_pull_model_rejects_a_reported_total_that_cannot_fit(tmp_path: Path) -> 
 def test_pull_model_rejects_completion_without_accounted_byte_progress(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(0, 0, "success"),
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]
@@ -3605,7 +3624,7 @@ def test_model_pull_preserves_digest_and_reports_later_tag_drift(tmp_path: Path)
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         request_json=request_json,
     )
@@ -3660,7 +3679,7 @@ def test_changed_model_digest_requires_exact_explicit_acceptance(tmp_path: Path)
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=request_json,
     )
     runtime._process = _FakeProcess()
@@ -3752,7 +3771,7 @@ def test_reset_model_digest_state_refuses_to_discard_valid_metadata(tmp_path: Pa
 def test_model_pull_recognises_explicit_latest_but_still_requires_first_acceptance(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(1, 1, "success", f"sha256:{'a' * 64}"),
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:latest", "model": "qwen3:latest", "digest": "a" * 64}]
@@ -3793,7 +3812,7 @@ def test_cancelled_pull_after_remote_progress_is_indeterminate(
     # a process double instead of demanding a real Job Object handle.
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         puller=puller,
         process_factory=lambda *_args, **_kwargs: process,
     )
@@ -5064,7 +5083,7 @@ def test_managed_model_admission_rechecks_the_accepted_digest(tmp_path: Path) ->
     alias_digest = [accepted_digest]
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=lambda *_args: {
             "models": [
                 {
@@ -5116,7 +5135,7 @@ def test_inference_session_discards_admission_when_the_loaded_digest_differs(tmp
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=request_json,
     )
     runtime._process = _FakeProcess()
@@ -5151,7 +5170,7 @@ def test_inference_session_rechecks_the_alias_after_a_client_error(tmp_path: Pat
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=request_json,
     )
     runtime._process = _FakeProcess()
@@ -5173,7 +5192,7 @@ def test_stop_waits_for_an_active_inference_admission(
     alias = ollama_runtime._locked_model_alias(digest)
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=lambda *_args: {
             "models": [
                 {
@@ -5227,7 +5246,7 @@ def test_stop_forces_the_exact_owned_child_after_the_inference_grace_deadline(
     process = _FakeProcess()
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0" if process.poll() is None else None,
+        probe=lambda: "0.35.0" if process.poll() is None else None,
         request_json=lambda *_args: {
             "models": [{"name": alias, "model": alias, "digest": digest}]
         },
@@ -5279,7 +5298,7 @@ def test_stop_publishes_stopped_state_before_status_can_observe_process_removal(
     process = _FakeProcess()
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0" if process.poll() is None else None,
+        probe=lambda: "0.35.0" if process.poll() is None else None,
         listener_owner=lambda owned_process: owned_process is process,
     )
     runtime._process = process
@@ -5326,7 +5345,7 @@ def test_stop_deadline_is_not_blocked_by_the_pre_inference_digest_check(
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0" if process.poll() is None else None,
+        probe=lambda: "0.35.0" if process.poll() is None else None,
         request_json=request_json,
     )
     runtime._process = process
@@ -5733,7 +5752,7 @@ def test_stop_holds_lifecycle_admission_through_its_final_snapshot(
 def test_managed_global_readiness_refuses_model_digest_drift(tmp_path: Path) -> None:
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "b" * 64}]
         },
@@ -5753,7 +5772,7 @@ def test_readiness_rechecks_listener_ownership_after_the_version_probe(tmp_path:
     ownership = iter([True, False])
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         listener_owner=lambda _process: next(ownership),
     )
     runtime._process = _FakeProcess()
@@ -5766,7 +5785,7 @@ def test_legacy_mutable_tag_trust_is_not_presented_as_inference_acceptance(tmp_p
     digest = "a" * 64
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0",
+        probe=lambda: "0.35.0",
         listener_owner=lambda _process: True,
         request_json=lambda *_args: {
             "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": digest}]
@@ -5984,7 +6003,7 @@ def test_bodyless_http_copy_success_is_verified_by_follow_up_tags(tmp_path: Path
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     try:
-        runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+        runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
         runtime._process = _FakeProcess()
         runtime._port = int(server.server_port)
 
@@ -6911,7 +6930,7 @@ def test_zero_release_uninstall_cleanup_failure_is_indeterminate(
 
 
 def test_uninstall_refuses_a_running_managed_process(tmp_path: Path) -> None:
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
     runtime._process = _FakeProcess()
 
     with pytest.raises(OllamaRuntimeError, match="must be stopped"):
@@ -7189,7 +7208,7 @@ def test_delete_model_removes_exact_alias_and_reconciles_trust(tmp_path: Path) -
             ]
         }
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", request_json=request_json)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
     runtime._write_model_trust_state({locked_alias: digest}, {"qwen3:8b": locked_alias})
 
@@ -7226,7 +7245,7 @@ def test_shutdown_waits_for_model_delete_reconciliation_before_cancelling(
 
     runtime = OllamaRuntime(
         tmp_path,
-        probe=lambda: "0.32.0" if process.poll() is None else None,
+        probe=lambda: "0.35.0" if process.poll() is None else None,
         request_json=request_json,
     )
     runtime._process = process
@@ -7270,7 +7289,7 @@ def test_shutdown_waits_for_model_delete_reconciliation_before_cancelling(
 
 
 def test_delete_model_refuses_the_selected_model(tmp_path: Path) -> None:
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0")
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0")
     runtime._process = _FakeProcess()
 
     with pytest.raises(OllamaRuntimeError, match="selected model"):
@@ -7303,7 +7322,7 @@ def test_prune_removes_only_unreferenced_flinttrade_locked_aliases(tmp_path: Pat
             ]
         }
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", request_json=request_json)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
     runtime._write_model_trust_state(
         {stale_alias: stale_digest, retained_alias: retained_digest},
@@ -7340,7 +7359,7 @@ def test_prune_recovers_an_unrecorded_locked_alias_left_by_interrupted_acceptanc
             ]
         }
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", request_json=request_json)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
 
     result = runtime.prune_models()
@@ -7373,7 +7392,7 @@ def test_prune_reconciles_successful_deletions_when_a_later_delete_fails(tmp_pat
             ]
         }
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", request_json=request_json)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
     runtime._write_model_trust_state(
         {first_alias: first_digest, second_alias: second_digest},
@@ -7398,7 +7417,7 @@ def test_model_inventory_reconciles_a_missing_locked_alias_before_reporting_trus
             ]
         }
 
-    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", request_json=request_json)
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
     runtime._write_model_trust_state({locked_alias: digest}, {"qwen3:8b": locked_alias})
 
