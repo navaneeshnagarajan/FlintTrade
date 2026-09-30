@@ -529,8 +529,15 @@ stores and you guarantee a bug.
 Home and Invest share `accountNetWorth` in
 `packages/apps/terminal/src/lib/accountNetWorth.ts`. The total is ledger
 cash, including blocked margin, plus holdings at market value, plus each
-open position, minus charges. Opening an F&O position does not reduce
-the total by its margin. Options, and equity positions that are not
+open position. Opening an F&O position does not reduce
+the total by its margin. `accountNetWorth` accepts a charges argument,
+but Live funds pass through `normaliseFundsShape` in
+`packages/apps/terminal/src/services/api.ts`, which drops any charges
+field, so `accountCharges` is 0 and that argument does not change the
+figure. Practice funds have no charges field, and a fill does not reduce
+sandbox capital by charges. A Practice round trip at an unchanged price
+leaves the total at the starting cash, for example ₹10,00,000. The Invest
+label is `Net Worth (Cash + Holdings + Positions)`. Options, and equity positions that are not
 already holdings, add signed market value: last traded price × quantity
 when that price is positive, otherwise the entry price × quantity.
 Futures add unrealised P&L.
@@ -552,16 +559,24 @@ label `Net Worth (Cash + Holdings + Positions)` and `≈` plus the tooltip
 on the amount under it. The Net Worth view does the same for
 `Known Total (Cash + Holdings + Positions)`, and puts both on the
 `Open Positions` value. Available Funds on Dashboard shows `≈` with no
-tooltip. The donut centre shows `≈` with no tooltip. The tooltip text
-is `approximateNetWorthTooltip`: one symbol is named, and several
-positions use `N futures positions`. The accessible name is
+tooltip. The donut centre shows `≈` with no tooltip. The tooltip text is `approximateNetWorthTooltip`. A missing
+Dhan average uses
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+A Kotak Neo open-leg estimate uses
+`Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+One symbol is named, and several positions of that kind use
+`N futures positions`. When both kinds are open, the tooltip is
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, and the price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+The accessible name is
 `accountNetWorthAccessibleName` (`Net Worth, approximately …`). A flat
 quantity, or `mark_source: "avg"`, clears it. Practice never shows `≈`.
 Allocation percentages are not marked. Invest publishes the total only
 after the position book has loaded (`positionBookReady` in
-`InvestContext`). Home's amount does not wait on that book. Home
-allocation stays on the Example split until funds, holdings, and
-positions have all succeeded (`PortfolioCard`).
+`InvestContext`). Home uses that same check in `PortfolioCard`: while
+the book is pending or has failed, the amount is `—`, never a cash-only
+figure. The amount appears once positions have loaded, including when
+it is negative. Home allocation stays on the Example split until funds,
+holdings, and positions have all succeeded (`PortfolioCard`).
 
 The Home greeting is `useOperatorGreetingName` in
 `packages/apps/terminal/src/routes/home/operatorGreetingName.ts`. The

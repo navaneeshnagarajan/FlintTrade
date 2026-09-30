@@ -773,10 +773,12 @@ never greets the operator as `Trader`. Editing the display name replaces
 the greeting. There is no greeting toast.
 
 Home and Invest share one net-worth figure: ledger cash, plus the market
-value of holdings, plus open positions, minus charges. Ledger cash includes
+value of holdings, plus open positions. On Invest the label is
+`Net Worth (Cash + Holdings + Positions)`. Ledger cash includes
 blocked margin. It is not the available margin, so opening an F&O position
-does not reduce Net Worth by its margin. Charges come from the account
-book and are 0 in Practice for now. Options add signed market value
+does not reduce Net Worth by its margin. The figure does not subtract
+charges. A Practice round trip at an unchanged price leaves Net Worth
+at the starting cash, for example ₹10,00,000. Options add signed market value
 (last traded price × quantity when that price is positive, otherwise the
 entry price × quantity). A long is positive and a short is negative,
 because the premium has already gone through cash. Equity positions that
@@ -803,11 +805,19 @@ the rupees, in the same size and colour. Dhan sets that mark when the
 base is `costPrice`. Kotak Neo sets it on an open future. Practice never
 sets it. It clears when that position goes flat or its mark is the
 average. One future names its symbol in the tooltip; two or more say the
-count, for example `2 futures positions`. For one future the tooltip is
+count, for example `2 futures positions`. Dhan, when the average price
+was missing, uses
 `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
-using that future's symbol. For more than one it is
+for one future, and
 `Approximate. Your broker didn't send an average price for 2 futures positions, so profit or loss from earlier days may be counted twice.`
-with the count in place of `2`.
+when more than one fall back, with the count in place of `2`. Kotak Neo uses
+`Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+for one future, and
+`Approximate. The price for 2 futures positions is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+when more than one are estimated, with the count in place of `2`. When both
+kinds are open, the tooltip joins them:
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, and the price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+Each subject is that future's symbol, or `N futures positions` when several share that kind.
 While the figure is approximate, this tooltip replaces the positions
 note on the same labels. The screen-reader name of the amount is
 `Net Worth, approximately …`, using the same rupee figure and no second
@@ -824,7 +834,7 @@ also shows `≈`, and it has no tooltip. On the Net Worth view, the label
 `Open Positions` value. That line is shown only when the positions
 contribution is above zero. The donut centre (`tracked`) shows `≈` on
 the same total and has no tooltip. Cash on that view is not marked.
-Those labels do not name charges; the figure still subtracts them.
+Those labels do not name charges, and the figure does not subtract them.
 
 Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
 until funds, holdings, and positions have all loaded successfully. If any
@@ -838,10 +848,12 @@ those books settle, both leave the total as `—` until the position
 book has loaded. A position book that is still loading or has failed
 does not publish the total.
 
-The sample book does not wait on a position book. Home's Net Worth
-amount does not wait. A missing position book counts open positions as
-none, and Home draws that amount, including `≈`, only when it is above
-zero.
+The sample book does not wait on a position book. On an account, Home
+shows `—` while the position book is pending or has failed, the same
+check Invest uses. It does not draw a cash-only figure. The amount
+appears once positions have loaded. A negative Net Worth is drawn as
+the number, including `≈` when the mark is approximate, the same as on
+Invest.
 
 ### Invest
 

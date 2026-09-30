@@ -59,9 +59,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Home and Invest net worth, greeting, and benchmark legend.**
   Home and Invest share one total: ledger cash, including blocked
-  margin, plus holdings at market value, plus open positions, minus
-  charges. Opening an F&O position does not reduce the total by its
-  margin. Options add signed market value. Futures add unrealised
+  margin, plus holdings at market value, plus open positions. Opening
+  an F&O position does not reduce the total by its margin. The figure
+  does not subtract charges. A Practice round trip at an unchanged
+  price leaves it at the starting cash, for example ₹10,00,000.
+  Options add signed market value. Futures add unrealised
   P&L. Dhan marks from the mark-to-market average, or from `costPrice`
   when that average is absent. Kotak Neo marks an open future from
   the open-leg average. Practice marks a future from the entry price.
@@ -72,12 +74,17 @@ changelog rebuilds itself from the first release cut after this baseline.
   amount, and the Open Positions value. The Invest Dashboard label
   `Net Worth (Cash + Holdings + Positions)` carries the tooltip, and
   `≈` sits on the amount under it. Available Funds shows that `≈`
-  with no tooltip. The tooltip names one symbol, or
-  `2 futures positions` when two fall back, and the screen-reader
-  name is `Net Worth, approximately …`. Allocation percentages are
-  not marked. Home allocation stays on the Example split until
-  funds, holdings, and positions have all loaded. Invest waits for the
-  position book before it publishes the total. Home's amount does not.
+  with no tooltip. Dhan's tooltip, when the average was missing, is
+  `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+  Neo's is
+  `Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+  Several positions of one kind say `N futures positions` instead of
+  the symbol. The screen-reader name is `Net Worth, approximately …`.
+  Allocation percentages are not marked. Home allocation stays on the
+  Example split until funds, holdings, and positions have all loaded.
+  Home and Invest both wait for the position book before they publish
+  the total. While that book is pending or has failed, Home shows `—`
+  and does not draw cash alone. A negative total is shown as the number.
   The greeting uses the saved display name, then the username, and
   stays plain `Good morning` (or afternoon or evening) until a name
   is known. It never uses `Trader`. On Benchmark, real holdings use
