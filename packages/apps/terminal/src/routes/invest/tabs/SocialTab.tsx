@@ -567,9 +567,6 @@ function MarketplaceSection() {
         </Button>
       </div>
 
-      {/* Demo banner */}
-      {isDemo && !isLoading && <ExampleChip />}
-
       {/* Category filter pills */}
       <div className="flex items-center gap-1.5">
         <Filter className="size-3 text-text-muted shrink-0" />

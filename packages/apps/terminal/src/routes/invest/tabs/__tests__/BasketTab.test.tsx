@@ -141,6 +141,21 @@ describe("BasketTab", () => {
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("shows one Example chip in Example mode when quotes are loaded", () => {
+    quoteQuery.data = { RELIANCE: { symbol: "RELIANCE", ltp: 2500 } };
+    render(<BasketTab />);
+    expect(screen.getAllByTestId("example-chip")).toHaveLength(1);
+    expect(screen.getByText(/thematic stock baskets/)).toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
+  });
+
+  it("does not show the Example chip in Practice when quotes are loaded", () => {
+    quoteQuery.data = { RELIANCE: { symbol: "RELIANCE", ltp: 2500 } };
+    useModeStore.setState({ mode: "practice" });
+    render(<BasketTab />);
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+  });
+
   it("shows one Example chip when no quotes are loaded", () => {
     render(<BasketTab />);
     expect(screen.getByTestId("example-chip")).toBeInTheDocument();

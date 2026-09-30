@@ -314,7 +314,7 @@ export function NetWorthTab() {
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold text-text-primary">{cat.label}</div>
                   <div className="text-xs text-text-muted">
-                    {isExample && cat.note === "Live from broker" ? <ExampleChip /> : cat.note}
+                    {isExample && cat.note === "Live from broker" ? null : cat.note}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">

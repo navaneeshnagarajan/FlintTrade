@@ -48,12 +48,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/magicui/animated-counter", () => ({
-  AnimatedCounter: ({ value, formatter }: { value: number; formatter: (v: number) => string }) => (
-    <span>{formatter(value)}</span>
-  ),
-}));
-
 vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
@@ -125,6 +119,41 @@ describe("DashboardTab", () => {
       sectorCount: 2,
       holdingCount: LIVE_ROWS.length,
     };
+  });
+
+  it("paints dashboard totals at their final value on the first frame", () => {
+    render(<DashboardTab />);
+
+    expect(screen.getByTestId("invest-net-worth").textContent).toBe(formatAccountNetWorth(220_100));
+    expect(screen.getByTestId("invest-available-funds").textContent).toBe(formatAccountNetWorth(50_000));
+    expect(screen.getByTestId("invest-invested-value").textContent).toBe(formatCurrencyCompact(167_250));
+    expect(screen.getByTestId("invest-day-pnl").textContent).toBe(`+${formatCurrencyCompact(2_750)}`);
+  });
+
+  it("paints a negative net worth and day P&L without a zero frame", () => {
+    investState.summary = {
+      ...investState.summary,
+      netWorth: -50_000,
+      totalPnl: -2_750,
+      totalPnlPercent: -1.64,
+      availableCash: -1_000,
+    };
+
+    render(<DashboardTab />);
+
+    expect(screen.getByTestId("invest-net-worth").textContent).toBe(formatAccountNetWorth(-50_000));
+    expect(screen.getByTestId("invest-available-funds").textContent).toBe(formatAccountNetWorth(-1_000));
+    expect(screen.getByTestId("invest-day-pnl").textContent).toBe(`-${formatCurrencyCompact(2_750)}`);
+    expect(screen.getByTestId("invest-net-worth").textContent).not.toContain("₹0");
+  });
+
+  it("shows one Example chip on the sample Net Worth view", () => {
+    useModeStore.setState({ mode: "explore" });
+    investState.isSampleData = true;
+    render(<NetWorthTab />);
+
+    expect(screen.getAllByTestId("example-chip")).toHaveLength(1);
+    expect(screen.queryByText("Live from broker")).not.toBeInTheDocument();
   });
 
   it("renders the net worth hero section", () => {
@@ -221,7 +250,7 @@ describe("DashboardTab", () => {
 
     render(<DashboardTab />);
 
-    expect(screen.getByTestId("invest-net-worth")).toHaveTextContent("—");
+    expect(screen.getByTestId("invest-net-worth").textContent).toBe("—");
     expect(screen.getByTestId("invest-net-worth")).not.toHaveAttribute("data-value");
     expect(screen.queryByText(formatAccountNetWorth(999_200))).not.toBeInTheDocument();
     expect(screen.getByText(NET_WORTH_LABEL).closest("p")).toHaveAttribute("title", NET_WORTH_POSITIONS_NOTE);
@@ -273,7 +302,7 @@ describe("DashboardTab", () => {
       "title",
       "Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.",
     );
-    expect(screen.getByTestId("invest-net-worth")).toHaveTextContent(formatAccountNetWorth(452_300, true));
+    expect(screen.getByTestId("invest-net-worth").textContent).toBe(formatAccountNetWorth(452_300, true));
     expect(screen.getByTestId("invest-net-worth")).toHaveAccessibleName(accountNetWorthAccessibleName(452_300));
     expect(screen.getByRole("list", { name: "Portfolio allocation values" })).not.toHaveTextContent("≈");
   });
@@ -289,7 +318,11 @@ describe("DashboardTab", () => {
     expect(xirr).toHaveTextContent("XIRR +17.44%");
     expect(within(xirr).getAllByTestId("example-chip")).toHaveLength(1);
     expect(within(xirr).getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getAllByTestId("example-chip")).toHaveLength(1);
     expect(screen.queryByText("Portfolio XIRR")).not.toBeInTheDocument();
+    expect(screen.queryByText(
+      "Equity + Cash from your connected broker. Debt / MF requires NAV data source.",
+    )).not.toBeInTheDocument();
   });
 
   it("does not mark Practice XIRR as Example", () => {

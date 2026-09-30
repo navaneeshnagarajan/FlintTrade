@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import { xirr } from "@/lib/xirr";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
 import { cn } from "@/lib/utils";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
@@ -204,16 +203,7 @@ export function DashboardTab() {
                 }
                 {...(netWorthPublished ? { "data-value": netWorth } : {})}
               >
-                {netWorthPublished ? (
-                  <AnimatedCounter
-                    value={netWorth}
-                    formatter={netWorthLabel}
-                    accessibleLabel={
-                      approximate && !valuesHidden ? accountNetWorthAccessibleName(netWorth) : undefined
-                    }
-                    duration={1.2}
-                  />
-                ) : "—"}
+                {netWorthPublished ? netWorthLabel(netWorth) : "—"}
               </span>
               <span
                 className={cn(
@@ -276,7 +266,7 @@ export function DashboardTab() {
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-available-funds">
-          <AnimatedCounter value={availableCash} formatter={netWorthLabel} duration={1.0} />
+          {netWorthLabel(availableCash)}
         </div>
         <p className="text-xs text-text-muted">Withdrawable cash</p>
       </GlassCard>
@@ -290,8 +280,8 @@ export function DashboardTab() {
             Invested Value
           </span>
         </div>
-        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-          <AnimatedCounter value={totalInvested} formatter={money} duration={1.0} />
+        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-invested-value">
+          {money(totalInvested)}
         </div>
         <p className="text-xs text-text-muted">Total cost basis of holdings</p>
       </GlassCard>
@@ -319,12 +309,11 @@ export function DashboardTab() {
             "text-2xl font-mono font-bold tabular-nums",
             totalPnl >= 0 ? "text-profit" : "text-loss",
           )}
+          data-testid="invest-day-pnl"
         >
-          <AnimatedCounter
-            value={Math.abs(totalPnl)}
-            formatter={(v) => (valuesHidden ? VALUE_MASK : (totalPnl >= 0 ? "+" : "-") + formatINRCompact(v))}
-            duration={1.0}
-          />
+          {valuesHidden
+            ? VALUE_MASK
+            : `${totalPnl >= 0 ? "+" : "-"}${formatINRCompact(Math.abs(totalPnl))}`}
         </div>
         <p className="text-xs text-text-muted">{formatPercent(totalPnlPercent)} unrealised</p>
       </GlassCard>
@@ -335,13 +324,11 @@ export function DashboardTab() {
           <h3 className="font-heading font-semibold text-sm text-text-primary">
             Portfolio Allocation
           </h3>
-          <p className="text-xs text-text-muted mt-0.5">
-            {isDemo ? (
-              <ExampleChip />
-            ) : (
-              "Equity + Cash from your connected broker. Debt / MF requires NAV data source."
-            )}
-          </p>
+          {!isDemo && (
+            <p className="text-xs text-text-muted mt-0.5">
+              Equity + Cash from your connected broker. Debt / MF requires NAV data source.
+            </p>
+          )}
         </div>
 
         {bands.length > 0 ? (
