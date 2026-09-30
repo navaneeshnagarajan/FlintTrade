@@ -252,6 +252,7 @@ function normaliseOrderBody(body: object): Record<string, unknown> {
   copyField("marketProtection", "market_protection");
   copyField("positionSize", "position_size");
   copyField("disclosedQuantity", "disclosed_quantity");
+  copyField("priceBasis", "price_basis");
 
   return normalised;
 }
@@ -2155,6 +2156,16 @@ function normalisePracticePosition(value: unknown): Position | undefined {
     ? averagePrice + (unrealisedPnl / quantity)
     : toNumber(value.ltp ?? averagePrice);
   const cost = Math.abs(quantity * averagePrice);
+  const priceSourceRaw = String(value.priceSource ?? value.price_source ?? "");
+  const priceSource = priceSourceRaw === "ltp" || priceSourceRaw === "last_close"
+    ? priceSourceRaw
+    : undefined;
+  const ageRaw = value.priceAgeS ?? value.price_age_s;
+  const priceAgeS = ageRaw === null || ageRaw === undefined || ageRaw === ""
+    ? undefined
+    : toNumber(ageRaw);
+  const hasLiveMark = quantity !== 0 && unrealisedPnl !== 0;
+  const ltpBasis = priceSource === "last_close" && !hasLiveMark ? "last_close" as const : undefined;
   return {
     symbol: String(value.symbol ?? ""),
     exchange: String(value.exchange ?? ""),
@@ -2165,6 +2176,9 @@ function normalisePracticePosition(value: unknown): Position | undefined {
     pnl,
     pnlPercent: cost > 0 ? (pnl / cost) * 100 : 0,
     restored: value.restored === true,
+    ...(priceSource ? { priceSource } : {}),
+    ...(priceAgeS !== undefined ? { priceAgeS } : {}),
+    ...(ltpBasis ? { ltpBasis } : {}),
   };
 }
 

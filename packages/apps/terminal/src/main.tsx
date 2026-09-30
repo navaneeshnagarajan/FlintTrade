@@ -3,6 +3,7 @@ import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
 import { getColdStartPath } from "@/lib/personaDefaultRoute";
 import { createBrowserRouter, Navigate } from "react-router";
+import { DESK_ROUTE_ALIASES, PUBLIC_ENTRY_REDIRECTS } from "./routes/deskAliases";
 // RouterProvider must come from react-router/dom: the root export is the
 // non-DOM variant without ReactDOM.flushSync wiring, so navigate/submit
 // flushSync opt-ins would silently degrade to transitions.
@@ -124,6 +125,10 @@ const router = createBrowserRouter([
 
       /* Flow routes -- no chrome (TopBar/TickerBar) */
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
+      ...PUBLIC_ENTRY_REDIRECTS.map((alias) => ({
+        path: alias.path,
+        element: <Navigate to={alias.to} replace />,
+      })),
       { path: "explore", element: <ExplorePathElement /> },
       /* Canonical setup owns account creation and onboarding. The historical
          /setup-account URL remains an explicit compatibility alias. Public demo
@@ -145,6 +150,10 @@ const router = createBrowserRouter([
           { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI Centre"><Suspense fallback={<RouteLoading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Accounts"><Suspense fallback={<RouteLoading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<RouteLoading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          ...DESK_ROUTE_ALIASES.map((alias) => ({
+            path: alias.path,
+            element: <Navigate to={alias.to} replace />,
+          })),
           ...(import.meta.env.DEV
             ? [
                 { path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<RouteLoading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
