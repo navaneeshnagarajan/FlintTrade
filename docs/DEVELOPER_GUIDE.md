@@ -602,14 +602,30 @@ Sample Invest figures use `ExampleChip`
 paints when the session is example data unless `always` is set.
 Correlation, ETF Screener, ETFs, Risk-Return, Sector, Sector Rotation,
 Shareholding, and Social render that chip, not `ExampleLabel`.
-`BasketTab` renders one when quotes are empty and not loading.
+`SocialTab` renders exactly one, after loading has finished.
+`EtfTab` in Example renders one, with
+`Example prices. Connect a broker for live quotes.`
+Practice and Live keep
+`live quotes via OpenAlgo. Refreshes every 30s`
+when quotes have loaded.
+`SectorTab` in Example uses
+`Example sector split. Connect a broker to see yours.`
+and
+`Example data. Not from your holdings.`,
+with one chip.
+`BasketTab` renders one in Example, including while quotes are loading
+and after they have loaded.
 `HoldingsTab` renders one. `DashboardTab` renders one on the inline
-sample XIRR and one on sample Portfolio Allocation, and does not render
-a Portfolio XIRR card. With no holdings the inline XIRR is omitted.
+sample XIRR. It does not render one on sample Portfolio Allocation, and
+that block omits the connected-book sentence. It does not render a
+Portfolio XIRR card. Net Worth, Available Funds, Invested Value, and
+Day P&L paint their final formatted value on the first frame, with no
+count-up from zero, including `≈`, `-₹50,000`, and `—`. With no
+holdings the inline XIRR is omitted.
 `NetWorthTab` sample copy is
 `Example equity and cash. Connect a broker to see yours.`,
-with the chip on that sample allocation and on each `Live from broker`
-note. A connected book keeps
+with the chip on the sample `Allocation` label only. Equity Holdings
+and Cash notes are blank on example data. A connected book keeps
 `Allocation (live assets only)` and `Live from broker`.
 
 ### OpenAlgo bugs to work around

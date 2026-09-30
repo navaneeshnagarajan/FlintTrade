@@ -96,14 +96,25 @@ changelog rebuilds itself from the first release cut after this baseline.
   `Your Portfolio (since first buy)`. An empty book stays
   `Your Portfolio`. Example holdings stay `Your Portfolio` with an
   Example label, and the hard-coded index returns keep the Example
-  chip. The sample Dashboard XIRR is the inline `XIRR` figure plus
-  one Example chip, and sample allocation has one Example chip. There
+  chip. Dashboard Net Worth, Available Funds, Invested Value, and Day P&L
+  show the final formatted value on the first frame in every mode, with
+  no count-up from zero, including `≈`, `-₹50,000`, and `—`.
+  The sample Dashboard XIRR is the inline `XIRR` figure plus
+  one Example chip. Portfolio Allocation on that sample dashboard omits
+  its broker sentence and does not carry its own Example chip. There
   is no Portfolio XIRR card. On sample figures, Net Worth reads
   `Example equity and cash. Connect a broker to see yours.`; the
-  allocation label is `Allocation` with the Example chip, and each
-  `Live from broker` note on those figures is the Example chip. The
-  Dashboard, allocation, and Net Worth chips paint only on example
-  data. The Benchmark chip stays in Practice and Live. A connected
+  allocation label is `Allocation` with the Example chip. Equity
+  Holdings and Cash leave their notes blank, and those rows do not
+  carry their own Example chip. In Example, Baskets show one Example
+  chip while quotes are loading and after they have loaded. ETFs show
+  one Example chip and `Example prices. Connect a broker for live quotes.`;
+  Practice and Live keep the live quote wording. Sector's header reads
+  `Example sector split. Connect a broker to see yours.` and the footer
+  reads `Example data. Not from your holdings.` Social shows exactly one
+  Example chip. The sample XIRR chip and the Net Worth allocation chip
+  paint only on example data. The Benchmark chip stays in Practice and
+  Live. A connected
   book keeps the live equity sentence,
   `Allocation (live assets only)`, and `Live from broker`. Mutual
   Funds on example data reads

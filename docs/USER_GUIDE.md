@@ -977,13 +977,19 @@ and `Returns are absolute (not annualised) for periods under 1Y.`
 **Example chips.** Sector, Sector Rotation, Shareholding, ETF Screener,
 Social, ETFs, Risk-Return, and Correlation use the Example chip on sample
 figures. They do not use the Example label. Shareholding omits the chip
-when the read has failed. Social shows the chip after loading has finished.
-On example data, Baskets show one Example chip when quotes are empty and
-not loading. The chip stays off while quotes are loading. Seeded cards do
-not add a second marker. Seeded example baskets disable **Edit** and
-**Delete**, with the title `Example basket — editing unavailable`. Baskets
-created in Practice or Live keep **Edit** and **Delete**. An empty Baskets
-view reads `No baskets yet`.
+when the read has failed. In Example, Social shows exactly one Example
+chip, and only after loading has finished. In Example, ETFs show one
+Example chip and `Example prices. Connect a broker for live quotes.`
+Practice and Live keep `live quotes via OpenAlgo. Refreshes every 30s.`
+In Example, Sector's header reads
+`Example sector split. Connect a broker to see yours.`
+and the footer reads `Example data. Not from your holdings.` That view
+has one Example chip. In Example, Baskets show one Example chip,
+including while quotes are loading and after they have loaded. Seeded
+cards do not add a second marker. Seeded example baskets disable **Edit**
+and **Delete**, with the title `Example basket — editing unavailable`.
+Baskets created in Practice or Live keep **Edit** and **Delete**. An
+empty Baskets view reads `No baskets yet`.
 
 **Holdings.** On example data, the Holdings view shows one Example chip
 when the book is sample data. The Investor Dashboard header badge reads `N holdings` and
@@ -1000,18 +1006,20 @@ book shows `0 holdings` and `No holdings`. An account snapshot replaces
 the sample book, including a Practice snapshot with cash and an empty
 holdings list.
 
-**Dashboard and Net Worth figures.** The sample Dashboard marks the
-inline sample XIRR with one Example chip (`XIRR` plus that chip).
-Portfolio Allocation on that sample dashboard shows one Example chip in
-place of
+**Dashboard and Net Worth figures.** Net Worth, Available Funds, Invested
+Value, and Day P&L on the Dashboard show their final formatted value on
+the first frame in every mode, with no count-up from zero, including `≈`,
+`-₹50,000`, and `—`. The sample Dashboard marks the inline sample XIRR
+with one Example chip (`XIRR` plus that chip). Portfolio Allocation on
+that sample dashboard omits
 `Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
-A connected book keeps that sentence. There is no Portfolio XIRR card.
-With no holdings, the inline XIRR is omitted. On sample figures,
-`/invest#networth` reads
+and does not carry its own Example chip. A connected book keeps that
+sentence. There is no Portfolio XIRR card. With no holdings, the inline
+XIRR is omitted. On sample figures, `/invest#networth` reads
 `Example equity and cash. Connect a broker to see yours.`
-The allocation label is `Allocation` with the Example chip, and each
-`Live from broker` note, including Equity Holdings and Cash, is that
-chip. A connected book keeps
+The allocation label is `Allocation` with the Example chip. Equity
+Holdings and Cash leave their notes blank on example data, and those rows
+do not carry their own Example chip. A connected book keeps
 `Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
 the label `Allocation (live assets only)`, and the note `Live from broker`.
 Those sentences follow the sample-figure flag, including a Practice book
