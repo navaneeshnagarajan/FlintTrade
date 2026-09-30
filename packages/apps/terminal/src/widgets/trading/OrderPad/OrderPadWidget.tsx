@@ -183,7 +183,7 @@ function PillGroup({ value, options, onChange, className = "", label }: PillGrou
           onClick={() => onChange(opt)}
           className={`flex-1 h-8 text-xs font-medium transition-colors ${
             value === opt
-              ? "bg-accent text-white"
+              ? "bg-accent text-accent-foreground"
               : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
           }`}
         >
@@ -1450,7 +1450,7 @@ function OrderPadWidget(props: WidgetProps) {
               onClick={() => setInputMode("qty")}
               className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
                 inputMode === "qty"
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-foreground"
                   : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
               }`}
               aria-pressed={inputMode === "qty"}
@@ -1463,7 +1463,7 @@ function OrderPadWidget(props: WidgetProps) {
               onClick={() => setInputMode("fund")}
               className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
                 inputMode === "fund"
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-foreground"
                   : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
               }`}
               aria-pressed={inputMode === "fund"}

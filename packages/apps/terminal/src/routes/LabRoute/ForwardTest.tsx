@@ -589,7 +589,7 @@ export function ForwardTestSection() {
             <Button
               onClick={() => startMutation.mutate()}
               disabled={startMutation.isPending || !selectedStrategy}
-              className="bg-accent text-white hover:bg-accent/90 font-sans text-sm px-5"
+              className="bg-accent text-accent-foreground hover:bg-accent/90 font-sans text-sm px-5"
             >
               {startMutation.isPending ? (
                 <>

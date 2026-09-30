@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildHeaders } from "@/services/ftApi.helpers";
 import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
@@ -12,7 +12,6 @@ import {
   BarChart3,
   PlayCircle,
   Search,
-  ChevronRight,
   TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
@@ -26,6 +25,8 @@ import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
 import { motionConfig } from "@/lib/motion";
+import { Page, PageHeader } from "@/components/layout/Page";
+import { SectionNav } from "@/components/layout/SectionNav";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,7 +38,6 @@ interface TabDef {
   id: TabId;
   label: string;
   icon: typeof BookOpen;
-  /** Progress 0–100 shown as a bar under the label */
   progress: number;
 }
 
@@ -82,8 +82,6 @@ interface BasicsSection {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const LEARN_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 const TABS: TabDef[] = [
   { id: "basics",     label: "Market Basics",    icon: BookOpen,     progress: 33 },
@@ -785,90 +783,6 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar nav item with progress bar
-// ---------------------------------------------------------------------------
-
-interface SidebarItemProps {
-  tab: TabDef;
-  isActive: boolean;
-  collapsed: boolean;
-  onClick: () => void;
-}
-
-function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
-  const Icon = tab.icon;
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        role="tab"
-        id={`learn-tab-${tab.id}`}
-        aria-selected={isActive}
-        aria-controls={`learn-tabpanel-${tab.id}`}
-        tabIndex={isActive ? 0 : -1}
-        onClick={onClick}
-        title={collapsed ? tab.label : undefined}
-        className={`flex w-auto min-w-0 items-center gap-3 border-l-2 px-3 py-2.5 text-sm font-sans transition-colors md:w-full ${
-          isActive
-            ? "text-accent bg-accent/10 border-accent"
-            : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
-        }`}
-      >
-        <Icon className="w-4 h-4 shrink-0" />
-
-        {/* Label — hidden when collapsed */}
-        <AnimatePresence initial={false}>
-          {!collapsed && (
-            <motion.span
-              key="label"
-              initial={{ opacity: 0, width: 0 }}
-              animate={{ opacity: 1, width: "auto" }}
-              exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-              className="truncate flex-1 text-left"
-              style={{ overflow: "hidden", whiteSpace: "nowrap" }}
-            >
-              {tab.label}
-            </motion.span>
-          )}
-        </AnimatePresence>
-
-        {/* Active chevron — hidden when collapsed */}
-        {!collapsed && (
-          <ChevronRight
-            className={`w-3 h-3 ml-auto shrink-0 transition-opacity ${isActive ? "opacity-100" : "opacity-0"}`}
-          />
-        )}
-      </button>
-
-      {/* Progress bar — only visible when expanded */}
-      <AnimatePresence initial={false}>
-        {!collapsed && tab.progress > 0 && (
-          <motion.div
-            key="progress"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: motionConfig.duration.fast }}
-            className="mx-3 mb-1"
-          >
-            <div className="h-0.5 w-full rounded-full bg-border-default/50">
-              <motion.div
-                className="h-full rounded-full bg-accent/60"
-                initial={{ width: 0 }}
-                animate={{ width: `${tab.progress}%` }}
-                transition={{ duration: motionConfig.duration.slow, ease: motionConfig.ease.enter }}
-              />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -878,21 +792,8 @@ export default function LearnRoute() {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabId>("basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [isDesktopTablist, setIsDesktopTablist] = useState(
-    () => window.matchMedia(LEARN_DESKTOP_MEDIA_QUERY).matches,
-  );
   const level = useSkillLevel("learn");
   const selectedDoc = useMemo(() => getSelectedDoc(location.state), [location.state]);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(LEARN_DESKTOP_MEDIA_QUERY);
-    const handleChange = (event: MediaQueryListEvent) => {
-      setIsDesktopTablist(event.matches);
-    };
-    setIsDesktopTablist(mediaQuery.matches);
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
 
   useEffect(() => {
     if (selectedDoc) setActiveTab("resources");
@@ -912,29 +813,6 @@ export default function LearnRoute() {
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
-  const tablistRef = useRef<HTMLDivElement>(null);
-
-  // Roving tabindex: arrow keys follow tablist orientation
-  const handleTablistKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const previousKey = isDesktopTablist ? "ArrowUp" : "ArrowLeft";
-      const nextKey = isDesktopTablist ? "ArrowDown" : "ArrowRight";
-      if (e.key !== previousKey && e.key !== nextKey) return;
-      e.preventDefault();
-      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
-      if (!tabs || tabs.length === 0) return;
-      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
-      const next =
-        e.key === nextKey
-          ? (idx + 1) % tabs.length
-          : (idx - 1 + tabs.length) % tabs.length;
-      const nextTab = tabs[next];
-      nextTab?.focus();
-      const tabId = visibleTabs[next]?.id;
-      if (tabId) setActiveTab(tabId);
-    },
-    [isDesktopTablist, visibleTabs],
-  );
 
   const tabContent = useMemo<Record<TabId, React.ReactNode>>(() => ({
     basics:     <BasicsTab />,
@@ -944,80 +822,73 @@ export default function LearnRoute() {
     resources:  <ResourceHubTab selectedDoc={selectedDoc} />,
   }), [selectedDoc]);
 
-  const desktopCollapsed = isDesktopTablist && sidebarCollapsed;
+  const navGroups = [
+    {
+      id: "learn",
+      items: visibleTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        icon: tab.icon,
+        progress: tab.progress,
+      })),
+    },
+  ];
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="min-w-0 border-b border-border-default bg-surface-card/80 px-4 py-4 backdrop-blur-sm sm:px-6" data-tour-target="course-list">
-          <div className="flex min-w-0 items-center gap-3">
-            <GraduationCap className="h-6 w-6 shrink-0 text-accent" />
-            <div className="min-w-0">
-              <h1 className="font-heading break-words font-bold text-lg text-text-primary">
-                {level === "beginner" ? "Getting Started" : "Learning Center"}
-              </h1>
-              <p className="break-words text-xxs text-text-muted">
-                {level === "beginner"
-                  ? "Learn market basics one lesson at a time"
-                  : "Market concepts, Practice workflows, and project resources"}
-              </p>
-            </div>
-          </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Learn"
+        tourTarget="course-list"
+        description={
+          level === "beginner"
+            ? "Market basics, one short lesson at a time."
+            : "Market concepts, Practice workflows and project resources."
+        }
+      />
 
       <div
         data-testid="learn-body"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row"
       >
-        {/* Section tabs: stacked/wrapping rail on narrow viewports, collapsible column on desktop */}
-        <motion.div
+        {/* Section tabs: a scrolling row on narrow viewports, a collapsible column on desktop */}
+        <SectionNav<TabId>
           data-testid="learn-sidebar"
-          animate={isDesktopTablist ? { width: sidebarCollapsed ? 48 : 224 } : { width: "100%" }}
-          transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-          className="flex w-full min-w-0 flex-col border-b border-border-default bg-surface-card md:border-b-0 md:border-r md:shrink-0"
-        >
-          {/* Collapse toggle — desktop column only */}
-          <div className={`hidden py-2 md:flex ${sidebarCollapsed ? "justify-center" : "justify-end px-2"}`}>
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed((v) => !v)}
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!sidebarCollapsed}
-              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-base hover:text-text-primary"
-            >
-              {sidebarCollapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-
-          {/* Nav items — filtered by skill level */}
-          <nav aria-label="Learning sections" className="min-w-0 md:flex-1 md:overflow-y-auto" data-tour-target="glossary">
-            <div
-              ref={tablistRef}
-              role="tablist"
-              aria-orientation={isDesktopTablist ? "vertical" : "horizontal"}
-              className="flex min-w-0 flex-row flex-wrap md:flex-col"
-              onKeyDown={handleTablistKeyDown}
-            >
-              {visibleTabs.map((tab) => (
-                <SidebarItem
-                  key={tab.id}
-                  tab={tab}
-                  isActive={activeTab === tab.id}
-                  collapsed={desktopCollapsed}
-                  onClick={() => setActiveTab(tab.id)}
-                />
-              ))}
+          tourTarget="glossary"
+          className="w-full min-w-0"
+          groups={navGroups}
+          value={activeTab}
+          onChange={setActiveTab}
+          label="Learning sections"
+          idPrefix="learn"
+          collapsed={sidebarCollapsed}
+          header={
+            <div className={`flex px-3 pt-3 ${sidebarCollapsed ? "justify-center px-2" : "justify-end"}`}>
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed((v) => !v)}
+                title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-expanded={!sidebarCollapsed}
+                className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+              >
+                {sidebarCollapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
             </div>
-          </nav>
-        </motion.div>
+          }
+        />
 
         {/* Content area — plain overflow-y pane so Radix ScrollArea cannot pin a min-content width */}
         <div className="min-w-0 flex-1 overflow-y-auto">
-          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="mx-auto min-w-0 max-w-4xl p-4 sm:p-6">
+          <div
+            role="tabpanel"
+            id={`learn-tabpanel-${activeTab}`}
+            aria-labelledby={`learn-tab-${activeTab}`}
+            className="mx-auto min-w-0 max-w-4xl px-[var(--ft-page-gutter)] pb-16 pt-6"
+          >
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>
@@ -1032,6 +903,6 @@ export default function LearnRoute() {
           steps={TOUR_DEFINITIONS["learn-beginner"] ?? []}
         />
       )}
-    </div>
+    </Page>
   );
 }

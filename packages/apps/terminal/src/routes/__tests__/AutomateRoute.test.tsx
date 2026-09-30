@@ -120,9 +120,9 @@ describe("AutomateRoute", () => {
     mockGetUploadedStrategies.mockReset().mockResolvedValue([]);
   });
 
-  it("renders the Automation Hub heading", () => {
+  it("renders the Automate heading, matching its sidebar label", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Automation Hub")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Automate" })).toBeInTheDocument();
   });
 
   it("has section tabs for all sections at advanced level", () => {

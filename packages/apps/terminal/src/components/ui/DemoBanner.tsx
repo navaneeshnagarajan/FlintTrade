@@ -6,8 +6,7 @@
  */
 
 import type { ReactNode } from "react";
-import { Info } from "lucide-react";
-
+import { Callout } from "@/components/ui/Callout";
 import { useModeStore } from "@/stores/modeStore";
 
 export const SAMPLE_DATA_BANNER = "Example data. Connect a broker to see your own.";
@@ -23,9 +22,8 @@ export function DemoBanner({
   const mode = useModeStore((s) => s.mode);
   if (mode === "practice" && message === SAMPLE_DATA_BANNER) return null;
   return (
-    <div className="flex items-center gap-2 px-3 py-2 mb-4 rounded border border-amber-500/20 bg-amber-500/5 text-amber-400 text-xs">
-      <Info size={14} className="shrink-0" />
-      <span>{message}</span>
-    </div>
+    <Callout tone="warning" className="mb-4" data-testid="demo-banner">
+      {message}
+    </Callout>
   );
 }
