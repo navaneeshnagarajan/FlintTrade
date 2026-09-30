@@ -14,7 +14,6 @@ import { usePrevClose } from "@/hooks/usePrevClose";
 import { useOpenAlgoConfigHydration } from "@/hooks/useOpenAlgoConfigHydration";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { useNotificationFeed } from "@/components/NotificationCentre/useNotificationFeed";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
@@ -223,10 +222,6 @@ export default function AppLayout() {
       window.removeEventListener("keydown", onActivity);
     };
   }, []);
-
-  const [showWelcome, setShowWelcome] = useState(() => {
-    return sessionStorage.getItem("flinttrade:dailyWelcomeDismissed") !== "true";
-  });
 
   const [showSmallScreenWarning, setShowSmallScreenWarning] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -442,11 +437,6 @@ export default function AppLayout() {
     setShowSmallScreenWarning(false);
   }
 
-  const handleDismissWelcome = useCallback(() => {
-    sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
-    setShowWelcome(false);
-  }, []);
-
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
 
   // The locked session leaves the desk. Panels and their data are not kept
@@ -531,9 +521,6 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
-      {showWelcome && mode !== "explore" && (
-        <DailyWelcome onDismiss={handleDismissWelcome} />
-      )}
       <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}

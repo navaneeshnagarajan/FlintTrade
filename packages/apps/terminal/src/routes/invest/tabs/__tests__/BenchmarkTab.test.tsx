@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -50,12 +50,37 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+const investState = vi.hoisted(() => ({
+  holdings: [] as {
+    symbol: string;
+    averagePrice: number;
+    quantity: number;
+    pnl: number;
+  }[],
+  isSampleData: false,
+}));
+
+vi.mock("../../InvestContext", () => ({
+  useInvest: () => investState,
+}));
+
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { BenchmarkTab } from "../BenchmarkTab";
+import {
+  BenchmarkTab,
+  HOLDINGS_RETURN_LABEL,
+  HOLDINGS_RETURN_LEGEND,
+  HOLDINGS_RETURN_TOOLTIP,
+  portfolioBookReturn,
+} from "../BenchmarkTab";
 import { useModeStore } from "@/stores/modeStore";
+
+function holding(pnl: number, averagePrice = 100, quantity = 2) {
+  return { symbol: "SBIN", averagePrice, quantity, pnl };
+}
+
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -63,6 +88,8 @@ import { useModeStore } from "@/stores/modeStore";
 
 describe("BenchmarkTab", () => {
   beforeEach(() => {
+    investState.holdings = [holding(50)];
+    investState.isSampleData = false;
     useModeStore.setState({ mode: "explore" });
     vi.clearAllMocks();
   });
@@ -72,12 +99,70 @@ describe("BenchmarkTab", () => {
     expect(screen.getByText("Benchmark Comparison")).toBeInTheDocument();
   });
 
+  it("shows the book return without a chip and keeps the chip on sample index rows", () => {
+    const rows = [holding(50)];
+    investState.holdings = rows;
+    render(<BenchmarkTab />);
+
+    const portfolio = screen.getByTestId("benchmark-portfolio-row");
+    const expected = portfolioBookReturn(rows);
+    expect(expected).toBe((50 / (100 * 2)) * 100);
+    expect(within(portfolio).getByTestId("benchmark-portfolio-return")).toHaveTextContent(
+      "+25.00%",
+    );
+    expect(HOLDINGS_RETURN_LABEL).toBe("Unrealised return on holdings");
+    expect(HOLDINGS_RETURN_LEGEND).toBe("Your holdings (unrealised)");
+    expect(within(portfolio).getByText(HOLDINGS_RETURN_LEGEND)).toBeInTheDocument();
+    expect(screen.getByTitle(HOLDINGS_RETURN_TOOLTIP)).toHaveTextContent(HOLDINGS_RETURN_LEGEND);
+    expect(screen.getByRole("table", { name: HOLDINGS_RETURN_LABEL })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: (name) => name.includes(HOLDINGS_RETURN_LEGEND) })).toBe(portfolio);
+    expect(within(portfolio).queryByText("Example")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing sample data/)).not.toBeInTheDocument();
+
+    expect(screen.getAllByTestId("benchmark-row-example")).toHaveLength(5);
+    for (const name of ["NIFTY 50", "NIFTY Next 50", "NIFTY Midcap 150", "SENSEX", "NIFTY Bank"]) {
+      const indexRow = screen.getByText(name).closest("tr");
+      expect(indexRow).not.toBeNull();
+      expect(within(indexRow as HTMLElement).getByTestId("benchmark-row-example")).toHaveTextContent(
+        "Example",
+      );
+    }
+
+    expect(screen.queryByText("Benchmarks Beaten (1Y)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Best 1Y Alpha")).not.toBeInTheDocument();
+    expect(screen.queryByText("Worst 1Y Alpha")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Portfolio - Benchmark/)).not.toBeInTheDocument();
+    expect(screen.queryByText("indices outperformed")).not.toBeInTheDocument();
+    expect(screen.queryByText("+18.45%")).not.toBeInTheDocument();
+    expect(screen.queryByText("4/5")).not.toBeInTheDocument();
+    expect(screen.getByTestId("benchmark-comparison-note")).toHaveTextContent(
+      "Comparison needs real index data.",
+    );
+    expect(screen.queryByTestId("benchmark-empty-note")).not.toBeInTheDocument();
+  });
+
+  it("keeps Your Portfolio and the Example chip on a sample book", () => {
+    investState.isSampleData = true;
+    investState.holdings = [holding(50)];
+    render(<BenchmarkTab />);
+
+    const portfolio = screen.getByTestId("benchmark-portfolio-row");
+    expect(within(portfolio).getByText("Your Portfolio")).toBeInTheDocument();
+    expect(within(portfolio).queryByText(HOLDINGS_RETURN_LEGEND)).not.toBeInTheDocument();
+    expect(within(portfolio).getByTestId("benchmark-portfolio-example")).toHaveTextContent("Example");
+    expect(screen.queryByRole("table", { name: HOLDINGS_RETURN_LABEL })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(HOLDINGS_RETURN_TOOLTIP)).not.toBeInTheDocument();
+  });
+
   it("renders the demo banner", () => {
     render(<BenchmarkTab />);
     expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("keeps the Example chip on hard-coded returns in Practice and Live", () => {
+    investState.holdings = [];
+    investState.isSampleData = false;
     useModeStore.setState({ mode: "practice" });
     const { rerender } = render(<BenchmarkTab />);
     expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
@@ -86,12 +171,13 @@ describe("BenchmarkTab", () => {
     useModeStore.setState({ mode: "live" });
     rerender(<BenchmarkTab />);
     expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
-    expect(screen.getByText("+18.45%")).toBeInTheDocument();
+    expect(screen.getByText("+14.20%")).toBeInTheDocument();
+    expect(screen.queryByText("+18.45%")).not.toBeInTheDocument();
   });
 
   it("shows the portfolio row", () => {
     render(<BenchmarkTab />);
-    expect(screen.getByText("Your Portfolio")).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: (name) => name.includes(HOLDINGS_RETURN_LEGEND) })).toBeInTheDocument();
   });
 
   it("renders all five benchmark indices", () => {
@@ -103,32 +189,35 @@ describe("BenchmarkTab", () => {
     expect(screen.getAllByText("NIFTY Bank").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders the alpha section", () => {
-    render(<BenchmarkTab />);
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
-    expect(screen.getByText("(Portfolio - Benchmark)")).toBeInTheDocument();
-  });
-
   it("shows all time period columns", () => {
     render(<BenchmarkTab />);
-    // Each period appears in both the returns table and the alpha table headers
     for (const period of ["1D", "1W", "1M", "3M", "6M", "1Y", "3Y", "5Y"]) {
-      expect(screen.getAllByText(period).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText(period).length).toBeGreaterThanOrEqual(1);
     }
   });
 
-  it("renders summary cards", () => {
+  it("shows benchmark lines only when the account has no holdings", () => {
+    investState.holdings = [];
     render(<BenchmarkTab />);
-    expect(screen.getByText("Best 1Y Alpha")).toBeInTheDocument();
-    expect(screen.getByText("Worst 1Y Alpha")).toBeInTheDocument();
-    expect(screen.getByText("Benchmarks Beaten (1Y)")).toBeInTheDocument();
-  });
 
-  it("shows benchmarks beaten count and outperformance label", () => {
-    render(<BenchmarkTab />);
-    // Portfolio 1Y = 18.45%, beats all 5 benchmarks
-    expect(screen.getByText("Benchmarks Beaten (1Y)")).toBeInTheDocument();
-    expect(screen.getByText("indices outperformed")).toBeInTheDocument();
+    const portfolio = screen.getByTestId("benchmark-portfolio-row");
+    expect(screen.getByText("NIFTY 50")).toBeInTheDocument();
+    expect(within(portfolio).getByText("Your Portfolio")).toBeInTheDocument();
+    expect(within(portfolio).queryByText(HOLDINGS_RETURN_LEGEND)).not.toBeInTheDocument();
+    expect(within(portfolio).queryByText(HOLDINGS_RETURN_LABEL)).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: HOLDINGS_RETURN_LABEL })).not.toBeInTheDocument();
+    expect(within(portfolio).queryByText(/since first buy/)).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: (name) => name.includes("Your Portfolio") })).toBe(portfolio);
+    expect(within(portfolio).queryByTestId("benchmark-portfolio-return")).not.toBeInTheDocument();
+    expect(within(portfolio).getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("benchmark-empty-note")).toHaveTextContent(
+      "Add holdings to compare against benchmarks.",
+    );
+    expect(screen.queryByTestId("benchmark-comparison-note")).not.toBeInTheDocument();
+    expect(screen.queryByText("+18.45%")).not.toBeInTheDocument();
+    expect(screen.queryByText("Benchmarks Beaten (1Y)")).not.toBeInTheDocument();
+    expect(screen.queryByText("4/5")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("benchmark-row-example")).toHaveLength(5);
   });
 
   it("renders the disclaimer", () => {

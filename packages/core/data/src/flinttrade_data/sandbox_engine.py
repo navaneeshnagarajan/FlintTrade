@@ -164,6 +164,41 @@ def _coerce_timestamp(value: Any, default: float) -> float:
     return parsed
 
 
+def _is_option_symbol(symbol: str) -> bool:
+    """True for a compact or hyphenated CE/PE symbol."""
+    if parse_option_symbol(symbol) is not None:
+        return True
+    compact = "".join(symbol.strip().upper().split())
+    # A digit keeps "RELIANCE" (ends in CE) from reading as a call.
+    return any(char.isdigit() for char in compact) and compact.endswith(("CE", "PE"))
+
+
+def _is_future_position(symbol: str, exchange: str) -> bool:
+    """True when the row is a future rather than an option or an equity.
+
+    Practice stores no settlement price. A future is recognised from the
+    symbol (``FUT``) or from a derivatives exchange that is not an option.
+    """
+    if _is_option_symbol(symbol):
+        return False
+    if parse_future_symbol(symbol) is not None:
+        return True
+    compact = "".join(symbol.strip().upper().split())
+    if compact.endswith("FUT"):
+        return True
+    return exchange.strip().upper() in {
+        "NFO",
+        "BFO",
+        "MCX",
+        "CDS",
+        "NSE_FNO",
+        "BSE_FNO",
+        "MCX_COMM",
+        "NSE_CURRENCY",
+        "BSE_CURRENCY",
+    }
+
+
 # ---------------------------------------------------------------------------
 # SandboxEngine
 # ---------------------------------------------------------------------------
@@ -378,8 +413,21 @@ class SandboxEngine:
             "used_margin": used_margin,
         }
 
-    def get_funds(self) -> dict[str, float]:
-        """Return the retired engine's funds shape from canonical state."""
+    def get_funds(self) -> dict[str, float | bool]:
+        """Return the retired engine's funds shape from canonical state.
+
+        ``available_balance`` is capital left after blocked margin.
+        ``current_balance`` is the ledger (``current``): initial capital plus
+        realised P&L, with blocked margin still inside it. Practice never
+        settles daily futures MTM into that ledger, and a position has no
+        settlement or previous-close price, so ``futures_mtm_in_ledger`` is
+        false and futures mark from ``avg_price``.
+
+        Option premium and equity notional are not booked into ``current``
+        until the leg is realised. ``ledger_balance`` is the net-worth cash:
+        ``current`` with those open cash trades applied, and with blocked
+        margin still included. Futures notional is not applied.
+        """
         capital = self.get_capital()
         pnl = self.get_pnl()
         return {
@@ -387,8 +435,26 @@ class SandboxEngine:
             "used_margin": capital["used_margin"],
             "realized_pnl": pnl["realised"],
             "available_balance": capital["available"],
+            "current_balance": capital["current"],
+            "ledger_balance": self._net_worth_ledger(capital),
+            "futures_mtm_in_ledger": False,
             "total_equity": capital["current"] + pnl["unrealised"],
         }
+
+    def _net_worth_ledger(self, capital: dict[str, float]) -> float:
+        """Cash for net worth, including blocked margin.
+
+        ``current`` is not reduced by ``used_margin``. Open option and equity
+        positions subtract signed entry value (quantity × average), because
+        that cash movement is only realised later. Futures are left out:
+        there is no daily settlement into capital and no settlement price.
+        """
+        ledger = float(capital["current"])
+        for position in self.get_positions():
+            if _is_future_position(str(position["symbol"]), str(position["exchange"])):
+                continue
+            ledger -= int(position["net_qty"]) * float(position["avg_price"])
+        return ledger
 
     def adjust_capital(self, amount: float) -> dict[str, float]:
         """Add or remove virtual capital.

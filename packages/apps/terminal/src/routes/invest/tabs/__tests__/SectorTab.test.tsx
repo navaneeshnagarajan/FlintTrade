@@ -39,24 +39,55 @@ vi.mock("@/components/motion/StaggeredList", () => ({
   ),
 }));
 
-vi.mock("../../InvestContext", () => ({
-  useInvest: () => ({
-    holdings: [
-      { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
-      { symbol: "INFY", exchange: "NSE", quantity: 30, averagePrice: 1500, ltp: 1475, pnl: -750, pnlPercent: -1.67 },
-    ],
-    isLoading: false,
-    isError: false,
-  }),
+const investState = vi.hoisted(() => ({
+  holdings: [
+    { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
+    { symbol: "INFY", exchange: "NSE", quantity: 30, averagePrice: 1500, ltp: 1475, pnl: -750, pnlPercent: -1.67 },
+  ],
+  isLoading: false,
+  isError: false,
+  isSampleData: false,
 }));
 
+vi.mock("../../InvestContext", () => ({
+  useInvest: () => investState,
+}));
+
+import { useModeStore } from "@/stores/modeStore";
 import { SectorTab } from "../SectorTab";
+
+const LIVE_HEADER = "Portfolio value distribution across NSE sectors, derived from your live holdings.";
 
 describe("SectorTab", () => {
   it("renders sector allocation through Flint primitives", () => {
+    investState.isSampleData = false;
     render(<SectorTab />);
 
     expect(screen.getByText("Sector Allocation")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Sector allocation donut" })).toBeInTheDocument();
+  });
+
+  it("shows one Example chip and example wording on a sample book", () => {
+    useModeStore.setState({ mode: "explore" });
+    investState.isSampleData = true;
+    render(<SectorTab />);
+
+    expect(screen.getAllByTestId("example-chip")).toHaveLength(1);
+    expect(screen.getByText("Example sector split. Connect a broker to see yours.")).toBeInTheDocument();
+    expect(screen.getByText("Example data. Not from your holdings.")).toBeInTheDocument();
+    expect(screen.queryByText(LIVE_HEADER)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Data sourced from live holdings/)).not.toBeInTheDocument();
+  });
+
+  it("keeps live holdings wording and no Example chip when the book is not sample data", () => {
+    useModeStore.setState({ mode: "practice" });
+    investState.isSampleData = false;
+    render(<SectorTab />);
+
+    expect(screen.getByText(LIVE_HEADER)).toBeInTheDocument();
+    expect(screen.getByText(/Data sourced from live holdings via your active broker data source/)).toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+    expect(screen.queryByText("Example sector split. Connect a broker to see yours.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Example data. Not from your holdings.")).not.toBeInTheDocument();
   });
 });
