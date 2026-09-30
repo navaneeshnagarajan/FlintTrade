@@ -1,0 +1,38 @@
+{
+  "intents": {
+    "inline:choosing-sample-data-opens-the-desk-in-explore-m-df576200": {
+      "binding": {
+        "kind": "allOf",
+        "predicates": [
+          {
+            "kind": "route",
+            "pathname": "/home"
+          },
+          {
+            "equals": "explore",
+            "kind": "state",
+            "path": "mode",
+            "store": "mode"
+          }
+        ]
+      },
+      "declaredAt": 1790758823716,
+      "id": "inline:choosing-sample-data-opens-the-desk-in-explore-m-df576200",
+      "provenBy": {
+        "at": 1790758824675,
+        "grade": "state",
+        "verdictId": "reticle_act_and_wait:1790758824675"
+      },
+      "state": "proved",
+      "statement": "Choosing sample data opens the desk in Explore mode without creating an account.",
+      "status": "proved",
+      "subject": "unsorted",
+      "surface": {
+        "route": "/home"
+      },
+      "updatedAt": 1790758824703
+    }
+  },
+  "subject": "unsorted",
+  "version": 1
+}
