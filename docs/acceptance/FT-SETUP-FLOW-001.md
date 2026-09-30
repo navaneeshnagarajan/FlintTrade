@@ -7,10 +7,13 @@ Later steps come after the affirm.
 
 ## Locked behaviour
 
-1. The mandatory first-run path is only **Create operator → vault →
-   Practice desk**. Nothing else blocks that path.
-2. After the vault, the operator affirms Practice and lands on the
-   Practice desk. That affirm happens **before** the optional cards.
+1. The mandatory first-run path ends on the Practice desk. When the
+   vault is not yet secured, that path is **Create operator → vault →
+   Practice desk**. When the vault is already secured, Setup skips the
+   vault step. Nothing else blocks the path.
+2. The operator affirms Practice and lands on the Practice desk. That
+   affirm happens **before** the optional cards. When the vault step is
+   shown, the affirm comes after it.
 3. The optional cards are **Two-factor authentication**,
    **Broker connect**, **LLM**, and **Trading defaults**. Risk limits
    and Monitoring stay in Settings. None of these appear ahead of the
@@ -27,29 +30,14 @@ Later steps come after the affirm.
    finished card shows **Done** and only **Set up** (no **Later**).
    A finished **Broker connect** card does not show
    **Continue without a broker**. That control is on the card only
-   while the card is neither done nor skipped. Card-row **Later**
+   while the card is neither done nor skipped. Choosing it on the open
+   broker panel marks **Broker connect** **Skipped**. Card-row **Later**
    buttons, and **Later** in the open **LLM** and trading-defaults
    panels, are announced as `Later {title}`. The strip reads
    `Optional setup · N of 4 done`, and adds `· M skipped` only when M
    is at least 1. N counts finished cards only. **Dismiss** on the desk
    moves the strip into Settings. The Settings reminder has **Show**
    and **Hide**, and no **Dismiss**.
-
-1. The mandatory first-run path ends on the Practice desk. When the
-   vault is not yet secured, that path is **Create operator → vault →
-   Practice desk**. When the vault is already secured, Setup skips the
-   vault step. Nothing else blocks the path.
-2. The operator affirms Practice and lands on the Practice desk. That
-   affirm happens **before** Trading Defaults, Risk, and Broker. When
-   the vault step is shown, the affirm comes after it.
-3. **Trading Defaults**, **Risk**, and **Broker** stay Later/Skip. They
-   must never appear ahead of the Practice affirm.
-4. **Continue without a broker** is a primary Later path. It is not
-   buried under Native, OpenAlgo, or MCP.
-5. **TOTP**, **broker connect**, **LLM**, and **Monitoring** are
-   Later/Skip on first run. They are not required gates. Choosing Later
-   or Skip does not block the Practice desk.
-
 6. First run does not unlock **Live**. The Practice desk is the finish.
    A later Live unlock, outside this path, keeps the existing
    authenticator and PIN gate. Live place stays fail-closed.
@@ -89,10 +77,10 @@ and does not render the optional cards, Monitoring, or Risk. Opening
 the desk mints a Practice session and leaves setup for `/trade`.
 
 The optional strip opens on the Practice desk after landing. **Later**
-on a card row marks the card **Skipped** and does not change Step N of
-3. **Later** inside an open authenticator, **LLM**, or trading-defaults
-panel only closes the panel and leaves the card and the strip
-unchanged. Card titles are plain: **Two-factor authentication**,
+on a card row marks the card **Skipped** and does not change the step
+total fixed above. **Later** inside an open authenticator, **LLM**, or
+trading-defaults panel only closes the panel and leaves the card and
+the strip unchanged. Card titles are plain: **Two-factor authentication**,
 **Broker connect**, **LLM**, and **Trading defaults**. A finished
 **Broker connect** card shows **Done** and **Set up** only. On the open
 broker panel, **Continue without a broker** is the first control, above
@@ -138,14 +126,6 @@ signed-in operator is sent to `/trade`. A signed-out operator sees
 **Setup is complete. Sign in to open the desk.** **Sign in** is the
 primary button and opens `/welcome`.
 
-Those later panels open on the Practice desk after landing. Skip or
-Later stays on the desk and does not change the step total fixed
-above. On the broker card, **Continue without a broker** is the primary
-control. Native, OpenAlgo, and MCP stay behind Set up, and inside that
-panel the same control remains above them. There is no Live unlock
-control on this path.
-
-
 ## Out of scope
 
 - Operator-copy scrub for weekday or pack names (**FT-SETUP-COPY-001** /
@@ -156,10 +136,12 @@ control on this path.
 
 ## Acceptance
 
-1. A new operator can finish first-run Setup only by creating the
-   operator, opening the vault, and landing on the Practice desk.
-2. Immediately after the vault, the operator affirms Practice and lands
-   on the Practice desk. The optional cards are not on screen yet.
+1. A new operator finishes first-run Setup by creating the operator and
+   landing on the Practice desk. The vault step is required only when
+   the vault is not yet secured.
+2. The operator affirms Practice and lands on the Practice desk before
+   the optional cards appear. When the vault step is shown, that affirm
+   comes immediately after it. The optional cards are not on screen yet.
 3. **Two-factor authentication**, **Broker connect**, **LLM**, and
    **Trading defaults** come after that affirm. Risk limits and
    Monitoring stay in Settings. None of them can appear ahead of the
@@ -173,25 +155,11 @@ control on this path.
    authenticator, **LLM**, or trading-defaults panel only closes the
    panel and leaves the card and the strip unchanged. **Continue without
    a broker** on the open broker panel marks **Broker connect**
-   **Skipped** and updates the strip. A finished
-   **Broker connect** card shows **Done** and **Set up** only. The
-   strip counts finished cards only, and omits `· M skipped` when
-   nothing is skipped. Settings keeps the reminder after **Dismiss**,
-   without a **Dismiss** of its own.
-
-1. A new operator finishes first-run Setup by creating the operator and
-   landing on the Practice desk. The vault step is required only when
-   the vault is not yet secured.
-2. The operator affirms Practice and lands on the Practice desk before
-   Trading Defaults, Risk, and Broker appear. When the vault step is
-   shown, that affirm comes immediately after it.
-3. Trading Defaults, Risk, and Broker are Later/Skip, and none of them
-   can appear ahead of that affirm.
-4. **Continue without a broker** is the primary control on the broker
-   Later path. Native, OpenAlgo, and MCP do not sit above it or hide it.
-5. TOTP, broker connect, LLM, and Monitoring are Later/Skip. Skipping
-   any of them still leaves the operator on the Practice desk.
-
+   **Skipped** and updates the strip. A skipped card shows **Skipped**
+   and only **Set up**. A finished **Broker connect** card shows
+   **Done** and **Set up** only. The strip counts finished cards only,
+   and omits `· M skipped` when nothing is skipped. Settings keeps the
+   reminder after **Dismiss**, without a **Dismiss** of its own.
 6. First run has no Live unlock control and cannot mint a Live session.
 7. Step N of M counts only the required steps. When the vault is already
    secured, M is 2 (**Step 1 of 2 - Create operator**, **Step 2 of 2 -
@@ -223,5 +191,8 @@ to delete this unfinished operator.**) and the red **Delete and start
 over** button restarts at step 1. After Setup completes, a signed-in
 operator opening `/setup` is sent to `/trade`, and a signed-out
 operator sees **Setup is complete. Sign in to open the desk.** The
-affirm lands on the Practice desk before later setup. Optional panels
-do not gate that desk, and first run does not unlock Live.
+affirm lands on the Practice desk before the optional strip. The
+strip reads `Optional setup · N of 4 done`, and adds `· M skipped` only
+when at least one card is skipped. Monitoring and risk limits stay in
+Settings. The strip does not gate the desk, and first run does not
+unlock Live.
