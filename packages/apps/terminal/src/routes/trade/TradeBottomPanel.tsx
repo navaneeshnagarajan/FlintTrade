@@ -1,22 +1,24 @@
 /**
  * TradeBottomPanel.tsx
  *
- * Collapsible bottom panel for the /trade route.
- * Shows tabs: Alerts | Trade Log
+ * Bottom book on the /trade route.
+ * Tabs: Positions | Orders | Alerts | Trade Log
  *
- * The panel is collapsed by default (height = 0) and can be expanded via the
- * react-resizable-panels drag handle above it.
- *
- * Accessibility:
- * - Tab bar uses role="tablist" / role="tab" / role="tabpanel" with
- *   aria-selected and aria-controls linking.
- * - Tab panel has focus management via tabIndex.
+ * The panel opens at about 28% of the workspace so Practice positions and
+ * orders are on the desk without dragging a zero-height splitter. The header
+ * control can open it again after it has been collapsed.
  */
 
-import { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { detachedPanelProps } from "@/layout/flexLayoutAdapter";
 import { cn } from "@/lib/utils";
+import type { TradeBookTab } from "./tradeBookPanel";
 
-type TabId = "alerts" | "log";
+const PositionsWidget = lazy(() => import("@/widgets/trading/Positions/PositionsWidget"));
+const OrdersWidget = lazy(() => import("@/widgets/trading/Orders/OrdersWidget"));
+
+type TabId = TradeBookTab | "alerts" | "log";
 
 interface TabDef {
   id: TabId;
@@ -24,20 +26,29 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  { id: "positions", label: "Positions" },
+  { id: "orders", label: "Orders" },
   { id: "alerts", label: "Alerts" },
   { id: "log", label: "Trade Log" },
 ];
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+function BookFallback({ label }: { label: string }) {
+  return (
+    <p role="status" className="text-text-disabled">
+      Loading {label}…
+    </p>
+  );
+}
 
-export function TradeBottomPanel() {
-  const [activeTab, setActiveTab] = useState<TabId>("alerts");
+export function TradeBottomPanel({ requestedTab }: { requestedTab?: TradeBookTab | null }) {
+  const [activeTab, setActiveTab] = useState<TabId>(requestedTab ?? "positions");
+
+  useEffect(() => {
+    if (requestedTab) setActiveTab(requestedTab);
+  }, [requestedTab]);
 
   return (
     <div className="h-full bg-surface-card border-t border-border-default flex flex-col overflow-hidden">
-      {/* Tab bar */}
       <div
         role="tablist"
         aria-label="Trade panel tabs"
@@ -46,42 +57,50 @@ export function TradeBottomPanel() {
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
-            <button
+            <Button
               key={tab.id}
               id={`trade-bottom-tab-${tab.id}`}
+              type="button"
               role="tab"
+              variant="ghost"
+              size="sm"
               aria-selected={isActive}
               aria-controls={`trade-bottom-panel-${tab.id}`}
               tabIndex={isActive ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "ft-tray-tab px-2.5 h-6 text-xxs rounded-none",
+                "px-2.5 h-5 text-xxs font-medium rounded",
+                isActive
+                  ? "bg-surface-active text-text-primary"
+                  : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
               )}
             >
               {tab.label}
-            </button>
+            </Button>
           );
         })}
       </div>
 
-      {/* Panel content */}
-      {TABS.map((tab) => (
-        <div
-          key={tab.id}
-          id={`trade-bottom-panel-${tab.id}`}
-          role="tabpanel"
-          aria-labelledby={`trade-bottom-tab-${tab.id}`}
-          tabIndex={0}
-          hidden={activeTab !== tab.id}
-          className="flex-1 overflow-y-auto p-2 text-xs text-text-muted outline-none"
-        >
-          {tab.id === "alerts" ? (
-            <p className="text-text-disabled">No active alerts</p>
-          ) : (
-            <p className="text-text-disabled">No recent trades</p>
-          )}
-        </div>
-      ))}
+      <div
+        id={`trade-bottom-panel-${activeTab}`}
+        role="tabpanel"
+        aria-labelledby={`trade-bottom-tab-${activeTab}`}
+        tabIndex={0}
+        className="flex-1 overflow-y-auto p-2 text-xs text-text-muted outline-none"
+      >
+        {activeTab === "positions" && (
+          <Suspense fallback={<BookFallback label="positions" />}>
+            <PositionsWidget {...detachedPanelProps("desk-positions")} />
+          </Suspense>
+        )}
+        {activeTab === "orders" && (
+          <Suspense fallback={<BookFallback label="orders" />}>
+            <OrdersWidget {...detachedPanelProps("desk-orders")} />
+          </Suspense>
+        )}
+        {activeTab === "alerts" && <p className="text-text-disabled">No active alerts</p>}
+        {activeTab === "log" && <p className="text-text-disabled">No recent trades</p>}
+      </div>
     </div>
   );
 }
