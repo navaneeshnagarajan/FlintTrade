@@ -1,0 +1,77 @@
+name: Visual and accessibility
+
+# Advisory lane. It is not one of the ten Test jobs and it is not a required
+# check. VISUAL_AXE_GATE is the one-line switch: "0" always finishes green,
+# "1" fails the job when Playwright fails. Leave it at "0" until the lane
+# has stayed quiet, then flip it. Do not add the job to branch protection
+# before that flip.
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: Regenerate screenshot baselines on ubuntu-latest and commit them to this branch
+        type: boolean
+        default: false
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, ready_for_review, reopened]
+  push:
+    branches: [main, dev]
+
+concurrency:
+  group: visual-a11y-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  terminal-visual-a11y:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Flip this one value to "1" to make visual diffs and new axe violations fail the job.
+      VISUAL_AXE_GATE: "0"
+      UPDATE_VISUAL_BASELINES: ${{ github.event_name == 'workflow_dispatch' && inputs.update_baselines && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install the lockfile-pinned Playwright Chromium build
+        run: pnpm --dir packages/apps/terminal exec playwright install --with-deps chromium
+      - name: Run advisory visual and axe checks
+        run: node packages/apps/terminal/e2e/visual/run-advisory.mjs
+      - name: Upload visual diffs and axe observations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visual-a11y-diffs
+          path: packages/apps/terminal/test-results
+          if-no-files-found: ignore
+      - name: Upload regenerated baselines
+        if: github.event_name == 'workflow_dispatch' && inputs.update_baselines
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visual-baselines
+          path: |
+            packages/apps/terminal/e2e/visual/baselines
+            packages/apps/terminal/e2e/visual/known-axe-violations.json
+          if-no-files-found: ignore
+      - name: Commit regenerated baselines
+        if: github.event_name == 'workflow_dispatch' && inputs.update_baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/apps/terminal/e2e/visual/baselines packages/apps/terminal/e2e/visual/known-axe-violations.json
+          if git diff --cached --quiet; then
+            echo "No baseline changes to commit."
+            exit 0
+          fi
+          git commit -m "test(terminal): refresh visual baselines"
+          git push

@@ -1,0 +1,12 @@
+{
+  "layaRendered": ["Ready", "Degraded", "Down"],
+  "layaNotRendered": [
+    "Checking",
+    "Downloading the model",
+    "Can't verify the model",
+    "Wrong model version"
+  ],
+  "statusMenu": "TopBar Status menu (broker, Laya, and LLM)",
+  "dashboard": "Trading Desk workspace, the retired Dashboard as a composition",
+  "sampleData": "Example"
+}
