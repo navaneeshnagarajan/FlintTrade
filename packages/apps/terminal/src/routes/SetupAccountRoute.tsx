@@ -12,9 +12,10 @@
  * The secret is the one the backend wrote at startup. Setup does not replace it.
  *
  * Later / Skip (never counted, never shown before the affirm, never
- * block Practice): authenticator, broker connect, LLM, Monitoring,
- * trading defaults, and risk limits. They open on the Practice desk
- * after landing. Persona is not a first-run gate.
+ * block Practice): authenticator, broker connect, LLM, and trading
+ * defaults. They open on the Practice desk after landing, as a one-line
+ * reminder. Monitoring and risk limits stay in Settings. Persona is not
+ * a first-run gate.
  * First run has no Live unlock.
  *
  * Non-secret progress is persisted to localStorage under
@@ -46,6 +47,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,7 +62,6 @@ import type { RiskFormValues } from "@/routes/setup/RiskStep";
 import { LlmStep, type LlmFormValues } from "@/routes/setup/LlmStep";
 import { normaliseLlmHost, providerSelection } from "@/lib/llmProviders";
 import { TradingStep } from "@/routes/setup/TradingStep";
-import { RiskStep } from "@/routes/setup/RiskStep";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { downgradeMode } from "@/lib/modeAuth";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
@@ -85,6 +86,29 @@ import { setupProgressCounts, setupStepDetail, setupStepTitle } from "@/routes/s
 import {
   type OptionalSetupPanel,
 } from "@/routes/setupRouting";
+import {
+  OPTIONAL_SETUP_CARDS,
+  clearOptionalSetupState,
+  clearPracticeLaterPending,
+  loadOptionalSetupState,
+  markPracticeLaterPending,
+  optionalSetupDoneCount,
+  optionalSetupSkippedCount,
+  optionalSetupStripLabel,
+  practiceLaterPending,
+  saveOptionalSetupState,
+  type OptionalSetupCardId,
+  type OptionalSetupTrayState,
+} from "@/routes/optionalSetupTray";
+
+export {
+  OPTIONAL_SETUP_STATE_KEY,
+  PRACTICE_LATER_KEY,
+  clearOptionalSetupState,
+  clearPracticeLaterPending,
+  markPracticeLaterPending,
+  optionalSetupStripLabel,
+} from "@/routes/optionalSetupTray";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -273,33 +297,6 @@ function restoreSetupSessionFromTab(): void {
   const persisted = readPersistedAuthSession();
   if (!persisted) return;
   useAuthStore.getState().setLoggedIn(persisted.token, persisted.username, persisted.expiresAt);
-}
-
-/** Set once the operator opens the Practice desk. Not a required step. */
-export const PRACTICE_LATER_KEY = "flinttrade:setup-later";
-
-export function markPracticeLaterPending(): void {
-  try {
-    localStorage.setItem(PRACTICE_LATER_KEY, "1");
-  } catch {
-    // Storage quota or privacy mode — the desk still opens.
-  }
-}
-
-export function clearPracticeLaterPending(): void {
-  try {
-    localStorage.removeItem(PRACTICE_LATER_KEY);
-  } catch {
-    // Non-critical.
-  }
-}
-
-function practiceLaterPending(): boolean {
-  try {
-    return localStorage.getItem(PRACTICE_LATER_KEY) === "1";
-  } catch {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -704,84 +701,16 @@ function TotpDisplay({
     setDownloaded(true);
   }
 
-  // Shared escape-hatch block (rendered on both warning and qr phases).
-  // Gives the user two explicit exits: "Reset 2FA" (keep account, new QR)
-  // and "Delete account & start over" (wipe and re-run step 0).
-  function EscapeHatches() {
-    if (escapeAction) {
-      const title =
-        escapeAction === "reset-2fa"
-          ? "Reset 2FA — confirm with your password"
-          : "Delete account — confirm with your password";
-      const confirmLabel =
-        escapeAction === "reset-2fa" ? "Reset 2FA" : "Delete account";
-      return (
-        <div className="mt-4 rounded-lg border border-loss/30 bg-loss/5 p-3 space-y-2">
-          <p className="text-xs text-text-primary font-medium">{title}</p>
-          <p className="text-[11px] text-text-muted">
-            {escapeAction === "reset-2fa"
-              ? "Your old QR and backup codes will be invalidated. You'll scan a fresh QR on the next screen."
-              : "The account will be wiped from this machine. You can re-create it with a different username or email."}
-          </p>
-          <Input
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            placeholder="Your password"
-            value={escapePassword}
-            onChange={(e) => setEscapePassword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void submitEscape(); }}
-            aria-label="Confirm password"
-          />
-          {escapeError && (
-            <p role="alert" className="text-xs text-loss">{escapeError}</p>
-          )}
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={cancelEscape}
-              disabled={escapeLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void submitEscape()}
-              disabled={escapeLoading || !escapePassword}
-              className={escapeAction === "delete-account" ? "bg-loss hover:bg-loss/90" : ""}
-            >
-              {escapeLoading ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
-              {confirmLabel}
-            </Button>
-          </div>
-        </div>
-      );
+  function beginEnrol() {
+    if (hasRecoveryMaterial) {
+      setPhase("qr");
+      return;
     }
-    return (
-      <div className="mt-4 pt-3 border-t border-border-default flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted/80">
-        <span className="text-text-muted/60">Need to change something?</span>
-        <button
-          type="button"
-          onClick={() => setEscapeAction("reset-2fa")}
-          className="underline decoration-dotted underline-offset-4 hover:text-text-primary"
-        >
-          Reset 2FA
-        </button>
-        <button
-          type="button"
-          onClick={() => setEscapeAction("delete-account")}
-          className="underline decoration-dotted underline-offset-4 hover:text-loss"
-        >
-          Delete account &amp; start over
-        </button>
-      </div>
-    );
+    setEscapeAction("reset-2fa");
   }
 
-  // Phase 1: Warning — explain what 2FA is, what's locked in, and the exits.
+  // Phase 1: Warning — enrol or leave it for later. Account deletion lives
+  // in Settings → Security, not on this card.
   if (phase === "warning") {
     return (
       <div className="space-y-5">
@@ -793,7 +722,7 @@ function TotpDisplay({
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
             An authenticator is optional for Explore and Practice. Enrol it now, or choose
-            Set up later and use your password. Live unlock still requires the authenticator
+            Later and use your password. Live unlock still requires the authenticator
             and your PIN.
           </p>
           <ul className="space-y-2 text-xs text-text-secondary">
@@ -820,10 +749,8 @@ function TotpDisplay({
           <p className="text-[11px] text-text-secondary leading-relaxed">
             Your account is already created on this machine. Once you continue
             and scan the QR, you cannot come back to change your username,
-            email, or password without signing in first. If you need to change
-            any of those, use <strong>Delete account &amp; start over</strong>{" "}
-            below. If you only need a new QR (wrong device scanned, lost
-            phone), use <strong>Reset 2FA</strong>.
+            email, or password without signing in first. To delete the account,
+            open Settings → Security.
           </p>
         </div>
 
@@ -833,29 +760,58 @@ function TotpDisplay({
             className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-text-secondary"
           >
             For security, the QR seed and backup codes were not retained after the page was
-            closed or refreshed. Use <strong className="text-text-primary">Reset 2FA</strong>{" "}
-            below and confirm your password to generate fresh recovery material.
+            closed or refreshed. Enrol asks for your password and then shows a fresh QR.
           </div>
         )}
 
-        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-6">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onSetUpLater}
-          >
-            Set up later
-          </Button>
-          <Button onClick={() => setPhase("qr")} disabled={!hasRecoveryMaterial}>
-            I&apos;m ready — show QR code
-          </Button>
-        </div>
+        {escapeAction === "reset-2fa" ? (
+          <div className="rounded-lg border border-border-default p-3 space-y-2">
+            <p className="text-xs text-text-primary font-medium">Enrol — confirm with your password</p>
+            <p className="text-[11px] text-text-muted">
+              A fresh QR replaces any previous authenticator seed.
+            </p>
+            <Input
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              placeholder="Your password"
+              value={escapePassword}
+              onChange={(e) => setEscapePassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void submitEscape(); }}
+              aria-label="Confirm password"
+            />
+            {escapeError && (
+              <p role="alert" className="text-xs text-loss">{escapeError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={cancelEscape} disabled={escapeLoading}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void submitEscape()}
+                disabled={escapeLoading || !escapePassword}
+              >
+                {escapeLoading ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+                Enrol
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-6">
+            <Button type="button" variant="outline" onClick={onSetUpLater}>
+              Later
+            </Button>
+            <Button type="button" onClick={beginEnrol}>
+              Enrol
+            </Button>
+          </div>
+        )}
         <p className="text-[11px] text-text-muted text-right">
           Explore and Practice work with your password only. Enrol the
           authenticator before unlocking Live.
         </p>
-
-        <EscapeHatches />
       </div>
     );
   }
@@ -985,7 +941,7 @@ function TotpDisplay({
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           <Button type="button" variant="outline" onClick={onSetUpLater}>
-            Set up later
+            Later
           </Button>
           <Button
             onClick={() => {
@@ -1016,7 +972,6 @@ function TotpDisplay({
         </div>
       </div>
 
-      <EscapeHatches />
     </div>
   );
 }
@@ -1304,81 +1259,66 @@ function SetupComplete({ signedIn }: { signedIn: boolean }) {
   );
 }
 
-type LaterPanel = OptionalSetupPanel | "trading" | "risk";
-
-const LATER_ACTIONS: ReadonlyArray<{
-  id: LaterPanel;
-  title: string;
-  detail: string;
-}> = [
-  {
-    id: "totp",
-    title: "Two-factor authentication",
-    detail: "Optional. Practice does not need an authenticator.",
-  },
-  {
-    id: "broker",
-    title: "Broker connect",
-    detail: "Optional. Practice does not need a broker.",
-  },
-  {
-    id: "llm",
-    title: "LLM",
-    detail: "Optional. You can choose a model later.",
-  },
-  {
-    id: "monitoring",
-    title: "Monitoring",
-    detail: "Optional. System health stays in Settings.",
-  },
-  {
-    id: "trading",
-    title: "Trading defaults",
-    detail: "Optional. Defaults stay in Settings until you set them.",
-  },
-  {
-    id: "risk",
-    title: "Risk",
-    detail: "Optional. Limits stay in Settings until you set them.",
-  },
-];
-
 /**
- * Later/Skip tray on the Practice desk. Renders nothing until the operator
- * has affirmed Practice. Skipping a panel does not leave the desk, and the
- * tray never shows Step N of M.
+ * Later/Skip tray on the Practice desk. Collapsed to one line until Show.
+ * Dismiss moves the reminder into Settings. Skipping a card does not leave
+ * the desk, and the tray never shows Step N of M.
  */
-export function PracticeLaterSetup() {
+export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "settings" } = {}) {
   const [pending, setPending] = useState(practiceLaterPending);
-  const [panel, setPanel] = useState<LaterPanel | null>(null);
-  const [skipped, setSkipped] = useState<ReadonlySet<LaterPanel>>(() => new Set());
+  const [tray, setTray] = useState<OptionalSetupTrayState>(loadOptionalSetupState);
+  const [expanded, setExpanded] = useState(false);
+  const [panel, setPanel] = useState<OptionalSetupCardId | null>(null);
   const [totpUri, setTotpUri] = useState(sessionRecoveryMaterial?.totpUri ?? "");
   const [backupCodes, setBackupCodes] = useState<string[]>(
     sessionRecoveryMaterial?.backupCodes ?? [],
   );
 
-  if (!pending) return null;
+  const visible = surface === "settings" ? tray.dismissed : pending && !tray.dismissed;
+  if (!visible) return null;
 
-  function skip(id: LaterPanel) {
-    setSkipped((current) => {
-      const next = new Set(current);
-      next.add(id);
+  function updateTray(updater: (current: OptionalSetupTrayState) => OptionalSetupTrayState) {
+    setTray((current) => {
+      const next = updater(current);
+      saveOptionalSetupState(next);
       return next;
     });
+  }
+
+  function markDone(id: OptionalSetupCardId, kind: "skipped" | "completed") {
+    updateTray((current) => {
+      const skipped = kind === "skipped"
+        ? [...new Set([...current.skipped, id])]
+        : current.skipped.filter((entry) => entry !== id);
+      const completed = kind === "completed"
+        ? [...new Set([...current.completed, id])]
+        : current.completed.filter((entry) => entry !== id);
+      return { ...current, skipped, completed };
+    });
+  }
+
+  function skip(id: OptionalSetupCardId) {
     if (id === "totp") sessionRecoveryMaterial = null;
+    markDone(id, "skipped");
+    setPanel(null);
+  }
+
+  function complete(id: OptionalSetupCardId) {
+    markDone(id, "completed");
     setPanel(null);
   }
 
   function dismiss() {
     clearPracticeLaterPending();
     sessionRecoveryMaterial = null;
+    updateTray((current) => ({ ...current, dismissed: true }));
     setPending(false);
     setPanel(null);
+    setExpanded(false);
   }
 
   function rememberChoices(patch: {
     tradingDefaults?: TradingDefaultsFormValues | null;
-    riskLimits?: RiskFormValues | null;
     llm?: LlmFormValues | null;
   }) {
     const settings = useSettingsStore.getState();
@@ -1388,8 +1328,8 @@ export function PracticeLaterSetup() {
         defaultProduct: patch.tradingDefaults.defaultProduct,
         defaultQty: patch.tradingDefaults.defaultQty,
       });
+      complete("trading");
     }
-    if (patch.riskLimits) settings.setRiskLimits(patch.riskLimits);
     if (patch.llm) {
       const { provider, authMode } = providerSelection(patch.llm.provider);
       settings.setLLMSetupDraft({
@@ -1398,154 +1338,160 @@ export function PracticeLaterSetup() {
         model: patch.llm.model.trim(),
         host: normaliseLlmHost(provider, (patch.llm.host ?? "").trim()),
       });
+      complete("llm");
     }
-    setPanel(null);
   }
+
+  const strip = optionalSetupStripLabel(
+    optionalSetupDoneCount(tray),
+    optionalSetupSkippedCount(tray),
+  );
 
   return (
     <section
       aria-label="Optional setup"
-      className="shrink-0 border-b border-border-default bg-surface-card/80 px-3 py-3"
+      className={`shrink-0 border-b border-border-default bg-surface-card/80${
+        surface === "settings" ? " mb-4" : ""
+      }`}
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-text-primary">Optional</p>
-            <p className="text-xs text-text-muted">
-              You can skip this. Practice is already open.
-            </p>
-          </div>
-          <Button type="button" variant="ghost" size="sm" onClick={dismiss}>
-            Close
+      <div className="flex h-9 items-center gap-2 px-3">
+        <p className="min-w-0 flex-1 truncate text-sm text-text-primary">{strip}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 w-16 shrink-0 px-2 text-xs text-text-primary hover:bg-surface-hover hover:text-text-primary"
+          aria-expanded={expanded}
+          onClick={() => {
+            setExpanded((open) => !open);
+            if (expanded) setPanel(null);
+          }}
+        >
+          {expanded ? "Hide" : "Show"}
+        </Button>
+        {surface === "desk" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-xs text-text-primary hover:bg-surface-hover hover:text-text-primary"
+            onClick={dismiss}
+          >
+            Dismiss
           </Button>
-        </div>
-
-        {panel === null && (
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {LATER_ACTIONS.map((item) => (
-              <li
-                key={item.id}
-                className="rounded-lg border border-border-default p-3 space-y-2"
-              >
-                <div>
-                  <p className="text-sm text-text-primary">
-                    {item.title}
-                    {skipped.has(item.id) ? <span className="text-text-muted"> — later</span> : null}
-                  </p>
-                  <p className="text-xs text-text-muted">{item.detail}</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {item.id === "broker" && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => skip("broker")}
-                    >
-                      Continue without a broker
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Set up ${item.title}`}
-                    onClick={() => setPanel(item.id)}
-                  >
-                    Set up
-                  </Button>
-                  {item.id !== "broker" && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Skip ${item.title}`}
-                      onClick={() => skip(item.id)}
-                    >
-                      Later
-                    </Button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {panel === "totp" && (
-          <TotpDisplay
-            totpUri={totpUri}
-            backupCodes={backupCodes}
-            onConfirmed={() => setPanel(null)}
-            onTotpRegenerated={(uri, codes) => {
-              sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
-              setTotpUri(uri);
-              setBackupCodes(codes);
-            }}
-            onAccountDeleted={() => {
-              clearPracticeLaterPending();
-              sessionRecoveryMaterial = null;
-              setPending(false);
-            }}
-            onSetUpLater={() => skip("totp")}
-          />
-        )}
-
-        {panel === "broker" && (
-          <ConnectionStep onComplete={() => setPanel(null)} />
-        )}
-
-        {panel === "llm" && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" aria-label="Skip LLM" onClick={() => skip("llm")}>
-                Later
-              </Button>
-            </div>
-            <LlmStep onComplete={(values) => rememberChoices({ llm: values })} />
-          </div>
-        )}
-
-        {panel === "monitoring" && (
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-text-primary">Monitoring</h3>
-            <p className="text-xs text-text-secondary leading-relaxed">
-              Monitoring is optional. Practice does not need it. You can open
-              system health later in Settings.
-            </p>
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" aria-label="Skip Monitoring" onClick={() => skip("monitoring")}>
-                Later
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {panel === "trading" && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                aria-label="Skip Trading defaults"
-                onClick={() => skip("trading")}
-              >
-                Later
-              </Button>
-            </div>
-            <TradingStep onComplete={(values) => rememberChoices({ tradingDefaults: values })} />
-          </div>
-        )}
-
-        {panel === "risk" && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" aria-label="Skip Risk" onClick={() => skip("risk")}>
-                Later
-              </Button>
-            </div>
-            <RiskStep onComplete={(values) => rememberChoices({ riskLimits: values })} />
-          </div>
         )}
       </div>
+
+      {expanded && (
+        <div className="mx-auto flex max-w-3xl flex-col gap-3 px-3 pb-3">
+          {panel === null && (
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {OPTIONAL_SETUP_CARDS.map((item) => (
+                <li
+                  key={item.id}
+                  className="space-y-2 rounded-lg border border-border-default p-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-text-primary">{item.title}</p>
+                      {tray.skipped.includes(item.id) ? (
+                        <Badge variant="outline" className="px-1.5 py-0 text-xxs text-text-primary">
+                          Skipped
+                        </Badge>
+                      ) : tray.completed.includes(item.id) ? (
+                        <Badge variant="outline" className="px-1.5 py-0 text-xxs text-text-primary">
+                          Done
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-text-muted">{item.detail}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {!tray.skipped.includes(item.id) && !tray.completed.includes(item.id) && item.id === "broker" && (
+                      <Button type="button" size="sm" onClick={() => skip("broker")}>
+                        Continue without a broker
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Set up ${item.title}`}
+                      onClick={() => setPanel(item.id)}
+                    >
+                      Set up
+                    </Button>
+                    {!tray.skipped.includes(item.id) && !tray.completed.includes(item.id) && item.id !== "broker" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Later ${item.title}`}
+                        onClick={() => skip(item.id)}
+                      >
+                        Later
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {panel === "totp" && (
+            <TotpDisplay
+              totpUri={totpUri}
+              backupCodes={backupCodes}
+              onConfirmed={() => complete("totp")}
+              onTotpRegenerated={(uri, codes) => {
+                sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
+                setTotpUri(uri);
+                setBackupCodes(codes);
+              }}
+              onAccountDeleted={() => {
+                clearOptionalSetupState();
+                sessionRecoveryMaterial = null;
+                setPending(false);
+              }}
+              onSetUpLater={() => setPanel(null)}
+            />
+          )}
+
+          {panel === "broker" && (
+            <ConnectionStep
+              onComplete={() => complete("broker")}
+              onContinueWithoutBroker={() => skip("broker")}
+            />
+          )}
+
+          {panel === "llm" && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" aria-label="Later LLM" onClick={() => setPanel(null)}>
+                  Later
+                </Button>
+              </div>
+              <LlmStep onComplete={(values) => rememberChoices({ llm: values })} />
+            </div>
+          )}
+
+          {panel === "trading" && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  aria-label="Later Trading defaults"
+                  onClick={() => setPanel(null)}
+                >
+                  Later
+                </Button>
+              </div>
+              <TradingStep onComplete={(values) => rememberChoices({ tradingDefaults: values })} />
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -1669,6 +1615,7 @@ export default function SetupAccountRoute({
 
   function resetLocalSetup(): void {
     clearProgress();
+    clearOptionalSetupState();
     sessionRecoveryMaterial = null;
     setAccountCreated(false);
     setVaultOpened(false);

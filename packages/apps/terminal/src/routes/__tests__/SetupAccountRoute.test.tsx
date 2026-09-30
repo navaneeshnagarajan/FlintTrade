@@ -341,8 +341,8 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     mocks.downgradeMode.mockResolvedValue("practice-token");
     await renderSetup();
 
-    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip Broker connect" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later Broker connect" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
 
     await waitFor(() =>
@@ -425,10 +425,12 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     second.unmount();
 
     render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
     fireEvent.click(screen.getByRole("button", { name: "Set up Two-factor authentication" }));
-
-    expect(screen.getByRole("button", { name: /show QR code/i })).toBeEnabled();
     expect(screen.queryByText(/not retained/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enrol" }));
+    expect(screen.getByRole("button", { name: /reveal QR code/i })).toBeEnabled();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
   });
 
