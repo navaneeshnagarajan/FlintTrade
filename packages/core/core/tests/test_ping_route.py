@@ -53,6 +53,21 @@ class TestPingRoute:
         assert data is not None
         assert data["status"] == "ok"
 
+    def test_ping_omits_component_version_and_path_detail(self, client) -> None:  # type: ignore[no-untyped-def]
+        """Public liveness is status, timestamp, and the Laya heartbeat only."""
+        response = client.get("/api/v1/ping")
+        data = response.get_json()
+        assert data is not None
+        assert set(data) == {"status", "timestamp", "laya"}
+        assert data["status"] == "ok"
+        assert data["laya"] in {"ready", "degraded", "down"}
+        assert isinstance(data["timestamp"], str)
+        assert "/" not in data["timestamp"]
+        blob = response.get_data(as_text=True).lower()
+        assert "version" not in blob
+        for detail in ("broker", "duckdb", "disk", "memory", "cpu", "gpu", "network", "checks", "path"):
+            assert detail not in blob
+
     def test_ping_has_timestamp(self, client) -> None:  # type: ignore[no-untyped-def]
         """Response body contains a non-empty ISO-8601 timestamp."""
         response = client.get("/api/v1/ping")

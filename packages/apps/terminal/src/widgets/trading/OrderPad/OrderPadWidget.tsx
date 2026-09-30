@@ -46,9 +46,17 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { searchSymbol, placeOrder, getSymbol, OrderApiError } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useMargin } from "@/hooks/useMargin";
+import { useOrders } from "@/hooks/useOrders";
+import { usePositions } from "@/hooks/usePositions";
+import {
+  contractHasOpenExit,
+  exitAlreadyPendingMessage,
+  orderRefusalMessage,
+} from "@/widgets/trading/Positions/positionReconcile";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import {
   checkLotMultiple,
@@ -71,7 +79,7 @@ import {
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { liveWritesMuted } from "@/lib/operatorIncident";
+import { LAYA_EXIT_WHILE_DOWN, liveWritesMuted } from "@/lib/operatorIncident";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
@@ -94,6 +102,16 @@ const PRICE_ENABLED = new Set<OrderTypeValue>(["LIMIT", "SL"]);
 const TRIGGER_ENABLED = new Set<OrderTypeValue>(["SL", "SL-M"]);
 
 const DEBOUNCE_MS = 300;
+
+function contractToken(value: string | undefined): string {
+  return (value ?? "").trim().toUpperCase();
+}
+
+function exitSideForQuantity(quantity: number): "BUY" | "SELL" | null {
+  if (quantity > 0) return "SELL";
+  if (quantity < 0) return "BUY";
+  return null;
+}
 
 // Lot-size, price, mode and derivative-exchange rules live in
 // @/lib/orderGuards so every order-entry surface refuses the same things for
@@ -178,6 +196,7 @@ interface StepInputProps {
   value: string | number;
   onChange: (v: string) => void;
   min?: number;
+  max?: number;
   step?: number;
   disabled?: boolean;
   placeholder?: string;
@@ -191,6 +210,7 @@ function StepInput({
   value,
   onChange,
   min = 0,
+  max,
   step = 1,
   disabled = false,
   placeholder = "",
@@ -204,8 +224,11 @@ function StepInput({
   }
   function inc() {
     const n = parseFloat(String(value)) || 0;
-    onChange(String(n + step));
+    const next = n + step;
+    onChange(String(max != null ? Math.min(max, next) : next));
   }
+  const numeric = parseFloat(String(value)) || 0;
+  const atMax = max != null && numeric >= max;
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -229,6 +252,7 @@ function StepInput({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           min={min}
+          max={max}
           step={step}
           placeholder={placeholder}
           aria-invalid={invalid || undefined}
@@ -240,7 +264,7 @@ function StepInput({
           variant="outline"
           size="icon"
           onClick={inc}
-          disabled={disabled}
+          disabled={disabled || atMax}
           aria-label={`Increase ${label}`}
           className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r rounded-l-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
@@ -419,6 +443,7 @@ function OrderPadWidget(props: WidgetProps) {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastParamsRef = useRef<PlaceOrderParams | null>(null);
   const lastSubmissionModeRef = useRef<"practice" | "live" | null>(null);
+  const lastExitRef = useRef(false);
   const practiceConfirmInFlightRef = useRef(false);
   const suppressedChannelInstrumentRef = useRef<ReturnType<typeof useChannelInstrument>>(null);
 
@@ -517,6 +542,29 @@ function OrderPadWidget(props: WidgetProps) {
   const price = watch("price");
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
+  const appMode = useModeStore((s) => s.mode);
+  const { data: openPositions } = usePositions({
+    enabled: appMode === "practice" || appMode === "live",
+  });
+  const { data: openOrders } = useOrders({
+    enabled: appMode === "practice" || appMode === "live",
+  });
+  const openPosition = (openPositions ?? []).find((row) =>
+    contractToken(row.symbol) === contractToken(symbol)
+    && contractToken(row.exchange) === contractToken(exchange)
+    && contractToken(row.product || "MIS") === contractToken(product || "MIS")
+    && row.quantity !== 0
+  );
+  const openQty = openPosition ? Math.abs(openPosition.quantity) : 0;
+  const exitSide = openPosition ? exitSideForQuantity(openPosition.quantity) : null;
+  const exitAlreadyPending = openPosition != null && contractHasOpenExit(openPosition, openOrders ?? []);
+  // Close caps the ticket only on the side that reduces this contract.
+  const closeCap = exitSide != null && action === exitSide && openQty > 0 ? openQty : null;
+
+  useEffect(() => {
+    if (closeCap == null || !Number.isFinite(qty) || qty <= closeCap) return;
+    setValue("qty", closeCap, { shouldValidate: true });
+  }, [closeCap, qty, setValue]);
 
   useEffect(() => {
     setAdmission((current) => {
@@ -610,20 +658,26 @@ function OrderPadWidget(props: WidgetProps) {
           calculated = Math.floor(amount / ltp);
         }
         if (calculated >= 1) {
-          setValue("qty", calculated);
+          const capped = closeCap != null ? Math.min(calculated, closeCap) : calculated;
+          if (capped >= 1) setValue("qty", capped);
         }
       }
     },
-    [ltp, lotSize, setValue],
+    [closeCap, ltp, lotSize, setValue],
   );
 
   const handleQtyChange = useCallback(
     (v: string, fieldOnChange: (n: number) => void) => {
       // Manual qty edit clears the capital field to avoid confusion
       setCapitalAmount("");
-      fieldOnChange(Number(v));
+      const parsed = Number(v);
+      if (!Number.isFinite(parsed)) {
+        fieldOnChange(parsed);
+        return;
+      }
+      fieldOnChange(closeCap != null ? Math.min(parsed, closeCap) : parsed);
     },
-    [],
+    [closeCap],
   );
 
   // Broker capabilities — used to hide product for crypto, show dynamic exchanges
@@ -780,26 +834,38 @@ function OrderPadWidget(props: WidgetProps) {
   const submitOrder = useCallback(async (
     params: Readonly<PlaceOrderParams>,
     authority?: { mode: "practice" | "live" },
+    options?: { exit?: boolean },
   ): Promise<boolean> => {
     setLoading(true);
     try {
-      const result = await placeOrder(params, authority);
+      const result = options?.exit
+        ? await placeOrder(params, authority, { exit: true })
+        : await placeOrder(params, authority);
       setAdmission(null);
       const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
         (result as { order_id?: string }).order_id ??
         (result as { orderid?: string }).orderid ?? "";
       const placedMode = useModeStore.getState().mode;
-      showToast("success", orderSuccessToast(placedMode, orderId), 3000);
+      const exitWhileDown = options?.exit === true
+        && useOperatorSignalStore.getState().decisionStatus !== "ready";
+      const successText = exitWhileDown
+        ? LAYA_EXIT_WHILE_DOWN
+        : orderSuccessToast(placedMode, orderId);
+      showToast("success", successText, 3000);
       // Log to the central Notification Centre (complements the transient toast).
       emitNotification({
         category: "order",
-        title: orderSuccessNotificationTitle(
-          placedMode,
-          params.action,
-          params.quantity,
-          params.symbol,
-        ),
-        body: orderSuccessNotificationBody(placedMode, orderId),
+        title: exitWhileDown
+          ? LAYA_EXIT_WHILE_DOWN
+          : orderSuccessNotificationTitle(
+            placedMode,
+            params.action,
+            params.quantity,
+            params.symbol,
+          ),
+        body: exitWhileDown
+          ? LAYA_EXIT_WHILE_DOWN
+          : orderSuccessNotificationBody(placedMode, orderId),
       });
       return true;
     } catch (err) {
@@ -823,7 +889,15 @@ function OrderPadWidget(props: WidgetProps) {
         return false;
       }
       setAdmission(null);
-      const msg = err instanceof Error ? err.message : "Order failed";
+      const code = err instanceof OrderApiError && err.body && typeof err.body === "object" && "code" in err.body
+        && typeof (err.body as { code?: unknown }).code === "string"
+        ? (err.body as { code: string }).code
+        : undefined;
+      const msg = orderRefusalMessage(
+        code,
+        getValues("symbol"),
+        err instanceof Error ? err.message : "Order failed",
+      );
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
@@ -844,7 +918,6 @@ function OrderPadWidget(props: WidgetProps) {
     }
   }, [getValues, setValue, showToast]);
 
-  const appMode = useModeStore((s) => s.mode);
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
   // A denial belongs to the status and mode that produced it. When either
@@ -890,7 +963,10 @@ function OrderPadWidget(props: WidgetProps) {
     // Order Pad's Practice Buy is the paper path: Explore records a sample
     // fill and Practice uses the sandbox. Do not demand a live broker here.
     if (liveMuted) {
-      showToast("error", operatorIncident?.rectify ?? "Live orders are closed.", 6000);
+      const message = operatorIncident?.failureClass === "laya"
+        ? operatorIncident.headline
+        : (operatorIncident?.rectify ?? "Live orders are closed.");
+      showToast("error", message, 6000);
       return;
     }
 
@@ -973,6 +1049,7 @@ function OrderPadWidget(props: WidgetProps) {
     }
     lastParamsRef.current = params;
     lastSubmissionModeRef.current = "live";
+    lastExitRef.current = false;
     await submitOrder(params, { mode: "live" });
   };
 
@@ -1017,6 +1094,47 @@ function OrderPadWidget(props: WidgetProps) {
     }
   }, [getValues, practiceReview, showToast, submitOrder]);
 
+  const handleClosePosition = useCallback(async () => {
+    if (loading || exitSide == null || openQty < 1) return;
+    if (exitAlreadyPending) return;
+    const incident = readOperatorIncident();
+    const muted = appMode === "live" && liveWritesMuted(incident);
+    if (muted && incident?.failureClass !== "laya") return;
+    const values = getValues();
+    const requested = Number(values.qty);
+    const closeQty = Math.min(
+      openQty,
+      Math.max(1, Number.isFinite(requested) && requested > 0 ? requested : openQty),
+    );
+    setValue("action", exitSide);
+    setValue("qty", closeQty, { shouldValidate: true });
+    const selectedType = values.orderType;
+    const priceOn = PRICE_ENABLED.has(selectedType);
+    const triggerOn = TRIGGER_ENABLED.has(selectedType);
+    const isMarketType = selectedType === "MARKET" || selectedType === "SL-M";
+    const paper = appMode === "practice" || appMode === "explore";
+    const practiceMarketFill = !priceOn && isMarketType && ltp > 0 && paper;
+    const params: PlaceOrderParams = {
+      symbol: values.symbol,
+      exchange: values.exchange,
+      action: exitSide,
+      product: values.product as "MIS" | "CNC" | "NRML",
+      orderType: selectedType as "MARKET" | "LIMIT" | "SL" | "SL-M",
+      quantity: closeQty,
+      price: priceOn ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
+      triggerPrice: triggerOn ? (values.trigPrice ?? 0) : 0,
+      ...(values.discQty != null && values.discQty > 0
+        ? { disclosedQuantity: values.discQty }
+        : {}),
+      strategy: "FlintOrderPad",
+    };
+    const authorityMode = appMode === "live" ? "live" as const : "practice" as const;
+    lastParamsRef.current = params;
+    lastSubmissionModeRef.current = authorityMode;
+    lastExitRef.current = true;
+    await submitOrder(params, { mode: authorityMode }, { exit: true });
+  }, [appMode, exitAlreadyPending, exitSide, getValues, loading, ltp, openQty, setValue, submitOrder]);
+
   function handleRetry() {
     const mode = useModeStore.getState().mode;
     setToast(null);
@@ -1027,7 +1145,11 @@ function OrderPadWidget(props: WidgetProps) {
       return;
     }
     if (mode === "live" && lastSubmissionModeRef.current === "live" && lastParamsRef.current) {
-      void submitOrder(lastParamsRef.current, { mode: "live" });
+      void submitOrder(
+        lastParamsRef.current,
+        { mode: "live" },
+        lastExitRef.current ? { exit: true } : undefined,
+      );
       return;
     }
     showToast("error", "A Practice order cannot be retried after switching to Live mode.", 5000);
@@ -1219,17 +1341,42 @@ function OrderPadWidget(props: WidgetProps) {
         {/* Order type */}
         <div className="flex flex-col gap-0.5">
           <label className="text-xxs text-text-muted uppercase tracking-wider">Order Type</label>
-          <Controller
-            control={control}
-            name="orderType"
-            render={({ field }) => (
-              <PillGroup
-                value={field.value}
-                options={ORDER_TYPES}
-                onChange={field.onChange}
-              />
-            )}
-          />
+          <div className="flex items-center gap-1">
+            <Controller
+              control={control}
+              name="orderType"
+              render={({ field }) => (
+                <PillGroup
+                  value={field.value}
+                  options={ORDER_TYPES}
+                  onChange={field.onChange}
+                  className="flex-1"
+                />
+              )}
+            />
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      title="GTT orders aren't supported right now."
+                      aria-label="GTT"
+                      className="h-8 text-xs border-border-default text-text-muted cursor-not-allowed opacity-60"
+                    >
+                      GTT
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-56 text-xs">
+                  GTT orders aren&apos;t supported right now.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
 
         {/* Options premium hint — shown for options exchanges (NFO/BFO) */}
@@ -1316,8 +1463,9 @@ function OrderPadWidget(props: WidgetProps) {
                     onChange={(v) => handleQtyChange(v, field.onChange)}
                     // One lot is the floor when the lot size is known, keeping the
                     // stepper (and the native spinner's step base) lot-aligned.
-                    min={lotSize > 0 ? lotSize : 1}
-                    step={lotSize > 0 ? lotSize : 1}
+                    min={closeCap != null ? 1 : (lotSize > 0 ? lotSize : 1)}
+                    max={closeCap ?? undefined}
+                    step={closeCap != null && lotSize > closeCap ? 1 : (lotSize > 0 ? lotSize : 1)}
                     invalid={!!errors.qty}
                     errorId={errors.qty ? "orderpad-qty-error" : undefined}
                   />
@@ -1386,6 +1534,7 @@ function OrderPadWidget(props: WidgetProps) {
                 calculatedQty = Math.floor(amount / ltp);
                 lots = calculatedQty;
               }
+              if (closeCap != null) calculatedQty = Math.min(calculatedQty, closeCap);
               const approxCost = calculatedQty * ltp;
               return (
                 <div className="rounded border border-border-subtle bg-surface-card px-3 py-2 space-y-0.5">
@@ -1534,6 +1683,22 @@ function OrderPadWidget(props: WidgetProps) {
         )}
 
         {/* Submit button */}
+        {openQty > 0 && exitSide ? (
+          <Button
+            type="button"
+            data-testid="orderpad-close"
+            disabled={loading || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "laya")}
+            onClick={() => void handleClosePosition()}
+            className={`${btnBase} bg-surface-hover text-text-primary border border-border-default hover:bg-surface-card`}
+          >
+            Close
+          </Button>
+        ) : null}
+        {exitAlreadyPending ? (
+          <p className="text-xs text-loss" data-testid="exit-already-pending">
+            {exitAlreadyPendingMessage(symbol)}
+          </p>
+        ) : null}
         <Button
           type="submit"
           disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny"}
@@ -1543,7 +1708,9 @@ function OrderPadWidget(props: WidgetProps) {
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
         {liveMuted && operatorIncident ? (
-          <p className="text-xs text-loss" data-testid="live-write-rectify">{operatorIncident.rectify}</p>
+          <p className="text-xs text-loss" data-testid="live-write-rectify">
+            {operatorIncident.failureClass === "laya" ? operatorIncident.headline : operatorIncident.rectify}
+          </p>
         ) : (
           <LayaDegradedLimitsNote status={decisionStatus} />
         )}

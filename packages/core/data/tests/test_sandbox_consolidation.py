@@ -334,7 +334,8 @@ def test_version_two_export_import_preserves_feature_union() -> None:
         assert stats["pnl_days_imported"] == 1
         assert target.config.equity_leverage == 4
         assert target.config.squareoff_time == "15:05"
-        assert target.get_trades()[0]["strategy"] == "roundtrip"
+        assert target.get_orders()[0]["strategy"] == "roundtrip"
+        assert target.get_trades()[0]["strategy"] == "Restored from backup"
         assert target.get_pnl_history()[0]["unrealised"] == pytest.approx(100.0)
     finally:
         source.close()

@@ -8,7 +8,7 @@ import {
   mondayAccountStatusLine,
   mondayReadChrome,
   mondayReadConnectable,
-} from "./mondayReadChrome";
+} from "./connectedReadChrome";
 
 describe("mondayReadChrome", () => {
   it("labels Dhan and Neo Connected (read) only when connected", () => {

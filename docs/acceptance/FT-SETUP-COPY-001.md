@@ -38,7 +38,7 @@ Quotes below are the operator strings this tip replaced.
 
 `No broker needed · primary Monday Practice path`
 
-The Explore and Live notes on the same screen already use product
+The Example and Live notes on the same screen already use product
 language (`No broker needed`, `Broker required · PIN and authenticator
 required`).
 
@@ -82,7 +82,7 @@ IDs that contain the weekday pack name:
 
 - `(FT-MONDAY-002)` beside native Dhan + Kotak Neo Connected (read) /
   API smoke (broker setup and the native-read section).
-- `(FT-MONDAY-001)` beside Practice SandboxEngine fills and the Learn →
+- `(FT-MONDAY-001)` beside Practice fills and the Learn →
   Practice Trading fallback.
 - `(FT-MONDAY-003)` beside AI Suggest labelling, Chat live-read context,
   and the Settings AI note.
@@ -123,7 +123,8 @@ operator; the function names may stay.
 These are not operator chrome. Do not rename them as part of this
 finding:
 
-- Identifiers such as `isMondayReadBroker`, `mondayReadChrome`,
+- Identifiers such as `isMondayReadBroker` and `mondayReadChrome` in
+  `packages/apps/terminal/src/lib/connectedReadChrome.ts`,
   `nativeMonday`, `MONDAY_READ_BROKERS`, and `run_monday_read_smoke`.
 - Developer comments, including the file headers on `ConnectionStep.tsx`
   and `SetupAccountRoute.tsx`, the comment in

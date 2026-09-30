@@ -38,7 +38,7 @@ import AISuggestionsPanel from "@/routes/ai/AISuggestionsPanel";
 import SentimentPanel from "@/routes/ai/SentimentPanel";
 import RegimePanel from "@/routes/ai/RegimePanel";
 import AgentPanel from "@/routes/ai/AgentPanel";
-import { getBase } from "@/services/ftApi.helpers";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -702,7 +702,7 @@ function KnowledgeSection() {
 
 async function fetchAdvisorStatus(): Promise<AdvisorStatusData> {
   const base = getBase();
-  const resp = await fetch(`${base}/api/v1/advisor/status`);
+  const resp = await fetch(`${base}/api/v1/advisor/status`, { headers: buildHeaders(false) });
   if (!resp.ok) throw new Error(`advisor/status: HTTP ${resp.status}`);
   const raw: unknown = await resp.json();
   const result = AdvisorStatusResponseSchema.safeParse(raw);

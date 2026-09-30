@@ -1,7 +1,7 @@
 # FlintTrade on Windows
 
-> FlintTrade `v0.0.1` is not production ready; use Explore and Practice
-> modes before connecting any live broker workflow.
+> FlintTrade `v0.0.1` is not production ready; use Practice and example data
+> before connecting any live broker workflow.
 
 Everything below runs in stock **Windows PowerShell 5.1** — no WSL, no Git
 Bash, no make. Two Windows notes that apply to every command on this page:

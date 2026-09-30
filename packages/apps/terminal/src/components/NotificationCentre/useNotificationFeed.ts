@@ -28,8 +28,8 @@ const VALID_CATEGORIES: NotificationCategory[] = ["alert", "order", "system", "a
 
 const MODE_NOTIFICATIONS: Record<AppMode, { title: string; body: string }> = {
   explore: {
-    title: "Explore mode",
-    body: "Showing sample data only — no broker connection or live orders.",
+    title: "Example",
+    body: "Showing Example only — no broker connection or live orders.",
   },
   practice: {
     title: "Practice mode active",

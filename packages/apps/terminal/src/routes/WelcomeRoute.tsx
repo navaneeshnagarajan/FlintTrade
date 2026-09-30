@@ -27,7 +27,7 @@ import { migrationBlockedFromStatus } from "@/lib/twoOperatorGuide";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
+import { EXAMPLE_USER_DISPLAY_NAME, isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
 import { readPersistedAuthSession } from "@/lib/homeEntry";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -61,7 +61,7 @@ export const CINEMATIC_STEP_SCHEDULE = [
 
 const WELCOME_FEATURES = [
   "OpenAlgo bridge plus verified native brokers",
-  "Explore, Practice, and Live safety modes",
+  "Practice, Connected (read), and Live",
   "Option chain, Greeks, order flow, and depth",
   "Strategy lab, SIP tracking, and AI context",
 ] as const;
@@ -310,7 +310,7 @@ export default function WelcomeRoute() {
     // Sample-data Explore is not an operator database. Restore it without a
     // status probe so a paused update cannot drop the hatch session.
     if (isDemoSessionActive()) {
-      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
       return;
     }
 
@@ -327,7 +327,7 @@ export default function WelcomeRoute() {
       .then((data) => {
         if (cancelled) return;
         if (isDemoSessionActive()) {
-          useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+          useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
           return;
         }
         if (migrationBlockedFromStatus(data)) {
@@ -456,7 +456,7 @@ export default function WelcomeRoute() {
     // British English: "Try with sample data".
     useModeStore.getState().setMode("explore");
     markDemoSessionActive();
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
     navigate("/home");
   }
 
@@ -734,9 +734,9 @@ export default function WelcomeRoute() {
                       variant="ghost"
                       onClick={handleExplore}
                       className="text-sm text-text-muted hover:text-text-primary"
-                      aria-label="Try with sample data without creating an account"
+                      aria-label="Try with example data without creating an account"
                     >
-                      Try with sample data →
+                      Try with example data →
                     </Button>
                   </>
                 ) : (

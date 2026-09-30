@@ -37,10 +37,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
-}));
-
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
@@ -60,6 +56,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { RiskReturnTab } from "../RiskReturnTab";
+import { useModeStore } from "@/stores/modeStore";
 import { useQuery } from "@tanstack/react-query";
 
 const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
@@ -81,6 +78,7 @@ const LIVE_POINT = {
 
 describe("RiskReturnTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
     mockUseQuery.mockReturnValue(NO_DATA);
   });
 
@@ -88,13 +86,13 @@ describe("RiskReturnTab", () => {
     // Provenance fails closed — an absent flag is sample, never live.
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { points: [LIVE_POINT] } });
     render(<RiskReturnTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("drops the demo banner only on an explicit is_sample_data: false", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, points: [LIVE_POINT] } });
     render(<RiskReturnTab />);
-    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
   });
 
   it("renders the section heading", () => {
@@ -104,7 +102,7 @@ describe("RiskReturnTab", () => {
 
   it("shows demo banner when API is unavailable", () => {
     render(<RiskReturnTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("renders stats cards for avg return, volatility, and Sharpe", () => {

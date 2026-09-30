@@ -73,7 +73,7 @@ vi.mock("@/stores/modeStore", () => ({
 // ---------------------------------------------------------------------------
 
 const SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE =
-  "Sample schedule — control unavailable in Explore";
+  "Example schedule — control unavailable";
 
 const ACTIVE_JOB = {
   name: "health_check_job",
@@ -144,7 +144,7 @@ describe("CronSection", () => {
     const pause = await findPauseControl();
     expect(pause).toBeDisabled();
     expect(pause).toHaveAttribute("title", SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE);
-    expect(screen.getAllByText("Sample").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Example").length).toBeGreaterThan(0);
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expectNoExtraSampleChip();
 
@@ -162,7 +162,7 @@ describe("CronSection", () => {
     const pause = await findPauseControl();
     expect(pause).toBeDisabled();
     expect(pause).toHaveAttribute("title", SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE);
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText("Example")).toBeInTheDocument();
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expectNoExtraSampleChip();
 
@@ -180,7 +180,7 @@ describe("CronSection", () => {
     expect(pause).toBeEnabled();
     expect(pause).not.toHaveAttribute("title", SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE);
     expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByText("Example")).not.toBeInTheDocument();
 
     await userEvent.click(pause);
     await waitFor(() => {

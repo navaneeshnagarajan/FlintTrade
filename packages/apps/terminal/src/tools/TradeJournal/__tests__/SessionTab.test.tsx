@@ -270,6 +270,29 @@ describe("SessionTab live mode", () => {
     expect(screen.getByText("1W / 0L")).toBeTruthy();
   });
 
+  it("tags a trade-log row when the round trip was restored from backup", () => {
+    mockTradebook.mockReturnValue({
+      data: [
+        {
+          tradeId: "t1", orderId: "o1", symbol: "INFY", exchange: "NSE",
+          action: "BUY", quantity: 1, price: 100, timestamp: "2026-07-19T09:20:00",
+          strategy: "Restored from backup",
+        },
+        {
+          tradeId: "t2", orderId: "o2", symbol: "INFY", exchange: "NSE",
+          action: "SELL", quantity: 1, price: 110, timestamp: "2026-07-19T09:50:00",
+          strategy: "Restored from backup",
+        },
+      ],
+    });
+    render(<SessionTab />);
+    const tag = screen.getByText("Restored");
+    expect(tag).toHaveAttribute(
+      "title",
+      "Restored from backup. Not sent to a broker or checked by Laya.",
+    );
+  });
+
   it("stays on the disclosed sample when fills exist but nothing closed", () => {
     mockTradebook.mockReturnValue({
       data: [

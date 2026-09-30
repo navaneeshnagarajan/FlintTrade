@@ -26,6 +26,7 @@ import { useTradebook } from "@/hooks/useTradebook";
 import { useOrders } from "@/hooks/useOrders";
 import { useModeStore } from "@/stores/modeStore";
 import { roundTripsFromTrades } from "@/lib/pnl";
+import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +40,7 @@ export interface SessionTrade {
   isWin: boolean;
   entryTime: string;
   exitTime: string;
+  restored?: boolean;
 }
 
 export interface OrderSummary {
@@ -252,6 +254,7 @@ export function SessionTab() {
       isWin: t.isWin,
       entryTime: t.entryTime,
       exitTime: t.exitTime,
+      restored: t.restored,
     }));
   }, [tradebookQuery.data]);
 
@@ -435,7 +438,12 @@ export function SessionTab() {
                   today's fills. The regression test pins this. */}
               {sessionTrades.map((t) => (
                 <tr key={t.id} className="border-b border-border-subtle hover:bg-surface-hover transition-colors">
-                  <td className="py-1 text-text-secondary truncate max-w-24" title={t.symbol}>{t.symbol}</td>
+                  <td className="py-1 text-text-secondary max-w-24">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="truncate" title={t.symbol}>{t.symbol}</span>
+                      {t.restored ? <RestoredFillTag /> : null}
+                    </span>
+                  </td>
                   <td className="py-1 text-center font-mono text-text-muted text-xxs">{t.entryTime}</td>
                   <td className="py-1 text-right font-mono text-text-muted text-xxs">{t.holdMinutes}m</td>
                   <td className={cn("py-1 text-right font-mono tabular-nums font-medium", t.isWin ? "text-profit" : "text-loss")}>

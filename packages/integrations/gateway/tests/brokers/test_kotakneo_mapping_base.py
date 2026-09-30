@@ -155,6 +155,7 @@ def test_from_kotak_position_net_long_realised_pnl():
     assert pos["average_price"] == "100.00"  # buy side (buy_qty > sell_qty)
     assert pos["pnl"] == "40.00"             # realised: 4 * (110 - 100), NOT -560
     assert pos["buy_quantity"] == "10" and pos["sell_quantity"] == "4"
+    assert "mark_source" not in pos
 
 
 def test_from_kotak_position_net_short():
@@ -170,6 +171,28 @@ def test_from_kotak_position_net_short():
     assert pos["average_price"] == "110.00"  # sell side (sell_qty > buy_qty)
     assert pos["pnl"] == "40.00"
     assert pos["buy_quantity"] == "4" and pos["sell_quantity"] == "10"
+    assert "mark_source" not in pos
+
+
+def test_from_kotak_open_future_marks_the_open_leg_average_as_fallback():
+    pos = from_kotak_position({
+        "trdSym": "NIFTY25JUNFUT", "exSeg": "nse_fo", "prod": "NRML",
+        "cfBuyQty": 50, "flBuyQty": 0, "cfSellQty": 0, "flSellQty": 0,
+        "cfBuyAmt": 1_100_000, "buyAmt": 0, "cfSellAmt": 0, "sellAmt": 0,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": 2,
+    })
+    assert pos["quantity"] == "50"
+    assert pos["mark_source"] == "fallback"
+    assert "settlement_price" not in pos
+
+    flat = from_kotak_position({
+        "trdSym": "NIFTY25JUNFUT", "exSeg": "nse_fo", "prod": "NRML",
+        "cfBuyQty": 50, "flBuyQty": 0, "cfSellQty": 0, "flSellQty": 50,
+        "cfBuyAmt": 1_100_000, "buyAmt": 0, "cfSellAmt": 0, "sellAmt": 1_105_000,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": 2,
+    })
+    assert flat["quantity"] == "0"
+    assert "mark_source" not in flat
 
 
 def test_from_kotak_position_flat_books_full_realised():
@@ -306,6 +329,8 @@ def test_from_kotak_funds_real_limits_shape():
     assert funds["available_balance"] == "19.41"   # Net
     assert funds["used_margin"] == "18.78"          # MarginUsed
     assert funds["total_balance"] == "38.19"        # Net + MarginUsed
+    assert funds["ledger_balance"] == "38.19"
+    assert funds["futures_mtm_in_ledger"] is True
 
 
 def test_from_kotak_funds_check_margin_fallback():

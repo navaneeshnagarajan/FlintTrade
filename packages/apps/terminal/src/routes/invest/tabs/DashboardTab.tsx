@@ -18,15 +18,20 @@ import {
   DollarSign,
   ArrowUpRight,
   ArrowDownRight,
-  Percent,
 } from "lucide-react";
 import { xirr } from "@/lib/xirr";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
 import { cn } from "@/lib/utils";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
+import {
+  accountNetWorth,
+  accountNetWorthAccessibleName,
+  formatAccountNetWorth,
+  NET_WORTH_LABEL,
+  netWorthFigureTitleForBook,
+} from "@/lib/accountNetWorth";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
 import { maskValue, VALUE_MASK } from "@/lib/formatters";
@@ -64,8 +69,14 @@ interface TopMover {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function DashboardTab() {
-  const { holdings, summary: liveSummary, isLoading, isSampleData } = useInvest();
-
+  const {
+    holdings,
+    summary: liveSummary,
+    isLoading,
+    isError,
+    isSampleData,
+    positionBookReady,
+  } = useInvest();
   // Count and rows come from InvestContext only — never a local sample
   // overlay that would disagree with the header badge (FT-TRADE-010).
   const isDemo = Boolean(isSampleData);
@@ -74,14 +85,28 @@ export function DashboardTab() {
   const totalPnl = liveSummary.totalPnl;
   const totalPnlPercent = liveSummary.totalPnlPercent;
   const availableCash = liveSummary.availableCash;
-  // Sample and live share the same sum: InvestContext already derives
-  // currentValue from the exposed book (getDemoHoldings when sample).
-  const netWorth = currentValue + availableCash;
+  const ledgerCash = liveSummary.ledgerCash ?? availableCash;
+  // Same helper as Home. A sample book is labelled Example; a Practice
+  // snapshot never mixes the demo portfolio into this figure.
+  const netWorth = typeof liveSummary.netWorth === "number"
+    ? liveSummary.netWorth
+    : accountNetWorth(holdings, availableCash);
+  const netWorthPublished = !isError && positionBookReady !== false;
 
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   // Wrap the compact-INR formatter so masked mode hides the figure everywhere it
   // is passed to a counter/list without changing each call site's shape.
   const money = (v: number) => maskValue(formatINRCompact(v), valuesHidden);
+  const approximate = liveSummary.approximateNetWorth === true;
+  const figureTitle = netWorthFigureTitleForBook({
+    approximate,
+    missingAverageSymbols: liveSummary.missingAverageSymbols,
+    openLegSymbols: liveSummary.openLegSymbols,
+    fallbackSymbols: liveSummary.fallbackSymbols,
+  });
+  const netWorthLabel = (v: number) => maskValue(formatAccountNetWorth(v, approximate), valuesHidden);
+
+  const positionValue = liveSummary.positionValue ?? 0;
 
   const equityValue = useMemo(
     () =>
@@ -101,8 +126,9 @@ export function DashboardTab() {
 
   const bands: AllocationBand[] = [
     { label: "Equity", value: equityValue, color: "text-neutral-text", bg: "bg-neutral-text", hex: "#60a5fa" },
+    { label: "Positions", value: positionValue, color: "text-profit", bg: "bg-profit", hex: "#22c55e" },
     { label: "Commodity", value: commodityValue, color: "text-warning", bg: "bg-warning", hex: "#fbbf24" },
-    { label: "Cash", value: availableCash, color: "text-profit", bg: "bg-profit", hex: "#34d399" },
+    { label: "Cash", value: ledgerCash, color: "text-profit", bg: "bg-profit", hex: "#34d399" },
   ].filter((b) => b.value > 0);
 
   const sortedByPnl = useMemo(
@@ -131,11 +157,10 @@ export function DashboardTab() {
     [holdings],
   );
 
-  // XIRR calculation — uses demo cash flows for now; live would use trade history
+  // XIRR is computed from cash flows. An empty book has no return to show.
   const portfolioXirr = useMemo(() => {
+    if (holdings.length === 0) return null;
     if (!isDemo) {
-      // With live data we'd build cash flows from trade history
-      // For now, use demo flows but substitute current portfolio value
       const flows = DEMO_CASH_FLOWS.slice(0, -1).concat({
         date: new Date(),
         amount: currentValue + availableCash,
@@ -143,7 +168,7 @@ export function DashboardTab() {
       return xirr(flows);
     }
     return xirr(DEMO_CASH_FLOWS);
-  }, [isDemo, currentValue, availableCash]);
+  }, [holdings.length, isDemo, currentValue, availableCash]);
 
   if (isLoading) {
     return (
@@ -155,28 +180,30 @@ export function DashboardTab() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      {/* Demo banner */}
-      {isDemo && (
-        <div className="lg:col-span-3">
-          <DemoBanner />
-        </div>
-      )}
-
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3" data-testid="dashboard-figures">
       {/* Hero: Net Worth (full width) */}
       <GlassCard className="lg:col-span-3 p-5 gap-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="space-y-1">
-            <p className="text-xxs text-text-muted uppercase tracking-wider font-medium">
-              Net Worth (Equity + Cash)
+            <p
+              className="text-xxs text-text-muted uppercase tracking-wider font-medium flex items-center gap-1.5"
+              title={figureTitle}
+            >
+              <GlossaryTooltip term="Net Worth">{NET_WORTH_LABEL}</GlossaryTooltip>
             </p>
             <div className="flex items-baseline gap-3">
-              <span className="text-4xl font-mono font-bold tabular-nums text-text-primary">
-                <AnimatedCounter
-                  value={netWorth}
-                  formatter={money}
-                  duration={1.2}
-                />
+              <span
+                className="text-4xl font-mono font-bold tabular-nums text-text-primary"
+                data-testid="invest-net-worth"
+                title={figureTitle}
+                aria-label={
+                  netWorthPublished && approximate && !valuesHidden
+                    ? accountNetWorthAccessibleName(netWorth)
+                    : undefined
+                }
+                {...(netWorthPublished ? { "data-value": netWorth } : {})}
+              >
+                {netWorthPublished ? netWorthLabel(netWorth) : "—"}
               </span>
               <span
                 className={cn(
@@ -192,13 +219,16 @@ export function DashboardTab() {
               {portfolioXirr !== null && (
                 <>
                   {" "}&middot;{" "}
-                  <span
-                    className={cn(
-                      "font-mono font-semibold tabular-nums",
-                      portfolioXirr >= 0 ? "text-profit" : "text-loss",
-                    )}
-                  >
-                    XIRR {formatPercent(portfolioXirr * 100)}
+                  <span data-testid="sample-xirr" className="inline-flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "font-mono font-semibold tabular-nums",
+                        portfolioXirr >= 0 ? "text-profit" : "text-loss",
+                      )}
+                    >
+                      XIRR {formatPercent(portfolioXirr * 100)}
+                    </span>
+                    {isDemo ? <ExampleChip /> : null}
                   </span>
                 </>
               )}
@@ -235,8 +265,8 @@ export function DashboardTab() {
             Available Funds
           </span>
         </div>
-        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-          <AnimatedCounter value={availableCash} formatter={money} duration={1.0} />
+        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-available-funds">
+          {netWorthLabel(availableCash)}
         </div>
         <p className="text-xs text-text-muted">Withdrawable cash</p>
       </GlassCard>
@@ -250,8 +280,8 @@ export function DashboardTab() {
             Invested Value
           </span>
         </div>
-        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-          <AnimatedCounter value={totalInvested} formatter={money} duration={1.0} />
+        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-invested-value">
+          {money(totalInvested)}
         </div>
         <p className="text-xs text-text-muted">Total cost basis of holdings</p>
       </GlassCard>
@@ -279,12 +309,11 @@ export function DashboardTab() {
             "text-2xl font-mono font-bold tabular-nums",
             totalPnl >= 0 ? "text-profit" : "text-loss",
           )}
+          data-testid="invest-day-pnl"
         >
-          <AnimatedCounter
-            value={Math.abs(totalPnl)}
-            formatter={(v) => (valuesHidden ? VALUE_MASK : (totalPnl >= 0 ? "+" : "-") + formatINRCompact(v))}
-            duration={1.0}
-          />
+          {valuesHidden
+            ? VALUE_MASK
+            : `${totalPnl >= 0 ? "+" : "-"}${formatINRCompact(Math.abs(totalPnl))}`}
         </div>
         <p className="text-xs text-text-muted">{formatPercent(totalPnlPercent)} unrealised</p>
       </GlassCard>
@@ -295,9 +324,11 @@ export function DashboardTab() {
           <h3 className="font-heading font-semibold text-sm text-text-primary">
             Portfolio Allocation
           </h3>
-          <p className="text-xs text-text-muted mt-0.5">
-            Equity + Cash from your connected broker. Debt / MF requires NAV data source.
-          </p>
+          {!isDemo && (
+            <p className="text-xs text-text-muted mt-0.5">
+              Equity + Cash from your connected broker. Debt / MF requires NAV data source.
+            </p>
+          )}
         </div>
 
         {bands.length > 0 ? (
@@ -410,38 +441,6 @@ export function DashboardTab() {
         </div>
         <p className="text-xs text-text-muted">Sectors represented</p>
       </GlassCard>
-
-      {/* Row 5: XIRR card */}
-      {portfolioXirr !== null && (
-        <GlassCard className="lg:col-span-3 p-4 gap-2">
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                "size-7 rounded-lg flex items-center justify-center",
-                portfolioXirr >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
-              )}
-            >
-              <Percent className={cn("size-3.5", portfolioXirr >= 0 ? "text-profit" : "text-loss")} />
-            </div>
-            <span className="text-xxs text-text-muted uppercase tracking-wider">
-              Portfolio XIRR
-            </span>
-          </div>
-          <div className="flex items-baseline gap-3">
-            <span
-              className={cn(
-                "text-2xl font-mono font-bold tabular-nums",
-                portfolioXirr >= 0 ? "text-profit" : "text-loss",
-              )}
-            >
-              {formatPercent(portfolioXirr * 100)}
-            </span>
-            <span className="text-xs text-text-muted">
-              Annualised return on irregular cash flows (SIPs + lump sum)
-            </span>
-          </div>
-        </GlassCard>
-      )}
 
       <p className="lg:col-span-3 text-xs text-text-muted">
         Holdings refresh every 60s. Cash refreshes every 30s from your active broker data source.

@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { buildHeaders } from "@/services/ftApi.helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,7 +69,7 @@ export async function searchDocs(
     const params = new URLSearchParams({ q: query.trim() });
     const res = await fetch(`/ft-api/v1/docs/search?${params.toString()}`, {
       signal,
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(false),
     });
     if (!res.ok) return [];
     const raw: unknown = await res.json();

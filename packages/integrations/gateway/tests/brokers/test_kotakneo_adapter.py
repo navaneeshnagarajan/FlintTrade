@@ -909,6 +909,26 @@ async def test_cancel_unknown_variety_refused():
 
 
 @pytest.mark.asyncio
+async def test_place_refuses_gtt_before_any_broker_call():
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="CNC",
+        quantity="1",
+        price="10",
+        variety="gtt",
+    )
+    with pytest.raises(UnsupportedCapabilityError, match="GTT orders aren't supported"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 async def test_modify_forwards_only_exact_v3_surface_and_checks_envelope():
     mock = MockNeoFull()
     adapter = _adapter(mock)

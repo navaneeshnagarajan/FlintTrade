@@ -186,7 +186,11 @@ def test_failed_flow_store_construction_still_degrades_to_503(
 
     assert app.config["FLOW_STORE"] is None
     assert "flows" in app.blueprints
+    from flinttrade_core.auth_routes import _create_token
+
+    with app.app_context():
+        headers = {"Authorization": f"Bearer {_create_token('operator', mode='explore')}"}
     with app.test_client() as client:
-        resp = client.get("/api/v1/flows")
+        resp = client.get("/api/v1/flows", headers=headers)
         assert resp.status_code == 503
         assert resp.get_json()["status"] == "error"

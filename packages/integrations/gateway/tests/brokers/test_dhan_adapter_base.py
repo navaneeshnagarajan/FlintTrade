@@ -420,7 +420,9 @@ async def test_place_order_with_router_token():
 
 
 @pytest.mark.asyncio
-async def test_bracket_order_dispatches_to_super_order():
+async def test_bracket_order_does_not_call_super_orders():
+    from flinttrade_core.exceptions import UnsupportedCapabilityError
+
     mock = MockDhan()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -437,15 +439,16 @@ async def test_bracket_order_dispatches_to_super_order():
         stop_loss_price="2870",
         trailing_jump="5",
     )
-    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
-    assert oid == "SUP1"
-    kind, kw = mock.calls[0]
-    assert kind == "super"  # routed to place_super_order, not place_order
-    assert kw["targetPrice"] == 2950.0 and kw["stopLossPrice"] == 2870.0 and kw["trailingJump"] == 5.0
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+    assert mock.dhan_http.calls == []
 
 
 @pytest.mark.asyncio
-async def test_cover_order_has_stop_loss_only():
+async def test_cover_order_does_not_call_super_orders():
+    from flinttrade_core.exceptions import UnsupportedCapabilityError
+
     mock = MockDhan()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -461,10 +464,10 @@ async def test_cover_order_has_stop_loss_only():
         target_price="2950",
         stop_loss_price="2870",
     )
-    await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
-    kind, kw = mock.calls[0]
-    assert kind == "super" and kw["stopLossPrice"] == 2870.0
-    assert kw["targetPrice"] == 0.0  # cover orders drop the target leg
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+    assert mock.dhan_http.calls == []
 
 
 @pytest.mark.asyncio
@@ -488,7 +491,9 @@ async def test_iceberg_order_dispatches_to_slice_order():
 
 
 @pytest.mark.asyncio
-async def test_gtt_order_dispatches_to_place_forever():
+async def test_gtt_order_does_not_call_forever_orders():
+    from flinttrade_core.exceptions import UnsupportedCapabilityError
+
     mock = MockDhan()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -503,16 +508,17 @@ async def test_gtt_order_dispatches_to_place_forever():
         trigger_price="2890",
         variety="gtt",
     )
-    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
-    assert oid == "GTT1"
-    kind, kw = mock.calls[0]
-    assert kind == "forever" and kw["trigger_Price"] == 2890.0 and kw["order_flag"] == "SINGLE"
+    with pytest.raises(UnsupportedCapabilityError, match="GTT orders aren't supported"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+    assert mock.dhan_http.calls == []
 
 
 @pytest.mark.asyncio
-async def test_gtt_oco_order_dispatches_to_place_forever_with_second_leg():
-    """The OCO leg trio on a gtt Order flips the forever order to OCO and maps
-    the forever.md price1/triggerPrice1/quantity1 fields — same gated method."""
+async def test_gtt_oco_order_does_not_call_forever_orders():
+    """An OCO GTT still stops before ``/forever/orders``."""
+    from flinttrade_core.exceptions import UnsupportedCapabilityError
+
     mock = MockDhan()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -530,16 +536,15 @@ async def test_gtt_oco_order_dispatches_to_place_forever_with_second_leg():
         trigger_price1="2805",
         quantity1="5",
     )
-    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
-    assert oid == "GTT1"
-    kind, kw = mock.calls[0]
-    assert kind == "forever" and kw["order_flag"] == "OCO"
-    assert kw["price1"] == 2800.0 and kw["trigger_Price1"] == 2805.0 and kw["quantity1"] == 5
+    with pytest.raises(UnsupportedCapabilityError, match="GTT orders aren't supported"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+    assert mock.dhan_http.calls == []
 
 
 @pytest.mark.asyncio
 async def test_gtt_partial_oco_leg_fails_closed():
-    from flinttrade_gateway.brokers.dhan_mapping import DhanMappingError
+    from flinttrade_core.exceptions import UnsupportedCapabilityError
 
     mock = MockDhan()
     adapter = _adapter(mock)
@@ -556,14 +561,14 @@ async def test_gtt_partial_oco_leg_fails_closed():
         variety="gtt",
         price1="2800",
     )  # trigger_price1 + quantity1 missing
-    with pytest.raises(DhanMappingError, match="OCO"):
+    with pytest.raises(UnsupportedCapabilityError, match="GTT orders aren't supported"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert mock.calls == []  # never reached the broker
 
 
 @pytest.mark.asyncio
 async def test_gtt_without_trigger_fails_closed():
-    from flinttrade_gateway.brokers.dhan_mapping import DhanMappingError
+    from flinttrade_core.exceptions import UnsupportedCapabilityError
 
     mock = MockDhan()
     adapter = _adapter(mock)
@@ -578,7 +583,7 @@ async def test_gtt_without_trigger_fails_closed():
         price="2900",
         variety="gtt",
     )  # no trigger_price
-    with pytest.raises(DhanMappingError, match="trigger_price"):
+    with pytest.raises(UnsupportedCapabilityError, match="GTT orders aren't supported"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert mock.calls == []  # never reached the broker
 
