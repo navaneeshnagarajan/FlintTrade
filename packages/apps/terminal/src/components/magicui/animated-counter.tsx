@@ -25,6 +25,8 @@ interface AnimatedCounterProps {
   direction?: "up" | "down";
   className?: string;
   formatter?: (value: number) => string;
+  /** Final phrase for screen readers. The visual formatter stays on screen. */
+  accessibleLabel?: string;
   duration?: number;
 }
 
@@ -33,6 +35,7 @@ export function AnimatedCounter({
   direction = "up",
   className,
   formatter,
+  accessibleLabel,
   duration = 1.5,
 }: AnimatedCounterProps) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -98,7 +101,7 @@ export function AnimatedCounter({
       <motion.span aria-hidden="true">{displayValue}</motion.span>
       {/* sr-only span — shows final value for screen readers */}
       <span className="sr-only">
-        {formatter ? formatter(value) : value.toLocaleString("en-IN")}
+        {accessibleLabel ?? (formatter ? formatter(value) : value.toLocaleString("en-IN"))}
       </span>
     </span>
   );

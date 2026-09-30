@@ -188,7 +188,7 @@ export function HoldingsTab() {
 
       {/* Toolbar */}
       <div className="flex items-center justify-between px-2 py-2 border-b border-border-default shrink-0">
-        <span className="text-xs text-text-muted">
+        <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
           {holdings.length} stock{holdings.length !== 1 ? "s" : ""}
         </span>
         <div className="flex items-center gap-1">

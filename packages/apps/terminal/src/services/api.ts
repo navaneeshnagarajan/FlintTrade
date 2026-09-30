@@ -286,6 +286,8 @@ function normaliseFundsShape(value: unknown): Funds {
     row.usedMargin ?? row.utiliseddebits ?? row.usedmargin ?? row.used_margin
       ?? row.utilized_margin ?? row.utilised_margin,
   );
+  const ledgerBalance = optionalFinite(row.ledgerBalance ?? row.ledger_balance);
+  const futuresFlag = row.futuresMtmInLedger ?? row.futures_mtm_in_ledger;
   return {
     availableCash,
     usedMargin,
@@ -293,7 +295,15 @@ function normaliseFundsShape(value: unknown): Funds {
       row.totalBalance ?? row.totalbalance ?? row.total_balance ?? row.total ?? row.net
         ?? (availableCash + usedMargin),
     ),
+    ...(ledgerBalance !== undefined ? { ledgerBalance } : {}),
+    ...(typeof futuresFlag === "boolean" ? { futuresMtmInLedger: futuresFlag } : {}),
   };
+}
+
+function optionalFinite(value: unknown): number | undefined {
+  if (value == null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2219,15 +2229,24 @@ async function readPracticeAccountData<T>(
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
   if (!kind || !NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) return undefined;
 
-  if (endpoint === "funds" || endpoint === "limits") {
+  if (endpoint === "funds") {
+    const payload = await getFtV1<{ funds?: unknown }>("sandbox/funds", signal);
+    const row = isRecord(payload.funds) ? payload.funds : {};
+    // Practice get_funds: available_balance is after margin, current_balance
+    // is the untouched ledger, and ledger_balance has option premium and
+    // equity notional applied. futures_mtm_in_ledger is false.
+    return normaliseFundsShape({
+      available_balance: row.available_balance,
+      used_margin: row.used_margin,
+      total_balance: row.current_balance,
+      ledger_balance: row.ledger_balance,
+      futures_mtm_in_ledger: row.futures_mtm_in_ledger,
+    }) as T;
+  }
+  if (endpoint === "limits") {
     const payload = await getFtV1<{ capital?: unknown }>("sandbox/capital", signal);
     const capital = isRecord(payload.capital) ? payload.capital : {};
-    const funds = normaliseFundsShape({
-      availableCash: capital.available,
-      usedMargin: capital.used_margin,
-      totalBalance: capital.current,
-    });
-    return (endpoint === "funds" ? funds : capital) as T;
+    return capital as T;
   }
   if (endpoint === "positionbook") {
     const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions", signal);

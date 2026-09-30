@@ -51,6 +51,9 @@ export interface Position {
   ltp: number;
   pnl: number;
   pnlPercent: number;
+  /** Futures mark base. `fallback` means the figure is approximate. */
+  markSource?: "avg" | "fallback";
+  settlementPrice?: number;
 }
 
 export interface Order {
@@ -94,6 +97,10 @@ export interface Funds {
   availableCash: number;
   usedMargin: number;
   totalBalance: number;
+  /** Ledger cash including blocked margin, when an adapter has normalised it. */
+  ledgerBalance?: number;
+  /** True when earlier days' futures MTM are already in that ledger. */
+  futuresMtmInLedger?: boolean;
 }
 
 // --- Options ---

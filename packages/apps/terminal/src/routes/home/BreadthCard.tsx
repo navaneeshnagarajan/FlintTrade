@@ -14,6 +14,7 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { BarChart2 } from "lucide-react";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 interface Breadth {
   advances: number;
@@ -83,6 +84,7 @@ export function BreadthCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Market Breadth
           </p>
+          {!isLive && <ExampleLabel testId="breadth-example-label" />}
         </div>
 
         {/* Bar */}

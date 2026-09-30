@@ -524,6 +524,110 @@ locally but break on every other contributor's machine.
 Each data shape enters through one path only. Duplicate data across
 stores and you guarantee a bug.
 
+### Home and Invest net worth
+
+Home and Invest share `accountNetWorth` in
+`packages/apps/terminal/src/lib/accountNetWorth.ts`. The total is ledger
+cash, including blocked margin, plus holdings at market value, plus each
+open position. Opening an F&O position does not reduce
+the total by its margin. A Practice round trip at an unchanged price
+leaves the total at the starting cash, for example ₹10,00,000. The Invest
+label is `Net Worth (Cash + Holdings + Positions)`. Options, and equity positions that are not
+already holdings, add signed market value: last traded price × quantity
+when that price is positive, otherwise the entry price × quantity.
+Futures add unrealised P&L.
+
+Dhan's funds set `futures_mtm_in_ledger`. The futures base is `buyAvg`
+on a long and `sellAvg` on a short (`mark_source: "avg"`). When that
+average is absent, the base is `costPrice` and `mark_source` is
+`"fallback"`. Kotak Neo's funds also set `futures_mtm_in_ledger`. An
+open future has no settlement price, so the base is the open-leg
+average and `mark_source` is `"fallback"`. Practice sets
+`futures_mtm_in_ledger` false and does not set a mark source, so a
+future marks from the entry price.
+
+`"fallback"` on an open future, while earlier mark-to-market is already
+in the ledger, formats the amount with `≈` (`formatAccountNetWorth`).
+Home puts `≈` and the tooltip on the Net Worth amount; the `Net Worth`
+label has the tooltip only. Invest Dashboard puts the tooltip on the
+label `Net Worth (Cash + Holdings + Positions)` and `≈` plus the tooltip
+on the amount under it. The Net Worth view does the same for
+`Known Total (Cash + Holdings + Positions)`, and puts both on the
+`Open Positions` value. Available Funds on Dashboard shows `≈` with no
+tooltip. The donut centre shows `≈` with no tooltip. The tooltip text is `approximateNetWorthTooltip`. A missing
+Dhan average uses
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+A Kotak Neo open-leg estimate uses
+`Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+One symbol is named, and several positions of that kind use
+`N futures positions`. When both kinds are open, the tooltip is
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, and the price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+The accessible name is
+`accountNetWorthAccessibleName` (`Net Worth, approximately …`). A flat
+quantity, or `mark_source: "avg"`, clears it. Practice never shows `≈`.
+Allocation percentages are not marked. Invest publishes the total only
+after the position book has loaded (`positionBookReady` in
+`InvestContext`). Home uses that same check in `PortfolioCard`: while
+the book is pending or has failed, the amount is `—`, never a cash-only
+figure. The sample book does not wait on that book. The amount appears
+once positions have loaded, including when it is negative: `-₹50,000`,
+or `≈ -₹50,000` when the mark is approximate. Home allocation stays on
+the Example split until funds, holdings, and positions have all
+succeeded (`PortfolioCard`). That split uses `ExampleLabel`, not
+`ExampleChip`.
+
+The Home greeting is `useOperatorGreetingName` in
+`packages/apps/terminal/src/routes/home/operatorGreetingName.ts`. The
+saved display name wins. The username is the fallback. `Trader` is the
+unset placeholder and is never shown. Hour buckets are Asia/Kolkata in
+`getIstGreeting`.
+
+Real holdings on Benchmark use `HOLDINGS_RETURN_LEGEND`
+(`Your holdings (unrealised)`), with `HOLDINGS_RETURN_TOOLTIP` and
+table label `HOLDINGS_RETURN_LABEL` (`Unrealised return on holdings`).
+That row has no Example mark. An empty book, and example holdings, use
+`Your Portfolio`. Example holdings add `ExampleLabel` on the row.
+`BenchmarkTab` renders `ExampleChip` with `always` on the hard-coded
+index returns, so the chip stays in Practice and Live. Each index row
+also renders `ExampleLabel`.
+
+Home Open Positions percent is `formatPositionPnlPercent` in
+`packages/apps/terminal/src/routes/home/PositionsCard.tsx`. Cost is the
+absolute average price times quantity. The percent is P&L divided by cost when cost is above zero; otherwise
+the cell is `—`.
+Dhan and Neo rows do not carry `pnlPercent`.
+
+Sample Invest figures use `ExampleChip`
+(`packages/apps/terminal/src/components/ui/ExampleChip.tsx`), which
+paints when the session is example data unless `always` is set.
+Correlation, ETF Screener, ETFs, Risk-Return, Sector, Sector Rotation,
+Shareholding, and Social render that chip, not `ExampleLabel`.
+`SocialTab` renders exactly one, after loading has finished.
+`EtfTab` in Example renders one, with
+`Example prices. Connect a broker for live quotes.`
+Practice and Live keep
+`live quotes via OpenAlgo. Refreshes every 30s`
+when quotes have loaded.
+`SectorTab` in Example uses
+`Example sector split. Connect a broker to see yours.`
+and
+`Example data. Not from your holdings.`,
+with one chip.
+`BasketTab` renders one in Example, including while quotes are loading
+and after they have loaded.
+`HoldingsTab` renders one. `DashboardTab` renders one on the inline
+sample XIRR. It does not render one on sample Portfolio Allocation, and
+that block omits the connected-book sentence. It does not render a
+Portfolio XIRR card. Net Worth, Available Funds, Invested Value, and
+Day P&L paint their final formatted value on the first frame, with no
+count-up from zero, including `≈`, `-₹50,000`, and `—`. With no
+holdings the inline XIRR is omitted.
+`NetWorthTab` sample copy is
+`Example equity and cash. Connect a broker to see yours.`,
+with the chip on the sample `Allocation` label only. Equity Holdings
+and Cash notes are blank on example data. A connected book keeps
+`Allocation (live assets only)` and `Live from broker`.
+
 ### OpenAlgo bugs to work around
 
 1. **Sandbox sends real orders for some brokers.** Verify isolation

@@ -5,6 +5,7 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { Sparkles, MessageSquare } from "lucide-react";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 export function AIPulseCard() {
   function handleChatWithAI() {
@@ -20,6 +21,7 @@ export function AIPulseCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             AI Pulse
           </p>
+          <ExampleLabel testId="ai-pulse-example-label" />
         </div>
 
         {/* Regime badge — illustrative example, not a live regime call */}

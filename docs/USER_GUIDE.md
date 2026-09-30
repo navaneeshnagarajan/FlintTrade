@@ -346,10 +346,8 @@ this order:
 
 **Example-data marker.** Where a sample figure still uses the shared banner,
 that banner reads `Example data. Connect a broker to see your own.` It never
-shows in Practice. On Invest, an **Example** chip on the view replaces that
-banner. The sample Dashboard carries that chip on the single inline sample
-XIRR figure (`XIRR` plus one `Example` chip). There is no Portfolio XIRR
-card. Practice leaves the XIRR unmarked.
+shows in Practice. On Invest, an Example chip on a sample view replaces that
+banner. Where those chips sit is under [Invest](#invest).
 
 **Order review.** Practice reads `Confirm places this simulated order.`
 The confirm button reads **Confirm simulation** (accessible name
@@ -414,10 +412,8 @@ label. Example data reads `Example data. No broker is connected and no orders ar
 Practice reads `Practice — simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
 Widgets stay quiet: they do not repeat a second feed chip for the same fact.
-Mode is not provenance. Benchmark figures stay hard-coded in every Mode
-and keep the **Example** chip. The example-data banner
-`Example data. Connect a broker to see your own.` never shows in Practice.
-On Invest, an Example chip on each view replaces that banner. An incident strip,
+Mode is not provenance. A figure that stays fabricated in Practice and Live,
+such as benchmark index returns, keeps the Example chip. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 
@@ -773,10 +769,10 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
 | `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
-| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
+| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
-| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, mutual-fund tracker, and stock baskets. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, `#mutual-funds`, `#mf-optimizer`, and `#basket` open the matching tab on load; an unknown hash falls back to Dashboard. |
+| `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
@@ -832,52 +828,222 @@ sees the same Home as sidebar Home, Alt+H, or the TopBar logo —
 never the password Welcome Back gate. That gate stays on `/welcome`
 for unauthenticated visitors only (FT-HOME-003).
 
-With example data, `/invest#mutual-funds` labels the static
-fixture `Example NAVs · as of 10-Sep-2026`
-on the view header and again on the disclaimer, and does not claim
-"Updated daily after market close." The as-of is the
-fixture date and does not auto-update. Practice and Live keep the live
-AMFI sentence ("Updated daily after market close") when the live feed is
-in use.
+### Home
 
-On `/invest` → Holdings with no broker, the header
-badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
-sample table. Example data shows one Example chip on the view. The banner
-`Example data. Connect a broker to see your own.` is not repeated there, and
-it never shows in Practice. The sample Dashboard marks the sample XIRR with
-that same one **Example** chip. There is no Portfolio XIRR card. On sample
-figures, `/invest#networth` reads `Example equity and cash. Connect a broker to see yours.`
-The allocation label is `Allocation` with the Example chip, and each
-`Live from broker` note on Equity Holdings and Available Cash is that
-chip. Those sentences follow the sample-figure flag, including a Practice
-book that has fallen back to sample holdings. A connected book
-keeps `Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
+The Home greeting card stays on the dashboard. It uses the saved display
+name. When that name is missing, or it is the placeholder `Trader`, the
+greeting uses the username, unless the username is missing or is also
+`Trader`. Until a name is known, the line is plain `Good morning`,
+`Good afternoon`, or `Good evening` from the Asia/Kolkata hour. The card
+never greets the operator as `Trader`. Editing the display name replaces
+the greeting. There is no greeting toast.
+
+Home and Invest share one net-worth figure: ledger cash, plus the market
+value of holdings, plus open positions. On Invest the label is
+`Net Worth (Cash + Holdings + Positions)`. Ledger cash includes
+blocked margin. It is not the available margin, so opening an F&O position
+does not reduce Net Worth by its margin. A Practice round trip at an
+unchanged price leaves Net Worth at the starting cash, for example
+₹10,00,000. Options add signed market value
+(last traded price × quantity when that price is positive, otherwise the
+entry price × quantity). A long is positive and a short is negative,
+because the premium has already gone through cash. Equity positions that
+are not already holdings do the same. A flat position adds nothing.
+Futures add unrealised P&L (last traded price minus a base, times signed
+quantity):
+
+- Dhan's ledger already includes earlier days' mark-to-market. The base
+  is the mark-to-market average (`buyAvg` on a long, `sellAvg` on a
+  short). When that average is absent, the base is `costPrice`, and the
+  figure is approximate.
+- Kotak Neo's ledger also includes earlier days' mark-to-market, and an
+  open future has no settlement price. The base is the open-leg average,
+  and the figure is approximate.
+- Practice does not put futures mark-to-market into the ledger and has
+  no settlement price. The base is the entry price. Practice never marks
+  the figure approximate.
+
+The positions note, while the figure is exact, reads
+`Options at market value, futures at unrealised P&L.`
+
+When an open future uses an estimated mark, the amount shows `≈` before
+the rupees, in the same size and colour. Dhan sets that mark when the
+base is `costPrice`. Kotak Neo sets it on an open future. Practice never
+sets it. It clears when that position goes flat or its mark is the
+average. One future names its symbol in the tooltip; two or more say the
+count, for example `2 futures positions`. Dhan, when the average price
+was missing, uses
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+for one future, and
+`Approximate. Your broker didn't send an average price for 2 futures positions, so profit or loss from earlier days may be counted twice.`
+when more than one fall back, with the count in place of `2`. Kotak Neo uses
+`Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+for one future, and
+`Approximate. The price for 2 futures positions is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+when more than one are estimated, with the count in place of `2`. When both
+kinds are open, the tooltip joins them:
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, and the price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+Each subject is that future's symbol, or `N futures positions` when several share that kind.
+While the figure is approximate, this tooltip replaces the positions
+note on the same labels. The screen-reader name of the amount is
+`Net Worth, approximately …`, using the same rupee figure and no second
+`≈`. Allocation percentages are not marked.
+
+On Home, `≈` and that tooltip sit on the Net Worth amount. The `Net Worth`
+label carries the same tooltip and does not itself show `≈`. On Invest
+Dashboard, the label `Net Worth (Cash + Holdings + Positions)` carries
+that tooltip, and `≈` with the same tooltip sit on the amount under it.
+Available Funds on that dashboard uses the same amount format, so it
+also shows `≈`, and it has no tooltip. On the Net Worth view, the label
+`Known Total (Cash + Holdings + Positions)` carries that tooltip, and
+`≈` with the same tooltip sit on the amount under it and on the
+`Open Positions` value. That line is shown only when the positions
+contribution is above zero. The donut centre (`tracked`) shows `≈` on
+the same total and has no tooltip. Cash on that view is not marked.
+
+Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
+until funds, holdings, and positions have all loaded successfully. If any
+of those books is still loading or has failed, the split stays on that
+Example mix. The sample-data Home keeps that mix. After all three succeed
+on an account, the bar is the account split: Cash, Positions, and Equity.
+The Example label sits on that split only while it is the example mix.
+While holdings or funds are still loading, Invest Dashboard shows
+`Loading portfolio data...` and the Net Worth view shows `—`. After
+those books settle, both leave the total as `—` until the position
+book has loaded. A position book that is still loading or has failed
+does not publish the total.
+
+The sample book does not wait on a position book.
+
+On an account, Home shows `—` while the position book is pending or has
+failed, the same check Invest uses. It does not draw a cash-only figure.
+The amount appears once positions have loaded. A negative Net Worth is
+drawn as the number, for example `-₹50,000`, or `≈ -₹50,000` when the
+mark is approximate, the same as on Invest.
+
+On Home, each open position's P&L percent is derived from cost: the
+absolute average price times quantity. Dhan and Neo do not send a
+percent. When cost is missing or not above zero, or the profit figure
+is missing, the percent is `—`.
+
+### Invest
+
+Invest sections are Overview, Holdings, Analyse, Discover, and Tax.
+
+| Section | Views |
+|---|---|
+| Overview | Dashboard, Net Worth, Goals |
+| Holdings | Holdings, Mutual Funds, SIPs, Baskets |
+| Analyse | Sector, Sector Rotation, Overlap, Benchmark, Shareholding, Risk-Return, Correlation |
+| Discover | ETF Screener, MF Optimizer, Social, ETFs, Stocks, IPO |
+| Tax | Tax |
+
+A leaf hash opens that view inside its section. `#sip` opens Holdings →
+SIPs. `#networth` opens Overview → Net Worth. `#mutual-funds` opens
+Holdings → Mutual Funds. `#mf-optimizer` opens Discover → MF Optimizer.
+`#basket` opens Holdings → Baskets. `#sector-rotation` opens Analyse →
+Sector Rotation. A section hash opens that section's first view:
+`#overview` opens Dashboard, `#analyse` opens Sector, `#discover` opens
+ETF Screener, and `#tax` opens Tax. `#holdings` is the Holdings view, so
+it opens Holdings → Holdings. An unknown hash opens Overview → Dashboard.
+The selected view stays available from that hash when the skill level
+would otherwise hide it.
+
+**Overlap.** With zero or one fund or basket, Overlap shows
+`No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.`
+The view opens at two or more. The sample book appears only in the web
+demo, labelled `Demo (example data)`, or with an Example label before any
+account snapshot exists. Practice with no holdings always shows the empty
+state.
+
+**Benchmark.** Hard-coded index returns carry the Example chip in every
+mode, and each index name also shows an Example label. With real
+holdings, the series legend is `Your holdings (unrealised)`.
+That legend replaces `Your Portfolio (since first buy)`. Its tooltip reads
+`Gain or loss on the shares you hold now, compared with what you paid. Sold shares and dividends aren't included.`
+The comparison's accessible name is `Unrealised return on holdings`.
+That row carries no Example mark. When the holdings are example data,
+that row is `Your Portfolio` and keeps an Example label. With no
+holdings, the row is plain `Your Portfolio`, shows `—`, and
+`Add holdings to compare against benchmarks.`
+Benchmarks beaten, alpha, and the other outperformance figures are
+replaced by
+`Comparison needs real index data.`
+That note is shown whenever there are holdings, including on the sample book.
+The view also reads
+`Benchmark data is illustrative. Live index data requires a market data subscription.`
+and `Returns are absolute (not annualised) for periods under 1Y.`
+
+**Example chips.** Sector, Sector Rotation, Shareholding, ETF Screener,
+Social, ETFs, Risk-Return, and Correlation use the Example chip on sample
+figures. They do not use the Example label. Shareholding omits the chip
+when the read has failed. In Example, Social shows exactly one Example
+chip, and only after loading has finished. In Example, ETFs show one
+Example chip and `Example prices. Connect a broker for live quotes.`
+Practice and Live keep `live quotes via OpenAlgo. Refreshes every 30s.`
+In Example, Sector's header reads
+`Example sector split. Connect a broker to see yours.`
+and the footer reads `Example data. Not from your holdings.` That view
+has one Example chip. In Example, Baskets show one Example chip,
+including while quotes are loading and after they have loaded. Seeded
+cards do not add a second marker. Seeded example baskets disable **Edit**
+and **Delete**, with the title `Example basket — editing unavailable`.
+Baskets created in Practice or Live keep **Edit** and **Delete**. An
+empty Baskets view reads `No baskets yet`.
+
+**Holdings.** On example data, the Holdings view shows one Example chip
+when the book is sample data. The Investor Dashboard header badge reads `N holdings` and
+matches that table. On a sample book the badge has an Example label
+beside it. The Holdings toolbar reads `N stocks` for the same count.
+The banner `Example data. Connect a broker to see your own.` is not
+repeated on the view, and it never shows in Practice. A cold load waits
+until the holdings query has settled before the sample fallback, so a
+pending book is not covered by the sample count. Practice waits until
+that query has settled empty. A failed holdings read shows
+`Failed to load holdings` and `Refresh`, and does not show `0 holdings`,
+`No holdings`, or a sample table under that failure. An empty connected
+book shows `0 holdings` and `No holdings`. An account snapshot replaces
+the sample book, including a Practice snapshot with cash and an empty
+holdings list.
+
+**Dashboard and Net Worth figures.** Net Worth, Available Funds, Invested
+Value, and Day P&L on the Dashboard show their final formatted value on
+the first frame in every mode, with no count-up from zero, including `≈`,
+`-₹50,000`, and `—`. The sample Dashboard marks the inline sample XIRR
+with one Example chip (`XIRR` plus that chip). Portfolio Allocation on
+that sample dashboard omits
+`Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
+and does not carry its own Example chip. A connected book keeps that
+sentence. There is no Portfolio XIRR card. With no holdings, the inline
+XIRR is omitted. On sample figures, `/invest#networth` reads
+`Example equity and cash. Connect a broker to see yours.`
+The allocation label is `Allocation` with the Example chip. Equity
+Holdings and Cash leave their notes blank on example data, and those rows
+do not carry their own Example chip. A connected book keeps
+`Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
 the label `Allocation (live assets only)`, and the note `Live from broker`.
-The Example chip itself paints only on example data, so that Practice
-fallback shows the example sentences without the chip. On the sample
-Dashboard, Portfolio Allocation replaces `Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
-with the Example chip; a connected book keeps that sentence. The Mode line on example data is
-`Example data. No broker is connected and no orders are sent.`
-The Practice Mode line (`Practice — simulated fills, no real money.`)
-does not call that book Example. Dashboard and "N stocks"
-use that same N. Practice waits
-until the holdings query has settled empty before the sample fallback,
-so a cold load does not flash the sample N over a pending book.
-Dashboard `Net Worth (Equity + Cash)` uses that same shared demo book
-as Holdings. A broker read failure shows muted `Failed to load holdings`
-plus `Refresh` — never `0 holdings`, `No holdings`, or a sample table
-under a failed load. A connected broker with no positions shows
-`0 holdings` and an honest empty state (`No holdings`) — no sample
-table under a zero badge. Connected positions use the live count only
-(FT-TRADE-010).
+Those sentences follow the sample-figure flag, including a Practice book
+that has fallen back to sample holdings. The Example chip paints only on
+example data, so that Practice fallback shows the example sentences
+without the chip. Practice does not mark the XIRR figure as Example.
+The connect banner
+`Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here.`
+is hidden in Practice.
 
-With example data, `/invest#basket` (Stock Baskets) shows one Example chip
-for the view. Seeded cards do not add a second marker. Bare ₹ / P&L
-is acceptable once **Edit** and **Delete** cannot look
-live. Seeded example baskets disable **Edit** and **Delete**, with title
-helper `Example basket — editing unavailable`. User-created
-Practice or Live baskets keep full Edit/Delete. An empty example-data
-view is an honest empty state or a clearly labelled sample set (FT-INVEST-002).
+**Mutual funds.** With example data, `/invest#mutual-funds` labels the
+static fixture `Example NAVs · as of 10-Sep-2026` on the view header and
+again on the disclaimer, and does not claim "Updated daily after market
+close." The as-of date is the fixture date and does not auto-update.
+Practice and Live keep
+`Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close.`
+when the live feed is in use.
+
+**Cash.** Available Funds on Dashboard is the balance left after blocked
+margin. The Net Worth view's Cash line is the ledger, including that
+blocked margin, so opening a position does not shrink the total by the
+margin. Both show full rupees, in Indian grouping, with no paise.
+When the total is approximate, Available Funds shows `≈` as well.
+Cash on the Net Worth view does not.
 
 ### The widgets (71)
 
