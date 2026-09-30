@@ -39,7 +39,7 @@ The 3.0 second timeout is the existing `SystemOneClient` default. It is also the
 
 An allowlist entry is a tag, a pinned SHA-256 digest, and a route. The tag is not the proof. There is no shipped entry in this spike. Nothing is added without a confirmed licence.
 
-`tev1:4b` and `tev1:0.8b` stay off the allowlist. The fine-tuned weight licence is still being finalised upstream. `nimble:9b` is a `systemone` candidate and stays off the allowlist until its Hugging Face licence card has been checked. `qwen3:8b` is the advisory default and the `chat` candidate. It is not on the allowlist until a digest is reviewed and pinned. Its weights licence is Apache-2.0; that does not by itself admit it.
+`tev1:4b` and `tev1:0.8b` stay off the allowlist. The fine-tuned weight licence is still being finalised upstream. `nimble:9b` is a `systemone` candidate and its licence is confirmed. The Hugging Face card for `bespokelabs/Bespoke-Nimble-9B` says Apache 2.0, and the Ollama licence blob says the adapter and the Qwen3.5-9B base (pinned at revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a`) are both Apache-2.0. It stays off the allowlist until a reviewed digest is pinned and the benchmark passes. A v2 adapter (`Bespoke-Nimble-9B-v2`) exists on Hugging Face, and the Ollama tag may not be v1, so whoever pins a digest must check which one they get. `qwen3:8b` is the advisory default and the `chat` candidate. It is not on the allowlist until a digest is reviewed and pinned. Its weights licence is Apache-2.0; that does not by itself admit it.
 
 On every admission the gate opens one `ManagedOllamaAdmission` and holds it for the whole inference. The digest Ollama reports for that call is compared with the pinned digest for the tag. A tag pulled again onto new weights fails the comparison. The chip shows Wrong model version. The response body is not allowed to vouch for itself.
 
@@ -61,7 +61,7 @@ Expiry, quantity, price, and symbol stay on the floor. The route is chosen per a
 
 `chat` is `POST /api/chat` on the admitted loopback endpoint. It is for plain models such as `qwen3:8b`, which are asked for JSON. Options are temperature 0, seed 0, `num_ctx` 8192, and a small `num_predict`. `format` is a strict schema: three answers, each with option probabilities for A and B. There is no confidence field in the schema.
 
-`systemone` is `POST /v1/systemone` on that same admitted endpoint. It is for decision models (`nimble:9b`, and the tev1 tags above once a licence and a digest exist). The request sends the same three choice questions. The response is mapped onto the thresholds already in `laya_policy.toml`: `deny_at` 0.80 and `abstain_at` 0.55, per question, on the deny option.
+`systemone` is `POST /v1/systemone` on that same admitted endpoint. It is for decision models (`nimble:9b` once a reviewed digest is pinned and the benchmark passes, and the tev1 tags above once a licence and a digest exist). The request sends the same three choice questions. The response is mapped onto the thresholds already in `laya_policy.toml`: `deny_at` 0.80 and `abstain_at` 0.55, per question, on the deny option.
 
 - A `choice` answer uses `probabilities` for A and B. The `choice` label is not the gate.
 - A `noul` answer uses `noul` as the probability that the deny condition holds, and that number is compared with the same two thresholds.
@@ -145,7 +145,7 @@ Open:
 
 - No reviewed digest is pinned yet. The shipped allowlist is empty, so `ollama` pauses new orders until an entry is added.
 - `tev1` stays off the allowlist. The fine-tuned weight licence is still being finalised upstream.
-- `nimble` needs its Hugging Face licence card checked before any allowlisting.
+- `nimble` licence is confirmed. It stays off the allowlist until a reviewed digest is pinned and the benchmark passes. Whoever pins that digest must check whether the Ollama tag is v1 or `Bespoke-Nimble-9B-v2`.
 - Live qualification is still the sidecar's revision, weight digest, and policy version. An Ollama digest does not qualify Live in this spike.
 - The 8,192-token check estimates tokens as UTF-8 bytes divided by 4. It is not the model's own tokenizer. The two can disagree near the cap. Over the estimate, the order is refused.
 - Decision-model probabilities can differ between CPU and GPU. That is a vendor note and is unverified here.
