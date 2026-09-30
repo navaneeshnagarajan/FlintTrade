@@ -125,8 +125,7 @@ in the versioned `laya_policy.toml`. There is no confidence field in the
 gate. The model can deny or clamp. It cannot raise a quantity or overturn a
 rule refusal. An unreachable host, a timeout, a malformed response, or a
 revision or digest mismatch is Down. Down refuses Practice as well as Live.
-Down copy is the same in every mode: "Laya is Down. Orders are paused
-until it's Ready." That refusal carries no quantity ceiling. A Practice
+Down copy is the same in every mode: "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. That refusal carries no quantity ceiling. A Practice
 refusal never says Live. When Laya is Ready
 or Degraded and a Live place is refused only because Live is not qualified,
 the reason is "Laya isn't qualified for Live yet. Practice orders are

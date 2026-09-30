@@ -499,8 +499,7 @@ tighter ceiling can continue. See [Laya on place](#laya-on-place).
 **Ready**, **Degraded**, **Down**, **Still loading**, or **Checking**.
 Live shows the Live-facing status.
 During the first load the label is **Still loading** and does not read
-**Down**. Orders are still refused with **Laya is Down. Orders are paused
-until it's Ready.** **Checking** uses the neutral colour. The popover
+**Down**. Orders are still refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** **Checking** uses the neutral colour. The popover
 says **Checking Laya…**. It is not a stale **Ready**.
 
 The chip tooltip is the hover text. For `not_started`, `stopped`,
@@ -645,8 +644,7 @@ confirms the new state, the chip says **Checking** in the neutral
 colour and the popover says **Checking Laya…**. It does not show a
 stale **Ready** during that wait. An admitted place while the chip is
 not **Ready** or **Degraded** also shows **Checking** until the next
-ping. A place refused with exactly **Laya
-is Down. Orders are paused until it's Ready.** sets the chip to
+ping. A place refused with exactly **Laya is Down. New orders are paused until it's Ready. You can still close positions.** sets the chip to
 **Down** on that response. The refusal line stays that sentence.
 
 **Command line.** From the FlintTrade environment (the project `.venv`
@@ -693,8 +691,7 @@ sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1`, so transfer logs stay in that folder and not in
 the shared cache. The model is about 2.37 GB, and that size is reported
 once. While that runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
-progress, one decimal, decimal GB). Orders are refused with **Laya is
-Down. Orders are paused until it's Ready.** FlintTrade then hashes the
+progress, one decimal, decimal GB). Orders are refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. When no
 checkpoint is already there, a full match renames that directory onto
 `<workspace>/runtime/laya/checkpoint` and launches the offline verified
@@ -2314,8 +2311,7 @@ as a toast.
    controls stay off until Laya or the mode changes. **Max quantity N.**
    is the ceiling the server sent.
    The strip reads **Laya is Down. New orders are paused until it's Ready. You can still close positions.** when Live-facing status is Down. It mutes Live place. Practice is not muted by that strip. A
-   Practice place is refused when Practice itself is Down, with **Laya is
-   Down. Orders are paused until it's Ready.** Start the opt-in model
+   Practice place is refused when Practice itself is Down, with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** A non-exit order is HTTP 403. Start the opt-in model
    before a Down engine can admit. A close that only reduces an open position can still be sent. A filled one can show **Closed. Exits are allowed while Laya is Down.** A close larger than the position is refused with that Down line. A second exit while one is already unfilled is **Not placed. An exit for `<symbol>` is already pending. Wait for it to fill, or cancel it and try again.** and the row shows **Exit pending**. When the broker's orders cannot be read, that refusal is **Not placed. One exit at a time for `<symbol>` until your broker's orders load.** If the position flips after the broker book loads, that row is tagged **Unexpected** and stays on screen with `Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.`
    The Laya chip follows the current mode. Practice shows the sidecar.
    When Practice can admit, the chip shows **Ready** or **Degraded**, not

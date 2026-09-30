@@ -593,8 +593,7 @@ complete download is `unverified`. A dropped connection, a partial or
 missing file, or a read error is `download_failed` ("Can't download the
 model"; tooltip "Check your connection, then Start Laya again."). The
 status word for `downloading` and `download_failed` is Down, not Still
-loading, and orders use "Laya is Down. Orders are paused until it's
-Ready." Those failures delete the staging directory and leave the shared
+loading, and orders use "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
 model cache alone. The sidecar does not start on files that do not match
 the pin. If the download does not finish, the reason is `download_failed`, not
 `wrong_revision` and not `unverified`, whatever older snapshot is on
@@ -662,8 +661,7 @@ Checking in the neutral colour and the popover says Checking Laya…. It
 does not show a stale Ready during that wait. An admitted place while
 the chip is not Ready or Degraded also shows Checking until the next
 ping. A confirmed first load
-still says Still loading. A place refused with exactly "Laya is Down.
-Orders are paused until it's Ready." sets the chip to Down on that
+still says Still loading. A place refused with exactly "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to Down on that
 response. The refusal line is unchanged. Every `stop` deletes the runtime
 record, as does a start that fails after it was written. A record from
 an earlier run is rejected. A health document without the weight digest

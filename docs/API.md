@@ -524,7 +524,7 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 |---|---|
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. `data.migration_blocked` is `two_operators` when more than one operator account is present, and null otherwise. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`) with `mode` `practice`. That token is a Practice session. It is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. A second create, including one that overlaps the first, raises `Account already set up` in the account service. The route answers HTTP 409 with `code: "operator_exists"` and message `Request conflicts with the current state`. The setup screen maps that code to **This machine already has an operator. Sign in to finish setup.** A 409 without `operator_exists` keeps the generic message. |
-| `POST auth/setup/resume` | Public. A reload mid-setup drops the setup-session JWT that lived only in the browser tab, so this proves the password and mints a setup-session JWT again. Body `{ "password", "totp_code"? }`. Once an authenticator is enrolled, that code is required as well. No operator yet is HTTP 409 `Create an operator before continuing setup.` A finished setup is HTTP 409 `Setup is already complete. Sign in.` A wrong password is HTTP 401 `Invalid credentials.` It does not require a session that is already in the browser. |
+| `POST auth/setup/resume` | Public. A reload mid-setup drops the setup-session JWT that lived only in the browser tab, so this proves the password and mints a setup-session JWT again. It mints a Practice setup session, the same as `POST /v1/auth/setup` (`setup_session` true, Live not unlocked). Body `{ "password", "totp_code"? }`. Once an authenticator is enrolled, that code is required as well. No operator yet is HTTP 409 `Create an operator before continuing setup.` A finished setup is HTTP 409 `Setup is already complete. Sign in.` A wrong password is HTTP 401 `Invalid credentials.` It does not require a session that is already in the browser. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
 | `POST auth/setup/complete` | Session-bound. Records that first-run setup has finished. Requires the operator's session JWT; the setup-session JWT qualifies, and an API key does not. The operator must already exist and the vault must be open. Success is `{ "setup_finished": true }` under `data`. A missing session is HTTP 401 `Sign in to continue setup.` |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires an active session, the password, and the current authenticator code (`totp_code`). An API key is not a session. A signed-out request on a finished account changes nothing. When an authenticator is enrolled the response is HTTP 403 `Sign in to reset this account. You'll need your password and authenticator code.` Otherwise it is HTTP 401 `Sign in to reset this account. You'll need your password.` The body includes `authenticator_enrolled`. A successful wipe bumps the account epoch, so other session tokens stop working. |
@@ -699,8 +699,7 @@ until the ping confirms the new state, the chip says Checking in the
 neutral colour and the popover says Checking Laya…. It does not show a
 stale Ready during that wait. An admitted place while the chip is not
 Ready or Degraded also shows Checking until the next ping. A confirmed first load still says Still
-loading. A place refused with exactly "Laya is Down. Orders are paused
-until it's Ready." sets the chip to Down on that response. The refusal
+loading. A place refused with exactly "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to Down on that response. A non-exit order is HTTP 403. The refusal
 line is unchanged. Every `stop` deletes the runtime record, as does a start
 that fails after it was written. A record from an earlier run is rejected.
 A decision without `revision` or `sha256` is checked against that record
@@ -1002,8 +1001,7 @@ continuation, and environment variables are read as `$env:NAME`).
 
 This example is for a locally issued **Practice-mode** FlintTrade session JWT.
 Place is admitted before the sandbox. Laya starts **Down**, so a Practice
-place while Down returns HTTP 403 `laya_denied` with "Laya is Down. Orders
-are paused until it's Ready." and the sandbox is not called. That sentence
+place while Down returns HTTP 403 `laya_denied` with "Laya is Down. New orders are paused until it's Ready. You can still close positions." and the sandbox is not called. That sentence
 is the same in Live. A Live place while Laya is Ready or Degraded, with no
 matching qualification record, returns "Laya isn't qualified for Live yet.
 Practice orders are available." A Practice refusal never says Live. A quantity
