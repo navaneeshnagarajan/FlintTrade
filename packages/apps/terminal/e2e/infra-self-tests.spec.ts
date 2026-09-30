@@ -325,7 +325,7 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
 
     await expect(fetchJson(page, "GET", ADVISOR_STATUS_PATH)).resolves.toEqual({
       status: "success",
-      data: { configured: false, provider: "none", model: "none" },
+      data: { configured: false, provider: "", model: "", source: "default" },
     });
     expect(registry.callCount("GET", ADVISOR_STATUS_PATH)).toBe(1);
     await expect(registry.dispose()).resolves.toBeUndefined();
