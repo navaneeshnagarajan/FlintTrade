@@ -123,8 +123,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
       three:
-        specifier: 0.186.1
-        version: 0.186.1
+        specifier: 0.186.0
+        version: 0.186.0
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -6452,6 +6452,9 @@ packages:
     resolution: {integrity: sha512-XyGQrFmNQ5O/IoKm556ftwKsBg11TIb301MB5dWNicziQBEs2g3gtOYIf7pFiLa0zI2gUwhtCjv9fmjnxKZ1Cg==}
     peerDependencies:
       three: '>=0.128.0'
+
+  three@0.186.0:
+    resolution: {integrity: sha512-cr/fIM2ddMSVbYVgkfD4jLJv7Fh/8ZTjvo+7gQeSVGUZHxpx9FDwoL5iC7hUz/LiRA8wMbqfnb90xKfm1/HHkQ==}
 
   three@0.186.1:
     resolution: {integrity: sha512-blFeqb49wRCSGUGj7gtpfnSGHy2lwDk94RhUmS1c/hTby70kvChbWpkJ4Pm1390LqzzvTmzgXKHPEafJwCb8jA==}
@@ -13650,6 +13653,8 @@ snapshots:
       fflate: 0.6.11
       potpack: 1.0.2
       three: 0.186.1
+
+  three@0.186.0: {}
 
   three@0.186.1: {}
 
