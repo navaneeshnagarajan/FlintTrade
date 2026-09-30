@@ -130,11 +130,11 @@ it. Down and Degraded do not block it. Live still runs
 SafetySystem after that record. A second exit on the same broker account,
 while one of this desk's exits on that contract is still unfilled, is
 HTTP 409 `exit_pending`:
-"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."
+`"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."`
 Practice uses this code on the Practice book. On Live it is the code when
 the broker order book can be read. The Live hold is for that broker
 account. When the broker order book cannot be read, that refusal is HTTP 409
-`exit_orders_unreadable`: "Not placed. One exit at a time for <symbol> until your broker's orders load."
+`exit_orders_unreadable`: `"Not placed. One exit at a time for <symbol> until your broker's orders load."`
 `message` and `reason` are that same text. The label is the symbol, or `this contract` when the symbol is empty.
 The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has
 loaded keeps that row, tagged **Unexpected**, and the book shows
