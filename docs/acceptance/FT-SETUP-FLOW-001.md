@@ -174,10 +174,14 @@ primary button and opens `/welcome`.
 ## Status
 
 Implemented. When the vault is already secured, required progress is
-Step N of 2 and the Practice step shows **Your vault is set up and
+**Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk**,
+and the Practice step shows **Your vault is set up and
 secured on this machine.** above **Open Practice desk**. When the vault
-is not yet secured, required progress is Step N of 3 and includes the
-vault step. Reloading `/setup` resumes the unfinished setup and keeps
+is not yet secured, required progress is **Step 1 of 3 - Create
+operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice
+desk**. The Practice desk is Step 2 or 3. With no operator yet, Setup
+starts at Create operator. When an operator already exists and Setup is
+unfinished, `/setup` resumes at Step 2 or 3. Reloading `/setup` resumes the unfinished setup and keeps
 the same step title (for example **Step 3 of 3 - Practice desk**). A
 fresh browser, or a reload on the vault step that needs a setup
 session, shows **Continue setup** and **This machine already has an

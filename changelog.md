@@ -157,9 +157,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   When the vault is not yet secured, the required path is Create
-  operator, then Vault, then the Practice desk (Step N of 3). When the
-  vault is already secured, that vault step is skipped (Step N of 2);
-  see the step-count note below. Affirming Practice lands on `/trade`.
+  operator, then Vault, then the Practice desk (Step 3 of 3). When the
+  vault is already secured, that vault step is skipped and the Practice
+  desk is Step 2 of 2. The Practice desk is Step 2 or 3; see the
+  step-count note below. Affirming Practice lands on `/trade`.
   Authenticator, broker connect, LLM, Monitoring, trading defaults,
   and risk are Later or Skip on that desk. They do not change the
   step count and do not block Practice. On the broker Later path,
@@ -807,7 +808,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   are unchanged.
 
 - **Unfinished Setup recovery without the authenticator (FT-SETUP-001).**
-  **Try with sample data** marks a durable demo session so `/home`
+  **Try with example data** marks a durable Example session so `/home`
   survives a refresh. **Start over** wipes the unfinished account via
   the account-create setup JWT, so a lost QR seed is recoverable
   without the TOTP secret. Daily-login session tokens cannot wipe the

@@ -652,9 +652,11 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 
 - Issued on `/ft-api/v1/auth/login` after argon2id password
   verification, with `mode` `practice`. Account setup mints the same
-  Practice session. Login is password-only until authenticator enrolment
-  is confirmed (`totp_enabled`); a TOTP or backup code is required
-  only after that.
+  Practice session. `POST /v1/auth/setup/resume` is public: a reload
+  mid-setup proves the password and mints a setup-session JWT again.
+  `POST /v1/auth/setup/complete` needs that session. Login is
+  password-only until authenticator enrolment is confirmed
+  (`totp_enabled`); a TOTP or backup code is required only after that.
 - Optional second factor: TOTP enrolment with Fernet-encrypted seed
   (`POST /v1/auth/totp/enable`). `POST /v1/auth/live` refuses with
   `totp_required` until enrolment is confirmed. Quick Unlock of a session
@@ -662,7 +664,7 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (`explore` for example data, `practice`, or
-  `live`), `jti` (unique ID), plus `oid` and `epoch`. Operators see Example, Practice, Connected (read), or Live.
+  `live`), `jti` (unique ID), plus `oid` and `epoch`. Operators see Example, Practice, or Live. Connected (read) is a broker status on a Practice session, not a session Mode.
 - PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and
   returns a new token. The previous token stops working. The Live
   switch does the same rotation when it enters Live.
