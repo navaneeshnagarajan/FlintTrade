@@ -537,7 +537,10 @@ set to an https PyTorch ROCm wheel index. `start` still uses CPU
 port and defaults to 8000. A clash on that port is Down with
 `port_in_use`. A fresh API key is
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
-on a start that fails after the key was written.
+on a start that fails after the key was written. When `LAYA_API_KEY_FILE`
+points at that same path, `start` replaces the file and does not treat
+it as missing. A different path that is not there still refuses with
+"The Laya API key file is missing."
 
 `start` downloads the pinned commit (`[checkpoint] revision`, never the
 default branch) into `<workspace>/runtime/laya/staging` when the weights
@@ -607,9 +610,11 @@ start is not replacing is `wrong_revision` ("Wrong model version") and the
 sidecar does not start. A changed byte in the runtime checkpoint is the
 download above; the sidecar does not start on that tree. Laya does not
 reach Ready in these cases. A verified boot sets
-`LAYA_WEIGHTS_PATH` to that hashed weights file. A standard cache symlink
-(`snapshots/<revision>/model.safetensors` into `blobs/`) is passed as the
-snapshot file, not the blob. The boot runs offline
+`LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in the
+standard Hugging Face cache is accepted. When that file is the cache
+symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), it is
+passed as the snapshot file, not the blob. A blob path is still refused.
+The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. When that sidecar's health document leaves the revision
 null, FlintTrade fills the pinned revision from the verified manifest, so
@@ -624,10 +629,18 @@ watch tick, about every 1.5 seconds. A mismatch is `unverified`
 file that changed. The same watch reads the pid file
 (`runtime/laya/sidecar.pid`), the key file (`runtime/laya/api.key`), and
 the runtime record, so a command-line stop or start, or a key rotation,
-shows on the chip within that interval. The desk ping runs that same
-check, and the chip reads the ping. Until the ping confirms a stop or a
-start, the chip says Checking in the neutral colour and the popover says
-Checking Laya…. It does not stay on Ready while orders are refused. Every `stop` deletes the runtime
+is reconciled by that watch. The desk polls `GET /api/v1/ping` every
+1.5 seconds. That ping reconciles the pid, the key, and the runtime
+record the same way an order does, so the chip and the order gate read
+the same state. A stop or a start shows on the chip within 1.5 seconds.
+After Start Laya, until the ping confirms the new state, the chip says
+Checking in the neutral colour and the popover says Checking Laya…. It
+does not show a stale Ready during that wait. An admitted place while
+the chip is not Ready or Degraded also shows Checking until the next
+ping. A confirmed first load
+still says Still loading. A place refused with exactly "Laya is Down.
+Orders are paused until it's Ready." sets the chip to Down on that
+response. The refusal line is unchanged. Every `stop` deletes the runtime
 record, as does a start that fails after it was written. A record from
 an earlier run is rejected. A health document without the weight digest
 is Ready when that record matches the pin. If the record cannot be
@@ -642,7 +655,11 @@ not a status code. The desk shows Not started, Stopped,
 `Port <n> in use`, Still loading, Downloading the model · 1.2 of 3.4 GB,
 Can't download the model, Unreachable, Wrong model version, Can't verify
 the model, Can't reach Laya, and The Laya API key file is missing.
-`key_missing` stays until the next start or an explicit stop. A health
+`key_missing` stays until a later start finds the file, or an explicit
+stop. When `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`,
+that next `start` replaces the file and does not treat it as missing. A
+different path that is not there still refuses with "The Laya API key
+file is missing." A health
 check does not replace it with Not started. The download progress class
 subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`). The model is
 about 2.37 GB, and the progress line reports that size once. `unverified` applies when this start did
@@ -682,8 +699,15 @@ is Down, and Practice refuses too. A decision without `revision` or
 `sha256` is checked against this run's verified record for both admitted
 and clamped orders. The decision log is
 `<workspace>/runtime/laya/decisions.jsonl`. It stores `proof=decision`
-or `proof=runtime`. When the chip is Ready and that decision carries no
-proof, the refusal code is `laya_unverified` and the decision log records
+or `proof=runtime`. An admitted Practice place with an empty note skips
+the model and writes one line, `effect=clamp` with `failure=note_absent`
+and no proof, including when the quantity already fits. When this run's
+record stood in, each model allow keeps its own `effect=allow`
+`proof=runtime` line. Three admitted places in that case (a note, an
+empty note, a note) write `effect=allow` `proof=runtime`, then
+`effect=clamp` `failure=note_absent`, then `effect=allow`
+`proof=runtime`, and the model is called twice. There is no dedupe. When the chip is Ready and a model decision
+carries no proof, the refusal code is `laya_unverified` and the decision log records
 `identity_absent` with no proof. The refusal reads "Not placed. Laya's
 decision couldn't be verified. Try again." Stopping the sidecar records
 Down before an in-flight probe can publish Ready. An empty note is

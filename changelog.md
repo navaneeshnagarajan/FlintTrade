@@ -19,16 +19,33 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **Laya chip, runtime key, and snapshot launch.** `start` rewrites
-  `runtime/laya/api.key` when `LAYA_API_KEY_FILE` names that file, and
-  does not refuse it as missing. The desk ping uses the same watch as
-  the order gate, so a stop or a start shows on the chip within 1.5
-  seconds. Until that ping confirms the new state, the chip says
-  Checking and the popover says Checking Laya…. It does not stay Ready
-  while orders are refused. A standard cache symlink is launched as the
-  snapshot `model.safetensors`, not the blob. An admitted empty note is
-  written to the decision log as `effect=clamp` with `failure=note_absent`
-  and no proof. Each model allow keeps its own `proof=runtime` line.
+- **Laya chip, runtime key, and snapshot launch.** The desk polls
+  `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the pid
+  file, the key file, and the runtime record the same way an order
+  does, so the chip and the order gate read the same state. A
+  command-line stop or start shows on the chip within 1.5 seconds.
+  After Start Laya, until that ping confirms the new state, the chip
+  says Checking in the neutral colour and the popover says Checking
+  Laya…. It does not show a stale Ready during that wait. An admitted
+  place while the chip is not Ready or Degraded also shows Checking
+  until the next ping. A confirmed
+  first load still says Still loading. A place refused with exactly
+  "Laya is Down. Orders are paused until it's Ready." sets the chip to
+  Down on that response. The refusal line is unchanged. When
+  `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`, `start`
+  replaces that file and does not treat it as missing. A different path
+  that is not there still refuses with "The Laya API key file is
+  missing." A model already in the standard Hugging Face cache is
+  accepted. When that file is the cache symlink
+  `snapshots/<revision>/model.safetensors`, the launch path is the
+  snapshot file, not the blob. A blob path is still refused. An admitted
+  Practice place with an empty note skips the model and writes one
+  decision-log line, `effect=clamp` with `failure=note_absent` and no
+  proof. When this run's record stood in, each model allow keeps its own
+  `effect=allow` `proof=runtime` line. Three admits in that case (a note,
+  an empty note, a note) write `effect=allow` `proof=runtime`, then
+  `effect=clamp` `failure=note_absent`, then `effect=allow`
+  `proof=runtime`, and the model is called twice.
 
 ### Added
 
@@ -129,8 +146,8 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Changed
 
 - **Desk Laya chip follows the current mode (FT-LAYA-MODEL-001).**
-  Practice and Explore show sidecar Ready, Degraded, or Down. Live
-  shows Live-facing status. "Not qualified for Live" is the tooltip
+  Practice shows sidecar Ready, Degraded, Down, Still loading, or
+  Checking. Live shows Live-facing status. "Not qualified for Live" is the tooltip
   and the popover line when Live lacks qualification. Ping
   publishes Live-facing `laya`, sidecar `laya_practice`, and
   `laya_live_qualified`, plus a reason code and port. During the first
@@ -149,15 +166,25 @@ changelog rebuilds itself from the first release cut after this baseline.
   `unreachable` (Unreachable), `wrong_revision` (Wrong model version),
   `unverified` (Can't verify the model), `key_rejected` (Can't reach
   Laya), and `key_missing` (The Laya API key file is missing.). A health
-  check does not replace `key_missing` with Not started. `downloading` has no Next line. The `download_failed` tooltip is
+  check does not replace `key_missing` with Not started. When
+  `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`, `start`
+  replaces that file and does not treat it as missing. A different path
+  that is not there still refuses with that same sentence.
+  `downloading` has no Next line. The `download_failed` tooltip is
   "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
-  (`POST /api/v1/laya/start`); the chip then says Still loading until
-  Laya is Ready or a failure reason arrives. A dead sidecar is reaped
-  and reported Stopped. The pid file, key file, and runtime record are
-  watched about every 1.5 seconds, so a command-line stop or start, or
-  a key rotation, shows within that interval. When a place is refused
+  (`POST /api/v1/laya/start`); the chip then says Checking in the
+  neutral colour, and the popover says Checking Laya…, until the ping
+  confirms Ready, Degraded, or a reason other than `not_started`. A
+  confirmed first load still says Still loading. A dead sidecar is reaped
+  and reported Stopped. The desk polls `GET /api/v1/ping` every 1.5
+  seconds. That ping reconciles the pid file, the key file, and the
+  runtime record the same way an order does, so the chip and the order
+  gate read the same state. A command-line stop or start, or a key
+  rotation, shows on the chip within 1.5 seconds. When a place is refused
   because Laya cannot be reached, or because it rejects the key, the
-  chip updates on that same order. A clamp says "Not placed. Laya allows
+  chip updates on that same order. A place refused with exactly
+  "Laya is Down. Orders are paused until it's Ready." sets the chip to
+  Down on that response. The refusal line is unchanged. A clamp says "Not placed. Laya allows
   up to N." with Place N and Cancel, and never auto-places. Place N
   sends that quantity, and the Practice review panel shows it. A Down
   refusal is "Laya is Down. Orders are paused until it's Ready." and
@@ -170,7 +197,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   only live region. The reason line is not its own status. A place with
   no note still gets
   Laya's policy decision: Practice clamps and Live denies. It is not a
-  hard reject. Desk place surfaces go through this admission.
+  hard reject. An admitted Practice place skips the model and writes one
+  decision-log line, `effect=clamp` with `failure=note_absent` and no
+  proof. When this run's record stood in, each model allow keeps its own
+  `effect=allow` `proof=runtime` line. Three admits in that case write
+  allow, clamp, allow, and the model is called twice. Desk place
+  surfaces go through this admission.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice

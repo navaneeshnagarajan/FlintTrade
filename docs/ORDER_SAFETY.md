@@ -161,7 +161,14 @@ that fails after it was written. A record from an earlier run is
 rejected. A decision without `revision` or `sha256` is checked against
 that record for both admitted and clamped orders. The decision log is
 `<workspace>/runtime/laya/decisions.jsonl`. It records `proof=decision`
-or `proof=runtime`. A decision with no proof is refused with "Not placed.
+or `proof=runtime`. An admitted Practice place with an empty note skips
+the model and writes one line, `effect=clamp` with `failure=note_absent`
+and no proof, including when the quantity already fits. When this run's
+record stood in, each model allow keeps its own `effect=allow`
+`proof=runtime` line. Three admitted places in that case (a note, an
+empty note, a note) write `effect=allow` `proof=runtime`, then
+`effect=clamp` `failure=note_absent`, then `effect=allow`
+`proof=runtime`, and the model is called twice. There is no dedupe. A model decision with no proof is refused with "Not placed.
 Laya's decision couldn't be verified. Try again." A health document that
 omits the digest is Ready when that record matches the pin. If the
 record cannot be checked, the chip reason is `unverified`. Stopping the
@@ -220,7 +227,11 @@ match, the sidecar does not start on it; the pinned download runs
 instead, and a failed download leaves `download_failed` with that copy
 still on disk.
 A verified boot
-sets `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
+sets `LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in
+the standard Hugging Face cache is accepted. When that file is the cache
+symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), the
+launch path is the snapshot file, not the blob. A blob path is still
+refused. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. When the sidecar health document leaves the revision
 empty, FlintTrade fills the pinned revision from the verified manifest, so
@@ -233,12 +244,17 @@ changes, the chip shows Can't verify the model and the log line is
 `size`, `mtime`, or a comma-separated list of those. The same watch
 reads the pid file (`runtime/laya/sidecar.pid`), the key file
 (`runtime/laya/api.key`), and the runtime record, so a command-line
-stop or start, or a key rotation, shows on the chip within that interval.
-The desk ping runs that same check, and the chip reads the ping. Until
-the ping confirms a stop or a start, the chip says Checking in the
-neutral colour and the popover says Checking Laya…. It does not stay on
-Ready while orders are refused. The refusal line stays "Laya is Down.
-Orders are paused until it's Ready."
+stop or start, or a key rotation, is reconciled by that watch. The desk
+polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the
+pid, the key, and the runtime record the same way an order does, so the
+chip and the order gate read the same state. A stop or a start shows on
+the chip within 1.5 seconds. After Start Laya, until the ping confirms
+the new state, the chip says Checking in the neutral colour and the
+popover says Checking Laya…. It does not show a stale Ready during that
+wait. An admitted place while the chip is not Ready or Degraded also
+shows Checking until the next ping. A confirmed first load still says Still loading. A place refused
+with exactly "Laya is Down. Orders are paused until it's Ready." sets
+the chip to Down on that response. The refusal line stays that sentence.
 New orders stay paused. A reduce-only close is unchanged.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
@@ -246,7 +262,7 @@ Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
-one is registered. The desk ping reconciles the watched pid, key, and runtime record, then
+one is registered. The desk polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the watched pid, key, and runtime record the same way an order does, then
 publishes Live-facing `laya`, sidecar `laya_practice`,
 `laya_live_qualified`, `laya_reason`, and `laya_port`. It does not invent Ready. The Laya chip label follows
 the current mode, so Practice shows the sidecar and does not read Down while

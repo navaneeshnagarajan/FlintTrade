@@ -365,10 +365,11 @@ cancelled broker orders.
 
 The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
 separate labels. Broker is **Connected**, **Connected (read)**, or
-**Unavailable**. The Laya chip is **Ready**, **Degraded**, **Down**, or
-**Still loading**. The label follows the active mode. Practice shows the
-sidecar. Live shows Live-facing status. During the first load the label is
-**Still loading** and does not read **Down**. In Practice the chip does not
+**Unavailable**. The Laya chip is **Ready**, **Degraded**, **Down**,
+**Still loading**, or **Checking**. The label follows the active mode.
+Practice shows the sidecar. Live shows Live-facing status. During the
+first load the label is **Still loading** and does not read **Down**.
+**Checking** is the neutral colour, and it is not a stale **Ready**. In Practice the chip does not
 read **Down** while Practice orders are being admitted, when the sidecar is
 **Ready** or **Degraded** and Live-facing status is **Down** for missing
 qualification. **Not qualified for Live** is the chip tooltip, and the
@@ -426,10 +427,12 @@ not Ready, and it is not a refusal of every order: a place inside the
 tighter ceiling can continue. See [Laya on place](#laya-on-place).
 
 **Chip.** The label follows the active mode. Practice shows the sidecar:
-**Ready**, **Degraded**, or **Down**. Live shows the Live-facing status.
+**Ready**, **Degraded**, **Down**, **Still loading**, or **Checking**.
+Live shows the Live-facing status.
 During the first load the label is **Still loading** and does not read
 **Down**. Orders are still refused with **Laya is Down. Orders are paused
-until it's Ready.**
+until it's Ready.** **Checking** uses the neutral colour. The popover
+says **Checking Laya…**. It is not a stale **Ready**.
 
 The chip tooltip is the hover text. For `not_started`, `stopped`,
 `port_in_use`, `still_loading`, and `unreachable` it is the chip label
@@ -447,9 +450,12 @@ sidecar is not **Ready** or **Degraded**. A signed-out desk does not
 get it, and neither does a demo session. While the start request is in flight the button reads **Starting…**.
 If the start fails, the popover says **Laya could not be started.**
 **Start Laya** calls `POST /api/v1/laya/start`. After that click the chip
-says **Checking** and the popover says **Checking Laya…** until the ping
+says **Checking** in the neutral colour and the popover says **Checking Laya…** until the ping
 confirms **Ready**, **Degraded**, or a reason other than `not_started`.
-A confirmed first load still says **Still loading**.
+It does not show a stale **Ready** during that wait.
+A confirmed first load still says **Still loading**. A place refused with
+exactly **Laya is Down. Orders are paused until it's Ready.** sets the
+chip to **Down** on that response. The refusal line is unchanged.
 
 The popover prints the chip label, not the raw code. For `download_failed`,
 `unverified`, `wrong_revision`, and `key_rejected` it also prints the tooltip, because
@@ -523,9 +529,13 @@ against that record for both admitted and clamped orders. The decision
 log is `<workspace>/runtime/laya/decisions.jsonl`. It records
 `proof=decision` when the decision carried the pin, or `proof=runtime`
 when this run's record stood in. An empty note does not call the model.
-Practice still writes `effect=clamp` with `failure=note_absent` and no
-proof, including when the quantity already fits and the order is admitted.
-Each model allow keeps its own line. There is no dedupe. A model decision with no proof is refused
+An admitted Practice place still writes one line, `effect=clamp` with
+`failure=note_absent` and no proof, including when the quantity already
+fits. When this run's record stood in, each model allow keeps its own
+`effect=allow` `proof=runtime` line. Three admitted places in that case
+(a note, an empty note, a note) write `effect=allow` `proof=runtime`,
+then `effect=clamp` `failure=note_absent`, then `effect=allow`
+`proof=runtime`, and the model is called twice. There is no dedupe. A model decision with no proof is refused
 with `Not placed. Laya's decision couldn't be verified. Try again.`
 A health document that omits the digest is **Ready** when that record
 matches the pin. Laya is not **Ready** by default.
@@ -544,10 +554,11 @@ in a copy that this start is not replacing shows **Wrong model version**
 and the sidecar does not start. A changed byte in the runtime checkpoint
 starts the download below; the sidecar does not start on that tree.
 Laya does not reach **Ready** in these cases. A verified boot sets
-`LAYA_WEIGHTS_PATH` to that hashed weights file. When the file is a
-symlink in a Hugging Face snapshot (`snapshots/<revision>/model.safetensors`
-pointing at `blobs/`), that path is the snapshot file, not the blob.
-The sidecar loads the snapshot directory. The boot runs offline
+`LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in the
+standard Hugging Face cache is accepted. When that file is the cache
+symlink (`snapshots/<revision>/model.safetensors` pointing at `blobs/`),
+the launch path is the snapshot file, not the blob. The sidecar loads
+that snapshot directory. A blob path is still refused. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. When the sidecar health document leaves the revision
 empty, FlintTrade fills the pinned revision from the verified manifest,
@@ -559,13 +570,18 @@ changes, the chip shows **Can't verify the model** and the log line is
 `laya weights path=<path> changed=<field>`, where `<field>` is `inode`,
 `size`, `mtime`, or a comma-separated list of those. The same watch
 reads the pid file (`runtime/laya/sidecar.pid`), the key file
-(`runtime/laya/api.key`), and the runtime record, so a command-line
-stop or start, or a key rotation, shows on the chip within that interval.
-The desk ping runs that same check, and the chip reads the ping. Until
-the ping confirms a stop or a start, the chip says **Checking** in the
-neutral colour and the popover says **Checking Laya…**. It does not stay
-on **Ready** while orders are refused. The refusal line stays **Laya is
-Down. Orders are paused until it's Ready.**
+(`runtime/laya/api.key`), and the runtime record. The desk polls
+`GET /api/v1/ping` every 1.5 seconds. That ping reconciles those same
+files the same way an order does, so the chip and the order gate read
+the same state. A command-line stop or start, or a key rotation, shows
+on the chip within 1.5 seconds. After **Start Laya**, until the ping
+confirms the new state, the chip says **Checking** in the neutral
+colour and the popover says **Checking Laya…**. It does not show a
+stale **Ready** during that wait. An admitted place while the chip is
+not **Ready** or **Degraded** also shows **Checking** until the next
+ping. A place refused with exactly **Laya
+is Down. Orders are paused until it's Ready.** sets the chip to
+**Down** on that response. The refusal line stays that sentence.
 
 **Command line.** From the FlintTrade environment (the project `.venv`
 after setup, or `uv run python`):
@@ -596,8 +612,9 @@ opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
 `start` listens on `127.0.0.1` only. The port comes from `LAYA_PORT` and
 defaults to 8000. A port clash is **Down** with `port_in_use`. `start`
 writes a fresh API key to `<workspace>/runtime/laya/api.key`. When
-`LAYA_API_KEY_FILE` is that same path, `start` still writes the new key.
-It does not treat the file it is about to write as missing. `stop`
+`LAYA_API_KEY_FILE` points at that same path, `start` replaces the file
+and does not treat it as missing. A different path that is not there
+still refuses with **The Laya API key file is missing.** `stop`
 stops the sidecar, deletes that key, and records **Down** with
 `not_started`. `status` prints the report, including `reason` and the
 plain-words `detail`, and does not print the API key. If
@@ -1389,8 +1406,8 @@ the action or label it successful.
 Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
 It does not place Live orders, and it is not Laya. Chat is not an admission
 source: it never shows **Admit** or **Approved by Laya**. The desk Laya chip
-is a separate status: **Ready**, **Degraded**, **Down**, or **Still
-loading**. The chip follows the current mode. In Practice it shows the
+is a separate status: **Ready**, **Degraded**, **Down**, **Still
+loading**, or **Checking**. The chip follows the current mode. In Practice it shows the
 sidecar and does not read Down while Practice orders are being admitted.
 During the first load the label is **Still loading**. **Not qualified for
 Live** is the tooltip. Laya starts **Down** and does not invent Ready.
