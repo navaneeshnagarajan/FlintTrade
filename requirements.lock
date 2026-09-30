@@ -541,9 +541,9 @@ duckdb==1.5.5 \
     #   flinttrade-historical
     #   flinttrade-journal
     #   flinttrade-screener
-filelock==4.0.0 \
-    --hash=sha256:3611eca5d818ca9b00ec3cc7db1dcfe1e2aafc8d44fb4920d8cf60ad1f6bfda6 \
-    --hash=sha256:a850aa9ec2acba8db9ca2e9fcf8a327fbc2f85e432725715b37bd76b7dd1f798
+filelock==4.0.4 \
+    --hash=sha256:0df72be195ca7892216d16f2edce8d9b93a571f02402972020a8cff84c594c7b \
+    --hash=sha256:90999ed63a26ccf86b93b959ab10cf1017f422d816be454ed54cbed263e71ab5
     # via flinttrade-core
 flask==3.1.3 \
     --hash=sha256:0ef0e52b8a9cd932855379197dd8f94047b359ca0a78695144304cb45f87c9eb \
@@ -757,9 +757,9 @@ joblib==1.6.0 \
     --hash=sha256:2ccc96785b12046c08fd6d55839c12857831b54a3c1673ffadd2f04bfc4eda03 \
     --hash=sha256:3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba
     # via flinttrade-ai
-jugaad-data==0.35.5 \
-    --hash=sha256:5df246f0116a66e1a61fe6db62e1aeb1afedfc675f00863ad91363492a0380e6 \
-    --hash=sha256:8e7c37a0c5ca362719c0de6899d7d2f667cfd4da9ece23e4596018ec98c1044b
+jugaad-data==0.35.9 \
+    --hash=sha256:24ab0e9dc33e9556eef9bbe795a6a02f7dd28b27a26e7f19108a2bd78838a745 \
+    --hash=sha256:6befe2d1cfc5451fe37ff7a5f15da8752f346452027908660d502ab17a764a5f
     # via flinttrade-historical
 kiwisolver==1.5.0 \
     --hash=sha256:012b1eb16e28718fa782b5e61dc6f2da1f0792ca73bd05d54de6cb9561665fc9 \
@@ -1248,9 +1248,9 @@ ordered-set==4.1.0 \
     --hash=sha256:046e1132c71fcf3330438a539928932caf51ddbc582496833e23de611de14562 \
     --hash=sha256:694a8e44c87657c59292ede72891eb91d34131f6531463aab3009191c77364a8
     # via flask-limiter
-packaging==26.2 \
-    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e \
-    --hash=sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661
+packaging==26.3 \
+    --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
     # via
     #   flinttrade-gateway
     #   limits
@@ -1716,9 +1716,9 @@ qrcode==8.2 \
     --hash=sha256:16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f \
     --hash=sha256:35c3f2a4172b33136ab9f6b3ef1c00260dd2f66f858f24d88418a015f446506c
     # via flinttrade-core
-quantstats==0.0.81 \
-    --hash=sha256:6af2b501f61917c8c960faaf8007eb858d970ab02a3cf0d7dc19f048953e15f3 \
-    --hash=sha256:91f44895e4481167255384c2297193233255b427e3a09a3fa111a5ce77e9b44a
+quantstats==0.0.85 \
+    --hash=sha256:0ad4f65bb4b1b6426a33bb1ca7dd2cf6b8db44a6e7bc17e5503313607fdc7d4e \
+    --hash=sha256:f7440e456f7f79a2f9b7c523353d2c71b2756ba2006857b6a4589f7e5f5e13a0
     # via flinttrade-backtest
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
