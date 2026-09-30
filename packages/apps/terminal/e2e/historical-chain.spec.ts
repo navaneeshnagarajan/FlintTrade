@@ -86,6 +86,8 @@ test("Historical Chain captures and renders the latest snapshot in a narrow pane
   await seedExploreDemoSession(page);
   await page.goto("/trade");
   await page.getByRole("main", { name: "Trade", exact: true }).waitFor({ timeout: 15_000 });
+  // The Trade landmark mounts before the desk listener. Wait for the toolbar.
+  await page.getByTestId("desk-toolbar").waitFor({ timeout: 15_000 });
 
   await page.evaluate(() => {
     window.dispatchEvent(
