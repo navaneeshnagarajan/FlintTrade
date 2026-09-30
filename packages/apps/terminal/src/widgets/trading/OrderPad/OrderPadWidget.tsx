@@ -879,6 +879,18 @@ function OrderPadWidget(props: WidgetProps) {
       });
       if (notice) {
         setAdmission(notice);
+        if (notice.kind === "clamp" && notice.appliedQuantity != null) {
+          const nextQty = notice.appliedQuantity;
+          setValue("qty", nextQty);
+          const review = practiceReviewRef.current;
+          if (review) {
+            const nextValues = { ...getValues(), qty: nextQty };
+            setPracticeReview(createPracticeOrderReviewSnapshot(nextValues, {
+              ...review.params,
+              quantity: nextQty,
+            }));
+          }
+        }
         return false;
       }
       setAdmission(null);
@@ -909,7 +921,7 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [getValues, setValue, showToast]);
 
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
