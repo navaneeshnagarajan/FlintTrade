@@ -295,7 +295,8 @@ describe("TerminalRoute", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Trade" })).toBeInTheDocument();
     const toolbar = screen.getByTestId("desk-toolbar");
-    expect(toolbar).toContainElement(screen.getByTestId("desk-add-widget"));
+    expect(toolbar).toContainElement(screen.getByTestId("add-widget-button"));
+    expect(screen.getAllByTestId("add-widget-button")).toHaveLength(1);
     expect(toolbar).toContainElement(screen.getByTestId("desk-layouts"));
     expect(toolbar).toContainElement(screen.getByTestId("workspace-switcher"));
   });

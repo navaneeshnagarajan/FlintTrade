@@ -11,7 +11,6 @@ import {
   FileEdit,
   LayoutGrid,
   Layers,
-  Plus,
   ShieldOff,
   Star,
   Table2,
@@ -822,10 +821,10 @@ export default function TerminalRoute() {
             variant="ghost"
             className="h-7 text-xs text-text-secondary"
             onClick={() => setWidgetPickerOpen(true)}
-            data-testid="desk-add-widget"
+            aria-label="Add widget"
+            data-testid="add-widget-button"
           >
-            <Plus aria-hidden="true" />
-            Add widget
+            + Widget
           </Button>
           <Button
             type="button"
@@ -920,20 +919,6 @@ export default function TerminalRoute() {
                       onRenderTab={renderWorkspaceTabExtras}
                       realtimeResize
                     />
-                  )}
-                  {panelCount !== null && panelCount > 0 && (
-                    <div className="pointer-events-none absolute right-14 top-1 z-20">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="pointer-events-auto h-7 border-border-default px-2 text-xs text-text-secondary hover:text-text-primary"
-                        onClick={() => setWidgetPickerOpen(true)}
-                        data-testid="add-widget-button"
-                      >
-                        + Widget
-                      </Button>
-                    </div>
                   )}
                   {/* Empty-state overlay: shown when the canvas has no open panels */}
                   {panelCount === 0 && (
