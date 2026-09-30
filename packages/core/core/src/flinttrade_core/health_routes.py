@@ -112,9 +112,15 @@ def _reconcile_laya_for_desk() -> None:
     """Apply a command-line stop or start before the desk reads the gate.
 
     This is the same watch the order gate runs. The chip's ping and an
-    order then publish one status.
+    order then publish one status. An Ollama backend publishes that runtime
+    instead of the sidecar watch.
     """
     try:
+        from flinttrade_engine.laya_ollama import laya_backend, publish_ollama_gate_status  # noqa: PLC0415
+
+        if laya_backend() != "sidecar":
+            publish_ollama_gate_status()
+            return
         from flinttrade_core.laya_runtime import process_runtime  # noqa: PLC0415
 
         runtime = process_runtime()
@@ -256,22 +262,22 @@ def ping() -> tuple[Any, int]:
     practice, live, qualified = engine.desk_heartbeat()
     reason, port = engine.runtime_reason()
     progress = engine.download_progress()
-    return (
-        jsonify(
-            {
-                "status": "ok",
-                "timestamp": datetime.now(_IST).isoformat(),
-                "laya": live.value,
-                "laya_practice": practice.value,
-                "laya_live_qualified": qualified,
-                "laya_reason": reason,
-                "laya_port": port,
-                "laya_download_bytes": None if progress is None else progress[0],
-                "laya_download_total": None if progress is None else progress[1],
-            }
-        ),
-        200,
-    )
+    body = {
+        "status": "ok",
+        "timestamp": datetime.now(_IST).isoformat(),
+        "laya": live.value,
+        "laya_practice": practice.value,
+        "laya_live_qualified": qualified,
+        "laya_reason": reason,
+        "laya_port": port,
+        "laya_download_bytes": None if progress is None else progress[0],
+        "laya_download_total": None if progress is None else progress[1],
+    }
+    from flinttrade_engine.laya_ollama import laya_backend  # noqa: PLC0415
+
+    if laya_backend() == "ollama":
+        body["laya_checking"] = engine.gate_checking()
+    return jsonify(body), 200
 
 
 @health_bp.route("/api/v1/laya/start", methods=["POST"])

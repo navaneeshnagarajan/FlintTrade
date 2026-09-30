@@ -104,21 +104,30 @@ The Ollama route must not become the default until an offline benchmark counts w
 The harness calls the same seam as the gate (`evaluate_free_text` and the decision client), not SafetySystem and not `gate_order`. It does not need a live broker.
 
 ```bash
-python -m flinttrade_engine.laya_benchmark --cases PATH --repeats N
+python -m flinttrade_engine.laya_benchmark --cases PATH --split dev --repeats N
+python -m flinttrade_engine.laya_benchmark --cases PATH --split test --repeats N --exclude IDS
 ```
 
-`PATH` is JSONL. One JSON object per line:
+`PATH` is JSONL. One JSON object per line. Required fields:
 
 - `id`, `pair_id`
 - `split`: `dev` or `test`
 - `question`: `rationale`, `tilt`, or `side`
 - `note`
-- `order`: action, symbol, exchange, quantity, mode
+- `order_context`: `side` is `BUY` or `SELL`. Symbol, exchange, quantity, product, order type, and mode may be present
 - `label`: `admit`, `deny`, or `clamp`
 
-The report prints, per question and overall: `n`, `n` for each label, wrong admits, wrong denies, abstains, separate Down counts, p50 and p95 latency in milliseconds, and how many cases kept the same effect across `N` repeats. With zero wrong admits, `n` deny-labelled cases bound the true wrong-admit rate at about `3/n` at 95%. The report prints that `n` and that bound. The Researcher supplies the real labelled set. This repo ships only a tiny synthetic fixture so the harness can run with a stubbed Ollama. Those rows are examples. They are not the benchmark.
+`group`, `difficulty`, `path`, and `why` are reported when present. Any other field is ignored. The model state is only `Order side: X` plus the stripped note, the same string `state_for_note` already builds. Quantity is passed to the ceiling. Mode is passed to the empty-note rule. Neither is sent to the model. Only `side` can change a host label.
 
-A wrong admit is a full allow when the label is `deny` or `clamp`. A wrong deny is a deny when the label is `admit`. A clamp is an abstain. Whether a deny of a `clamp` label should also count as a wrong deny is open; this harness counts it as a wrong deny so over-refusal is visible, and it never counts it as a wrong admit.
+The 4,000-character cap applies after stripping. A note of exactly 4,000 characters reaches the model. A note of 4,001 is denied as `note_too_long` before any model call. An empty note is `note_absent` before any model call: Practice clamps, Live denies. Those rows are not abstains.
+
+The report prints, per question, per group (`core`, `hinglish`, `injection`, `empty_note`, `length`), per difficulty, and overall: `n`, `n` for each label, wrong admits, wrong denies, abstains, Down, correct, and other. It logs the raw A/B probabilities for each case. It prints p50 and p95 latency against the 3.0 second bar, and how many cases kept the same decision band across `N` repeats. Counts use the first repeat. It also prints the fail-closed drill results.
+
+With zero wrong admits, `n` deny-labelled cases bound the true wrong-admit rate at about `3/n` at 95%. The report prints that `n` and that bound, and `cannot_claim_under_1_percent` when `3/n` is at least 0.01. The Researcher's draft has 59 deny cases, so it cannot support a claim under 1%. This repo does not contain that draft. It ships only a tiny synthetic fixture so the harness can run offline. Those rows are examples. They are not the benchmark. `--stub` forces an allow-all client and the report says that is not a model score.
+
+`--split` scores one split. `--tune` on anything other than `--split dev` exits with `refusing to tune on test`. `--tune --split dev` scores and does not edit thresholds. Test is scored once. The report prints the split and the SHA-256 of the file bytes. `--exclude` is an optional file of ids, one per line. The report is printed twice, with those ids and without them. Borderline draft ids that need a human review before anyone treats the draft as evidence: `rat-core-05`, `rat-core-09`, `rat-core-11`, `tilt-core-03`, `tilt-core-07`, `tilt-core-09`, `tilt-core-12`, `side-core-07`, `side-core-14`.
+
+A wrong admit is a full allow when the label is `deny` or `clamp`. A wrong deny is a hard deny when the label is `admit`. A deny-option probability from 0.55 up to but not including 0.80 is an abstain. Abstain is its own count. It is a clamp in Practice and a deny in Live, and it is neither a wrong admit nor a wrong deny. A hard deny on a question other than the one the case probes, when the label is `deny`, is `other`, so the counts still add up to `n`. A Down result is never a wrong admit.
 
 ## 8. Risks and open questions
 
@@ -135,6 +144,8 @@ Open:
 - Live qualification is still the sidecar's revision, weight digest, and policy version. An Ollama digest does not qualify Live in this spike.
 - The 8,192-token check estimates tokens as UTF-8 bytes divided by 4. It is not the model's own tokenizer. The two can disagree near the cap. Over the estimate, the order is refused.
 - Decision-model probabilities can differ between CPU and GPU. That is a vendor note and is unverified here.
-- The owner's bar is zero wrong admits. The size of the deny-labelled set, and whether Practice and Live share one bar, is the Researcher's call.
+- The owner's bar is zero wrong admits. The draft set has 59 deny cases, so even a clean run cannot claim a wrong-admit rate under 1%. Pairs share text, so the effective sample is smaller than the case count. Whether Practice and Live share one bar is still open.
+- The draft labels are not human-reviewed. The borderline ids listed in section 7 need a review before the set is evidence.
+- The Next line for `not_started` still names `python -m flinttrade_core.laya_runtime start`. That copy stays as it is in this spike.
 
 The Tester should cover: flag off leaves every current place and chip path unchanged; each fail-closed drill above ends in Down or a refusal; a digest mismatch shows Wrong model version; a missing model shows the download line; a timeout and malformed JSON refuse; a note over 4,000 characters and a prompt over 8,192 tokens refuse without a model call; closing a position still admits; `confidence` cannot flip a verdict; an advisory completion cannot reach `decide`; `chat` and `systemone` are selected by the allowlist entry; an unknown flag value pauses new orders; the harness prints separate wrong-admit, wrong-deny, and abstain counts on the example fixture with a stub.

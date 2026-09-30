@@ -291,6 +291,7 @@ class Laya:
         self._download_progress: tuple[int, int] | None = None
         self._decision_client: Any = None
         self._qualification: Any = None
+        self._gate_checking = False
         self._lock = threading.Lock()
         self._log: list[DecisionRecord] = []
         self._log_lock = threading.Lock()
@@ -392,6 +393,16 @@ class Laya:
         with self._lock:
             return self._download_progress
 
+    def set_gate_checking(self, checking: bool) -> None:
+        """Record the unconfirmed Checking window. The sidecar leaves this false."""
+        with self._lock:
+            self._gate_checking = bool(checking)
+
+    def gate_checking(self) -> bool:
+        """True while an Ollama start is unconfirmed. False on the sidecar path."""
+        with self._lock:
+            return self._gate_checking
+
     def set_decision_client(self, client: Any) -> None:
         """Attach the host used for free-text questions. ``None`` skips that step."""
         with self._lock:
@@ -465,6 +476,10 @@ class Laya:
         floor refusal is final. The host cannot raise a quantity. A proven
         reduce-only exit uses :meth:`admit_reduce_only` instead.
         """
+        from .laya_ollama import laya_backend  # noqa: PLC0415
+
+        if laya_backend() != "sidecar":
+            return self._admit_ollama_backend(proposal)
         self._watch_sidecar()
         status = self.effective_status(proposal.mode)
         with self._lock:
@@ -479,6 +494,78 @@ class Laya:
             return Verdict(allow=False, reason=reason, limits=limits, applied_quantity=0)
         if client is None:
             return self._ceiling_verdict(proposal, limits)
+        from .laya_decision import evaluate_free_text  # noqa: PLC0415
+
+        decision = evaluate_free_text(
+            mode=proposal.mode,
+            action=proposal.action,
+            rationale=proposal.rationale,
+            requested_quantity=proposal.quantity,
+            degraded_ceiling=self._degraded_max_quantity,
+            client=client,
+        )
+        if decision.effect == "unverified":
+            return Verdict(
+                allow=False,
+                reason=decision.reason,
+                limits=limits,
+                applied_quantity=0,
+                evidence=decision.evidence,
+            )
+        if decision.effect == "down":
+            self.set_status(DecisionStatus.DOWN)
+            failure = next((item[1] for item in decision.evidence if item[0] == "failure"), "")
+            chip_reason = _reason_for_decision_failure(failure)
+            if chip_reason is not None:
+                self.set_runtime_reason(chip_reason, self.runtime_reason()[1])
+            verdict = self._down_verdict(VerdictLimits(max_quantity=self._ceiling_for(DecisionStatus.DOWN)))
+            return Verdict(
+                allow=verdict.allow,
+                reason=verdict.reason,
+                limits=verdict.limits,
+                applied_quantity=0,
+                evidence=decision.evidence,
+            )
+        if decision.effect == "deny":
+            return Verdict(
+                allow=False,
+                reason=decision.reason,
+                limits=limits,
+                applied_quantity=0,
+                evidence=decision.evidence,
+            )
+        if decision.effect == "clamp":
+            applied = min(decision.applied_quantity, limits.max_quantity, proposal.quantity)
+            return Verdict(
+                allow=True,
+                reason=decision.reason,
+                limits=limits,
+                applied_quantity=applied,
+                tightened=True,
+                evidence=decision.evidence,
+            )
+        return self._ceiling_verdict(proposal, limits, evidence=decision.evidence)
+
+    def _admit_ollama_backend(self, proposal: Proposal) -> Verdict:
+        """Score free text with the Ollama client. A missing client does not admit.
+
+        The sidecar watch is not run. Closing a position still uses
+        :meth:`admit_reduce_only`, which does not call this method.
+        """
+        from .laya_ollama import bind_ollama_gate  # noqa: PLC0415
+
+        client = bind_ollama_gate(self)
+        status = self.effective_status(proposal.mode)
+        with self._lock:
+            ceiling = self._ceiling_for(status)
+        limits = VerdictLimits(max_quantity=ceiling)
+        if client is None or status is DecisionStatus.DOWN:
+            if status is not DecisionStatus.DOWN:
+                self.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            return self._down_verdict(VerdictLimits(max_quantity=self._ceiling_for(DecisionStatus.DOWN)))
+        reason = self._schema_reason(proposal)
+        if reason:
+            return Verdict(allow=False, reason=reason, limits=limits, applied_quantity=0)
         from .laya_decision import evaluate_free_text  # noqa: PLC0415
 
         decision = evaluate_free_text(
@@ -698,6 +785,12 @@ def _reason_for_decision_failure(code: str) -> str | None:
     """
     if code in {"revision_mismatch", "digest_mismatch"}:
         return LAYA_REASON_WRONG_REVISION
+    if code in {"digest_absent", "runtime_too_old", "unverified"}:
+        return LAYA_REASON_UNVERIFIED
+    if code == "model_missing":
+        return LAYA_REASON_DOWNLOADING
+    if code == "runtime_down":
+        return LAYA_REASON_NOT_STARTED
     if code in {"http_401", "http_403"}:
         return LAYA_REASON_KEY_REJECTED
     if code in {"connection", "timeout"}:

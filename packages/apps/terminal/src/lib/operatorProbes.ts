@@ -53,6 +53,8 @@ export interface PingProbe {
   layaDownloadBytes: number | null;
   /** Bytes expected while `layaReason` is `downloading`. Null otherwise. */
   layaDownloadTotal: number | null;
+  /** True only when an Ollama ping says the runtime is still unconfirmed. Absent means false. */
+  layaChecking: boolean;
 }
 
 const LAYA_REASON_CODES = new Set([
@@ -108,6 +110,12 @@ function byteCount(value: unknown): number | null {
   return value;
 }
 
+/** True only for a boolean `true`. A missing field stays false, which is the sidecar ping. */
+export function layaCheckingFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_checking?: unknown }).laya_checking === true;
+}
+
 /** Done and total bytes. Both must be present, or both are null. */
 export function layaDownloadProgressFromBody(body: unknown): { done: number | null; total: number | null } {
   if (body === null || typeof body !== "object") return { done: null, total: null };
@@ -132,6 +140,7 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
         layaPort: 8000,
         layaDownloadBytes: null,
         layaDownloadTotal: null,
+        layaChecking: false,
       };
     }
     const body: unknown = await resp.json().catch(() => null);
@@ -146,6 +155,7 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaPort: layaPortFromBody(body),
       layaDownloadBytes: progress.done,
       layaDownloadTotal: progress.total,
+      layaChecking: layaCheckingFromBody(body),
     };
   } catch (err) {
     return {
@@ -158,6 +168,7 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaPort: 8000,
       layaDownloadBytes: null,
       layaDownloadTotal: null,
+      layaChecking: false,
     };
   }
 }

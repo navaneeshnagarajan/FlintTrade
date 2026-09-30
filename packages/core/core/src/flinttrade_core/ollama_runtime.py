@@ -351,6 +351,37 @@ def managed_ollama_session(model: str) -> Iterator[ManagedOllamaAdmission]:
         yield admission
 
 
+def managed_ollama_gate_snapshot(model: str = "") -> dict[str, Any] | None:
+    """Return chip fields for the owned runtime, or None when this process has none.
+
+    The place path rechecks the digest inside :class:`ManagedOllamaAdmission`.
+    This snapshot does not probe the listener, so a dead server can still look
+    ready until that admission fails closed.
+    """
+    with _MANAGED_RUNTIME_OWNER_LOCK:
+        runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
+    if runtime is None:
+        return None
+    try:
+        snapshot = dict(runtime._status_snapshot(probe_server=False))
+        port = getattr(runtime, "_port", 0) or 0
+        snapshot["port"] = port if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535 else 0
+        snapshot["pinned_server_version"] = str(runtime.server_version)
+        snapshot["model_present"] = False
+        snapshot["reported_digest"] = None
+        if model and snapshot.get("ready"):
+            try:
+                identity = runtime._accepted_model_identity(model)
+            except Exception:
+                identity = None
+            if identity is not None:
+                snapshot["model_present"] = True
+                snapshot["reported_digest"] = identity[1]
+    except Exception:
+        return None
+    return snapshot
+
+
 def _normalise_machine(machine: str) -> str:
     value = machine.strip().lower()
     if value in {"amd64", "x64"}:

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "@/stores/authStore";
 import {
   INSTALL_PROBE_URL,
+  layaCheckingFromBody,
   layaHeartbeatFromBody,
   layaLiveQualifiedFromBody,
   layaPortFromBody,
@@ -59,6 +60,18 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaReasonFromBody({ status: "ok" })).toBeNull();
     expect(layaPortFromBody({ laya_port: 8123 })).toBe(8123);
     expect(layaPortFromBody({ status: "ok" })).toBe(8000);
+    expect(layaCheckingFromBody({ laya_checking: true })).toBe(true);
+    expect(layaCheckingFromBody({ laya_checking: false })).toBe(false);
+    expect(layaCheckingFromBody({ laya_checking: "true" })).toBe(false);
+    expect(layaCheckingFromBody({ status: "ok" })).toBe(false);
+    expect(layaCheckingFromBody(null)).toBe(false);
+  });
+
+  it("treats a missing laya_checking field as not checking", async () => {
+    const checking = vi.fn(async () => jsonResponse({ status: "ok", laya_checking: true }, 200));
+    await expect(probeLocalPing(asFetch(checking))).resolves.toMatchObject({ layaChecking: true });
+    const sidecar = vi.fn(async () => jsonResponse({ status: "ok", laya: "down" }, 200));
+    await expect(probeLocalPing(asFetch(sidecar))).resolves.toMatchObject({ layaChecking: false });
   });
 
   it("does not present Ready when ping fails or omits Laya", async () => {
