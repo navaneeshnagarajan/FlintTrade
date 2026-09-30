@@ -11,6 +11,7 @@ import {
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useSyncExternalStore, type ReactNode } from "react";
 import { registerAuthenticatedQueryCachePurge } from "@/lib/authenticatedQueryCache";
+import { deskQueryRetryDelay } from "@/lib/deskPolling";
 import {
   captureAuthSessionFence,
   isAuthSessionFenceCurrent,
@@ -210,6 +211,7 @@ function createQueryClient(): QueryClient {
         staleTime: 5_000,
         gcTime: 300_000,
         retry: 2,
+        retryDelay: deskQueryRetryDelay,
         refetchOnWindowFocus: false,
       },
     },

@@ -12,6 +12,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { getDepth } from "@/services/api";
 import type { MarketDepth } from "@/types/api";
+import { isDocumentHidden } from "@/lib/deskPolling";
+import { useRearmPollingWhenVisible } from "@/hooks/useRearmPollingWhenVisible";
 import { isMarketHours } from "@/lib/market";
 
 /**
@@ -26,11 +28,16 @@ export function useDepthData(
   exchange: string,
   enabled = true,
 ) {
+  const queryKey = ["depth", symbol, exchange] as const;
+  useRearmPollingWhenVisible(
+    queryKey,
+    () => enabled && symbol.length > 0 && isMarketHours(),
+  );
   return useQuery<MarketDepth>({
-    queryKey: ["depth", symbol, exchange],
+    queryKey,
     queryFn: () => getDepth(symbol, exchange),
     enabled: enabled && !!symbol,
-    refetchInterval: () => (isMarketHours() ? 1_000 : false),
+    refetchInterval: () => (isDocumentHidden() || !isMarketHours() ? false : 1_000),
     // Keep previous data while refetching to avoid flicker
     placeholderData: (prev) => prev,
   });

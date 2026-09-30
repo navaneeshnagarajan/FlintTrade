@@ -2445,6 +2445,60 @@ def _subscribe_pending_practice_order(
 # Route handlers — one per endpoint, all delegate to _dispatch_order()
 # ---------------------------------------------------------------------------
 
+_LEGACY_MISSING_LTP = "no LTP was available"
+
+
+def _visible_practice_refusal(message: str, symbol: str) -> str:
+    """Replace the raw missing-LTP sentence. Other refusals stay as written."""
+    if _LEGACY_MISSING_LTP not in message:
+        return message
+    from flinttrade_data.practice_price import practice_price_unavailable
+
+    return practice_price_unavailable(symbol)
+
+
+def _resolve_practice_market_fill(
+    body: Mapping[str, Any],
+    *,
+    price: float,
+    order_type: str,
+) -> Any:
+    """Return a Practice fill, a refusal sentence, or None.
+
+    None keeps the request price. That path is only a MARKET order that
+    already has no positive price, so the sandbox still sees the same call
+    and the raw missing-price sentence is rewritten on the way out. An
+    unmarked positive price is not a live LTP and does not fill.
+    """
+    if order_type != "MARKET":
+        return None
+    symbol = str(body.get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    from flinttrade_data.practice_price import (  # noqa: PLC0415
+        OPTION_PRICE_STALE,
+        lookup_stored_last_close,
+        resolve_practice_market_price,
+    )
+
+    exchange = str(body.get("exchange") or "").strip().upper()
+    basis = str(body.get("price_basis") or "").strip().lower()
+    stored = None
+    if not (basis == "ltp" and price > 0):
+        stored = lookup_stored_last_close(symbol, exchange)
+    resolved = resolve_practice_market_price(
+        symbol=symbol,
+        exchange=exchange,
+        request_price=price,
+        price_basis=basis,
+        stored_close=stored,
+    )
+    if isinstance(resolved, str):
+        if resolved == OPTION_PRICE_STALE or price > 0:
+            return resolved
+        return None
+    return resolved
+
 
 def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     """Admit one Practice order through Laya, then fill or rest it in the sandbox.
@@ -2513,17 +2567,28 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     except (TypeError, ValueError):
         trigger_price = 0.0
 
+    fill = _resolve_practice_market_fill(body, price=price, order_type=order_type)
+    if isinstance(fill, str):
+        return jsonify({"status": "error", "message": fill}), 400
+    place_price = price if fill is None else fill.price
+    provenance: dict[str, Any] = {}
+    if fill is not None and fill.price_source:
+        provenance["price_source"] = fill.price_source
+        if fill.price_age_s is not None:
+            provenance["price_age_s"] = fill.price_age_s
+
     try:
         result = sandbox.place_order(
             symbol=str(body.get("symbol", "")).strip().upper(),
             exchange=str(body.get("exchange", "")).strip().upper(),
             action=str(body.get("action", "BUY")).strip().upper(),
             quantity=quantity,
-            price=price,
+            price=place_price,
             product=str(body.get("product", "MIS")).strip().upper(),
             order_type=order_type,
             trigger_price=trigger_price,
             strategy=str(body.get("strategy") or "").strip(),
+            **provenance,
         )
         if not _subscribe_pending_practice_order(result, body):
             order_id = str(result.get("order_id") or "")
@@ -2554,8 +2619,19 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     if str(result.get("status", "")).upper() == "REJECTED":
         return jsonify({
             "status": "error",
-            "message": str(result.get("message") or "Practice order rejected"),
+            "message": _visible_practice_refusal(
+                str(result.get("message") or "Practice order rejected"),
+                str(body.get("symbol") or ""),
+            ),
         }), 400
+    if fill is not None and getattr(fill, "label", None):
+        result = {
+            **result,
+            "message": fill.label,
+            "price": fill.price,
+            "price_source": fill.price_source,
+            "price_age_s": fill.price_age_s,
+        }
     return jsonify(result), 200
 
 
