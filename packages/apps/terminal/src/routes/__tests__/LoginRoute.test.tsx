@@ -310,9 +310,8 @@ describe("LoginRoute", () => {
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
       },
     });
-    render(<LoginRoute onSuccess={onSuccess} mode="full" greeting="Good evening" />);
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
 
-    expect(screen.getByTestId("login-greeting")).toHaveTextContent("Good evening");
     const password = screen.getByLabelText("Enter your password");
     fireEvent.change(password, { target: { value: "password" } });
     fireEvent.submit(password.closest("form") as HTMLFormElement);

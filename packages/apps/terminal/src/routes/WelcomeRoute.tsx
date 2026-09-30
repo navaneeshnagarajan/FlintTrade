@@ -66,8 +66,16 @@ const WELCOME_FEATURES = [
   "Strategy lab, SIP tracking, and AI context",
 ] as const;
 
-/** The brand intro plays once per browser; later visits open on the actions. */
-const INTRO_SEEN_KEY = "flinttrade:intro-seen";
+const TRADING_QUOTES = [
+  { text: "The stock market is a device for transferring money from the impatient to the patient.", author: "Warren Buffett" },
+  { text: "In investing, what is comfortable is rarely profitable.", author: "Robert Arnott" },
+  { text: "Risk comes from not knowing what you are doing.", author: "Warren Buffett" },
+  { text: "The market is never wrong; opinions often are.", author: "Jesse Livermore" },
+  { text: "Be fearful when others are greedy and greedy when others are fearful.", author: "Warren Buffett" },
+] as const;
+
+const GREETED_KEY = "flinttrade:greeted-today";
+const enterEase = [0.22, 1, 0.36, 1] as const;
 const silkyEase = [0.16, 1, 0.3, 1] as const;
 const smoothSpring = {
   type: "spring",
@@ -76,7 +84,7 @@ const smoothSpring = {
   mass: 0.9,
 } as const;
 
-type FlowStep = "cinematic" | "login";
+type FlowStep = "cinematic" | "greeting" | "login";
 
 const DEBRIS_PARTICLES = [
   { dx: "-60px", dy: "-40px", delay: "1s" },
@@ -104,20 +112,16 @@ function getISTGreeting(): string {
   return "Good evening";
 }
 
-function readIntroSeen(): boolean {
-  try {
-    return localStorage.getItem(INTRO_SEEN_KEY) === "true";
-  } catch {
-    return false;
-  }
+function getRandomQuote() {
+  return TRADING_QUOTES[Math.floor(Math.random() * TRADING_QUOTES.length)];
 }
 
-function markIntroSeen(): void {
-  try {
-    localStorage.setItem(INTRO_SEEN_KEY, "true");
-  } catch {
-    // Storage unavailable: the intro simply plays again next time.
-  }
+function shouldShowGreeting(): boolean {
+  return sessionStorage.getItem(GREETED_KEY) !== new Date().toDateString();
+}
+
+function markGreeted(): void {
+  sessionStorage.setItem(GREETED_KEY, new Date().toDateString());
 }
 
 function ThemeToggle() {
@@ -181,6 +185,52 @@ function CinematicBackdrop({ particleColors }: { particleColors: string[] }) {
       <Meteors number={18} seed={8_021} />
       <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-surface-base via-surface-base/55 to-transparent" />
     </div>
+  );
+}
+
+function GreetingScreen({ onDone }: { onDone: () => void }) {
+  const quote = useMemo(() => getRandomQuote(), []);
+  const greeting = useMemo(() => getISTGreeting(), []);
+  const particleColors = useMemo(() => ["#22c55e", "#38bdf8", "#a3e635"], []);
+
+  useEffect(() => {
+    const timer = setTimeout(onDone, 3000);
+    return () => clearTimeout(timer);
+  }, [onDone]);
+
+  return (
+    <main
+      aria-label="Welcome back"
+      className="relative flex min-h-screen cursor-pointer flex-col items-center justify-center overflow-hidden bg-surface-base px-6 text-center"
+      onClick={onDone}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onDone();
+        }
+      }}
+    >
+      <CinematicBackdrop particleColors={particleColors} />
+      <motion.div
+        className="relative z-10 flex max-w-md flex-col items-center gap-6"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: enterEase }}
+      >
+        <LogoIcon size={56} />
+        <div className="space-y-1">
+          <h1 className="font-heading text-3xl font-bold text-text-primary">{greeting}</h1>
+          <p className="text-sm text-text-muted">Welcome back to FlintTrade</p>
+        </div>
+        <blockquote className="space-y-2 rounded-xl border border-border-default/80 bg-surface-card/70 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <p className="text-sm italic leading-relaxed text-text-secondary">&quot;{quote.text}&quot;</p>
+          <footer className="text-xs text-text-muted">- {quote.author}</footer>
+        </blockquote>
+        <p className="text-xs text-text-muted">Redirecting to login...</p>
+      </motion.div>
+    </main>
   );
 }
 
@@ -251,12 +301,8 @@ export default function WelcomeRoute() {
   const skipToEnd = useCallback(() => setStep(5), []);
 
   useEffect(() => {
-    if (reducedMotion || readIntroSeen()) setStep(5);
+    if (reducedMotion) setStep(5);
   }, [reducedMotion]);
-
-  useEffect(() => {
-    if (step >= 5) markIntroSeen();
-  }, [step]);
 
   useEffect(() => {
     if (authStatus !== "unknown" && authStatus !== "logged-out") return;
@@ -385,13 +431,22 @@ export default function WelcomeRoute() {
     }
   }, [authStatus, migrationBlocked, navigate]);
 
-  // Returning visitors go straight to sign-in: no intro, no interstitial.
   useEffect(() => {
     if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
     if (flowStep !== "cinematic") return;
-    setStep(5);
-    setFlowStep("login");
-  }, [authStatus, flowStep]);
+
+    const timer = setTimeout(() => {
+      setStep(5);
+      if (authStatus === "logged-out" && shouldShowGreeting()) {
+        markGreeted();
+        setFlowStep("greeting");
+      } else {
+        setFlowStep("login");
+      }
+    }, reducedMotion ? 0 : 1500);
+
+    return () => clearTimeout(timer);
+  }, [authStatus, flowStep, reducedMotion]);
 
   function handleLoginSuccess() {
     const persona = useSettingsStore.getState().persona;
@@ -418,6 +473,10 @@ export default function WelcomeRoute() {
     );
   }
 
+  if (authStatus === "logged-out" && flowStep === "greeting") {
+    return <GreetingScreen onDone={() => setFlowStep("login")} />;
+  }
+
   if (authStatus === "logged-out" && flowStep === "login") {
     let unfinishedSetup = false;
     try {
@@ -432,7 +491,6 @@ export default function WelcomeRoute() {
         onSuccess={handleLoginSuccess}
         onExplore={handleExplore}
         onUnfinishedSetup={unfinishedSetup ? () => navigate("/setup") : undefined}
-        greeting={getISTGreeting()}
         mode="full"
       />
     );
@@ -557,13 +615,15 @@ export default function WelcomeRoute() {
       <ThemeToggle />
       <CinematicBackdrop particleColors={particleColors} />
       {step < 5 && (
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={skipToEnd}
-          className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-full border border-border-default/70 bg-surface-card/70 px-4 py-1.5 text-xs font-medium text-text-secondary backdrop-blur-xl transition-colors hover:text-text-primary"
+          className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-full border-border-default/70 bg-surface-card/70 px-4 text-xs text-text-secondary backdrop-blur-xl hover:text-text-primary"
         >
           Skip intro
-        </button>
+        </Button>
       )}
 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-16 text-center">
@@ -699,6 +759,9 @@ export default function WelcomeRoute() {
                   </Button>
                 )}
 
+                {(authStatus === "logged-out" || authStatus === "pin-required") && (
+                  <p className="text-xs text-text-muted">Redirecting to login...</p>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

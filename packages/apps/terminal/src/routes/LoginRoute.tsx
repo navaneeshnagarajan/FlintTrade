@@ -43,8 +43,6 @@ interface LoginRouteProps {
   onExplore?: () => void;
   /** Open Setup so an unfinished account can be wiped after a hatch bounce. */
   onUnfinishedSetup?: () => void;
-  /** Time-of-day line shown above the heading, e.g. "Good evening". */
-  greeting?: string;
   /**
    * @deprecated Ignored. Daily Sign In probes ``/auth/status`` and shows 2FA
    * only when ``totp_enabled`` is explicitly true. A stale parent
@@ -69,7 +67,6 @@ export default function LoginRoute({
   mode,
   onExplore,
   onUnfinishedSetup,
-  greeting,
 }: LoginRouteProps) {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -231,9 +228,6 @@ export default function LoginRoute({
         </div>
 
         <div className="text-center space-y-1">
-          {greeting && mode === "full" ? (
-            <p className="text-sm font-medium text-accent" data-testid="login-greeting">{greeting}</p>
-          ) : null}
           <h1 className="font-heading font-bold text-xl text-text-primary">
             {mode === "pin" ? pinHeading : "Welcome Back"}
           </h1>

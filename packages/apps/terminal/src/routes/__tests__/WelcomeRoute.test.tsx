@@ -176,6 +176,7 @@ describe("WelcomeRoute", () => {
     sessionStorage.clear();
     authState.status = "setup-required";
     settingsPersona.value = "trader";
+    motionFlags.reduced = true;
   });
 
   it("renders the welcome heading", () => {
@@ -417,8 +418,9 @@ describe("WelcomeRoute", () => {
     fetchSpy.mockRestore();
   });
 
-  it("opens sign-in straight away for a returning operator, without re-running logout", async () => {
+  it("does not re-run logout for an operator who is already signed out", async () => {
     authState.status = "logged-out";
+    sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "success", data: { is_setup: true } }), {
         status: 200,
@@ -437,23 +439,36 @@ describe("WelcomeRoute", () => {
     fetchSpy.mockRestore();
   });
 
-  it("plays the brand intro once, with a visible way to skip it", () => {
+  it("keeps the daily greeting before sign-in for a returning operator", async () => {
+    authState.status = "logged-out";
+    sessionStorage.removeItem("flinttrade:greeted-today");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: { is_setup: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<WelcomeRoute />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Welcome back" }));
+    expect(await screen.findByTestId("login-route")).toBeInTheDocument();
+    fetchSpy.mockRestore();
+  });
+
+  it("offers Skip intro while the intro plays and still plays it on the next visit", () => {
     motionFlags.reduced = false;
-    localStorage.removeItem("flinttrade:intro-seen");
 
     const first = render(<WelcomeRoute />);
     expect(screen.queryByText("Get Started")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Skip intro" }));
     expect(screen.getByText("Get Started")).toBeInTheDocument();
-    expect(localStorage.getItem("flinttrade:intro-seen")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Skip intro" })).not.toBeInTheDocument();
     first.unmount();
 
     render(<WelcomeRoute />);
-    expect(screen.getByText("Get Started")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip intro" })).not.toBeInTheDocument();
-
-    motionFlags.reduced = true;
-    localStorage.removeItem("flinttrade:intro-seen");
+    expect(screen.queryByText("Get Started")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip intro" })).toBeInTheDocument();
   });
 
   it("logged-in trader continues to Trade (persona default)", async () => {
