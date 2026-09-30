@@ -64,7 +64,9 @@ jobs:
             packages/apps/terminal/e2e/visual/known-axe-violations.json
           if-no-files-found: ignore
       - name: Commit regenerated baselines
-        if: github.event_name == 'workflow_dispatch' && inputs.update_baselines
+        # A custom if replaces the default success() check. Without it, a
+        # failed refresh still commits whatever screenshots were written.
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.update_baselines
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

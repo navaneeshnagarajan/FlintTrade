@@ -104,7 +104,9 @@ const summaryPath = process.env.GITHUB_STEP_SUMMARY;
 if (summaryPath) fs.appendFileSync(summaryPath, summary);
 process.stdout.write(`\n${summary}`);
 
-if (gate) process.exit(playwrightCode);
+// A manual baseline refresh must not commit partial screenshots. Ordinary
+// advisory runs stay green until VISUAL_AXE_GATE is flipped.
+if (gate || updateBaselines) process.exit(playwrightCode);
 process.exit(0);
 
 function collectFailures(node, found) {
@@ -115,7 +117,11 @@ function collectFailures(node, found) {
       for (const test of tests) {
         const results = Array.isArray(test.results) ? test.results : [];
         for (const result of results) {
-          if (result.status === "unexpected" || result.status === "failed") {
+          const failed = result.status === "unexpected"
+            || result.status === "failed"
+            || result.status === "timedOut"
+            || result.status === "interrupted";
+          if (failed) {
             const message = result.error?.message ?? result.status;
             const flat = String(message).replace(/\s+/g, " ").slice(0, 500);
             found.push(`${spec.title}: ${flat}`);
