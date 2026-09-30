@@ -336,7 +336,7 @@ export default function RegimePanel() {
               aria-pressed={symbol === sym}
               className={`text-xxs font-mono px-2 py-1 rounded border transition-colors ${
                 symbol === sym
-                  ? "bg-accent text-white border-accent"
+                  ? "bg-accent text-accent-foreground border-accent"
                   : "bg-surface-base border-border-default text-text-muted hover:text-text-secondary"
               }`}
             >

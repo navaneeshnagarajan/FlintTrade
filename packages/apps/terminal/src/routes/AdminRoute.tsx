@@ -9,11 +9,12 @@
 import { useState, useEffect, useRef, useCallback, type JSX } from "react";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
-import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
-import { useNavigate } from "react-router";
+import { Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
+import { Page, PageBody, PageHeader, PageTabs } from "@/components/layout/Page";
 import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { useAuthStore } from "@/stores/authStore";
+import { buildHeaders } from "@/services/ftApi.helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -141,7 +142,7 @@ function useIntrospect(): { data: IntrospectData | null; loading: boolean; error
       return;
     }
 
-    fetch("/ft-api/v1/admin/introspect")
+    fetch("/ft-api/v1/admin/introspect", { headers: buildHeaders(false) })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<IntrospectResponse>;
@@ -497,7 +498,7 @@ function AbsorptionPanel(): JSX.Element {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/ft-api/v1/admin/repos")
+    fetch("/ft-api/v1/admin/repos", { headers: buildHeaders(false) })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<AbsorptionData>;
@@ -682,7 +683,7 @@ function LogsPanel(): JSX.Element {
 
     async function poll(): Promise<void> {
       try {
-        const res = await fetch("/ft-api/v1/logs/recent");
+        const res = await fetch("/ft-api/v1/logs/recent", { headers: buildHeaders(false) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as RecentLogsResponse;
         if (!cancelled) {
@@ -848,7 +849,6 @@ function LogsPanel(): JSX.Element {
 // ---------------------------------------------------------------------------
 
 export default function AdminRoute(): JSX.Element {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("system");
   const { data: introspect, loading: introLoading, error: introError } = useIntrospect();
 
@@ -877,57 +877,33 @@ export default function AdminRoute(): JSX.Element {
   };
 
   return (
-    <div className="min-h-screen bg-background text-text-primary">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-glass-chrome backdrop-blur-md border-b border-glass-chrome">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-1.5 rounded hover:bg-surface-hover transition-colors"
-            aria-label="Go back"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <h1 className="text-lg font-semibold">Admin Dashboard</h1>
-            <p className="text-xs text-text-muted">DEV only &mdash; not visible in production</p>
-          </div>
-          <span className="ml-auto text-xs font-mono text-amber-400 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+    <Page>
+      <PageHeader
+        title="Admin"
+        description="Developer diagnostics. Only in development builds, never in production."
+        meta={
+          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-xs text-[var(--color-warning-text,var(--color-warning))]">
             DEV
           </span>
-        </div>
-      </header>
+        }
+      >
+        <PageTabs<TabId>
+          tabs={TABS}
+          value={activeTab}
+          onChange={setActiveTab}
+          label="Admin sections"
+          idPrefix="admin"
+        />
+      </PageHeader>
 
-      {/* Tab bar */}
-      <nav className="bg-glass-l2 backdrop-blur-sm border-b border-glass-l1" role="tablist" aria-label="Admin sections">
-        <div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  isActive
-                    ? "border-accent text-accent"
-                    : "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
-      {/* Content */}
-      <main aria-label="Admin Dashboard" className="max-w-7xl mx-auto px-4 py-6">
+      <PageBody
+        role="tabpanel"
+        id={`admin-tabpanel-${activeTab}`}
+        aria-labelledby={`admin-tab-${activeTab}`}
+        width="wide"
+      >
         {renderPanel()}
-      </main>
-    </div>
+      </PageBody>
+    </Page>
   );
 }

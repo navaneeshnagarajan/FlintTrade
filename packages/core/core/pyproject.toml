@@ -53,6 +53,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flinttrade_core"]
+artifacts = ["src/flinttrade_core/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

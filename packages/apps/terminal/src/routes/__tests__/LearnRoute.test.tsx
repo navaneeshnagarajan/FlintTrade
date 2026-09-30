@@ -93,9 +93,9 @@ describe("LearnRoute", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the Learning Center heading", () => {
+  it("renders the Learn heading, matching its sidebar label", () => {
     renderLearnRoute();
-    expect(screen.getByText("Learning Center")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Learn" })).toBeInTheDocument();
   });
 
   it("has sidebar sections for all tabs at advanced level", () => {
@@ -182,8 +182,9 @@ describe("LearnRoute", () => {
     const sidebar = screen.getByTestId("learn-sidebar");
     expect(sidebar).toHaveClass("w-full", "min-w-0");
 
+    // Narrow screens scroll the section row sideways instead of clipping it.
     const tablist = screen.getByRole("tablist");
-    expect(tablist).toHaveClass("flex-wrap", "min-w-0");
+    expect(tablist).toHaveClass("overflow-x-auto", "min-w-0");
 
     const practice = screen.getByTestId("practice-trading");
     expect(practice).toHaveClass("min-w-0", "max-w-full");

@@ -28,6 +28,15 @@ def workspace(tmp_path, monkeypatch: pytest.MonkeyPatch):
     return tmp_path
 
 
+def _session_headers(app) -> dict[str, str]:
+    """Session headers so the request reaches the route's own status."""
+    from flinttrade_core.auth_routes import _create_token
+
+    with app.app_context():
+        token = _create_token("operator", mode="explore")
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_failed_store_construction_yields_503_not_404(
     workspace,
     monkeypatch: pytest.MonkeyPatch,
@@ -59,13 +68,14 @@ def test_failed_store_construction_yields_503_not_404(
     assert "journal" in app.blueprints
     assert "flows" in app.blueprints
 
+    headers = _session_headers(app)
     with app.test_client() as client:
         for path in ("/api/v1/journal/entries", "/api/v1/journal/notes", "/api/v1/journal/stats"):
-            resp = client.get(path)
+            resp = client.get(path, headers=headers)
             assert resp.status_code == 503, f"{path} -> {resp.status_code}"
             assert resp.get_json()["status"] == "error"
         for path in ("/api/v1/flows", "/api/v1/flows/flow_1"):
-            resp = client.get(path)
+            resp = client.get(path, headers=headers)
             assert resp.status_code == 503, f"{path} -> {resp.status_code}"
             assert resp.get_json()["status"] == "error"
 
@@ -88,6 +98,7 @@ def test_healthy_boot_still_registers_and_serves_both_surfaces(
     assert app.config["JOURNAL"] is not None
     assert app.config["FLOW_STORE"] is not None
 
+    headers = _session_headers(app)
     with app.test_client() as client:
-        assert client.get("/api/v1/journal/entries").status_code == 200
-        assert client.get("/api/v1/flows").status_code == 200
+        assert client.get("/api/v1/journal/entries", headers=headers).status_code == 200
+        assert client.get("/api/v1/flows", headers=headers).status_code == 200

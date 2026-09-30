@@ -386,7 +386,7 @@ function TextInputOverlay({ onConfirm, onCancel }: TextInputOverlayProps) {
         placeholder="Enter annotation text..."
         className="bg-transparent text-xs font-mono text-text-primary border-0 shadow-none p-0 h-auto w-48 placeholder-text-muted focus-visible:ring-0"
       />
-      <Button onClick={() => val.trim() && onConfirm(val.trim())} size="sm" className="text-xs bg-accent text-white px-2 py-0.5 h-auto rounded">Place</Button>
+      <Button onClick={() => val.trim() && onConfirm(val.trim())} size="sm" className="text-xs bg-accent text-accent-foreground px-2 py-0.5 h-auto rounded">Place</Button>
       <Button variant="ghost" size="icon" onClick={onCancel} className="h-auto w-auto text-xs text-text-muted hover:text-loss px-1"><X size={11} /></Button>
     </div>
   );
@@ -1498,7 +1498,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
               <BarChart2 size={11} />
               Indicators
               {activeIndicatorCount > 0 && (
-                <span className="ml-0.5 bg-accent text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center text-xxs leading-none">{activeIndicatorCount}</span>
+                <span className="ml-0.5 bg-accent text-accent-foreground rounded-full min-w-[18px] h-[18px] flex items-center justify-center text-xxs leading-none">{activeIndicatorCount}</span>
               )}
             </Button>
           </DropdownMenuTrigger>
@@ -1720,7 +1720,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
                               }}
                               className={`h-5 w-6 rounded text-[10px] font-semibold leading-none transition-colors ${
                                 active
-                                  ? "bg-accent text-white"
+                                  ? "bg-accent text-accent-foreground"
                                   : "text-text-muted hover:bg-surface-hover hover:text-text-primary"
                               }`}
                             >

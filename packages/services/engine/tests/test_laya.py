@@ -81,7 +81,7 @@ def test_quantity_above_the_ceiling_is_a_clamp_and_does_not_place() -> None:
     blocked = place_block(verdict, 3)
     assert blocked is not None
     assert blocked["code"] == "laya_clamp"
-    assert blocked["message"] == "Qty reduced to 2 (Laya limit)"
+    assert blocked["message"] == "Not placed. Laya allows up to 2."
     assert blocked["http_status"] == 409
 
 
@@ -102,6 +102,22 @@ def test_degraded_uses_the_tighter_ceiling_and_still_admits_inside_it() -> None:
 
 
 @pytest.mark.unit
+def test_tightened_quantity_places_when_the_request_is_already_allowed() -> None:
+    from flinttrade_engine.laya import Verdict, VerdictLimits, admission_kind, place_block
+
+    verdict = Verdict(
+        allow=True,
+        reason="Laya is uncertain. Quantity stays inside the tighter limit.",
+        limits=VerdictLimits(max_quantity=1),
+        applied_quantity=1,
+        tightened=True,
+    )
+    assert admission_kind(verdict, 1) == "allow"
+    assert place_block(verdict, 1) is None
+    assert admission_kind(verdict, 4) == "clamp"
+
+
+@pytest.mark.unit
 def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     engine = Laya(status=DecisionStatus.DOWN, max_quantity=10)
     live = engine.admit(_proposal(mode="live", source="automate"))
@@ -109,8 +125,39 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     assert live.allow is False
     assert practice.allow is False
     assert live.applied_quantity == 0
-    assert "Down" in live.reason
-    assert "Live" in live.reason
+    assert live.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert practice.reason == live.reason
+    assert "Live" not in practice.reason
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status", [DecisionStatus.READY, DecisionStatus.DEGRADED])
+def test_unqualified_live_names_practice_and_practice_refusal_omits_live(status: DecisionStatus) -> None:
+    engine = Laya(status=status, max_quantity=10, degraded_max_quantity=1)
+    engine.apply_runtime_status(status, live_qualified=False)
+    live = engine.admit(_proposal(mode="live"))
+    practice = engine.admit(_proposal(mode="practice"))
+    assert live.allow is False
+    assert live.reason == "Laya isn't qualified for Live yet. Practice orders are available."
+    assert "Orders are paused" not in live.reason
+    assert practice.allow is True
+    assert "Live" not in practice.reason
+
+
+@pytest.mark.unit
+def test_reduce_only_is_recorded_and_not_refused_or_clamped() -> None:
+    down = Laya(status=DecisionStatus.DOWN, max_quantity=2)
+    degraded = Laya(status=DecisionStatus.DEGRADED, max_quantity=10, degraded_max_quantity=1)
+    for engine in (down, degraded):
+        verdict = engine.admit_reduce_only(_proposal(quantity=8, action="SELL", mode="practice"))
+        assert verdict.allow is True
+        assert verdict.reason == ""
+        assert verdict.applied_quantity == 8
+        assert engine.decision_log()[-1].proof_kind == "reduce_only"
+        assert engine.decision_log()[-1].allow is True
+    refused = down.admit(_proposal(quantity=8))
+    assert refused.allow is False
+    assert refused.applied_quantity == 0
 
 
 @pytest.mark.unit
@@ -121,7 +168,7 @@ def test_explore_and_chat_sources_are_refused() -> None:
     explore = engine.admit(_proposal(mode="explore"))
     chat = engine.admit(_proposal(source="chat"))
     assert explore.allow is False
-    assert "Explore" in explore.reason
+    assert "Example" in explore.reason
     assert chat.allow is False
     assert chat.reason
     assert admission_kind(chat, 1) == "deny"

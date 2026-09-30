@@ -18,6 +18,8 @@ interface PracticeOrderReviewStageProps {
   admission?: LayaNotice | null;
   onBack: () => void;
   onConfirm: () => void;
+  onPlaceClamped?: (quantity: number) => void;
+  onCancelClamp?: () => void;
 }
 
 const currency = new Intl.NumberFormat("en-IN", {
@@ -46,6 +48,8 @@ export function PracticeOrderReviewStage({
   admission = null,
   onBack,
   onConfirm,
+  onPlaceClamped,
+  onCancelClamp,
 }: PracticeOrderReviewStageProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -120,12 +124,12 @@ export function PracticeOrderReviewStage({
           {detailRow("Estimated exposure", exposureText, true)}
         </dl>
 
-        <p className="mt-3 text-xxs leading-relaxed text-text-muted">
-          Back or any order edit invalidates this review. Confirm submits this exact immutable intent on the paper path.
-        </p>
-
         <div className="mt-3">
-          <LayaAdmissionNotice notice={admission} />
+          <LayaAdmissionNotice
+            notice={admission}
+            onPlaceClamped={onPlaceClamped}
+            onCancelClamp={onCancelClamp}
+          />
         </div>
 
         <div className="mt-4 flex gap-2">
@@ -141,14 +145,14 @@ export function PracticeOrderReviewStage({
           <button
             ref={confirmRef}
             type="button"
-            disabled={confirming || admission?.kind === "deny"}
+            disabled={confirming || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={orderReviewConfirmAria(mode)}
             aria-busy={confirming}
             onClick={onConfirm}
             className="flex h-9 flex-1 items-center justify-center gap-2 rounded border border-accent bg-accent px-3 text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {confirming ? <Loader2 aria-hidden="true" className="size-3.5 animate-spin" /> : null}
-            {confirming ? "Confirming…" : "Confirm simulation"}
+            {confirming ? "Confirming…" : mode === "explore" ? "Continue" : "Confirm simulation"}
           </button>
         </div>
       </div>

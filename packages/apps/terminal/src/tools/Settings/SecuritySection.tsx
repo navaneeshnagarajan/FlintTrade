@@ -2,8 +2,10 @@
  * SecuritySection — quick-unlock PIN, banned IP management, threat statistics.
  *
  * APIs:
- *   GET  /ft-api/v1/auth/status         → account status incl. has_pin
+ *   GET  /ft-api/v1/auth/status         → account status incl. has_pin, totp_enabled
  *   POST /ft-api/v1/auth/pin/set        → set/change the quick-unlock PIN
+ *   POST /ft-api/v1/auth/setup/regenerate-2fa → fresh authenticator QR
+ *   POST /ft-api/v1/auth/totp/enable    → confirm authenticator enrolment
  *   GET  /ft-api/api/v1/security/stats  → threat overview counters
  *   GET  /ft-api/api/v1/security/bans   → list of banned IPs
  *   POST /ft-api/api/v1/security/ban    → ban an IP
@@ -20,6 +22,7 @@ import {
   Ban,
   KeyRound,
 } from "lucide-react";
+import { AuthenticatorEnrolment } from "./AuthenticatorEnrolment";
 import { SectionTitle, TextInput, Toggle } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +40,9 @@ import {
   type BannedIP,
   type SecuritySettings,
 } from "@/services/ftApi";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
+import { useAuthStore } from "@/stores/authStore";
+import { clearOptionalSetupState } from "@/routes/optionalSetupTray";
 
 // ---------------------------------------------------------------------------
 // Stat tile
@@ -315,6 +321,86 @@ function QuickUnlockPinBlock() {
   );
 }
 
+function DeleteAccountBlock() {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    if (!password) return;
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify({ password }),
+      });
+      const data = await resp.json() as { message?: string };
+      if (!resp.ok) {
+        setError(data?.message ?? `Request failed (HTTP ${resp.status}).`);
+        return;
+      }
+      clearOptionalSetupState();
+      useAuthStore.getState().setSetupRequired();
+      window.location.assign("/welcome");
+    } catch {
+      setError("Cannot reach the server to delete the account.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded border border-border-default bg-surface-card p-4 space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+        Account
+      </p>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        Delete the operator account on this machine. Optional setup no longer
+        offers this — it stays here in Security.
+      </p>
+      {open ? (
+        <div className="space-y-2">
+          <TextInput
+            value={password}
+            onChange={setPassword}
+            placeholder="Your password"
+            aria-label="Confirm password to delete account"
+            type="password"
+          />
+          {error && <p role="alert" className="text-xxs text-loss">{error}</p>}
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setOpen(false); setPassword(""); setError(""); }}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 text-xs bg-loss hover:bg-loss/90"
+              disabled={loading || !password}
+              onClick={() => void submit()}
+            >
+              {loading ? "Deleting…" : "Delete account"}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs border-loss/40 text-loss hover:bg-loss/10 hover:text-loss"
+          onClick={() => setOpen(true)}
+        >
+          Delete account
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main section
 // ---------------------------------------------------------------------------
@@ -419,6 +505,9 @@ export function SecuritySection() {
 
       {/* Quick-unlock PIN */}
       <QuickUnlockPinBlock />
+
+      {/* Authenticator enrolment after "Set up later" */}
+      <AuthenticatorEnrolment />
 
       {/* Stats grid */}
       <div>
@@ -608,6 +697,8 @@ export function SecuritySection() {
           </Button>
         </div>
       </div>
+
+      <DeleteAccountBlock />
 
       {/* Notice */}
       <div className="flex items-start gap-2 p-3 rounded bg-surface-card border border-border-default text-xs text-text-muted">

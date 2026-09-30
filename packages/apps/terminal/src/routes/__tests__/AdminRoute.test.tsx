@@ -49,7 +49,7 @@ describe("AdminRoute", () => {
   it("renders the admin dashboard heading", () => {
     render(<AdminRoute />, { wrapper: Wrapper });
 
-    expect(screen.getByText("Admin Dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Admin" })).toBeInTheDocument();
   });
 
   it("shows all navigation tabs", () => {

@@ -103,6 +103,12 @@ class Order(BaseModel):
     iceberg_legs: str = "0"
     """Number of legs to slice an ``iceberg`` order into (0 = broker default)."""
     strategy: str = "Flint"
+    admission_note: str = ""
+    """Free-text plan admitted with this order.
+
+    Empty is a normal case: Practice clamps and Live denies. The field is part
+    of the SafetyContext HMAC. It is not a broker instruction.
+    """
     market_protection: bool | None = None
     """Enable Market Price Protection (MPP) for market orders.
 

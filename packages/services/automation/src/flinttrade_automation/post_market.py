@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from flinttrade_core.restored_fills import is_restored_from_backup
+
 logger = logging.getLogger("flinttrade.automation.post_market")
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -96,19 +98,20 @@ def build_report(trades: list[TradeEntry], report_date: str = "") -> DailyReport
     if not trades:
         return report
 
-    report.total_trades = len(trades)
-    report.winning_trades = sum(1 for t in trades if t.pnl > 0)
-    report.losing_trades = sum(1 for t in trades if t.pnl <= 0)
+    scored = [t for t in trades if not is_restored_from_backup(t.strategy)]
+    report.total_trades = len(scored)
+    report.winning_trades = sum(1 for t in scored if t.pnl > 0)
+    report.losing_trades = sum(1 for t in scored if t.pnl <= 0)
     report.gross_pnl = sum(t.pnl for t in trades)
     report.net_pnl = report.gross_pnl - report.fees
 
-    # Best/worst trades
+    # Best/worst trades stay on the full book, including restored P&L.
     report.best_trade = max(trades, key=lambda t: t.pnl)
     report.worst_trade = min(trades, key=lambda t: t.pnl)
 
-    # Strategy breakdown
+    # Strategy breakdown excludes restored fills.
     by_strategy: dict[str, list[TradeEntry]] = {}
-    for t in trades:
+    for t in scored:
         by_strategy.setdefault(t.strategy or "default", []).append(t)
 
     for strat_name, strat_trades in by_strategy.items():

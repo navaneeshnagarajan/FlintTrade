@@ -1,14 +1,18 @@
 /**
  * sidebarStore.ts
  *
- * Zustand v5 store for the macOS dock-style DockSidebar.
- * Persists to localStorage under "flinttrade:sidebar" (version 1).
+ * Zustand v5 store for the app navigation sidebar (DockSidebar).
+ * Persists to localStorage under "flinttrade:sidebar" (version 2).
  *
  * Responsibilities:
  *   - Track sidebar display mode: icons / expanded / auto-hide / hidden
- *   - Maintain ordered list of sidebar items (routes + separators)
- *   - Track hover state for auto-hide expansion
+ *   - Maintain the ordered list of sidebar items (routes + labelled group
+ *     separators)
+ *   - Track hover state for auto-hide expansion and the phone drawer state
  *   - Reorder items via drag-and-drop
+ *
+ * Every route label is the H1 of the page it opens, so the sidebar and the
+ * page always agree on what a place is called.
  */
 
 import { create } from "zustand";
@@ -23,6 +27,7 @@ export type SidebarMode = "icons" | "expanded" | "auto-hide" | "hidden";
 
 export interface SidebarItem {
   id: string;
+  /** Route label, or the group heading for a separator ("" for a plain rule). */
   label: string;
   /** lucide-react icon name */
   icon: string;
@@ -34,9 +39,12 @@ export interface SidebarState {
   mode: SidebarMode;
   items: SidebarItem[];
   isHovered: boolean;
+  /** Phone-width navigation drawer. Never persisted. */
+  mobileOpen: boolean;
   setMode: (mode: SidebarMode) => void;
   reorderItems: (fromIndex: number, toIndex: number) => void;
   setHovered: (hovered: boolean) => void;
+  setMobileOpen: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,18 +52,18 @@ export interface SidebarState {
 // ---------------------------------------------------------------------------
 
 const BASE_DEFAULT_ITEMS: SidebarItem[] = [
-  { id: "home",      label: "Home",      icon: "Home",          route: "/home",     type: "route" },
-  { id: "trade",     label: "Trade",     icon: "TrendingUp",    route: "/trade",    type: "route" },
-  { id: "invest",    label: "Invest",    icon: "Wallet",        route: "/invest",   type: "route" },
-  { id: "learn",     label: "Learn",     icon: "BookOpen",      route: "/learn",    type: "route" },
-  { id: "lab",       label: "Lab",       icon: "FlaskConical",  route: "/lab",      type: "route" },
-  { id: "automate",  label: "Automate",  icon: "Zap",           route: "/automate", type: "route" },
-  { id: "sep-1",     label: "",          icon: "",              route: "",          type: "separator" },
-  { id: "ai",        label: "AI Hub",    icon: "Bot",           route: "/ai",       type: "route" },
-  { id: "ditto",     label: "Ditto",     icon: "Copy",          route: "/ditto",    type: "route" },
-  { id: "admin",     label: "Admin",     icon: "Shield",        route: "/admin",    type: "route" },
-  { id: "sep-2",     label: "",          icon: "",              route: "",          type: "separator" },
-  { id: "settings",  label: "Settings",  icon: "Settings",      route: "/settings", type: "route" },
+  { id: "home",      label: "Home",         icon: "Home",          route: "/home",     type: "route" },
+  { id: "trade",     label: "Trade",        icon: "TrendingUp",    route: "/trade",    type: "route" },
+  { id: "invest",    label: "Invest",       icon: "Wallet",        route: "/invest",   type: "route" },
+  { id: "learn",     label: "Learn",        icon: "BookOpen",      route: "/learn",    type: "route" },
+  { id: "sep-1",     label: "Tools",        icon: "",              route: "",          type: "separator" },
+  { id: "lab",       label: "Strategy Lab", icon: "FlaskConical",  route: "/lab",      type: "route" },
+  { id: "automate",  label: "Automate",     icon: "Zap",           route: "/automate", type: "route" },
+  { id: "ai",        label: "AI Centre",    icon: "Bot",           route: "/ai",       type: "route" },
+  { id: "sep-2",     label: "Manage",       icon: "",              route: "",          type: "separator" },
+  { id: "ditto",     label: "Accounts",     icon: "Users",         route: "/ditto",    type: "route" },
+  { id: "admin",     label: "Admin",        icon: "Shield",        route: "/admin",    type: "route" },
+  { id: "settings",  label: "Settings",     icon: "Settings",      route: "/settings", type: "route" },
 ];
 
 const DEFAULT_ITEMS: SidebarItem[] = import.meta.env.DEV
@@ -97,6 +105,7 @@ const storeImpl: StateCreator<
   mode: "icons",
   items: DEFAULT_ITEMS,
   isHovered: false,
+  mobileOpen: false,
 
   setMode: (mode) => set({ mode }),
 
@@ -109,6 +118,8 @@ const storeImpl: StateCreator<
     }),
 
   setHovered: (isHovered) => set({ isHovered }),
+
+  setMobileOpen: (mobileOpen) => set({ mobileOpen }),
 });
 
 // ---------------------------------------------------------------------------
@@ -117,13 +128,20 @@ const storeImpl: StateCreator<
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:sidebar",
-  version: 1,
+  version: 2,
   storage: createJSONStorage(() => localStorage),
-  // Only persist user preferences, not transient hover state
+  // Only persist user preferences, not transient hover or drawer state
   partialize: (state) => ({
     mode: state.mode,
     items: state.items.filter(isSidebarItemAllowed),
   }),
+  // v2 regrouped the navigation (Tools / Manage). A v1 custom order predates
+  // those groups, so it restarts from the new default order.
+  migrate: (persisted, version) => {
+    const p = (persisted ?? {}) as Partial<SidebarState>;
+    if (version < 2) return (p.mode ? { mode: p.mode } : {}) as Partial<SidebarState>;
+    return p;
+  },
   // Merge persisted items with new defaults so additions in future versions
   // are picked up without a full reset
   merge: (persisted, current) => {

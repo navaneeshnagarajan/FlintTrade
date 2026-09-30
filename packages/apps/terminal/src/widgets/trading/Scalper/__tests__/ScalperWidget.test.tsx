@@ -270,7 +270,7 @@ describe("ScalperWidget", () => {
   // ── FT-TRADE-009: Explore external-action gate (Telegram Send Test class) ─
 
   const EXPLORE_SCALPER_HELPER = EXPLORE_SCALPER_ORDER_HELPER;
-  const EXPLORE_ONE_CLICK_TITLE = "One-click unavailable in Explore";
+  const EXPLORE_ONE_CLICK_TITLE = "One-click is unavailable for Example";
 
   async function renderExploreScalper(): Promise<void> {
     mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
@@ -352,6 +352,20 @@ describe("ScalperWidget", () => {
     fireEvent.click(screen.getByText("Buy CE"));
     fireEvent.click(await screen.findByText("Confirm BUY"));
   }
+
+  it("sends the admission note with the confirmed place", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Scalp the open" },
+    });
+    await buyCeWithConfirm();
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "BUY", rationale: "Scalp the open" }),
+      );
+    });
+  });
 
   it("renders the SL/Target points inputs (wired to the gated bracket route)", () => {
     render(<ScalperWidget {...defaultProps} />);

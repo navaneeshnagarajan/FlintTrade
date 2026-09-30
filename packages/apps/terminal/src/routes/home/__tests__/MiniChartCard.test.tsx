@@ -11,7 +11,7 @@ describe("MiniChartCard", () => {
     render(<MiniChartCard />);
 
     const sparkline = screen.getByRole("img", {
-      name: /NIFTY 50 1D illustrative sparkline \(sample data\)/i,
+      name: /NIFTY 50 1D illustrative sparkline \(Example\)/i,
     });
     expect(sparkline).toHaveAttribute("viewBox", "0 0 160 42");
     expect(sparkline.querySelector("polyline")).not.toBeInTheDocument();

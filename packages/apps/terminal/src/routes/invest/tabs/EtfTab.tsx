@@ -42,7 +42,8 @@ import {
 } from "@/components/ui/table";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
+import { useModeStore } from "@/stores/modeStore";
 import { cn } from "@/lib/utils";
 import { ETF_UNIVERSE, type EtfInfo } from "@/lib/etfs";
 import { formatINR, formatPercent } from "../formatters";
@@ -251,6 +252,7 @@ function buildColumns(): ColumnDef<SortedTableFeatures, EtfRow>[] {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function EtfTab() {
+  const isExplore = useModeStore((s) => s.mode === "explore");
   const { data: quotes, isLoading, isError, refetch } = useEtfQuotes();
 
   const [sorting, setSorting] = useState<SortingState>([
@@ -259,8 +261,10 @@ export function EtfTab() {
 
   const columns = useMemo(() => buildColumns(), []);
 
-  // Fall back to demo prices when API fails or returns empty
-  const isDemo = isError || (!isLoading && (!quotes || quotes.length === 0));
+  // Explore serves mock quotes, so an empty list is not the example signal.
+  // A failed or empty book outside Explore still falls back to sample prices.
+  const quotesMissing = isError || (!isLoading && (!quotes || quotes.length === 0));
+  const isDemo = isExplore || quotesMissing;
 
   const rows = useMemo<EtfRow[]>(() => {
     if (quotes && quotes.length > 0) return mergeWithQuotes(quotes);
@@ -321,14 +325,16 @@ export function EtfTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-heading font-semibold text-sm text-text-primary">ETF Universe</h3>
           <p className="text-xs text-text-muted mt-0.5">
-            {ETF_UNIVERSE.length} ETFs — {isDemo ? "sample prices" : "live quotes via OpenAlgo. Refreshes every 30s"}.
+            {ETF_UNIVERSE.length} ETFs — {isExplore
+              ? "Example prices. Connect a broker for live quotes."
+              : `${quotesMissing ? "sample prices" : "live quotes via OpenAlgo. Refreshes every 30s"}.`}
           </p>
         </div>
         <Button

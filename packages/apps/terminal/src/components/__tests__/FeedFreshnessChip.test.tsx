@@ -65,9 +65,9 @@ describe("FT-CORE-002 FeedFreshnessChip", () => {
     renderChip();
 
     const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveTextContent("Example");
     expect(chip).toHaveAttribute("data-state", "sample");
-    expect(chip).toHaveAttribute("aria-label", expect.stringMatching(/feed source: sample/i));
+    expect(chip).toHaveAttribute("aria-label", expect.stringMatching(/feed source: example/i));
     expect(chip).not.toHaveTextContent("Live");
   });
 
@@ -108,13 +108,13 @@ describe("FT-CORE-002 FeedFreshnessChip", () => {
     expect(chip).toHaveClass("text-text-muted");
   });
 
-  it("unknown source with no timestamp is muted Unknown without an invented age", () => {
+  it("Practice with no feed reads No live feed (Practice)", () => {
     useModeStore.setState({ mode: "practice" });
     renderChip();
 
     const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Unknown");
-    expect(chip).not.toHaveTextContent("·");
+    expect(chip).toHaveTextContent("No live feed (Practice)");
+    expect(chip).not.toHaveTextContent("Unknown");
     expect(chip).toHaveAttribute("data-state", "unknown");
     expect(chip).toHaveClass("text-text-muted");
   });

@@ -333,4 +333,30 @@ describe("PerformanceTab", () => {
     expect(screen.getByText("100.0%")).toBeTruthy();
     expect(mockJournal).not.toHaveBeenCalled();
   });
+
+  it("counts restored fills in P&L and leaves them out of strategy stats", () => {
+    renderPerf([
+      jt({ pnl: 100, strategy: "ORB", symbol: "INFY" }),
+      jt({ pnl: -500, strategy: "Restored from backup", symbol: "TCS" }),
+    ]);
+    expect(screen.getByText("100.0%")).toBeInTheDocument();
+    expect(screen.getAllByText("-₹500").length).toBeGreaterThan(0);
+    expect(screen.getByText("ORB")).toBeInTheDocument();
+    expect(screen.queryByText("Restored from backup")).not.toBeInTheDocument();
+    expect(screen.getByText("Excludes 1 restored fill")).toBeInTheDocument();
+  });
+
+  it("hides the restored-fill line when nothing was restored", () => {
+    renderPerf([jt({ pnl: 800, strategy: "ORB" })]);
+    expect(screen.queryByText(/Excludes \d+ restored fill/)).not.toBeInTheDocument();
+  });
+
+  it("uses the plural restored-fill line", () => {
+    renderPerf([
+      jt({ pnl: 100, strategy: "ORB" }),
+      jt({ pnl: 10, strategy: "Restored from backup", symbol: "A" }),
+      jt({ pnl: 20, strategy: "Restored from backup", symbol: "B", timestamp: "2026-03-02T11:00:00+05:30" }),
+    ]);
+    expect(screen.getByText("Excludes 2 restored fills")).toBeInTheDocument();
+  });
 });

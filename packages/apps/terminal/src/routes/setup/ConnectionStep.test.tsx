@@ -43,7 +43,8 @@ describe("ConnectionStep", () => {
 
     const skip = screen.getByRole("button", { name: /continue without a broker/i });
     expect(skip).toBeEnabled();
-    expect(screen.getByText(/SandboxEngine/i)).toBeInTheDocument();
+    expect(screen.getByText(/simulated fills, no real money/i)).toBeInTheDocument();
+    expect(screen.queryByText(/SandboxEngine/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Settings fallback/i)).toBeInTheDocument();
     expect(screen.queryByText(/Recommended/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/openalgo-compatible url/i)).not.toBeInTheDocument();
@@ -56,6 +57,21 @@ describe("ConnectionStep", () => {
       apiKey: "",
       wsPort: "8765",
     });
+  });
+
+  it("records brokerless continuation through its own callback", () => {
+    const onComplete = vi.fn();
+    const onContinueWithoutBroker = vi.fn();
+    render(
+      <ConnectionStep
+        onComplete={onComplete}
+        onContinueWithoutBroker={onContinueWithoutBroker}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /continue without a broker/i }));
+    expect(onContinueWithoutBroker).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it("does not commit untested values to the connection store when Test Connection runs", async () => {

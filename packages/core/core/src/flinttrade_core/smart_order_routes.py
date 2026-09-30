@@ -40,11 +40,9 @@ Operational caveat:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -513,19 +511,16 @@ def start_smart_route() -> tuple[Any, int]:
         optional broker/account_id target; omitted target uses brokers.execution.default
 
     Returns:
-        202 with the initial job snapshot; 400 (validation), 401 (no JWT),
+        501 after a valid parent order; 400 (validation), 401 (no JWT),
         403 (disabled / not live / not unlocked / parent safety block),
-        503 (routing unavailable).
+        503 (routing or safety state unavailable).
     """
     from flinttrade_core.models import Action, Exchange, Order, PriceType  # noqa: PLC0415
-    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_engine.smart_router import SmartOrderRouter  # noqa: PLC0415
 
     from .order_routes import (  # noqa: PLC0415
         _decode_request_payload,
         _gated_target,
         _is_live_mode_unlocked,
-        _record_trade_journal,
         _require_live_safety,
         _run_on_client_loop,
         _safety_runtime_unavailable_response,
@@ -564,7 +559,6 @@ def start_smart_route() -> tuple[Any, int]:
         }), 403
 
     router = current_app.config.get("BROKER_ROUTER")
-    client = current_app.config.get("OPENALGO_CLIENT")
     if router is None:
         return jsonify({
             "status": "error",
@@ -664,187 +658,11 @@ def start_smart_route() -> tuple[Any, int]:
             "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
         }), 403
 
-    # --- concurrency cap + duplicate-submission guard -------------------------
-    jti = str(payload.get("jti") or "")
-    request_ctx = RequestContext(
-        jti=jti,
-        actor_type="human",
-        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
-        mode=_MODE_LIVE,
-        selector=f"{adapter_id}:{account_id}",
-    )
+    return jsonify({
+        "status": "error",
+        "message": "Orders are placed through /api/v1/orders/place.",
+    }), 501
 
-    job = _SmartJob(
-        job_id=uuid.uuid4().hex[:12],
-        params={
-            "symbol": symbol, "exchange": exchange, "action": action,
-            "quantity": quantity, "urgency": urgency, "product": product,
-            "broker": adapter_id, "account_id": account_id,
-            "max_slippage_bps": max_slippage_bps,
-        },
-    )
-
-    # ATOMIC cap + duplicate guard + insert in ONE lock section. A multi-minute
-    # unattended live-order job must not be silently duplicated (a re-click
-    # after the 202 would otherwise run 2x the quantity), and the number of
-    # simultaneous live-order workers must stay bounded. Doing the check and
-    # the insert under the SAME _JOBS_LOCK closes the TOCTOU window two
-    # concurrent submits could drive between a check-then-insert split.
-    # (Cross-process note: _JOBS is process-local; under a multi-worker
-    # deployment the cap/dup-guard and cancel are per-worker — documented in
-    # the module docstring's operational caveat.)
-    with _JOBS_LOCK:
-        if not _ACCEPTING_JOBS:
-            return jsonify({
-                "status": "error",
-                "message": "Smart-order routing is shutting down",
-            }), 503
-        running = [j for j in _JOBS.values() if j.status == "running"]
-        if len(running) >= _MAX_RUNNING_JOBS:
-            return jsonify({
-                "status": "error",
-                "message": (
-                    f"Too many smart-route jobs already running "
-                    f"(max {_MAX_RUNNING_JOBS}). Wait for one to finish or cancel it."
-                ),
-            }), 409
-        dup = next(
-            (
-                j for j in running
-                if j.params.get("symbol") == symbol and j.params.get("action") == action
-            ),
-            None,
-        )
-        if dup is not None:
-            return jsonify({
-                "status": "error",
-                "message": (
-                    f"A smart-route job for {action} {symbol} is already running "
-                    f"(job {dup.job_id}). Cancel it first if you intend to replace it."
-                ),
-            }), 409
-        # Insert NOW (status defaults to "running") so a concurrent submit sees
-        # it as an existing running job and is refused.
-        _JOBS[job.job_id] = job
-        _evict_terminal_locked()
-
-    # Mid-flight brake, evaluated before EVERY child: the job thread outlives
-    # this HTTP request, so logout and the live→practice downgrade (both of
-    # which revoke the jti) plus operator cancellation must keep working while
-    # the route runs. An unavailable revocation store fails CLOSED — this is a
-    # live order path.
-    def _pre_dispatch_check() -> str | None:
-        if job.cancel_requested:
-            return "cancelled by operator"
-        try:
-            from .auth_routes import _is_jti_revoked  # noqa: PLC0415
-
-            if jti and _is_jti_revoked(jti):
-                return "session token revoked (logout or mode change)"
-        except Exception:
-            logger.exception("smart-route revocation check failed — aborting (fail closed)")
-            return "session revocation check unavailable"
-        return None
-
-    # The job thread has no Flask context — capture the app object now and
-    # re-enter an app context per journal write (_record_trade_journal reads
-    # TRADE_STORAGE/TRADE_STORAGE_LOCK from app config and takes the lock).
-    journal_store = current_app.config.get("TRADE_STORAGE")
-    app_obj = current_app._get_current_object()  # noqa: SLF001
-
-    def _journal_write(order: Any, orderid: str) -> None:
-        with app_obj.app_context():
-            if journal_store is not None:
-                _record_trade_journal(order, orderid, strategy="smart-route")
-
-    async def _route_safety_provider(order: Any, reservations: tuple[Any, ...]) -> Any:
-        return await gather_safety_state(
-            app_obj.config,
-            adapter_id,
-            account_id=account_id,
-            orders=[order],
-            reservations=reservations,
-            include_order_margin=True,
-        )
-
-    executor = GatedChildExecutor(
-        safety=safety,
-        router=router,
-        router_provider=lambda: app_obj.config.get("BROKER_ROUTER"),
-        request_ctx=request_ctx,
-        adapter_id=adapter_id,
-        account_id=account_id,
-        audit=current_app.config.get("AUDIT"),
-        journal_write=_journal_write,
-        pre_dispatch_check=_pre_dispatch_check,
-        portfolio_state_provider=_route_safety_provider,
-    )
-    depth_provider, volume_provider = _make_providers(client)
-    smart_router = SmartOrderRouter(
-        base_router=executor,
-        depth_provider=depth_provider,
-        volume_provider=volume_provider,
-        twap_window_seconds=int(cfg.get("twap_window_seconds", 300)),
-        twap_slices=int(cfg.get("twap_slices", 5)),
-    )
-
-    # (job already registered atomically with the cap/dup guard above)
-
-    def _observe(live_result: Any) -> None:
-        job.result = live_result
-
-    def _run() -> None:
-        try:
-            final = asyncio.run(
-                smart_router.route(
-                    symbol=symbol,
-                    exchange=exchange,
-                    quantity=quantity,
-                    action=action,  # type: ignore[arg-type]
-                    max_slippage_bps=max_slippage_bps,
-                    urgency=urgency,  # type: ignore[arg-type]
-                    strategy="smart-route",
-                    product=product,
-                    result_observer=_observe,
-                )
-            )
-            job.result = final
-            # "cancelled" only when the cancel actually CURTAILED the route —
-            # a cancel that lands after the last child already placed (the
-            # route carries no abort error) is an honest "done", not a
-            # mislabelled cancellation.
-            cancel_took_effect = job.cancel_requested and bool(final.error)
-            if cancel_took_effect:
-                job.status = "cancelled"
-            elif final.error:
-                job.status = "error"
-            else:
-                job.status = "done"
-            job.error = final.error
-        except Exception:  # pragma: no cover — route() catches internally
-            logger.exception("smart-route job %s crashed", job.job_id)
-            job.status = "error"
-            job.error = "smart route failed"
-
-    worker = threading.Thread(target=_run, name=f"smart-route-{job.job_id}", daemon=True)
-    with _JOBS_LOCK:
-        if not _ACCEPTING_JOBS or job.cancel_requested:
-            job.status = "cancelled"
-            job.error = "smart-order runtime is shutting down"
-            return jsonify({
-                "status": "error",
-                "message": "Smart-order routing is shutting down",
-            }), 503
-        job.worker = worker
-        # Start while holding the ownership lock so shutdown cannot observe an
-        # assigned-but-not-started worker and return before it begins.
-        worker.start()
-
-    logger.info(
-        "Smart-route job started | job=%s %s %s qty=%d urgency=%s adapter=%s account=%s",
-        job.job_id, action, symbol, quantity, urgency, adapter_id, account_id,
-    )
-    return jsonify({"status": "success", "data": _snapshot(job)}), 202
 
 
 def _require_auth() -> tuple[Any, int] | None:

@@ -12,7 +12,7 @@
 - `src/flinttrade_engine/strategy_execution.py — gated scheduled-strategy execution through BrokerRouter`
 - `src/flinttrade_engine/strategy.py — base class for live strategies`
 - `src/flinttrade_engine/sandbox_executor.py — user-strategy execution with AST guard`
-- `src/flinttrade_engine/mode_guard.py — server-side Explore / Practice / Live enforcement`
+- `src/flinttrade_engine/mode_guard.py — server-side Practice / Live enforcement; example data is refused`
 
 (See the source for the full surface.)
 

@@ -974,7 +974,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
           size="sm"
           onClick={() => void sendMessage()}
           disabled={!chatReady || !draft.trim() || sending}
-          className="bg-accent text-white rounded-md px-4 h-10 shrink-0 hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="bg-accent text-accent-foreground rounded-md px-4 h-10 shrink-0 hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           aria-label="Send message"
         >
           <Send size={14} />

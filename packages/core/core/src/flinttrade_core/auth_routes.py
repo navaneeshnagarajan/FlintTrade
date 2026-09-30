@@ -2,16 +2,20 @@
 """Auth REST API — setup, login, PIN verify, status, logout.
 
 Blueprint prefix: /v1/auth
-Public endpoints (no API key required):
+Public endpoints (no session or API key required; see public_routes.py):
   - GET  /v1/auth/status   — check if setup complete
   - POST /v1/auth/setup    — one-time account creation
   - POST /v1/auth/login    — daily password login (TOTP only once enrolled)
-  - POST /v1/auth/pin      — PIN quick-unlock (Live also requires TOTP enrolment)
-  - POST /v1/auth/logout   — invalidate session
+  - POST /v1/auth/setup/resume — re-mint the setup session after a reload
 Session-bound endpoints (valid session JWT required):
+  - POST /v1/auth/pin      — PIN quick-unlock (restores the session Mode)
+  - POST /v1/auth/live     — explicit Live switch (PIN + authenticator enrolment)
   - POST /v1/auth/pin/set  — set/change the quick-unlock PIN (password re-confirm)
   - POST /v1/auth/totp/enable — confirm optional authenticator enrolment
+  - POST /v1/auth/logout   — invalidate the current session
   - POST /v1/auth/setup/vault — open the credential vault during first-run setup
+    (the handler accepts a setup-session JWT, not the daily API key)
+  - POST /v1/auth/setup/complete — record that first-run setup has finished
 """
 
 from __future__ import annotations
@@ -309,7 +313,7 @@ def _create_token(
     username: str,
     *,
     live_mode_unlocked: bool = False,
-    mode: str = "explore",
+    mode: str = "practice",
     setup_session: bool = False,
     setup_bound: str = "",
 ) -> str:
@@ -325,8 +329,11 @@ def _create_token(
             ``live_mode_unlocked`` claim that authorises live order
             execution.  Only set after successful PIN verification.
         mode: Trading mode at token-issue time: ``"explore"``,
-            ``"practice"``, or ``"live"``.  Defaults to ``"explore"`` so
-            that freshly issued (non-PIN) tokens cannot place live orders.
+            ``"practice"``, or ``"live"``.  Defaults to ``"practice"``.
+            Password login and account setup use that default.
+            ``"explore"`` is passed explicitly and is reserved for the web
+            demo; a desk session does not mint it. ``"live"`` still
+            requires PIN verification (``live_mode_unlocked``).
         setup_session: If ``True``, mark this as the one-shot account-create
             JWT. Passwordless ``/setup/reset`` accepts only this claim.
         setup_bound: Account ``created_at`` stamp bound into a setup JWT so
@@ -350,7 +357,57 @@ def _create_token(
     if setup_session:
         payload["setup_session"] = True
         payload["setup_bound"] = setup_bound
+    payload.update(_session_binding_claims())
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
+
+
+def _mint_setup_session(username: str, *, setup_bound: str) -> str:
+    """Mint the first-run setup session.
+
+    Account create and a mid-setup resume share this call. The mode is
+    ``_create_token``'s Practice default. Example data is reserved for the
+    web demo and is not minted here.
+    """
+    return _create_token(
+        username,
+        setup_session=True,
+        setup_bound=setup_bound,
+    )
+
+
+def _session_binding_claims() -> dict[str, Any]:
+    """Stamp the current operator id and account epoch, when one exists.
+
+    Called while issuing a session. A missing app context (tests that mint a
+    token before a request) leaves the claims off; decode then rejects the
+    token once a binding exists.
+    """
+    try:
+        svc = _get_auth_service()
+    except RuntimeError:
+        return {}
+    if svc is None:
+        return {}
+    try:
+        binding = svc.current_session_binding()
+    except Exception:
+        logger.debug("Session binding unavailable", exc_info=True)
+        return {}
+    if binding is None:
+        return {}
+    operator_id, epoch = binding
+    return {"oid": operator_id, "epoch": int(epoch)}
+
+
+def _session_binding_matches(payload: dict[str, Any], operator_id: str, epoch: int) -> bool:
+    """Return whether the token is bound to this operator and account epoch."""
+    token_oid = payload.get("oid")
+    token_epoch = payload.get("epoch")
+    if type(token_oid) is not str or type(token_epoch) is not int:
+        return False
+    if len(token_oid) != len(operator_id):
+        return False
+    return hmac.compare_digest(token_oid, operator_id) and token_epoch == epoch
 
 
 def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, Any]:
@@ -405,6 +462,19 @@ def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, An
                     raise jwt.InvalidTokenError(
                         "Token issued before most recent password change"
                     )
+
+    # Sessions are bound to the operator id and the account epoch. Reset and
+    # operator re-creation bump the epoch, so every earlier token fails here.
+    # Password-reset tokens are not sessions; their own verifier checks type.
+    if payload.get("type") != "reset":
+        svc = _get_auth_service()
+        if svc is not None:
+            try:
+                binding = svc.current_session_binding()
+            except Exception as exc:
+                raise jwt.InvalidTokenError("Account session binding unavailable") from exc
+            if binding is not None and not _session_binding_matches(payload, binding[0], binding[1]):
+                raise jwt.InvalidTokenError("Token is not bound to the current account")
 
     return payload
 
@@ -484,6 +554,22 @@ def require_operator_session() -> tuple[Any, int] | None:
     return None
 
 
+def _migration_paused_response(svc: Any) -> tuple[Any, int] | None:
+    """Refuse to mint a session while the single-operator update is paused.
+
+    Status still reports the state. Login and setup resume must not start
+    the desk by issuing a token.
+    """
+    blocked = svc.migration_blocked()
+    if not blocked:
+        return None
+    return jsonify({
+        "status": "error",
+        "message": "FlintTrade couldn't finish updating.",
+        "migration_blocked": blocked,
+    }), 409
+
+
 @auth_bp.route("/status", methods=["GET"])
 @_rate_limit("30 per minute")
 def auth_status() -> tuple[Any, int]:
@@ -504,6 +590,19 @@ def auth_status() -> tuple[Any, int]:
             "is_locked": svc.is_locked(),
             "has_pin": svc.has_pin(),
             "totp_enabled": svc.is_totp_enabled(),
+            # Non-secret first-run facts. ``vault_open`` is true when this
+            # machine already has a hardened master password (the backend
+            # provisions one at startup). ``setup_finished`` is true only
+            # after the operator has finished Setup, not merely created
+            # the account.
+            "vault_open": _vault_is_open(),
+            "setup_finished": svc.is_setup_finished(),
+            # Frozen at operator creation. Live ``vault_open`` can become
+            # true later without changing the step total.
+            "vault_presecured": svc.setup_vault_presecured(),
+            # ``two_operators`` pauses startup. Null when the desk may open.
+            # The field is a state name, not an account list.
+            "migration_blocked": svc.migration_blocked(),
         },
     }), 200
 
@@ -529,29 +628,43 @@ def auth_setup() -> tuple[Any, int]:
         backup_codes = svc.setup_account(username, email, password, pin)
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
-    except RuntimeError:
+    except RuntimeError as exc:
+        # A lost race and a second create are the same refusal. The code lets
+        # Setup show the existing-operator sign-in. Other conflicts stay a
+        # plain 409 with the generic message.
+        if str(exc) == "Account already set up":
+            return jsonify({
+                "status": "error",
+                "code": "operator_exists",
+                "message": "Request conflicts with the current state",
+            }), 409
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
 
-    # Mint an explore-mode session token so the REST of the setup wizard is
+    # Snapshot the vault before this request can open it. A missing or
+    # unreadable secret stays "not presecured" so Setup keeps three steps.
+    try:
+        presecured = _vault_is_open()
+    except OSError:
+        presecured = False
+    svc.record_setup_vault_presecured(presecured)
+
+    # Mint a practice session so the rest of the setup wizard is
     # authenticated (broker connection + mode selection are behind the G9
     # write guard / D6 session-bound PIN). Legitimate: the operator is
     # physically creating the account right now, so this first session needs no
-    # separate TOTP step. It is non-live (mode=explore, live_mode_unlocked
-    # false). Authenticator enrolment is optional for Explore/Practice;
+    # separate TOTP step. It is non-live (Practice, live_mode_unlocked
+    # false). Authenticator enrolment is optional for Practice;
     # arming Live still requires PIN and a confirmed authenticator.
-    token = _create_token(
-        username,
-        mode="explore",
-        setup_session=True,
-        setup_bound=svc.get_created_at(),
-    )
+    # Example data is reserved for the web demo and is not minted here.
+    # Resume uses the same helper, so a reload stays on that Practice session.
+    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
     return jsonify({
         "status": "success",
         "data": {
             "backup_codes": backup_codes,
             "totp_uri": svc.get_totp_provisioning_uri(),
             "token": token,
-            "mode": "explore",
+            "mode": "practice",
         },
     }), 201
 
@@ -563,6 +676,37 @@ def _session_token_from_request() -> str:
     if token:
         return token
     return request.headers.get("X-FlintTrade-Token", "").strip()
+
+
+def _account_exists(svc: Any) -> bool:
+    """Return whether an operator account is present.
+
+    A lookup failure is treated as present so a reset or re-key cannot
+    proceed when the check itself is unavailable.
+    """
+    try:
+        return bool(svc.is_setup())
+    except Exception:
+        logger.debug("Account existence check failed", exc_info=True)
+        return True
+
+
+def _operator_session_payload(token: str) -> dict[str, Any] | None:
+    """Return a verified session or setup-session payload, or None.
+
+    Both are ``type: session``. A setup-session JWT also carries
+    ``setup_session``. Password-reset tokens and unsigned requests are not
+    a session.
+    """
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    if payload.get("type") != "session":
+        return None
+    return payload
 
 
 def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
@@ -607,26 +751,88 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
     return payload
 
 
+_RECOVERY_REQUIRES_AUTHENTICATOR = (
+    "Account recovery requires your password and the current authenticator code."
+)
+_SIGN_IN_TO_RESET_PASSWORD = (
+    "Sign in to reset this account. You'll need your password."
+)
+_SIGN_IN_TO_RESET = (
+    "Sign in to reset this account. You'll need your password and authenticator code."
+)
+
+
+def _finished_account_recovery_refusal(svc: Any, body: dict[str, Any], token: str) -> tuple[Any, int] | None:
+    """Refuse account recovery that is missing a session, or a code once enrolled.
+
+    Before authenticator enrolment, first-run reset and regeneration keep
+    their existing session rules. Once an authenticator is enrolled, recovery
+    needs that session, the password, and the current authenticator code.
+    A signed-out request on a finished account returns a sign-in message.
+    The sentence includes an authenticator code only when one is enrolled,
+    and the response carries ``authenticator_enrolled``. An API key is not
+    a session. There is no separate enrolment probe.
+    Returns an error response, or ``None`` when the caller may continue.
+    Nothing is changed on refusal.
+    """
+    if not _account_exists(svc):
+        return None
+    try:
+        enrolled = bool(svc.is_totp_enabled())
+    except Exception:
+        logger.debug("Authenticator enrolment check failed", exc_info=True)
+        enrolled = True
+    if _operator_session_payload(token) is None:
+        if enrolled:
+            return jsonify({
+                "status": "error",
+                "message": _SIGN_IN_TO_RESET,
+                "authenticator_enrolled": True,
+            }), 403
+        return jsonify({
+            "status": "error",
+            "message": _SIGN_IN_TO_RESET_PASSWORD,
+            "authenticator_enrolled": False,
+        }), 401
+    if not enrolled:
+        return None
+    password = str(body.get("password", ""))
+    code = str(body.get("totp_code", ""))
+    if not password or not code:
+        return jsonify({"status": "error", "message": _RECOVERY_REQUIRES_AUTHENTICATOR}), 403
+    if not svc.verify_password(password):
+        return jsonify({"status": "error", "message": "Invalid password."}), 401
+    if not svc.verify_totp(code):
+        return jsonify({"status": "error", "message": "Invalid authenticator code."}), 403
+    return None
+
+
 @auth_bp.route("/setup/reset", methods=["POST"])
 @_rate_limit("3 per hour")
 def auth_setup_reset() -> tuple[Any, int]:
     """Wipe the account during the setup wizard.
 
     Body: ``{"password": "…"}`` (password-confirmed wipe) **or** the
-    account-create setup JWT with an empty body (lost-QR start-over). A
-    daily-login session or password-reset token is never enough.
+    account-create setup JWT with an empty body (lost-QR start-over).
+    Once an account exists, a session or setup-session JWT is required
+    before either path runs. Once an authenticator is enrolled, the password
+    and the current authenticator code are required as well. A password
+    alone, an API key, a password-reset token, or a signed-in request
+    without the authenticator code does not wipe the account.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
+    token = _session_token_from_request()
+    refusal = _finished_account_recovery_refusal(svc, body, token)
+    if refusal is not None:
+        return refusal
     if password:
         if not svc.reset_account(password):
             return jsonify({"status": "error", "message": "Invalid password."}), 401
         return jsonify({"status": "success", "data": {}}), 200
-
-    token = _session_token_from_request()
     if not token:
         return jsonify({"status": "error", "message": "Password required to confirm reset."}), 400
     verified = _verify_setup_session_token(token)
@@ -651,12 +857,19 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
     Body: ``{"password": "…"}``. Used by the "Reset 2FA" escape hatch on the
     setup wizard 2FA screen — useful when the user scanned the QR into the
     wrong device or wants a clean second attempt before first login.
+    Once an account exists, a session or setup-session JWT is required as
+    well as the password. Once an authenticator is enrolled, the current
+    authenticator code is required as well. A password alone, an API key,
+    or a signed-in request without that code does not re-key the account.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
+    refusal = _finished_account_recovery_refusal(svc, body, _session_token_from_request())
+    if refusal is not None:
+        return refusal
     if not password:
         return jsonify({"status": "error", "message": "Password required to reset 2FA."}), 400
     result = svc.regenerate_totp(password)
@@ -671,6 +884,23 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
 
 _VAULT_PASSWORD_MIN_CHARS = 8
 _VAULT_PASSWORD_MAX_BYTES = 4 * 1024
+
+
+def _vault_is_open() -> bool:
+    """Return whether this machine already has a credential-vault secret.
+
+    The boolean is safe to publish on the public status route. The secret
+    itself is never returned or logged. A missing or unreadable file is
+    treated as closed so Setup still asks the operator to open the vault.
+    """
+    from .workspace import workspace_dir  # noqa: PLC0415
+
+    password_file = workspace_dir() / "master_password"
+    try:
+        return _read_existing_vault_secret(password_file) is not None
+    except OSError:
+        logger.warning("Could not read the credential vault")
+        return False
 
 
 def _read_existing_vault_secret(path: Any) -> str | None:
@@ -758,6 +988,125 @@ def auth_setup_vault() -> tuple[Any, int]:
     }), 200
 
 
+def _verify_operator_session() -> dict[str, Any] | tuple[Any, int]:
+    """Accept a full operator session JWT, setup or daily.
+
+    Returns the payload, or a Flask error response when the caller is not
+    signed in as the account on this machine.
+    """
+    token = _session_token_from_request()
+    if not token:
+        return jsonify({"status": "error", "message": "Sign in to continue setup."}), 401
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — sign in again.",
+        }), 401
+    if payload.get("type") != "session":
+        return jsonify({"status": "error", "message": "Sign in to continue setup."}), 401
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    profile = svc.get_profile()
+    subject = str(payload.get("sub") or "")
+    expected_user = str(profile.get("username") or "")
+    if (
+        not subject
+        or not expected_user
+        or not hmac.compare_digest(subject, expected_user)
+    ):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — sign in again.",
+        }), 401
+    return payload
+
+
+@auth_bp.route("/setup/resume", methods=["POST"])
+@_rate_limit("5 per minute")
+def auth_setup_resume() -> tuple[Any, int]:
+    """Re-mint the first-run setup session after a reload.
+
+    The account-create JWT lives in the browser tab. Reloading ``/setup``
+    drops it, and the vault and Start over routes then refuse the operator.
+    Password proof (and the authenticator, once enrolled) mints the same
+    Practice setup session the account-create response minted. A finished
+    install uses daily sign-in instead.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    paused = _migration_paused_response(svc)
+    if paused is not None:
+        return paused
+    if svc.is_locked():
+        return jsonify({
+            "status": "error",
+            "message": "Account locked after too many failed attempts. Reset via email.",
+        }), 423
+    if not svc.is_setup():
+        return jsonify({
+            "status": "error",
+            "message": "Create an operator before continuing setup.",
+        }), 409
+    if svc.is_setup_finished():
+        return jsonify({
+            "status": "error",
+            "message": "Setup is already complete. Sign in.",
+        }), 409
+
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password", ""))
+    totp_code = str(body.get("totp_code", ""))
+    if not svc.verify_password(password):
+        return jsonify({"status": "error", "message": "Invalid credentials."}), 401
+    if svc.is_totp_enabled():
+        if not totp_code or not (svc.verify_totp(totp_code) or svc.verify_backup_code(totp_code)):
+            return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
+
+    profile = svc.get_profile()
+    username = str(profile.get("username") or "")
+    if not username:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
+    return jsonify({
+        "status": "success",
+        "data": {"token": token, "username": username},
+    }), 200
+
+
+@auth_bp.route("/setup/complete", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_setup_complete() -> tuple[Any, int]:
+    """Record that first-run setup has finished.
+
+    Requires a signed-in operator and an open vault. Idempotent once set.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    verified = _verify_operator_session()
+    if not isinstance(verified, dict):
+        return verified
+    if not svc.is_setup():
+        return jsonify({
+            "status": "error",
+            "message": "Create an operator before finishing setup.",
+        }), 409
+    if not _vault_is_open():
+        return jsonify({
+            "status": "error",
+            "message": "Open the vault before finishing setup.",
+        }), 409
+    svc.mark_setup_finished()
+    return jsonify({
+        "status": "success",
+        "data": {"setup_finished": True},
+    }), 200
+
+
 def _tofu_authorise_login_actor(actor_id: str) -> None:
     """Authorise a freshly authenticated operator for the default execution account.
 
@@ -792,6 +1141,10 @@ def auth_login() -> tuple[Any, int]:
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
 
+    paused = _migration_paused_response(svc)
+    if paused is not None:
+        return paused
+
     if svc.is_locked():
         return jsonify({
             "status": "error",
@@ -822,36 +1175,33 @@ def auth_login() -> tuple[Any, int]:
             "token": token,
             "username": profile.get("username"),
             "expires_at": _next_8am_ist().isoformat(),
+            "mode": "practice",
         },
     }), 200
 
 
-@auth_bp.route("/pin", methods=["POST"])
-@_rate_limit("10 per minute")
-def auth_pin_verify() -> tuple[Any, int]:
-    """PIN quick-unlock — returns a new session token for the requested mode.
+_SESSION_MODES = frozenset({"explore", "practice", "live"})
 
-    Default behaviour (no ``mode`` in the body) is unchanged: the returned
-    JWT carries ``mode: "live"`` and ``live_mode_unlocked: true``, which is
-    checked server-side by ``order_routes`` before any live order is
-    forwarded to a broker. This is the explicit Live-arming gesture used by
-    the ModeIndicator upgrade dialog and the login screen's quick-unlock.
 
-    An optional ``mode`` field (``"explore"`` | ``"practice"`` | ``"live"``)
-    lets mode-preserving callers — the idle LockScreen — re-authenticate
-    WITHOUT silently escalating the session to Live (Phase 1 fix for the
-    A4 divergence: an idle Practice session unlocking with a PIN previously
-    received a live-unlocked JWT under a Practice UI; design D2,
-    ``.local/specs/auth-phase1/DESIGN_LOG.md``).  Non-live targets mint
-    ``live_mode_unlocked: false`` — strictly less privilege from the same
-    PIN verification.
+def _session_mode(payload: dict[str, Any]) -> str | None:
+    """Return the session JWT's mode, or ``None`` when it cannot be restored.
 
-    Session-bound (Phase 1 policy decision D6): the PIN is a RE-AUTH factor,
-    never a session-minting factor — the request must carry a valid,
-    unrevoked session JWT (any mode). Without it, a low-entropy PIN alone
-    would arm Live for anything that can reach 127.0.0.1, and a session
-    that expired overnight could sidestep the daily password+TOTP re-auth
-    (the JWT's next-08:00-IST expiry is exactly that freshness bound).
+    Unlock never invents a mode. A missing or unrecognised claim is not Live.
+    """
+    raw = payload.get("mode")
+    if not isinstance(raw, str):
+        return None
+    mode = raw.strip().lower()
+    if mode not in _SESSION_MODES:
+        return None
+    return mode
+
+
+def _pin_reauth_session() -> dict[str, Any] | tuple[Any, int]:
+    """Load the full-login session a PIN re-auth must already hold.
+
+    Returns:
+        The decoded session payload, or a ``(response, status)`` error.
     """
     svc = _get_auth_service()
     if svc is None:
@@ -873,67 +1223,171 @@ def auth_pin_verify() -> tuple[Any, int]:
             "status": "error",
             "message": "Session expired — sign in with password and TOTP, then use the PIN.",
         }), 401
-    # A reset token proves only email possession (not password+TOTP) and is
-    # exempt from the password-change kill switch — it must never satisfy the
-    # D6 session requirement, or (reset token + PIN) would arm Live.
     if session_payload.get("type") != "session":
         return jsonify({
             "status": "error",
             "message": "PIN unlock requires a full login session — sign in with password and TOTP first.",
         }), 401
+    return session_payload
 
-    body = request.get_json(silent=True) or {}
-    pin = str(body.get("pin", ""))
-    target_mode = str(body.get("mode", "live")).strip().lower() or "live"
-    if target_mode not in ("explore", "practice", "live"):
+
+def _reject_pin(pin: str) -> tuple[Any, int] | None:
+    """Return a PIN error response, or ``None`` when the PIN matches."""
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    if svc.verify_pin(pin):
+        return None
+    # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN
+    # skipped at setup, verify_pin fails unconditionally and the old
+    # blanket "Invalid PIN." sent operators chasing a PIN they never set.
+    if not svc.has_pin():
         return jsonify({
             "status": "error",
-            "message": "mode must be one of 'explore', 'practice', 'live'.",
-        }), 400
-
-    if not svc.verify_pin(pin):
-        # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN
-        # skipped at setup, verify_pin fails unconditionally and the old
-        # blanket "Invalid PIN." sent operators chasing a PIN they never set,
-        # leaving Live mode unreachable with no hint of the actual fix.
-        if not svc.has_pin():
-            return jsonify({
-                "status": "error",
-                "code": "pin_not_set",
-                "message": (
-                    "No PIN is set for this account — the optional PIN was "
-                    "skipped at setup. Create one in Settings → Security "
-                    "(POST /v1/auth/pin/set), then retry."
-                ),
-            }), 409
-        return jsonify({"status": "error", "message": "Invalid PIN."}), 401
-
-    if target_mode == "live" and not svc.is_totp_enabled():
-        return jsonify({
-            "status": "error",
-            "code": "totp_required",
+            "code": "pin_not_set",
             "message": (
-                "Authenticator enrolment is required before Live. "
-                "Confirm a one-time code from your authenticator app, then retry."
+                "No PIN is set for this account — the optional PIN was "
+                "skipped at setup. Create one in Settings → Security "
+                "(POST /v1/auth/pin/set), then retry."
             ),
-        }), 403
+        }), 409
+    return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
-    live_unlocked = target_mode == "live"
+
+def _totp_required_for_live() -> tuple[Any, int]:
+    """The existing Live authenticator-enrolment refusal."""
+    return jsonify({
+        "status": "error",
+        "code": "totp_required",
+        "message": (
+            "Authenticator enrolment is required before Live. "
+            "Confirm a one-time code from your authenticator app, then retry."
+        ),
+    }), 403
+
+
+def _revoke_presented_session(session_payload: dict[str, Any]) -> tuple[Any, int] | None:
+    """Revoke the session a PIN re-auth is replacing.
+
+    Returns:
+        An error response when the old token cannot be retired, otherwise
+        ``None``.
+    """
+    old_jti = str(session_payload.get("jti") or "")
+    old_exp = float(session_payload.get("exp") or 0)
+    if not old_jti:
+        return jsonify({
+            "status": "error",
+            "message": "Token missing jti claim — cannot rotate the session.",
+        }), 400
+    try:
+        _revoke_jti(old_jti, old_exp)
+    except Exception:
+        logger.exception("PIN unlock revocation failed | jti=%s", old_jti)
+        return jsonify({
+            "status": "error",
+            "message": "Could not revoke previous session token — try again.",
+        }), 503
+    return None
+
+
+def _issue_pin_token(
+    session_payload: dict[str, Any],
+    mode: str,
+    *,
+    live_mode_unlocked: bool,
+) -> tuple[Any, int]:
+    """Revoke the presented session, then mint its replacement."""
+    blocked = _revoke_presented_session(session_payload)
+    if blocked is not None:
+        return blocked
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
     profile = svc.get_profile()
     token = _create_token(
         profile.get("username", "user"),
-        live_mode_unlocked=live_unlocked,
-        mode=target_mode,
+        live_mode_unlocked=live_mode_unlocked,
+        mode=mode,
     )
-
     return jsonify({
         "status": "success",
         "data": {
             "token": token,
-            "mode": target_mode,
-            "live_mode_unlocked": live_unlocked,
+            "mode": mode,
+            "live_mode_unlocked": live_mode_unlocked,
         },
     }), 200
+
+
+@auth_bp.route("/pin", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_pin_verify() -> tuple[Any, int]:
+    """PIN quick-unlock. Restores the existing session and never changes Mode.
+
+    The mode is taken from the server-side session JWT. Any ``mode`` in the
+    request body is ignored, and a missing session mode does not default to
+    Live. Practice, Explore, and any other non-Live session unlock with the
+    PIN alone. A session that is already Live keeps the authenticator
+    enrolment check. Switching into Live is ``POST /v1/auth/live``, not this
+    route. Connected (read) is a broker status, not a session mode.
+
+    The PIN is a re-auth factor: the request must carry a valid, unrevoked
+    session JWT.
+    """
+    loaded = _pin_reauth_session()
+    if isinstance(loaded, tuple):
+        return loaded
+
+    body = request.get_json(silent=True) or {}
+    pin = str(body.get("pin", ""))
+    rejected = _reject_pin(pin)
+    if rejected is not None:
+        return rejected
+
+    session_mode = _session_mode(loaded)
+    if session_mode is None:
+        return jsonify({
+            "status": "error",
+            "message": "The current session has no mode to restore.",
+        }), 400
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    # Already Live: keep the authenticator enrolment check. Any other session
+    # mode unlocks without that Live check.
+    if session_mode == "live" and not svc.is_totp_enabled():
+        return _totp_required_for_live()
+
+    return _issue_pin_token(loaded, session_mode, live_mode_unlocked=session_mode == "live")
+
+
+@auth_bp.route("/live", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_live_confirm() -> tuple[Any, int]:
+    """Explicit Live switch. PIN plus the existing authenticator enrolment check.
+
+    This is the only PIN route that changes Mode to Live. Quick unlock
+    (``POST /v1/auth/pin``) restores the current session instead.
+    """
+    loaded = _pin_reauth_session()
+    if isinstance(loaded, tuple):
+        return loaded
+
+    body = request.get_json(silent=True) or {}
+    pin = str(body.get("pin", ""))
+    rejected = _reject_pin(pin)
+    if rejected is not None:
+        return rejected
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    if not svc.is_totp_enabled():
+        return _totp_required_for_live()
+
+    return _issue_pin_token(loaded, "live", live_mode_unlocked=True)
 
 
 @auth_bp.route("/pin/set", methods=["POST"])
@@ -941,15 +1395,14 @@ def auth_pin_verify() -> tuple[Any, int]:
 def auth_pin_set() -> tuple[Any, int]:
     """Set or change the quick-unlock PIN over a live operator session.
 
-    The PIN is optional at account setup, but Live mode is armed exclusively
-    via ``POST /v1/auth/pin`` — without this route an operator who skipped
+    The PIN is optional at account setup. Reaching Live is the explicit
+    ``POST /v1/auth/live`` switch — without a PIN an operator who skipped
     the optional PIN could never reach Live except by wiping the account and
     re-running setup. Guarded like the broker-management writes (G9): the
     request must carry a valid, unrevoked full-login session JWT, plus the
-    account password as an explicit re-confirmation. The PIN stays a RE-AUTH
-    factor over that live session (policy D6) — this endpoint mints no token
-    and never changes the session's mode; arming Live still requires the
-    separate ``/v1/auth/pin`` verification with the new PIN.
+    account password as an explicit re-confirmation. The PIN stays a re-auth
+    factor over that session — this endpoint mints no token and never
+    changes Mode. Switching to Live still requires ``POST /v1/auth/live``.
 
     Request JSON:
         password (str): The account password (re-confirmation).
@@ -1061,28 +1514,27 @@ def auth_totp_enable() -> tuple[Any, int]:
 @auth_bp.route("/mode", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_mode_switch() -> tuple[Any, int]:
-    """Downgrade the current session to Practice or Explore mode.
+    """Downgrade the current session to Practice.
 
-    Issues a NEW JWT with ``mode: "practice"`` or ``mode: "explore"`` and
+    Issues a NEW JWT with ``mode: "practice"`` and
     ``live_mode_unlocked: false``, and REVOKES the caller's existing JWT
     (so a stale live-unlocked token can't be replayed). This closes the
     2026-05-19 Codex audit finding that ``ModeIndicator.tsx`` was
     flipping local UI state to Practice without ever invalidating the
     PIN-unlocked JWT — meaning a retained live-unlocked JWT could still
-    place live orders even after the UI displayed Practice. The Explore
-    target was added in Phase 1 (2026-07-03) so that EVERY UI mode change
-    keeps the JWT claim in lockstep — a Practice/Live session flipping the
-    UI to Explore must not keep holding a higher-mode token (design D1,
-    ``.local/specs/auth-phase1/DESIGN_LOG.md``).
+    place live orders even after the UI displayed Practice.
 
-    Both accepted targets are privilege *reductions* (explore is the most
-    restrictive mode; practice routes to the broker-free sandbox), so any
-    valid session token may request them. Upgrading to Live ALWAYS goes
-    through ``/v1/auth/pin`` (re-authenticates with PIN) — no shortcut
-    exists from this endpoint, by design.
+    Practice is a privilege reduction (the broker-free sandbox), so any
+    valid session token may request it. Example data is not a desk
+    downgrade: ``explore`` is refused before the current session is
+    revoked, and an existing explore token stays valid until the next
+    sign-in. Switching to Live goes through ``POST /v1/auth/live``
+    (PIN plus authenticator enrolment). This endpoint does not change
+    Mode to Live.
 
     Request JSON:
-        mode (str): ``"practice"`` or ``"explore"``. Any other value is a 400.
+        mode (str): ``"practice"``. Any other value, including
+        ``"explore"`` and ``"live"``, is a 400.
 
     Auth:
         Caller must send a valid Bearer JWT (any mode). The endpoint reads
@@ -1096,12 +1548,12 @@ def auth_mode_switch() -> tuple[Any, int]:
         target; 503 if auth service is not configured.
     """
     target_mode = str((request.get_json(silent=True) or {}).get("mode", "")).strip().lower()
-    if target_mode not in ("practice", "explore"):
+    if target_mode != "practice":
         return jsonify({
             "status": "error",
             "message": (
-                "Only downgrades to 'practice' or 'explore' are allowed here. "
-                "Upgrade to 'live' via POST /v1/auth/pin with PIN verification."
+                "Only a downgrade to practice is allowed here. "
+                "Switch to Live via POST /v1/auth/live with PIN verification."
             ),
         }), 400
 

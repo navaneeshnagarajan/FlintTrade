@@ -4,14 +4,18 @@ import { useLocation, useNavigate } from "react-router";
 import {
   BookOpen,
   Settings,
+  SlidersHorizontal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ToolId } from "@/types/widgets";
 
+type ToolKind = "overlay" | "quick-settings" | "settings";
+
 interface ToolEntry {
-  id: ToolId;
+  id: string;
   name: string;
   icon: LucideIcon;
+  kind: ToolKind;
 }
 
 /**
@@ -23,33 +27,40 @@ interface ToolEntry {
  * IV Smile & Skew, Correlation Matrix and Delivery Data.
  */
 const TRADE_TOOLS: ToolEntry[] = [
-  { id: "trade-journal", name: "Trade Review", icon: BookOpen },
-  { id: "settings", name: "Settings", icon: Settings },
+  { id: "trade-journal", name: "Trade Review", icon: BookOpen, kind: "overlay" },
+  { id: "quick-settings", name: "Quick Settings", icon: SlidersHorizontal, kind: "quick-settings" },
+  { id: "settings", name: "Settings", icon: Settings, kind: "settings" },
 ];
 
 /**
- * On routes other than /trade, only Settings is available as an overlay-style
- * tool, and it navigates to the dedicated /settings route instead.
+ * Off /trade there is no canvas overlay. Quick Settings still opens in place.
+ * Settings navigates to the dedicated /settings route.
  */
-const SETTINGS_ONLY: ToolEntry[] = [
-  { id: "settings", name: "Settings", icon: Settings },
+const ROUTE_TOOLS: ToolEntry[] = [
+  { id: "quick-settings", name: "Quick Settings", icon: SlidersHorizontal, kind: "quick-settings" },
+  { id: "settings", name: "Settings", icon: Settings, kind: "settings" },
 ];
 
 interface ToolsDropdownProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Called only when on /trade. On other routes, Settings navigates directly. */
+  /** Called for canvas overlay tools, and for Settings on /trade. */
   onSelectTool: (toolId: ToolId) => void;
+  /**
+   * Opens the in-place density/theme panel. Must not navigate.
+   * Always available — a skill allowlist cannot hide it.
+   */
+  onOpenQuickSettings: () => void;
   /**
    * Bounding rect of the TOOLS button — used for fixed portal positioning so
    * the dropdown escapes any parent overflow/stacking context (Issue #39).
    */
   anchorRect?: DOMRect;
   /**
-   * Optional allowlist of tool IDs to show on the /trade route. When provided,
-   * only tools whose id is in this set are rendered. "settings" is always
-   * included regardless of the allowlist. Supplied by TerminalRoute via
-   * useSkillContent so beginners see fewer tools.
+   * Optional allowlist of overlay tool IDs on /trade. When provided, only
+   * overlay tools whose id is in this set are rendered. Quick Settings and
+   * Settings stay visible regardless. Supplied by TerminalRoute via
+   * useSkillContent so beginners see fewer canvas tools.
    */
   allowedToolIds?: ReadonlyArray<string>;
 }
@@ -58,8 +69,9 @@ interface ToolsDropdownProps {
  * ToolsDropdown — portal-rendered dropdown anchored to the TOOLS button rect.
  *
  * Route-aware behaviour:
- * - /trade   → shows all 4 trade tools; clicking any calls onSelectTool (canvas overlay)
- * - other    → shows Settings only; clicking navigates to /settings
+ * - /trade   → overlay tools call onSelectTool; Settings does too (the route
+ *              navigates to /settings). Quick Settings opens the in-place panel.
+ * - other    → Quick Settings opens in place; Settings navigates to /settings.
  *
  * Rendered via createPortal into document.body so it escapes any overflow or
  * stacking context in TopBar / AppLayout (Issue #39).
@@ -69,6 +81,7 @@ export default function ToolsDropdown({
   isOpen,
   onClose,
   onSelectTool,
+  onOpenQuickSettings,
   anchorRect,
   allowedToolIds,
 }: ToolsDropdownProps) {
@@ -81,13 +94,13 @@ export default function ToolsDropdown({
 
   const isTradeRoute = location.pathname === "/trade";
 
-  // On /trade: apply skill allowlist when provided; "settings" is always visible.
-  // On other routes: show Settings only (no allowlist needed — single item).
+  // Skill allowlists filter overlay tools only. Quick Settings and Settings
+  // stay visible on every route so desk controls are not skill-gated away.
   const tools: ToolEntry[] = (() => {
-    if (!isTradeRoute) return SETTINGS_ONLY;
-    if (!allowedToolIds) return TRADE_TOOLS;
+    const source = isTradeRoute ? TRADE_TOOLS : ROUTE_TOOLS;
+    if (!allowedToolIds) return source;
     const allowed = new Set(allowedToolIds);
-    return TRADE_TOOLS.filter((t) => t.id === "settings" || allowed.has(t.id));
+    return source.filter((tool) => tool.kind !== "overlay" || allowed.has(tool.id));
   })();
 
   useEffect(() => {
@@ -126,12 +139,21 @@ export default function ToolsDropdown({
   if (!isOpen) return null;
 
   function handleClick(tool: ToolEntry) {
-    if (isTradeRoute) {
-      onSelectTool(tool.id);
-    } else {
-      // On non-trade routes, Settings navigates to the dedicated route.
-      navigate("/settings");
+    if (tool.kind === "quick-settings") {
+      onOpenQuickSettings();
+      onClose();
+      return;
     }
+    if (tool.kind === "settings") {
+      if (isTradeRoute) {
+        onSelectTool("settings");
+      } else {
+        navigate("/settings");
+      }
+      onClose();
+      return;
+    }
+    onSelectTool(tool.id as ToolId);
     onClose();
   }
 
@@ -162,7 +184,9 @@ export default function ToolsDropdown({
         return (
           <button
             key={tool.id}
+            type="button"
             role="menuitem"
+            aria-haspopup={tool.kind === "quick-settings" ? "dialog" : undefined}
             onClick={() => handleClick(tool)}
             className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
           >

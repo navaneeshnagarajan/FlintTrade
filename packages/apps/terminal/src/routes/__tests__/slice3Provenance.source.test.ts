@@ -127,13 +127,14 @@ describe("slice3 provenance source guard (production .tsx only)", () => {
     expect(existsSync(invPath)).toBe(true);
     const inv = readFileSync(invPath, "utf8");
     expect(inv).toMatch(/\b71\b/);
-    expect(inv).toMatch(/Operating modes:\s*Explore\s*\/\s*Practice\s*\/\s*Live/);
-    expect(inv).toMatch(/website sample opens ordinary Home in Explore mode/i);
-    expect(inv).toMatch(/installed app has no first-class Demo mode/i);
-    expect(inv).toMatch(/simulated order/i);
-    // Explicitly forbid paper-order framing except as a negated truth (“never a paper order”).
-    expect(inv).toMatch(/never a .+paper order/i);
+    expect(inv).toMatch(/Operating modes:\s*Practice and Live/);
+    expect(inv).toMatch(/Connected \(read\) is a broker status, not a Mode/);
+    expect(inv).toMatch(/Example is sample data, not a Mode/i);
+    expect(inv).toMatch(/public web demo is Demo \(example data\)/i);
+    expect(inv).toMatch(/Practice places a simulated order/i);
+    expect(inv).toMatch(/not a first-class installed screen/i);
     expect(inv).not.toMatch(/paper trading/i);
+    expect(inv).not.toMatch(/paper order/i);
     expect(inv).not.toMatch(/Screens:\s*welcome\s*\/\s*dashboard\s*\/\s*explore/i);
   });
 });

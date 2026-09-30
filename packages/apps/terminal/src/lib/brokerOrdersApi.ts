@@ -247,7 +247,7 @@ export async function listForeverOrders(target: BrokerTarget = {}): Promise<Brok
 }
 
 export function placeForeverOrder(params: ForeverOrderPlaceParams): Promise<unknown> {
-  return request<unknown>("POST", "orders/forever", {
+  return request<unknown>("POST", "orders/place", {
     body: { variety: "gtt", ...withNativeBrokerTarget(params) },
   });
 }
@@ -334,13 +334,23 @@ export function cancelConditionalTrigger(
 // Batch + sweep verbs
 // ---------------------------------------------------------------------------
 
-/** Place a batch of typed orders — every leg passes SafetySystem L1–L5. */
-export function placeMultiOrder(
+/** Place each leg through ``POST /api/v1/orders/place``. */
+export async function placeMultiOrder(
   params: { orders: TypedOrderFields[] } & BrokerTarget,
-): Promise<unknown> {
-  return request<unknown>("POST", "orders/multi", {
-    body: withNativeBrokerTarget(params),
-  });
+): Promise<unknown[]> {
+  const { orders, ...target } = params;
+  if (!Array.isArray(orders) || orders.length === 0) {
+    throw new BrokerOrdersApiError("'orders' must be a non-empty list of order objects", 400);
+  }
+  const placed: unknown[] = [];
+  for (const order of orders) {
+    placed.push(
+      await request<unknown>("POST", "orders/place", {
+        body: withNativeBrokerTarget({ ...order, ...target }),
+      }),
+    );
+  }
+  return placed;
 }
 
 /** Cancel all open orders for a broker (optionally narrowed by tag/segment). */

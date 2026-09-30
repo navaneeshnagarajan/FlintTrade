@@ -19,6 +19,7 @@ import { ListPlus, Trash2, Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { uploadExcel } from "@/services/ftApi";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { SectionTitle } from "./shared";
 
@@ -32,7 +33,7 @@ interface WatchlistItem {
 }
 
 async function fetchWatchlist(): Promise<WatchlistItem[]> {
-  const res = await fetch(`${BASE}/watchlist`);
+  const res = await fetch(`${BASE}/watchlist`, { headers: buildHeaders(false) });
   if (!res.ok) throw new Error(`Watchlist fetch failed (${res.status})`);
   const json = (await res.json()) as { data: WatchlistItem[] };
   return json.data ?? [];
@@ -41,7 +42,7 @@ async function fetchWatchlist(): Promise<WatchlistItem[]> {
 async function addItem(item: { symbol: string; exchange: string; interval: string }): Promise<void> {
   const res = await fetch(`${BASE}/watchlist`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify(item),
   });
   if (!res.ok) {
@@ -53,7 +54,7 @@ async function addItem(item: { symbol: string; exchange: string; interval: strin
 async function removeItem(item: { symbol: string; exchange: string }): Promise<void> {
   const res = await fetch(`${BASE}/watchlist`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify(item),
   });
   if (!res.ok) {

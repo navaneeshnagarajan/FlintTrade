@@ -737,6 +737,40 @@ describe("OptionChainWidget", () => {
     ));
   });
 
+  it("sends the admission note with a chain place", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockRejectedValue(new Error("resolver unavailable"));
+    useModeStore.setState({ mode: "live" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Buy the call" },
+    });
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+
+    await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "NIFTY10APR2625000CE",
+        action: "BUY",
+        rationale: "Buy the call",
+      }),
+      expect.anything(),
+    ));
+  });
+
   it("aborts pending option-symbol resolution on unmount and rechecks before ordering", async () => {
     const symbolResolution = deferred<{ symbol: string; exchange: string }>();
     optionChainHookMocks.overrides = {

@@ -30,7 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { getSectorBreakdown, type SectorBreakdownEntry } from "@/lib/sectors";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { formatINRCompact } from "../formatters";
@@ -159,7 +159,7 @@ export function SectorTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div>
@@ -167,7 +167,9 @@ export function SectorTab() {
           Sector Allocation
         </h3>
         <p className="text-xs text-text-muted mt-0.5">
-          Portfolio value distribution across NSE sectors, derived from your live holdings.
+          {isDemo
+            ? "Example sector split. Connect a broker to see yours."
+            : "Portfolio value distribution across NSE sectors, derived from your live holdings."}
         </p>
       </div>
 
@@ -317,8 +319,9 @@ export function SectorTab() {
       </GlassCard>
 
       <p className="text-xs text-text-muted">
-        Sector classification based on NSE symbol mapping. Unrecognised symbols are grouped
-        under "Other". Data sourced from live holdings via your active broker data source.
+        {isDemo
+          ? "Example data. Not from your holdings."
+          : "Sector classification based on NSE symbol mapping. Unrecognised symbols are grouped under \"Other\". Data sourced from live holdings via your active broker data source."}
       </p>
     </div>
   );

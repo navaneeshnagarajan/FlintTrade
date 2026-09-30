@@ -130,7 +130,7 @@ describe('docs index generation', () => {
     expect(heroActions).toContain('Install the web app');
     expect(heroActions).toContain('href="/demo-app/welcome"');
     expect(heroActions).toContain('target="_blank"');
-    expect(heroActions).toContain('Explore demo');
+    expect(heroActions).toContain('Demo (example data)');
     expect((heroActions.match(/href="\/download"/g) || []).length).toBe(1);
     expect(heroActions).not.toContain('Download desktop app');
     expect(heroActions).not.toContain('Run the web app');
