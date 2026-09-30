@@ -65,6 +65,7 @@ import {
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
 } from "@/lib/orderGuards";
+import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
@@ -387,6 +388,16 @@ interface OrderPadPrefill {
 function prefillTargetKey(next: OrderPadPrefill): string {
   return `${next.symbol ?? ""}|${next.exchange ?? ""}|${next.action ?? ""}`;
 }
+
+/** Place-response fields the Practice fill sentence reads.
+ *  Kept outside the submit callback so a type member is not a hook dependency.
+ */
+type PracticeFillResult = {
+  message?: unknown;
+  price?: unknown;
+  price_source?: unknown;
+  price_age_s?: unknown;
+};
 
 function OrderPadWidget(props: WidgetProps) {
   // Optional prefill from a launcher (e.g. a CreateOrder intent or a
@@ -853,9 +864,12 @@ function OrderPadWidget(props: WidgetProps) {
       const placedMode = useModeStore.getState().mode;
       const exitWhileDown = options?.exit === true
         && useOperatorSignalStore.getState().decisionStatus !== "ready";
+      const practiceFill = placedMode === "practice"
+        ? visiblePracticeFill(result as PracticeFillResult)
+        : "";
       const successText = exitWhileDown
         ? LAYA_EXIT_WHILE_DOWN
-        : orderSuccessToast(placedMode, orderId);
+        : practiceFill || orderSuccessToast(placedMode, orderId);
       showToast("success", successText, 3000);
       // Log to the central Notification Centre (complements the transient toast).
       emitNotification({
@@ -898,11 +912,11 @@ function OrderPadWidget(props: WidgetProps) {
         && typeof (err.body as { code?: unknown }).code === "string"
         ? (err.body as { code: string }).code
         : undefined;
-      const msg = orderRefusalMessage(
+      const msg = visiblePracticeRefusal(orderRefusalMessage(
         code,
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
-      );
+      ), getValues("symbol"));
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
@@ -1036,6 +1050,7 @@ function OrderPadWidget(props: WidgetProps) {
       orderType: values.orderType as "MARKET" | "LIMIT" | "SL" | "SL-M",
       quantity: values.qty,
       price: priceEnabled ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
+      ...(practiceMarketFill ? { priceBasis: "ltp" as const } : {}),
       triggerPrice: triggerEnabled ? (values.trigPrice ?? 0) : 0,
       // The pad has always offered a disclosed-quantity input, but the value
       // was dropped before dispatch — operator intent silently discarded. The
@@ -1153,6 +1168,7 @@ function OrderPadWidget(props: WidgetProps) {
       orderType: selectedType as "MARKET" | "LIMIT" | "SL" | "SL-M",
       quantity: closeQty,
       price: priceOn ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
+      ...(practiceMarketFill ? { priceBasis: "ltp" as const } : {}),
       triggerPrice: triggerOn ? (values.trigPrice ?? 0) : 0,
       ...(values.discQty != null && values.discQty > 0
         ? { disclosedQuantity: values.discQty }

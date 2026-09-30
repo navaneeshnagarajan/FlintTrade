@@ -27,7 +27,7 @@ def _storage(path: str) -> StorageManager:
 
 def _insert(storage: StorageManager, ltp: float, *, second: int = 0) -> None:
     storage.insert_tick(
-        datetime(2026, 3, 16, 4, 0, second),
+        datetime(2026, 3, 16, 4, 0, second, tzinfo=timezone.utc),
         "RELIANCE",
         "NSE",
         "quote",
@@ -348,7 +348,7 @@ def test_cursor_tracks_latest_committed_global_ingest_sequence() -> None:
     _insert(storage, 100.0)
     first = storage.get_tick_replay_cursor()
     storage.insert_tick(
-        datetime(2026, 3, 16, 4, 0, 1),
+        datetime(2026, 3, 16, 4, 0, 1, tzinfo=timezone.utc),
         "TCS",
         "NSE",
         "quote",
@@ -366,7 +366,7 @@ def test_cursor_tracks_latest_committed_global_ingest_sequence() -> None:
 
 def test_retention_cannot_move_the_committed_cursor_backwards() -> None:
     storage = _storage(":memory:")
-    recent = datetime.now(timezone.utc).replace(tzinfo=None)
+    recent = datetime.now(timezone.utc)
     old = recent - timedelta(days=30)
     storage.insert_tick(
         recent,
@@ -394,7 +394,7 @@ def test_retention_cannot_move_the_committed_cursor_backwards() -> None:
 
 def test_checkpoint_before_a_pruned_post_cursor_row_is_rejected() -> None:
     storage = _storage(":memory:")
-    recent = datetime.now(timezone.utc).replace(tzinfo=None)
+    recent = datetime.now(timezone.utc)
     storage.insert_tick(
         recent,
         "RELIANCE",
@@ -559,7 +559,7 @@ def test_unpartitioned_tail_returns_every_post_cursor_commit() -> None:
     _insert(storage, 100.0)
     cursor = storage.get_tick_replay_cursor()
     storage.insert_tick(
-        datetime(2026, 3, 17, 4, 0),
+        datetime(2026, 3, 17, 4, 0, tzinfo=timezone.utc),
         "RELIANCE",
         "NSE",
         "quote",
@@ -568,7 +568,7 @@ def test_unpartitioned_tail_returns_every_post_cursor_commit() -> None:
         timestamp_provenance="source",
     )
     storage.insert_tick(
-        datetime(2026, 3, 15, 4, 0),
+        datetime(2026, 3, 15, 4, 0, tzinfo=timezone.utc),
         "RELIANCE",
         "NSE",
         "quote",
