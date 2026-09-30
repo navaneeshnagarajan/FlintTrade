@@ -5,7 +5,14 @@ import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
 import { resetOperatorSignals, useOperatorSignalStore } from "@/stores/operatorSignalStore";
-import { LAYA_NOT_QUALIFIED_FOR_LIVE, LAYA_START_COMMAND, LAYA_START_DOCS_HREF } from "@/lib/layaStatus";
+import {
+  LAYA_NOT_QUALIFIED_FOR_LIVE,
+  LAYA_START_COMMAND,
+  LAYA_START_DOCS_HREF,
+  OLLAMA_DIGEST_DETAIL,
+  OLLAMA_NOT_STARTED_MANAGED,
+  OLLAMA_NOT_STARTED_UNMANAGED,
+} from "@/lib/layaStatus";
 
 describe("DeskStatusCluster", () => {
   beforeEach(() => {
@@ -355,5 +362,77 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-reason")).toHaveTextContent("Not started");
     expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
+  });
+
+  it("keeps the Ollama wrong-revision chip free of the digest sentence", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaReason: "wrong_revision",
+      layaRoute: "ollama",
+      layaManaged: true,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveAttribute("aria-label", "Laya Down. Wrong model version");
+    expect(chip).toHaveAttribute("title", "Laya is running a different model than FlintTrade expects.");
+    for (const surface of [chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("title")]) {
+      expect(surface?.toLowerCase()).not.toContain("digest");
+      expect(surface?.toLowerCase()).not.toContain("ollama");
+      expect(surface?.toLowerCase()).not.toContain("tag");
+    }
+    fireEvent.click(chip);
+    const reason = screen.getByTestId("laya-reason");
+    expect(reason).toHaveTextContent("Wrong model version");
+    expect(reason.textContent?.toLowerCase()).not.toContain("digest");
+    expect(reason.textContent?.toLowerCase()).not.toContain("ollama");
+    expect(reason.textContent?.toLowerCase()).not.toContain("tag");
+    expect(screen.getByTestId("laya-status-detail")).toHaveTextContent(OLLAMA_DIGEST_DETAIL);
+    expect(screen.queryByText(/sidecar/i)).not.toBeInTheDocument();
+  });
+
+  it("offers Start on a managed Ollama install and names no sidecar command", () => {
+    useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaReason: "not_started",
+      layaRoute: "ollama",
+      layaManaged: true,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveAttribute("title", OLLAMA_NOT_STARTED_MANAGED);
+    expect(chip.getAttribute("title")).not.toContain(LAYA_START_COMMAND);
+    fireEvent.click(chip);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Not started");
+    expect(screen.getByTestId("laya-status-detail")).toHaveTextContent(OLLAMA_NOT_STARTED_MANAGED);
+    expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
+    expect(screen.queryByTestId("laya-start-docs")).not.toBeInTheDocument();
+    expect(screen.queryByText(/sidecar/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/laya_runtime/)).not.toBeInTheDocument();
+  });
+
+  it("tells an unmanaged Ollama install how to start, with no Start action", () => {
+    useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaReason: "not_started",
+      layaRoute: "ollama",
+      layaManaged: false,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveAttribute("title", OLLAMA_NOT_STARTED_UNMANAGED);
+    fireEvent.click(chip);
+    expect(screen.getByTestId("laya-status-detail")).toHaveTextContent(OLLAMA_NOT_STARTED_UNMANAGED);
+    expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/sidecar/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/laya_runtime/)).not.toBeInTheDocument();
   });
 });

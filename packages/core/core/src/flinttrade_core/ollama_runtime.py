@@ -4305,6 +4305,18 @@ class OllamaRuntime:
             return False, None
         return True, None
 
+    def install_present(self) -> bool:
+        """Return whether a FlintTrade-managed Ollama install is on disk.
+
+        A missing install is unmanaged. The desk then says how to start Ollama
+        and does not offer Start. This does not launch the server.
+        """
+        try:
+            installed, _error = self._installation_status()
+        except Exception:  # noqa: BLE001 - a broken install is not a managed Start
+            return False
+        return bool(installed)
+
     @staticmethod
     def _public_operation(operation: dict[str, Any] | None) -> dict[str, Any] | None:
         if operation is None:

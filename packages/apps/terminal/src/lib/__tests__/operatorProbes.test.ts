@@ -3,6 +3,8 @@ import { useAuthStore } from "@/stores/authStore";
 import {
   INSTALL_PROBE_URL,
   layaCheckingFromBody,
+  layaManagedFromBody,
+  layaRouteFromBody,
   layaHeartbeatFromBody,
   layaLiveQualifiedFromBody,
   layaPortFromBody,
@@ -65,13 +67,34 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaCheckingFromBody({ laya_checking: "true" })).toBe(false);
     expect(layaCheckingFromBody({ status: "ok" })).toBe(false);
     expect(layaCheckingFromBody(null)).toBe(false);
+    expect(layaRouteFromBody({ laya_route: "ollama" })).toBe("ollama");
+    expect(layaRouteFromBody({ laya_route: "sidecar" })).toBeNull();
+    expect(layaRouteFromBody({ status: "ok" })).toBeNull();
+    expect(layaManagedFromBody({ laya_managed: true })).toBe(true);
+    expect(layaManagedFromBody({ laya_managed: false })).toBe(false);
+    expect(layaManagedFromBody({ laya_managed: "true" })).toBe(false);
   });
 
   it("treats a missing laya_checking field as not checking", async () => {
     const checking = vi.fn(async () => jsonResponse({ status: "ok", laya_checking: true }, 200));
     await expect(probeLocalPing(asFetch(checking))).resolves.toMatchObject({ layaChecking: true });
     const sidecar = vi.fn(async () => jsonResponse({ status: "ok", laya: "down" }, 200));
-    await expect(probeLocalPing(asFetch(sidecar))).resolves.toMatchObject({ layaChecking: false });
+    await expect(probeLocalPing(asFetch(sidecar))).resolves.toMatchObject({
+      layaChecking: false,
+      layaRoute: null,
+      layaManaged: false,
+    });
+    const ollama = vi.fn(async () => jsonResponse({
+      status: "ok",
+      laya_route: "ollama",
+      laya_managed: true,
+      laya_checking: false,
+    }, 200));
+    await expect(probeLocalPing(asFetch(ollama))).resolves.toMatchObject({
+      layaRoute: "ollama",
+      layaManaged: true,
+      layaChecking: false,
+    });
   });
 
   it("does not present Ready when ping fails or omits Laya", async () => {

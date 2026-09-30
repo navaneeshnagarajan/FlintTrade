@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from flinttrade_engine.laya import (
+    LAYA_DOWN_REASON,
+    LAYA_REASON_CODES,
     LAYA_REASON_DOWNLOAD_FAILED,
     LAYA_REASON_DOWNLOADING,
     LAYA_REASON_NOT_STARTED,
@@ -32,7 +34,10 @@ from flinttrade_engine.laya import (
     LAYA_REASON_UNREACHABLE,
     LAYA_REASON_UNVERIFIED,
     LAYA_REASON_WRONG_REVISION,
+    LAYA_START_COMMAND,
     DecisionStatus,
+    laya_reason_detail,
+    laya_reason_tooltip,
 )
 from flinttrade_engine.laya_decision import DecisionCallError, load_policy
 
@@ -87,8 +92,10 @@ _snapshot_override: Callable[[str], Mapping[str, Any] | None] | None = None
 class LayaOllamaModel:
     """One reviewed gate model. The digest is the pin. The tag is not.
 
-    Do not add an entry without a confirmed licence. ``tev1`` is unconfirmed
-    and must not appear here.
+    Do not add an entry without a confirmed licence. ``tev1`` stays off this
+    tuple while its fine-tuned weight licence is still being finalised
+    upstream. ``nimble`` stays off until its Hugging Face licence card has
+    been checked.
     """
 
     tag: str
@@ -181,6 +188,84 @@ def estimate_tokens(text: str) -> int:
     if size <= 0:
         return 0
     return (size + 3) // 4
+
+
+# Status-menu detail only. The chip stays "Wrong model version".
+OLLAMA_DIGEST_DETAIL = (
+    "FlintTrade checks the digest Ollama reports for the exact model tag on every admission. "
+    "The tag is not the proof. If that digest does not match the pinned digest, the gate shows "
+    "Wrong model version and new orders stay paused. You can still close positions."
+)
+OLLAMA_NOT_STARTED_MANAGED = "Ollama isn't running. Start it to bring Laya back."
+OLLAMA_NOT_STARTED_UNMANAGED = "Ollama isn't running. Start Ollama on this computer, then try again."
+OLLAMA_START_ACTION = "Start Laya"
+OLLAMA_STARTING_ACTION = "Starting…"
+OLLAMA_START_FAILED = "Laya could not be started."
+_OLLAMA_CHECKING_DETAIL = "Checking Laya…"
+
+
+def ollama_chip_text(
+    reason: str | None,
+    port: int,
+    *,
+    progress: tuple[int, int] | None = None,
+) -> str | None:
+    """Chip words on the Ollama route. The same sentence the sidecar chip uses."""
+    return laya_reason_detail(reason, port, progress=progress)
+
+
+def ollama_not_started_line(*, managed: bool) -> str:
+    """Next line when Ollama is not running. A managed install can be started."""
+    if managed:
+        return OLLAMA_NOT_STARTED_MANAGED
+    return OLLAMA_NOT_STARTED_UNMANAGED
+
+
+def ollama_status_menu_detail(reason: str | None, *, managed: bool) -> str | None:
+    """Status-menu detail. The chip does not use these sentences."""
+    if reason == LAYA_REASON_WRONG_REVISION:
+        return OLLAMA_DIGEST_DETAIL
+    if reason == LAYA_REASON_NOT_STARTED:
+        return ollama_not_started_line(managed=managed)
+    return None
+
+
+def ollama_route_tooltip(reason: str | None, port: int, *, managed: bool) -> str | None:
+    """Hover text on the Ollama route. It never names the sidecar start command."""
+    if reason == LAYA_REASON_NOT_STARTED:
+        return ollama_not_started_line(managed=managed)
+    tooltip = laya_reason_tooltip(reason, port)
+    if tooltip and LAYA_START_COMMAND in tooltip:
+        return ollama_chip_text(reason, port)
+    return tooltip
+
+
+def ollama_route_visible_lines(*, managed: bool) -> tuple[str, ...]:
+    """Every sentence the Ollama route can show. None of them say sidecar."""
+    lines: list[str] = []
+    for reason in sorted(LAYA_REASON_CODES):
+        chip = ollama_chip_text(
+            reason,
+            11434,
+            progress=(1_200_000_000, 3_400_000_000) if reason == LAYA_REASON_DOWNLOADING else None,
+        )
+        if chip:
+            lines.append(chip)
+        detail = ollama_status_menu_detail(reason, managed=managed)
+        if detail:
+            lines.append(detail)
+        tooltip = ollama_route_tooltip(reason, 11434, managed=managed)
+        if tooltip and tooltip not in {chip, detail}:
+            lines.append(tooltip)
+    lines.append(_OLLAMA_CHECKING_DETAIL)
+    lines.append(LAYA_DOWN_REASON)
+    lines.append(OLLAMA_START_FAILED)
+    if managed:
+        lines.append(OLLAMA_START_ACTION)
+        lines.append(OLLAMA_STARTING_ACTION)
+    for label in ("Ready", "Degraded", "Down", "Still loading", "Checking"):
+        lines.append(f"Laya {label}")
+    return tuple(lines)
 
 
 def allowlist_entry(tag: str) -> LayaOllamaModel | None:

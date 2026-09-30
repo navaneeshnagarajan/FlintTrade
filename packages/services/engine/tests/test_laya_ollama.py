@@ -13,16 +13,23 @@ import pytest
 
 from flinttrade_engine.laya import (
     LAYA_DOWN_REASON,
+    LAYA_START_COMMAND,
     DecisionStatus,
     Laya,
     Proposal,
     laya_reason_detail,
+    reset_process_laya_for_tests,
 )
 from flinttrade_engine.laya_benchmark import run_fail_closed_drills
 from flinttrade_engine.laya_decision import state_for_note
 from flinttrade_engine.laya_ollama import (
+    OLLAMA_DIGEST_DETAIL,
+    OLLAMA_NOT_STARTED_MANAGED,
+    OLLAMA_NOT_STARTED_UNMANAGED,
     LayaOllamaModel,
     OllamaDecisionClient,
+    ollama_chip_text,
+    ollama_route_visible_lines,
     reset_laya_backend_warning_for_tests,
     reset_laya_ollama_transport_for_tests,
     set_laya_ollama_transport_for_tests,
@@ -304,3 +311,131 @@ def test_digest_mismatch_copy_is_wrong_model_version() -> None:
         server_version="0.35.0",
     )
     assert client.last_proof == ""
+
+
+@pytest.mark.unit
+def test_ollama_chip_stays_wrong_model_version() -> None:
+    """The chip does not mention the digest, Ollama, or a model tag."""
+    chip = ollama_chip_text("wrong_revision", 11434)
+    assert chip == "Wrong model version"
+    assert chip == laya_reason_detail("wrong_revision", 11434)
+    lowered = (chip or "").lower()
+    assert "digest" not in lowered
+    assert "ollama" not in lowered
+    assert "tag" not in lowered
+    assert OLLAMA_DIGEST_DETAIL != chip
+    assert "digest" in OLLAMA_DIGEST_DETAIL.lower()
+    assert "ollama" in OLLAMA_DIGEST_DETAIL.lower()
+
+
+@pytest.mark.unit
+def test_not_started_next_line_depends_on_who_installed_ollama() -> None:
+    assert OLLAMA_NOT_STARTED_MANAGED == "Ollama isn't running. Start it to bring Laya back."
+    assert OLLAMA_NOT_STARTED_UNMANAGED == (
+        "Ollama isn't running. Start Ollama on this computer, then try again."
+    )
+    for line in (OLLAMA_NOT_STARTED_MANAGED, OLLAMA_NOT_STARTED_UNMANAGED):
+        assert LAYA_START_COMMAND not in line
+        assert "laya_runtime" not in line
+        assert "sidecar" not in line.lower()
+
+
+@pytest.mark.unit
+def test_ollama_route_visible_lines_do_not_say_sidecar() -> None:
+    managed = ollama_route_visible_lines(managed=True)
+    unmanaged = ollama_route_visible_lines(managed=False)
+    assert OLLAMA_NOT_STARTED_MANAGED in managed
+    assert "Start Laya" in managed
+    assert OLLAMA_NOT_STARTED_UNMANAGED in unmanaged
+    assert "Start Laya" not in unmanaged
+    for line in (*managed, *unmanaged):
+        assert "sidecar" not in line.lower()
+        assert LAYA_START_COMMAND not in line
+        assert "laya_runtime" not in line
+
+
+@pytest.mark.unit
+def test_ollama_ping_names_the_route_and_the_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flask import Flask
+
+    from flinttrade_core.health_routes import health_bp
+
+    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
+    reset_process_laya_for_tests()
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(health_bp)
+    client = app.test_client()
+
+    class Managed:
+        def install_present(self) -> bool:
+            return True
+
+    unmanaged_response = client.get("/api/v1/ping")
+    unmanaged = unmanaged_response.get_json()
+    assert unmanaged is not None
+    assert unmanaged["laya_route"] == "ollama"
+    assert unmanaged["laya_managed"] is False
+    assert unmanaged["laya_checking"] is False
+    assert "sidecar" not in unmanaged_response.get_data(as_text=True).lower()
+
+    app.config["OLLAMA_RUNTIME"] = Managed()
+    managed = client.get("/api/v1/ping").get_json()
+    assert managed is not None
+    assert managed["laya_managed"] is True
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_ollama_start_action_is_only_for_a_managed_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flask import Flask
+
+    from flinttrade_core.auth_routes import _create_token
+    from flinttrade_core.health_routes import health_bp
+
+    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
+    sidecar_calls: list[str] = []
+
+    def sidecar() -> str:
+        sidecar_calls.append("start")
+        return "http://127.0.0.1:8000"
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.start_managed_sidecar", sidecar)
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(health_bp)
+    client = app.test_client()
+    token = _create_token("operator", mode="practice")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    class Unmanaged:
+        def install_present(self) -> bool:
+            return False
+
+        def start_async(self) -> dict[str, str]:
+            raise AssertionError("an unmanaged install must not be started")
+
+    app.config["OLLAMA_RUNTIME"] = Unmanaged()
+    refused = client.post("/api/v1/laya/start", headers=headers)
+    assert refused.status_code == 503
+    assert refused.get_json()["message"] == "Laya could not be started."
+    assert "sidecar" not in refused.get_data(as_text=True).lower()
+    assert sidecar_calls == []
+
+    started: list[str] = []
+
+    class Managed:
+        def install_present(self) -> bool:
+            return True
+
+        def start_async(self) -> dict[str, str]:
+            started.append("start")
+            return {"state": "starting"}
+
+    app.config["OLLAMA_RUNTIME"] = Managed()
+    ok = client.post("/api/v1/laya/start", headers=headers)
+    assert ok.status_code == 200
+    assert ok.get_json()["status"] == "ok"
+    assert started == ["start"]
+    assert sidecar_calls == []
+    assert "sidecar" not in ok.get_data(as_text=True).lower()

@@ -14,6 +14,12 @@ import {
   layaDisabledLiveReason,
   layaReasonPlain,
   layaReasonTooltip,
+  OLLAMA_DIGEST_DETAIL,
+  OLLAMA_NOT_STARTED_MANAGED,
+  OLLAMA_NOT_STARTED_UNMANAGED,
+  ollamaChipText,
+  ollamaRouteVisibleLines,
+  ollamaStatusMenuDetail,
 } from "./layaStatus";
 
 describe("Laya chip status", () => {
@@ -99,5 +105,41 @@ describe("Laya chip status", () => {
       code: "laya_denied",
       message: "Laya denied this order. The note does not state a concrete reason.",
     })).toBe(false);
+  });
+
+  it("keeps the Ollama wrong-revision chip free of the digest sentence", () => {
+    const chip = ollamaChipText("wrong_revision", 11434);
+    expect(chip).toBe("Wrong model version");
+    expect(chip).toBe(layaReasonPlain("wrong_revision", 11434));
+    expect(chip?.toLowerCase()).not.toContain("digest");
+    expect(chip?.toLowerCase()).not.toContain("ollama");
+    expect(chip?.toLowerCase()).not.toContain("tag");
+    expect(ollamaStatusMenuDetail("wrong_revision", true)).toBe(OLLAMA_DIGEST_DETAIL);
+    expect(OLLAMA_DIGEST_DETAIL).not.toBe(chip);
+  });
+
+  it("gives a managed install a Start line and an unmanaged install a plain line", () => {
+    expect(OLLAMA_NOT_STARTED_MANAGED).toBe("Ollama isn't running. Start it to bring Laya back.");
+    expect(OLLAMA_NOT_STARTED_UNMANAGED).toBe(
+      "Ollama isn't running. Start Ollama on this computer, then try again.",
+    );
+    expect(ollamaStatusMenuDetail("not_started", true)).toBe(OLLAMA_NOT_STARTED_MANAGED);
+    expect(ollamaStatusMenuDetail("not_started", false)).toBe(OLLAMA_NOT_STARTED_UNMANAGED);
+    const managed = ollamaRouteVisibleLines(true);
+    const unmanaged = ollamaRouteVisibleLines(false);
+    expect(managed).toContain(OLLAMA_NOT_STARTED_MANAGED);
+    expect(managed).toContain("Start Laya");
+    expect(unmanaged).toContain(OLLAMA_NOT_STARTED_UNMANAGED);
+    expect(unmanaged).not.toContain("Start Laya");
+  });
+
+  it("greps Ollama-route user-visible strings for sidecar", () => {
+    for (const managed of [true, false]) {
+      for (const line of ollamaRouteVisibleLines(managed)) {
+        expect(line.toLowerCase()).not.toContain("sidecar");
+        expect(line).not.toContain(LAYA_START_COMMAND);
+        expect(line).not.toContain("laya_runtime");
+      }
+    }
   });
 });

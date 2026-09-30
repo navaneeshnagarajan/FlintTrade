@@ -17,11 +17,17 @@ import { buildHeaders, getBase, isDemoAuthSession } from "@/services/ftApi.helpe
 import {
   LAYA_CHECKING_DETAIL,
   LAYA_START_DOCS_HREF,
+  OLLAMA_START_ACTION,
+  OLLAMA_STARTING_ACTION,
+  OLLAMA_START_FAILED,
   layaChipLabel,
   layaChipStatus,
   layaDisabledLiveReason,
   layaReasonPlain,
   layaReasonTooltip,
+  ollamaChipText,
+  ollamaRouteTooltip,
+  ollamaStatusMenuDetail,
 } from "@/lib/layaStatus";
 
 export function DeskStatusCluster() {
@@ -36,6 +42,8 @@ export function DeskStatusCluster() {
   const layaDownloadBytes = useOperatorSignalStore((state) => state.layaDownloadBytes);
   const layaDownloadTotal = useOperatorSignalStore((state) => state.layaDownloadTotal);
   const layaChecking = useOperatorSignalStore((state) => state.layaChecking);
+  const layaRoute = useOperatorSignalStore((state) => state.layaRoute);
+  const layaManaged = useOperatorSignalStore((state) => state.layaManaged);
   const llmChrome = useOperatorSignalStore((state) => state.llmChrome);
   const readOnly = accounts.some((account) => mondayReadChrome(account) !== null);
   const placeable = accounts.some(
@@ -64,15 +72,23 @@ export function DeskStatusCluster() {
     reason: shownReason,
     checking: layaChecking,
   });
+  const ollamaRoute = layaRoute === "ollama";
   const plainReason = layaChecking
     ? LAYA_CHECKING_DETAIL
-    : layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
+    : (ollamaRoute
+      ? ollamaChipText(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
+      : layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal))
       ?? liveReason
       ?? (decision === "Down" ? "Not started" : null);
   const tooltip = layaChecking
     ? LAYA_CHECKING_DETAIL
-    : layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
-  const offerStart = operator && !sidecarUp && !awaitingLaya;
+    : ollamaRoute
+      ? ollamaRouteTooltip(shownReason, layaPort, layaManaged) ?? liveReason ?? undefined
+      : layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
+  const statusDetail = layaChecking || !ollamaRoute
+    ? null
+    : ollamaStatusMenuDetail(shownReason, layaManaged);
+  const offerStart = operator && !sidecarUp && !awaitingLaya && (!ollamaRoute || layaManaged);
   const chat = chatSurfaceLabel(llmChrome);
   const decisionTone = decision === "Down"
     ? "text-loss"
@@ -107,7 +123,7 @@ export function DeskStatusCluster() {
       });
       if (!response.ok) {
         setAwaitingLaya(false);
-        setStartNote("Laya could not be started.");
+        setStartNote(OLLAMA_START_FAILED);
         return;
       }
       startSnapshot.current = { reason: layaReason, practice: practiceStatus };
@@ -115,7 +131,7 @@ export function DeskStatusCluster() {
       useOperatorSignalStore.getState().noteLayaUnconfirmed();
       setStartNote(null);
     } catch {
-      setStartNote("Laya could not be started.");
+      setStartNote(OLLAMA_START_FAILED);
     } finally {
       setStarting(false);
     }
@@ -146,20 +162,25 @@ export function DeskStatusCluster() {
         </PopoverTrigger>
         <PopoverContent aria-label="Laya status" className="w-64 space-y-2 p-3 text-xs">
           <p data-testid="laya-reason">{plainReason ?? `Laya ${decision}`}</p>
-          {tooltip && plainReason && !tooltip.startsWith(plainReason) ? (
+          {statusDetail && statusDetail !== plainReason ? (
+            <p data-testid="laya-status-detail">{statusDetail}</p>
+          ) : null}
+          {tooltip && plainReason && tooltip !== statusDetail && !tooltip.startsWith(plainReason) ? (
             <p data-testid="laya-reason-tooltip">{tooltip}</p>
           ) : null}
-          <a
-            data-testid="laya-start-docs"
-            href={LAYA_START_DOCS_HREF}
-            className="underline"
-          >
-            How to start Laya
-          </a>
+          {ollamaRoute ? null : (
+            <a
+              data-testid="laya-start-docs"
+              href={LAYA_START_DOCS_HREF}
+              className="underline"
+            >
+              How to start Laya
+            </a>
+          )}
           {offerStart ? (
             <div>
               <Button type="button" disabled={starting} onClick={() => void startLaya()}>
-                {starting ? "Starting…" : "Start Laya"}
+                {starting ? OLLAMA_STARTING_ACTION : OLLAMA_START_ACTION}
               </Button>
             </div>
           ) : null}

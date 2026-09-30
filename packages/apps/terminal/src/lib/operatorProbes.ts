@@ -55,6 +55,10 @@ export interface PingProbe {
   layaDownloadTotal: number | null;
   /** True only when an Ollama ping says the runtime is still unconfirmed. Absent means false. */
   layaChecking: boolean;
+  /** `ollama` only when the ping names that route. Absent keeps the sidecar copy. */
+  layaRoute: "ollama" | null;
+  /** True only when the ping says FlintTrade installed Ollama. */
+  layaManaged: boolean;
 }
 
 const LAYA_REASON_CODES = new Set([
@@ -116,6 +120,18 @@ export function layaCheckingFromBody(body: unknown): boolean {
   return (body as { laya_checking?: unknown }).laya_checking === true;
 }
 
+/** `ollama` only for that exact string. Any other value keeps the sidecar copy. */
+export function layaRouteFromBody(body: unknown): "ollama" | null {
+  if (body === null || typeof body !== "object") return null;
+  return (body as { laya_route?: unknown }).laya_route === "ollama" ? "ollama" : null;
+}
+
+/** True only for a boolean `true`. A missing field is not a managed install. */
+export function layaManagedFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_managed?: unknown }).laya_managed === true;
+}
+
 /** Done and total bytes. Both must be present, or both are null. */
 export function layaDownloadProgressFromBody(body: unknown): { done: number | null; total: number | null } {
   if (body === null || typeof body !== "object") return { done: null, total: null };
@@ -141,6 +157,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
         layaDownloadBytes: null,
         layaDownloadTotal: null,
         layaChecking: false,
+        layaRoute: null,
+        layaManaged: false,
       };
     }
     const body: unknown = await resp.json().catch(() => null);
@@ -156,6 +174,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaDownloadBytes: progress.done,
       layaDownloadTotal: progress.total,
       layaChecking: layaCheckingFromBody(body),
+      layaRoute: layaRouteFromBody(body),
+      layaManaged: layaManagedFromBody(body),
     };
   } catch (err) {
     return {
@@ -169,6 +189,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaDownloadBytes: null,
       layaDownloadTotal: null,
       layaChecking: false,
+      layaRoute: null,
+      layaManaged: false,
     };
   }
 }

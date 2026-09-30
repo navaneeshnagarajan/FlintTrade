@@ -39,11 +39,11 @@ The 3.0 second timeout is the existing `SystemOneClient` default. It is also the
 
 An allowlist entry is a tag, a pinned SHA-256 digest, and a route. The tag is not the proof. There is no shipped entry in this spike. Nothing is added without a confirmed licence.
 
-`tev1:4b` and `tev1:0.8b` are trial only, licence unconfirmed. They are not on the allowlist. `nimble:9b` is a `systemone` candidate and is not on the allowlist either; its licence is not reviewed here. `qwen3:8b` is the advisory default and the `chat` candidate. It is not on the allowlist until a digest is reviewed and pinned. Its weights licence is Apache-2.0; that does not by itself admit it.
+`tev1:4b` and `tev1:0.8b` stay off the allowlist. The fine-tuned weight licence is still being finalised upstream. `nimble:9b` is a `systemone` candidate and stays off the allowlist until its Hugging Face licence card has been checked. `qwen3:8b` is the advisory default and the `chat` candidate. It is not on the allowlist until a digest is reviewed and pinned. Its weights licence is Apache-2.0; that does not by itself admit it.
 
 On every admission the gate opens one `ManagedOllamaAdmission` and holds it for the whole inference. The digest Ollama reports for that call is compared with the pinned digest for the tag. A tag pulled again onto new weights fails the comparison. The chip shows Wrong model version. The response body is not allowed to vouch for itself.
 
-Docs and any new explanation use this sentence. The chip label and the existing tooltip stay as they are ("Wrong model version", and "Laya is running a different model than FlintTrade expects."):
+Docs and the Status menu detail line use this sentence. The chip stays exactly "Wrong model version". It does not mention the digest, Ollama, or the model tag. The existing tooltip stays "Laya is running a different model than FlintTrade expects."
 
 > FlintTrade checks the digest Ollama reports for the exact model tag on every admission. The tag is not the proof. If that digest does not match the pinned digest, the gate shows Wrong model version and new orders stay paused. You can still close positions.
 
@@ -86,6 +86,10 @@ The locked sentences do not change. The Ollama snapshot fills the same reason co
 | Down | Stopped, not installed, not owned, conflict, timeout, malformed output, or any other error. |
 
 Degraded remains a sidecar state. This route does not invent a Degraded reason.
+
+The Status menu detail for Wrong model version is the digest sentence in section 3. The chip is not that sentence.
+
+When the reason is `not_started`, the Next line does not name the sidecar start command, and the word sidecar is not shown. A FlintTrade-managed install says "Ollama isn't running. Start it to bring Laya back." and offers Start. An unmanaged install has no Start action. It says "Ollama isn't running. Start Ollama on this computer, then try again."
 
 ## 6. What happens to the sidecar
 
@@ -140,12 +144,12 @@ The managed pin is v0.32.0, with pinned archive hashes. Moving it to v0.35 or la
 Open:
 
 - No reviewed digest is pinned yet. The shipped allowlist is empty, so `ollama` pauses new orders until an entry is added.
-- `tev1` licence is unconfirmed (trial only). `nimble` licence is not reviewed here.
+- `tev1` stays off the allowlist. The fine-tuned weight licence is still being finalised upstream.
+- `nimble` needs its Hugging Face licence card checked before any allowlisting.
 - Live qualification is still the sidecar's revision, weight digest, and policy version. An Ollama digest does not qualify Live in this spike.
 - The 8,192-token check estimates tokens as UTF-8 bytes divided by 4. It is not the model's own tokenizer. The two can disagree near the cap. Over the estimate, the order is refused.
 - Decision-model probabilities can differ between CPU and GPU. That is a vendor note and is unverified here.
 - The owner's bar is zero wrong admits. The draft set has 59 deny cases, so even a clean run cannot claim a wrong-admit rate under 1%. Pairs share text, so the effective sample is smaller than the case count. Whether Practice and Live share one bar is still open.
 - The draft labels are not human-reviewed. The borderline ids listed in section 7 need a review before the set is evidence.
-- The Next line for `not_started` still names `python -m flinttrade_core.laya_runtime start`. That copy stays as it is in this spike.
 
 The Tester should cover: flag off leaves every current place and chip path unchanged; each fail-closed drill above ends in Down or a refusal; a digest mismatch shows Wrong model version; a missing model shows the download line; a timeout and malformed JSON refuse; a note over 4,000 characters and a prompt over 8,192 tokens refuse without a model call; closing a position still admits; `confidence` cannot flip a verdict; an advisory completion cannot reach `decide`; `chat` and `systemone` are selected by the allowlist entry; an unknown flag value pauses new orders; the harness prints separate wrong-admit, wrong-deny, and abstain counts on the example fixture with a stub.

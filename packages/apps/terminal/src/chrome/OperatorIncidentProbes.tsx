@@ -63,6 +63,8 @@ export function OperatorIncidentProbes() {
     if (ping.data.epoch !== store.layaEpoch) return;
     const sample = ping.data.probe;
     store.setLayaChecking(sample.layaChecking === true);
+    store.setLayaRoute(sample.layaRoute);
+    store.setLayaManaged(sample.layaManaged === true);
     store.setPing(sample);
     store.setDecisionStatus(sample.laya ?? "down");
     store.setLayaPracticeStatus(sample.layaPractice ?? "down");
