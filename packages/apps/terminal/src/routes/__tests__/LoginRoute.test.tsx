@@ -304,7 +304,7 @@ describe("LoginRoute", () => {
         if (url.includes("/v1/auth/login")) {
           return jsonResponse({
             status: "success",
-            data: { token: "explore-session", username: "alice", expires_at: "" },
+            data: { token: "practice-session", mode: "practice", username: "alice", expires_at: "" },
           });
         }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
