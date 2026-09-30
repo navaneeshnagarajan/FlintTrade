@@ -48,9 +48,9 @@ async function mockManagedOllamaConfig(page: Page, model = 'qwen3:8b') {
 
 function managedOllamaStatus(overrides: Record<string, unknown> = {}) {
   return {
-    version: 'v0.32.0',
-    active_version: 'v0.32.0',
-    target_version: 'v0.32.0',
+    version: 'v0.35.0',
+    active_version: 'v0.35.0',
+    target_version: 'v0.35.0',
     previous_version: null,
     update_available: false,
     rollback_available: false,
@@ -239,7 +239,7 @@ test.describe('Settings page', () => {
           },
         });
         terminalAfterPoll = managedOllamaStatus({
-          active_version: 'v0.32.0',
+          active_version: 'v0.35.0',
           previous_version: 'v0.31.2',
           rollback_available: true,
           rollback_allowed: true,
@@ -314,7 +314,7 @@ test.describe('Settings page', () => {
 
     await page.getByRole('button', { name: 'Update runtime' }).click();
     await page.getByRole('button', { name: 'Download and update' }).click();
-    await expect(page.getByText('Runtime v0.32.0')).toBeVisible();
+    await expect(page.getByText('Runtime v0.35.0')).toBeVisible();
 
     await page.getByRole('button', { name: 'Rollback runtime' }).click();
     await page.getByRole('button', { name: 'Switch to v0.31.2' }).click();
@@ -323,7 +323,7 @@ test.describe('Settings page', () => {
     await page.getByRole('button', { name: 'Uninstall runtime' }).click();
     await expect(page.getByText(/Models and accepted-digest metadata will remain/i)).toBeVisible();
     await page.getByRole('button', { name: 'Remove runtime' }).click();
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     expect(retainedModels).toHaveLength(1);
 
     await page.getByRole('button', { name: 'Install runtime' }).click();
@@ -366,7 +366,7 @@ test.describe('Settings page', () => {
             state: 'ready',
             ready: true,
             managed_process: true,
-            server_version: '0.32.0',
+            server_version: '0.35.0',
           }),
         }),
       });
@@ -573,13 +573,13 @@ test.describe('Settings page', () => {
     const provider = page.getByRole('combobox', { name: 'LLM provider' });
     const refresh = page.getByRole('button', { name: 'Refresh runtime status' });
     await expect(installButton).toBeEnabled();
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     const freshRequestCount = statusRequests;
     failStatus = true;
     await refresh.click();
 
     await expect(page.getByRole('alert')).toContainText('runtime status is stale');
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     await expect(installButton).toBeDisabled();
     await expect(page.getByLabel('LLM model name')).toBeDisabled();
     await expect(provider).toBeEnabled();
