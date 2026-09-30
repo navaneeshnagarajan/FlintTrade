@@ -23,6 +23,8 @@ export interface SectionNavItem<T extends string> {
   icon?: LucideIcon;
   /** Trailing status (a dot or count). */
   indicator?: React.ReactNode;
+  /** Optional completion percentage (0–100); renders a bar under the tab when expanded. */
+  progress?: number;
   /** Extra hover text; defaults to the label. */
   title?: string;
 }
@@ -155,47 +157,63 @@ export function SectionNav<T extends string>({
             {group.items.map((item) => {
               const Icon = item.icon;
               const active = item.id === value;
+              const showProgress = !iconOnly && item.progress != null && item.progress > 0;
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  id={`${idPrefix}-tab-${item.id}`}
-                  aria-selected={active}
-                  aria-controls={active ? `${idPrefix}-tabpanel-${item.id}` : undefined}
-                  tabIndex={active ? 0 : -1}
-                  title={iconOnly ? item.label : item.title}
-                  onClick={() => onChange(item.id)}
-                  className={cn(
-                    "relative flex h-9 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-left text-sm transition-colors",
-                    "md:w-full",
-                    iconOnly && "md:justify-center md:px-0",
-                    active
-                      ? "bg-surface-hover font-medium text-text-primary"
-                      : "text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary",
-                  )}
-                >
-                  {active ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-0 top-1/2 hidden h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent md:block"
-                    />
-                  ) : null}
-                  {Icon ? (
-                    <Icon
-                      className={cn("size-4 shrink-0", active ? "text-accent" : "text-text-muted")}
-                      aria-hidden="true"
-                    />
-                  ) : null}
-                  <span className={cn("truncate whitespace-nowrap", iconOnly && "md:sr-only")}>
-                    {item.label}
-                  </span>
-                  {item.indicator ? (
-                    <span className={cn("ml-auto flex shrink-0 items-center", iconOnly && "md:absolute md:right-1.5 md:top-1.5")}>
-                      {item.indicator}
+                <div key={item.id} className="shrink-0 md:w-full">
+                  <button
+                    type="button"
+                    role="tab"
+                    id={`${idPrefix}-tab-${item.id}`}
+                    aria-selected={active}
+                    aria-controls={active ? `${idPrefix}-tabpanel-${item.id}` : undefined}
+                    tabIndex={active ? 0 : -1}
+                    title={iconOnly ? item.label : item.title}
+                    onClick={() => onChange(item.id)}
+                    className={cn(
+                      "relative flex h-9 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-left text-sm transition-colors",
+                      "md:w-full",
+                      iconOnly && "md:justify-center md:px-0",
+                      active
+                        ? "bg-surface-hover font-medium text-text-primary"
+                        : "text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary",
+                    )}
+                  >
+                    {active ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-0 top-1/2 hidden h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent md:block"
+                      />
+                    ) : null}
+                    {Icon ? (
+                      <Icon
+                        className={cn("size-4 shrink-0", active ? "text-accent" : "text-text-muted")}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <span className={cn("truncate whitespace-nowrap", iconOnly && "md:sr-only")}>
+                      {item.label}
                     </span>
+                    {item.indicator ? (
+                      <span className={cn("ml-auto flex shrink-0 items-center", iconOnly && "md:absolute md:right-1.5 md:top-1.5")}>
+                        {item.indicator}
+                      </span>
+                    ) : null}
+                  </button>
+                  {showProgress ? (
+                    <div
+                      className="mx-2.5 mb-1 mt-0.5"
+                      role="presentation"
+                      aria-hidden="true"
+                    >
+                      <div className="h-0.5 w-full rounded-full bg-border-default/50">
+                        <div
+                          className="h-full rounded-full bg-accent/60"
+                          style={{ width: `${item.progress}%` }}
+                        />
+                      </div>
+                    </div>
                   ) : null}
-                </button>
+                </div>
               );
             })}
           </React.Fragment>

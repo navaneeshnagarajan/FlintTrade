@@ -38,6 +38,7 @@ interface TabDef {
   id: TabId;
   label: string;
   icon: typeof BookOpen;
+  progress: number;
 }
 
 interface GlossaryEntry {
@@ -83,11 +84,11 @@ interface BasicsSection {
 // ---------------------------------------------------------------------------
 
 const TABS: TabDef[] = [
-  { id: "basics",     label: "Market Basics",    icon: BookOpen },
-  { id: "glossary",   label: "Glossary",          icon: GraduationCap },
-  { id: "strategies", label: "Strategy Library",  icon: BarChart3 },
-  { id: "paper",      label: "Practice Trading",  icon: TrendingUp },
-  { id: "resources",  label: "Resource Hub",      icon: PlayCircle },
+  { id: "basics",     label: "Market Basics",    icon: BookOpen,     progress: 33 },
+  { id: "glossary",   label: "Glossary",          icon: GraduationCap, progress: 0  },
+  { id: "strategies", label: "Strategy Library",  icon: BarChart3,    progress: 16 },
+  { id: "paper",      label: "Practice Trading",  icon: TrendingUp,   progress: 0  },
+  { id: "resources",  label: "Resource Hub",      icon: PlayCircle,   progress: 0  },
 ];
 
 const BASICS_SECTIONS: BasicsSection[] = [
@@ -822,7 +823,15 @@ export default function LearnRoute() {
   }), [selectedDoc]);
 
   const navGroups = [
-    { id: "learn", items: visibleTabs.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon })) },
+    {
+      id: "learn",
+      items: visibleTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        icon: tab.icon,
+        progress: tab.progress,
+      })),
+    },
   ];
 
   return (

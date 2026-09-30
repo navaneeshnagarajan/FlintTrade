@@ -622,11 +622,11 @@ export function AITutorPill() {
     /*
      * Fixed, z-50. Opened from the TopBar it drops down under the bar;
      * elsewhere the closed pill sits bottom-right.
-     * Hidden on xs screens (< sm) via `hidden sm:flex`.
+     * Hidden below the TopBar Ask AI band (480px, FT-MOBILE-002).
      */
     <div
       className={cn(
-        "fixed z-50 hidden sm:flex flex-col items-end gap-2",
+        "fixed z-50 hidden min-[480px]:flex flex-col items-end gap-2",
         hidesFloatingPill(location.pathname) ? "right-3 top-12" : "bottom-24 right-4",
       )}
       aria-live="polite"
