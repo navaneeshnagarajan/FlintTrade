@@ -74,9 +74,9 @@ afterEach(() => {
 
 function status(overrides: Partial<LocalAiStatus> = {}): LocalAiStatus {
   return {
-    version: "v0.32.0",
-    active_version: "v0.32.0",
-    target_version: "v0.32.0",
+    version: "v0.35.0",
+    active_version: "v0.35.0",
+    target_version: "v0.35.0",
     previous_version: null,
     update_available: false,
     rollback_available: false,
@@ -380,7 +380,7 @@ describe("LLMSection managed Ollama", () => {
     localAi.getStatus.mockResolvedValue(status({
       installed: true,
       state: "installed",
-      active_version: "v0.32.0",
+      active_version: "v0.35.0",
       previous_version: "v0.31.2",
       rollback_available: true,
       rollback_allowed: true,
@@ -402,7 +402,7 @@ describe("LLMSection managed Ollama", () => {
     localAi.getStatus.mockResolvedValue(status({
       installed: true,
       state: "failed",
-      active_version: "v0.32.0",
+      active_version: "v0.35.0",
       previous_version: "v0.31.2",
       rollback_available: true,
       rollback_allowed: true,
