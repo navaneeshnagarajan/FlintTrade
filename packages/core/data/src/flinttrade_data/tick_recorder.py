@@ -25,7 +25,7 @@ import websockets
 import websockets.exceptions
 
 from ._tick_contracts import MAX_SOURCE_CLOCK_SKEW_SECONDS
-from .storage import StorageManager
+from .storage import IST, StorageManager, ingest_broker_timestamp
 
 logger = logging.getLogger("flinttrade.data.tick_recorder")
 
@@ -160,7 +160,12 @@ def _normalise_epoch_timestamp(value: Any) -> datetime | None:
 
 
 def _normalise_frame_timestamp(value: Any) -> datetime | None:
-    """Parse one bounded OpenAlgo epoch or timezone-aware ISO timestamp."""
+    """Parse one bounded epoch, zoned ISO time, or IST broker wall clock.
+
+    A zone-less ``YYYY-MM-DD HH:MM:SS`` string is the Indian broker wall
+    clock (Dhan, Kotak Neo, Upstox, Groww, INDmoney). It is converted to
+    UTC before the row is stored. An unparseable value is rejected.
+    """
     if isinstance(value, str):
         text = value.strip()
         if not text or len(text) > _MAX_FRAME_TIMESTAMP_TEXT_LENGTH:
@@ -169,12 +174,9 @@ def _normalise_frame_timestamp(value: Any) -> datetime | None:
         if epoch_timestamp is not None:
             return epoch_timestamp
         try:
-            parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text)
+            parsed = ingest_broker_timestamp(text, source_tz=IST)
         except (TypeError, ValueError, OverflowError):
             return None
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            return None
-        parsed = parsed.astimezone(UTC)
         if not _MIN_FRAME_TIMESTAMP_EPOCH <= parsed.timestamp() <= _MAX_FRAME_TIMESTAMP_EPOCH:
             return None
         return parsed

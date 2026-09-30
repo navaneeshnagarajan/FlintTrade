@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { getPositionbook } from "@/services/api";
 import type { Position } from "@/types/api";
+import { isDocumentHidden } from "@/lib/deskPolling";
+import { useRearmPollingWhenVisible } from "@/hooks/useRearmPollingWhenVisible";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
 import {
@@ -24,12 +26,17 @@ export function usePositions(options: BrokerDataQueryOptions = {}) {
   const currentContext = useAccountReadContext();
   const context = options.context ?? currentContext;
   const enabled = (options.enabled ?? true) && context.enabled;
+  const listKey = queryKeys.positions.list(context.identity.scopeKey);
+  useRearmPollingWhenVisible(listKey, enabled);
   return useQuery<Position[]>({
-    queryKey: queryKeys.positions.list(context.identity.scopeKey),
+    queryKey: listKey,
     queryFn: ({ signal }) => getPositionbook(context, signal),
     enabled,
     retry: false,
     staleTime: 3_000,
-    refetchInterval: () => (enabled ? (isMarketHours() ? 5_000 : 60_000) : false),
+    refetchInterval: () => {
+      if (isDocumentHidden()) return false;
+      return enabled ? (isMarketHours() ? 5_000 : 60_000) : false;
+    },
   });
 }
