@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { setInstrumentLotRows } from "@/lib/instrumentLots";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
@@ -868,6 +869,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
     mockGetSymbol.mockReset();
+    // An empty lookup keeps the symbol-info lot. A seeded NIFTY row would win.
+    setInstrumentLotRows([]);
   });
 
   function renderNfoPad(): void {
@@ -905,9 +908,32 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const messages = await screen.findAllByText(/lot size unknown/i);
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const messages = await screen.findAllByText(refusal);
     expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/lot size unknown/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("uses the instrument master lot when the symbol lookup disagrees", async () => {
+    setInstrumentLotRows([
+      {
+        SEM_SMST_SECURITY_ID: "CACHE-NIFTY",
+        SEM_CUSTOM_SYMBOL: "NIFTY",
+        SEM_INSTRUMENT_NAME: "FUTIDX",
+        SEM_TRADING_SYMBOL: "NIFTY-Oct2026-FUT",
+        SEM_EXPIRY_DATE: "2099-12-31",
+        SEM_LOT_UNITS: "65",
+      },
+    ]);
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+
+    await screen.findByText("Lot: 65");
+    expect(screen.queryByText("Lot: 75")).not.toBeInTheDocument();
   });
 
   it("submits when the quantity is an exact lot multiple", async () => {

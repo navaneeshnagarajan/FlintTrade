@@ -36,6 +36,7 @@ import { usePrimaryBanner } from "@/hooks/usePrimaryBannerKind";
 import { useChromeCollapse } from "@/chrome/useChromeCollapse";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { loadInstrumentLotRows } from "@/lib/instrumentLots";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -189,6 +190,10 @@ export default function AppLayout() {
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
   }, [location.pathname]);
+
+  useEffect(() => {
+    void loadInstrumentLotRows();
+  }, []);
   // Practice mode drives the persistent amber indicator bar.
   // Mode is now owned exclusively by modeStore — settingsStore no longer has sandboxMode.
 

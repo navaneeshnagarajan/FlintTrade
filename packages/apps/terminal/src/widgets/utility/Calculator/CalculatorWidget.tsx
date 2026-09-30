@@ -68,6 +68,12 @@ import {
 import { getMargin, getFunds } from "@/services/api";
 import type { MarginData, Funds } from "@/types/api";
 import {
+  exchangeTransactionLabel,
+  statutoryLeg,
+  type StatutoryLeg,
+} from "@/lib/indianCharges";
+import { lotSizeFromMaster } from "@/lib/instrumentLots";
+import {
   breakevenWinRate,
   deriveTarget,
   formatRR,
@@ -940,24 +946,28 @@ function TargetTab({ form, values, errors }: TabProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Brokerage calculator (April 1 2026 STT rates)
+// Charges calculator — rates come from the shared Indian charges table.
+// Futures STT and stamp duty apply to one side only. Brokerage is shown
+// only when the operator has typed a broker rate.
 // ---------------------------------------------------------------------------
-const STT_RATE_FUTURES = 0.0005;   // 0.05%
-const STT_RATE_OPTIONS = 0.0015;   // 0.15% (on premium)
-const SEBI_CHARGE = 0.000001;      // ₹10 per crore
-const EXCHANGE_TXN = 0.0000325;    // NSE 0.00325%
-const STAMP_DUTY = 0.00003;        // 0.003% (buy side only)
-const GST_RATE = 0.18;
 
 interface BrokerageResult {
   stt: number;
   exchangeTxn: number;
+  exchangeLabel: string;
   sebi: number;
   stampDuty: number;
   brokerage: number;
   gst: number;
   total: number;
   breakeven: number;
+}
+
+function chargesAsOfToday(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 function calculateBrokerage(
@@ -967,31 +977,46 @@ function calculateBrokerage(
   type: "futures" | "options",
   flatBrokerage: number,
   side: "BUY" | "SELL" | "BOTH",
+  exchange: "NSE" | "BSE",
 ): BrokerageResult {
   const qty = lotSize * lots;
   const turnover = qty * price;
-  const sides = side === "BOTH" ? 2 : 1;
-
-  const sttRate = type === "futures" ? STT_RATE_FUTURES : STT_RATE_OPTIONS;
-  const stt = turnover * sttRate * (type === "futures" ? sides : 1); // options: sell side only
-
-  const exchangeTxn = turnover * EXCHANGE_TXN * sides;
-  const sebi = turnover * SEBI_CHARGE * sides;
-  const stampDuty = turnover * STAMP_DUTY * (side === "SELL" ? 0 : 1);
-  const brokerage = flatBrokerage * sides;
-  const subTotal = stt + exchangeTxn + sebi + stampDuty + brokerage;
-  const gst = (brokerage + exchangeTxn + sebi) * GST_RATE;
-  const total = subTotal + gst;
-  const breakeven = qty > 0 ? total / qty : 0;
-
-  return { stt, exchangeTxn, sebi, stampDuty, brokerage, gst, total, breakeven };
+  const segment = type === "futures" ? "equity_futures" : "equity_options";
+  const legs: Array<"buy" | "sell"> =
+    side === "BOTH" ? ["buy", "sell"] : [side === "SELL" ? "sell" : "buy"];
+  const priced = legs.map((leg) =>
+    statutoryLeg({
+      exchange,
+      segment,
+      turnover,
+      isBuy: leg === "buy",
+      on: chargesAsOfToday(),
+      brokerage: flatBrokerage,
+    }),
+  );
+  const sum = (pick: (leg: StatutoryLeg) => number) =>
+    priced.reduce((total, leg) => total + pick(leg), 0);
+  const total = sum((leg) => leg.total);
+  return {
+    stt: sum((leg) => leg.stt),
+    exchangeTxn: sum((leg) => leg.exchangeCharges),
+    exchangeLabel: priced[0]?.exchangeLabel ?? exchangeTransactionLabel(exchange),
+    sebi: sum((leg) => leg.sebiFee),
+    stampDuty: sum((leg) => leg.stampDuty),
+    brokerage: sum((leg) => leg.brokerage),
+    gst: sum((leg) => leg.gst),
+    total,
+    breakeven: qty > 0 ? total / qty : 0,
+  };
 }
 
 const brokerageSchema = z.object({
+  underlying: z.enum(["NIFTY", "BANKNIFTY", "SENSEX"]),
   lotSize: z.coerce.number().min(1, "Min 1"),
   lots: z.coerce.number().min(1, "Min 1"),
   price: z.coerce.number().min(0.05, "Required"),
   type: z.enum(["futures", "options"]),
+  exchange: z.enum(["NSE", "BSE"]),
   side: z.enum(["BUY", "SELL", "BOTH"]),
   flatBrokerage: z.coerce.number().min(0),
 });
@@ -1003,15 +1028,18 @@ function BrokerageCalcTab() {
     register,
     control,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<BrokerageFormValues>({
     // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
     resolver: zodResolver(brokerageSchema) as unknown as Resolver<BrokerageFormValues>,
     defaultValues: {
-      lotSize: 25,
+      underlying: "NIFTY",
+      lotSize: lotSizeFromMaster("NIFTY") ?? 1,
       lots: 1,
       price: 100,
       type: "options",
+      exchange: "NSE",
       side: "BOTH",
       flatBrokerage: 20,
     },
@@ -1019,6 +1047,12 @@ function BrokerageCalcTab() {
   });
 
   const values = watch();
+  const underlying = values.underlying;
+
+  useEffect(() => {
+    const lot = lotSizeFromMaster(underlying);
+    if (lot !== null) setValue("lotSize", lot, { shouldValidate: true });
+  }, [underlying, setValue]);
 
   const result = useMemo<BrokerageResult>(() => {
     return calculateBrokerage(
@@ -1028,6 +1062,7 @@ function BrokerageCalcTab() {
       values.type,
       num(values.flatBrokerage),
       values.side,
+      values.exchange ?? "NSE",
     );
   }, [values]);
 
@@ -1067,6 +1102,29 @@ function BrokerageCalcTab() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Label htmlFor="brk-exchange" className="text-xs text-text-muted w-32 shrink-0">
+            Exchange
+          </Label>
+          <div className="flex-1 min-w-0">
+            <Controller
+              name="exchange"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="brk-exchange" className={selectCls}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-surface-card border-border-default text-xs">
+                    <SelectItem value="NSE">NSE</SelectItem>
+                    <SelectItem value="BSE">BSE</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
           <Label htmlFor="brk-side" className="text-xs text-text-muted w-32 shrink-0">
             Side
           </Label>
@@ -1090,6 +1148,30 @@ function BrokerageCalcTab() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2">
+          <Label htmlFor="brk-underlying" className="text-xs text-text-muted w-32 shrink-0">
+            Underlying
+          </Label>
+          <div className="flex-1 min-w-0">
+            <Controller
+              name="underlying"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="brk-underlying" className={selectCls}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-surface-card border-border-default text-xs">
+                    <SelectItem value="NIFTY">NIFTY</SelectItem>
+                    <SelectItem value="BANKNIFTY">BANKNIFTY</SelectItem>
+                    <SelectItem value="SENSEX">SENSEX</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+        </div>
+
         <NumField
           id="brk-lotsize"
           label="Lot Size"
@@ -1097,6 +1179,9 @@ function BrokerageCalcTab() {
           error={errors.lotSize?.message}
           min="1"
         />
+        <p className="text-xxs text-text-muted leading-snug">
+          Lot size comes from the broker instrument master.
+        </p>
         <NumField
           id="brk-lots"
           label="Lots"
@@ -1123,11 +1208,13 @@ function BrokerageCalcTab() {
       {/* Results */}
       <div className="border border-border-default rounded p-2 bg-surface-card space-y-0.5">
         <p className="text-xxs text-text-muted uppercase tracking-wider mb-1">Charges Breakdown</p>
-        <ResultRow label="Brokerage" value={formatINR(result.brokerage)} />
+        {result.brokerage > 0 && (
+          <ResultRow label="Brokerage" value={formatINR(result.brokerage)} />
+        )}
         <ResultRow label="STT" value={formatINR(result.stt)} />
-        <ResultRow label="Exchange Txn" value={formatINR(result.exchangeTxn)} />
-        <ResultRow label="SEBI" value={formatINR(result.sebi)} />
-        <ResultRow label="Stamp Duty" value={formatINR(result.stampDuty)} />
+        <ResultRow label={result.exchangeLabel} value={formatINR(result.exchangeTxn)} />
+        <ResultRow label="SEBI fee" value={formatINR(result.sebi)} />
+        <ResultRow label="Stamp duty" value={formatINR(result.stampDuty)} />
         <ResultRow label="GST (18%)" value={formatINR(result.gst)} />
         <div className="border-t border-border-default my-1" />
         <ResultRow label="Total Cost" value={formatINR(result.total)} highlight="loss" />
@@ -1218,7 +1305,7 @@ function MarginCalcTab() {
       symbol:   "NIFTY",
       exchange: "NFO",
       action:   "BUY",
-      quantity: 25,
+      quantity: lotSizeFromMaster("NIFTY") ?? 1,
       product:  "NRML",
       price:    100,
       legs:     1,
@@ -1453,6 +1540,9 @@ function MarginCalcTab() {
             error={errors.quantity?.message}
             min="1"
           />
+          <p className="text-xxs text-text-muted leading-snug">
+            Quantity starts from the broker instrument master.
+          </p>
           <NumField
             id="mgn-legs"
             label="Legs (multi-leg)"

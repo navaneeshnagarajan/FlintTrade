@@ -8,6 +8,26 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/lib/instrumentLots", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { dirname, resolve } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const actual = await vi.importActual<typeof import("@/lib/instrumentLots")>("@/lib/instrumentLots");
+  const revision = JSON.parse(
+    readFileSync(
+      resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        "../../../../../../../core/core/tests/data/instrument_lot_revision_window.json",
+      ),
+      "utf8",
+    ),
+  ) as { rows: Parameters<typeof actual.contractsFromRows>[0] };
+  return {
+    ...actual,
+    scalperLotLabel: (underlying: string) => actual.scalperLotLabel(underlying, revision.rows, "2026-09-01"),
+  };
+});
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -16,6 +36,7 @@ import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
+import { LOT_SIZE_MASTER_HINT } from "../types";
 import WatchlistWidget from "@/widgets/utility/Watchlist/WatchlistWidget";
 
 // ---------------------------------------------------------------------------
@@ -327,7 +348,7 @@ describe("ScalperWidget", () => {
       selector({ mode: "practice" }),
     );
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     await waitFor(() => {
       const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
@@ -388,7 +409,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
 
     // Sublabel confirms the dynamic lot size arrived (not the built-in 75)
-    await screen.findByText("×99");
+    await screen.findByText("1 (99)");
     expect(mockGetSymbol).toHaveBeenCalledWith(expect.stringMatching(/CE$/), "NFO");
 
     await buyCeWithConfirm();
@@ -410,7 +431,7 @@ describe("ScalperWidget", () => {
     });
     render(<ScalperWidget {...defaultProps} />);
 
-    await screen.findByText("×80");
+    await screen.findByText("1 (80)");
 
     await buyCeWithConfirm();
 
@@ -426,7 +447,7 @@ describe("ScalperWidget", () => {
     // Default mockGetLotSize is sample-flagged 75 — display only.
     render(<ScalperWidget {...defaultProps} />);
 
-    await screen.findByText("×75 (unverified)");
+    await screen.findByText("75 · Oct expiry, 65 · Nov expiry");
 
     await buyCeWithConfirm();
 
@@ -440,8 +461,8 @@ describe("ScalperWidget", () => {
     mockGetLotSize.mockRejectedValue(new Error("backend down"));
     render(<ScalperWidget {...defaultProps} />);
 
-    // Falls back to the built-in table for DISPLAY only, marked unverified
-    await screen.findByText("×75 (unverified)");
+    // Both live months stay on the caption. Orders stay blocked.
+    await screen.findByText("75 · Oct expiry, 65 · Nov expiry");
 
     await buyCeWithConfirm();
 
@@ -451,7 +472,7 @@ describe("ScalperWidget", () => {
 
   it("blocks a LIMIT order without a limit price instead of sending ₹0", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     // Switch to LIMIT — the price input appears; leave it empty
     fireEvent.click(screen.getByText("LIMIT"));
@@ -465,7 +486,7 @@ describe("ScalperWidget", () => {
 
   it("sends the entered limit price with a LIMIT order", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -481,7 +502,7 @@ describe("ScalperWidget", () => {
 
   it("reports 'placed' — never 'filled' — after placeOrder resolves", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     await buyCeWithConfirm();
 
@@ -493,7 +514,7 @@ describe("ScalperWidget", () => {
 
   it("keeps the plain gated order path when SL/Target are blank", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     await buyCeWithConfirm();
 
@@ -503,7 +524,7 @@ describe("ScalperWidget", () => {
 
   it("places a bracket with an SL leg anchored to the LIMIT price", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -529,7 +550,7 @@ describe("ScalperWidget", () => {
 
   it("places a bracket with a target leg (and no stoploss key)", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -551,7 +572,7 @@ describe("ScalperWidget", () => {
       { get: () => ({ ltp: 200, close: 200 }) },
     ) as Record<string, { ltp?: number; close?: number }>;
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -568,7 +589,7 @@ describe("ScalperWidget", () => {
 
   it("fails closed on a MARKET bracket when no live price is available", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -581,7 +602,7 @@ describe("ScalperWidget", () => {
 
   it("refuses SL and Target together (no OCO fill monitor) without sending", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
     fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
@@ -595,7 +616,7 @@ describe("ScalperWidget", () => {
 
   it("reports a bracket as PLACED (legs pending) — never as filled", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -618,7 +639,7 @@ describe("ScalperWidget", () => {
       ),
     );
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -634,7 +655,7 @@ describe("ScalperWidget", () => {
       Object.assign(new Error("Safety layer L1 rejected the entry leg"), { code: "" }),
     );
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -655,7 +676,7 @@ describe("ScalperWidget", () => {
     );
     mockCancelBracket.mockResolvedValue({ message: "Bracket cancelled", warnings: [] });
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
@@ -675,7 +696,7 @@ describe("ScalperWidget", () => {
 
   it("shows the SL leg in the confirm modal before placing", async () => {
     render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("×75");
+    await screen.findByText("1 (75)");
 
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -853,5 +874,20 @@ describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.getByText(EXPLORE_SCALPER_ORDER_HELPER)).toBeInTheDocument();
     expect(screen.getByText("Buy CE").closest("button")).toBeDisabled();
+  });
+
+  it("shows an em dash when the instrument master has no lot for that index", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol master unavailable"));
+    mockGetLotSize.mockRejectedValue(new Error("backend down"));
+    const { store } = renderScalperOnBus();
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "FINNIFTY", exchange: "NSE_INDEX" });
+    });
+
+    await waitFor(() => expect(scalperIndexValue()).toBe("FINNIFTY"));
+    expect(screen.getByTitle(LOT_SIZE_MASTER_HINT)).toHaveTextContent("—");
+    expect(screen.queryByText("×65")).not.toBeInTheDocument();
+    expect(screen.queryByText("×75")).not.toBeInTheDocument();
   });
 });

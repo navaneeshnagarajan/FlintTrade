@@ -4,13 +4,15 @@ Fetches authoritative lot sizes from the OpenAlgo ``instruments`` endpoint
 and caches them for 24 hours.  Falls back to a built-in table of common lot
 sizes when the live fetch is unavailable.
 
-The built-in table reflects current NSE/BSE/MCX/CDS contract specifications.
-NIFTY is 75 as of the current NSE-mandated lot size.
+Nifty, Bank Nifty, and Sensex multipliers are not written in this table.
+They are read from the cached broker instrument master (Dhan ``SEM_LOT_UNITS``
+and Kotak Neo ``lLotSize``). Other underlyings stay in the built-in table
+until that master carries a row for them.
 
 Usage::
 
     resolver = LotSizeResolver(client)
-    lot = await resolver.get_lot_size("NIFTY", "NFO")   # 75 (or live value)
+    lot = await resolver.get_lot_size("NIFTY", "NFO")   # master, or live value
     lot = await resolver.get_lot_size("UNKNOWN", "NFO")  # 1 (safe default)
 
     # Or use the convenience module-level function (uses shared instance):
@@ -25,10 +27,15 @@ import math
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from flinttrade_core.instrument_lots import lot_size_from_master
+
 if TYPE_CHECKING:
     from flinttrade_core.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.screener.lot_sizes")
+
+# Index names whose contract multiplier comes only from the instrument master.
+_MASTER_UNDERLYINGS: tuple[str, ...] = ("NIFTY", "BANKNIFTY", "SENSEX")
 
 # ---------------------------------------------------------------------------
 # Built-in fallback table
@@ -39,18 +46,13 @@ logger = logging.getLogger("flinttrade.screener.lot_sizes")
 # table, keeping the freshest value wherever the two diverged (FINNIFTY 65,
 # MIDCPNIFTY 120 per the current contract specifications).
 #
-# NSE F&O — Index options/futures
-# NIFTY: 75 lots per contract (NSE mandate, last revised Nov 2024)
-# BANKNIFTY: 30 (reduced from 15 in 2024 NSE revision)
+# Nifty, Bank Nifty, and Sensex are filled below from the instrument master.
 FALLBACK_LOT_SIZES: dict[str, int] = {
-    # NFO — Index derivatives
-    "NIFTY": 75,
-    "BANKNIFTY": 30,
+    # NFO — Index derivatives (Nifty and Bank Nifty come from the master)
     "FINNIFTY": 65,
     "MIDCPNIFTY": 120,
     "NIFTYNXT50": 25,
-    # BFO — BSE derivatives
-    "SENSEX": 20,
+    # BFO — BSE derivatives (Sensex comes from the master)
     "BANKEX": 30,
     "SENSEX50": 25,
     # CDS — Currency derivatives (all per contract in INR notional units)
@@ -85,6 +87,11 @@ FALLBACK_LOT_SIZES: dict[str, int] = {
     "MENTHAOIL": 360,   # 360 kg
     "COTTON": 25,       # 25 bales
 }
+
+for _underlying in _MASTER_UNDERLYINGS:
+    _master_lot = lot_size_from_master(_underlying)
+    if _master_lot is not None:
+        FALLBACK_LOT_SIZES[_underlying] = _master_lot
 
 # Cache TTL — lot sizes change infrequently; 24 hours is safe
 _CACHE_TTL_SECONDS: int = 86_400  # 24 hours

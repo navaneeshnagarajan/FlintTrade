@@ -341,10 +341,10 @@ class VoiceOrderParser:
     Examples::
 
         parser = VoiceOrderParser()
-        cmd = parser.parse("Buy 75 Nifty at market")
+        cmd = parser.parse("Buy 65 Nifty at market")
         assert cmd.symbol == "NIFTY"
         assert cmd.action == "BUY"
-        assert cmd.quantity == 75
+        assert cmd.quantity == 65
         assert cmd.price_type == "MARKET"
     """
 

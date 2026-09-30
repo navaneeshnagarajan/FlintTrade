@@ -455,8 +455,12 @@ class TestMCPBridge:
         assert result is not None
         assert result.arguments["action"] == "SELL"
         assert result.arguments["exchange"] == "NFO"
-        # 2 lots * 75 = 150
-        assert result.arguments["quantity"] == "150"
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
+        lot = lot_size_from_master("NIFTY")
+        assert lot is not None
+        # 2 lots × the near-month master lot.
+        assert result.arguments["quantity"] == str(2 * lot)
 
     def test_parse_with_price(self):
         from flinttrade_ai.mcp_bridge import parse_order_command

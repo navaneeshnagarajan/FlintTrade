@@ -200,7 +200,9 @@ function PnLMonitorWidget(props: WidgetProps) {
         realisedPnL += realisedForSymbol.get(symbolOf(pos)) ?? 0;
       }
     }
-    const netPnL = realisedPnL + unrealisedPnL;
+    const grossPnL = realisedPnL + unrealisedPnL;
+    const estimatedCharges = mode === "practice" ? (funds?.estimatedCharges ?? 0) : 0;
+    const netPnL = grossPnL - estimatedCharges;
 
     // Peak / trough / max drawdown tracking (ref-stable). The peak seeds at 0:
     // the session starts flat, so falling from ₹0 straight into loss IS
@@ -259,6 +261,8 @@ function PnLMonitorWidget(props: WidgetProps) {
     isExplore,
     accountReadsEnabled,
     positions,
+    funds?.estimatedCharges,
+    mode,
   ]);
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.
@@ -414,6 +418,7 @@ function PnLMonitorWidget(props: WidgetProps) {
             loading={state.loading}
             riskLimits={riskLimits}
             accountReadsEnabled={accountReadsEnabled}
+            estimatedCharges={mode === "practice" ? (funds?.estimatedCharges ?? 0) : 0}
           />
         </TabsContent>
 
@@ -422,6 +427,7 @@ function PnLMonitorWidget(props: WidgetProps) {
             positions={positions ?? []}
             funds={funds}
             netPnL={state.netPnL}
+            estimatedCharges={mode === "practice" ? (funds?.estimatedCharges ?? 0) : 0}
           />
         </TabsContent>
 

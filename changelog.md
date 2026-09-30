@@ -17,6 +17,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Added
+
+- **Estimated charges on Practice fills.** Every Practice fill runs through the shared Indian statutory calculator and stores the breakdown and the day's charges total. Fills show `Charges ₹X (estimated)`. Positions and Performance show net P&L, with gross and charges in the tooltip. Home and Invest subtract those charges from net worth. The Practice source line is `Practice account, after estimated charges`.
+
 ### Fixed
 
 - **Laya chip, runtime key, and snapshot launch.** The desk polls
