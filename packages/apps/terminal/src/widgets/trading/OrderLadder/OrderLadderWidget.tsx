@@ -59,6 +59,7 @@ import { useDepthData } from "@/hooks/useDepthData";
 import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { placeOrder, cancelOrder, getSymbol } from "@/services/api";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import {
   checkLotMultiple,
   checkOrderEntryMode,
@@ -425,6 +426,7 @@ function OrderLadderWidget(props: Props) {
   const [tickSize, setTickSize] = useState<TickSize>(initialTick);
   useEffect(() => { setTickSize(initialTick); }, [initialTick]);
   const [qty, setQty] = useState(DEFAULT_QTY);
+  const [note, setNote] = useState("");
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
@@ -574,7 +576,7 @@ function OrderLadderWidget(props: Props) {
     setPendingOrders((p) => [...p, order]);
     try {
       const result = await placeOrder(
-        { symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder" },
+        { symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder", rationale: admissionRationale(note) },
         authority,
       );
       // Store the REAL broker order id — cancel is disabled until it is known,
@@ -591,7 +593,7 @@ function OrderLadderWidget(props: Props) {
       showMsg(err instanceof Error ? err.message : "Order failed");
       setPendingOrders((p) => p.filter((o) => o.localId !== localId));
     }
-  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg]);
+  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg, note]);
 
   const cancelPending = useCallback(async (localId: string) => {
     const order = pendingOrders.find((o) => o.localId === localId);
@@ -636,9 +638,9 @@ function OrderLadderWidget(props: Props) {
         {isExplore && (
           <span
             className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            aria-label="Showing sample data"
+            aria-label="Showing Example"
           >
-            Sample data
+            Example
           </span>
         )}
         <div className="flex-1" />
@@ -671,6 +673,9 @@ function OrderLadderWidget(props: Props) {
             ))}
           </div>
         </div>
+      </div>
+      <div className="flex-none px-2 py-1 border-b border-border-subtle">
+        <AdmissionNoteField id="ladder-admission-note" value={note} onChange={setNote} />
       </div>
 
       <div className="flex-none flex items-center h-5 border-b border-border-default text-xxs font-medium uppercase tracking-wide bg-surface-card">

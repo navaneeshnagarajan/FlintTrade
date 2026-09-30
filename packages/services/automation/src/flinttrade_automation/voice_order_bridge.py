@@ -506,12 +506,12 @@ class VoiceOrderBridge:
         if intent.order_type == "LIMIT" and intent.price is not None:
             order_params["price"] = intent.price
 
-        result = await self._router.place_order(order_params)
-        logger.info(
-            "Voice order placed: %s %d %s — result: %s",
-            intent.action, intent.quantity, intent.symbol, result,
-        )
-        return {"status": "success", "action": intent.action, "data": result}
+        return {
+            "status": "error",
+            "action": intent.action,
+            "message": "Orders are placed through /api/v1/orders/place.",
+            "data": order_params,
+        }
 
     async def _handle_cancel(self, intent: VoiceOrderIntent) -> dict[str, Any]:
         """Cancel the most recent open order (or order by symbol if provided).
@@ -534,8 +534,12 @@ class VoiceOrderBridge:
         Returns:
             Execution result dict.
         """
-        result = await self._router.close_position(symbol=intent.symbol)
-        return {"status": "success", "action": "EXIT", "data": result}
+        return {
+            "status": "error",
+            "action": "EXIT",
+            "message": "Orders are placed through /api/v1/orders/place.",
+            "symbol": intent.symbol,
+        }
 
     async def _handle_status(self, intent: VoiceOrderIntent) -> dict[str, Any]:
         """Return current positions, optionally filtered by symbol.

@@ -289,6 +289,18 @@ class TestWheelNoClient:
         strat.start()
         assert isinstance(strat.generate_orders(), list)
 
+    def test_queued_orders_carry_an_admission_note(self):
+        from flinttrade_engine.strategies.wheel_live import WheelStrategy
+        strat = WheelStrategy(symbol="NIFTY", client=None)
+        _run(strat._place_sell("NIFTY24APR22000PE", 50))
+        sell = strat.generate_orders()[0]
+        assert sell.action.value == "SELL"
+        assert sell.admission_note == "Wheel plan: sell NIFTY24APR22000PE"
+        _run(strat._place_sl_buy("NIFTY24APR22000PE", 12.0, 50))
+        buy = strat.generate_orders()[0]
+        assert buy.action.value == "BUY"
+        assert buy.admission_note == "Wheel plan: buy a protective stop on NIFTY24APR22000PE"
+
 
 # ===========================================================================
 # _round_strike helper

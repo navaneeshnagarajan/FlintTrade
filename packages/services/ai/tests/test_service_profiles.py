@@ -12,6 +12,8 @@ from flinttrade_ai.agent_backends import registry
 from flinttrade_ai import llm_client, rag_pipeline, sentiment
 from flinttrade_ai.llm_client import LLMProvider
 from flinttrade_ai.service_profiles import DEFAULT_FEEDS, RSS_SOURCES, ai_service_descriptors
+from flinttrade_core.llm_provider_profiles import LLM_PROVIDER_PROFILES
+from flinttrade_core.service_providers import EvidenceUseScope, ServiceKind
 
 
 def test_ai_contribution_exactly_covers_current_surfaces() -> None:
@@ -33,6 +35,25 @@ def test_ai_contribution_exactly_covers_current_surfaces() -> None:
         item.default_rights.rights.max_evidence_use_scope.value == "isolated_research"
         for item in llm_descriptors
     )
+
+
+def test_decision_descriptors_are_not_chat_profiles() -> None:
+    descriptors = {item.provider_id: item for item in ai_service_descriptors()}
+    managed = descriptors["decision:laya-managed"]
+    endpoint = descriptors["decision:systemone-endpoint"]
+
+    assert managed.service_kinds == frozenset({ServiceKind.DECISION})
+    assert endpoint.service_kinds == frozenset({ServiceKind.DECISION})
+    assert managed.capabilities == ("decision.admit",)
+    assert endpoint.capabilities == ("decision.admit",)
+    assert managed.default_rights.rights.max_evidence_use_scope is EvidenceUseScope.OFFLINE_QUALIFICATION
+    assert endpoint.default_rights.rights.max_evidence_use_scope is EvidenceUseScope.OFFLINE_QUALIFICATION
+    assert "base checkpoint is not qualified for Live" in managed.activation_blockers
+    assert managed.default_rights.grants[0].evidence[0].revision == (
+        "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+    )
+    assert all(not item.provider_id.startswith("decision:") for item in LLM_PROVIDER_PROFILES)
+    assert "unsloth" not in managed.resource_requirements[0]
 
 
 def test_generic_forecast_protocol_is_declared_but_not_invokable() -> None:

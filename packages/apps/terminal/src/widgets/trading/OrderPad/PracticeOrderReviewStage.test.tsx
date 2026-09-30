@@ -46,10 +46,14 @@ describe("PracticeOrderReviewStage", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Review Practice order" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAccessibleDescription(/simulation only/i);
+    expect(dialog).toHaveAccessibleDescription("Confirm places this simulated order.");
+    expect(screen.queryByText(/Explore records a sample fill/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Example only/i)).not.toBeInTheDocument();
 
     const back = screen.getByRole("button", { name: "Back to edit" });
     const confirm = screen.getByRole("button", { name: "Confirm simulated Practice order" });
+    expect(confirm).toHaveTextContent("Confirm simulation");
+    expect(confirm).not.toHaveTextContent("Continue");
     expect(back).toHaveFocus();
 
     await user.tab();
@@ -108,9 +112,15 @@ describe("PracticeOrderReviewStage", () => {
       />,
     );
 
-    expect(screen.getByRole("dialog", { name: "Review sample order" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm sample order" })).toBeInTheDocument();
-    expect(screen.getByText(/sample only/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Review Example order" })).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm Example order" });
+    expect(confirm).toHaveTextContent("Continue");
+    expect(confirm).not.toHaveTextContent("Confirm simulation");
+    expect(screen.queryByText("Confirm simulation")).not.toBeInTheDocument();
+    expect(screen.getByText(
+      "Example only. Nothing is sent to a broker and no order is placed.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/Explore records a sample fill/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /practice/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Live/i)).not.toBeInTheDocument();
   });

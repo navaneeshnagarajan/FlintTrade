@@ -394,6 +394,7 @@ def dispatch_action_center_approval(approval: Any) -> Any:
 
     from .order_routes import (  # noqa: PLC0415
         _dispatch_live_order,
+        _gtt_contract_refusal,
         _require_live_payload,
     )
 
@@ -465,6 +466,9 @@ def dispatch_action_center_approval(approval: Any) -> Any:
         )
     order_params["broker"] = adapter_id
     order_params["account_id"] = account_id
+    note = str(getattr(approval, "reason", "") or "").strip()
+    if note and "rationale" not in order_params:
+        order_params["rationale"] = note
 
     context = dict(getattr(approval, "intent_context", {}) or {})
     try:
@@ -483,6 +487,15 @@ def dispatch_action_center_approval(approval: Any) -> Any:
         return ApprovalDispatchResult.refused(
             400,
             "The persisted entry context is incomplete; the entry was not sent.",
+        )
+
+    gtt_refusal = _gtt_contract_refusal(order_params)
+    if gtt_refusal is not None:
+        response, status_code = gtt_refusal
+        body = response.get_json(silent=True) or {}
+        return ApprovalDispatchResult.refused(
+            status_code,
+            str(body.get("message") or "Not placed. GTT orders aren't supported right now."),
         )
 
     response, status_code = _dispatch_live_order(

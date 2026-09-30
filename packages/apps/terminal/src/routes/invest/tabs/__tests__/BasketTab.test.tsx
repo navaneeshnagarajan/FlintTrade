@@ -45,25 +45,19 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-// Mock TanStack Query
+const quoteQuery = vi.hoisted(() => ({
+  data: {} as Record<string, unknown> | undefined,
+  isLoading: false,
+  refetch: vi.fn(),
+}));
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: {},
-    isLoading: false,
-    refetch: vi.fn(),
-  }),
+  useQuery: () => quoteQuery,
 }));
 
 // Mock API service
 vi.mock("@/services/api", () => ({
   getMultiQuotes: vi.fn().mockResolvedValue([]),
-}));
-
-// Mock DemoBanner
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => (
-    <div data-testid="demo-banner">Demo mode</div>
-  ),
 }));
 
 // Mock localStorage
@@ -86,7 +80,7 @@ Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
 import { useModeStore } from "@/stores/modeStore";
 import { BasketTab } from "../BasketTab";
 
-const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable in Explore";
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Example basket — editing unavailable";
 
 const USER_BASKET = {
   id: "custom-1",
@@ -113,6 +107,8 @@ function expectNoCardSampleChip(): void {
 describe("BasketTab", () => {
   beforeEach(() => {
     localStorageMock.clear();
+    quoteQuery.data = {};
+    quoteQuery.isLoading = false;
     useModeStore.setState({ mode: "explore" });
   });
 
@@ -145,9 +141,32 @@ describe("BasketTab", () => {
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("shows demo banner when no quotes loaded", () => {
+  it("shows one Example chip in Example mode when quotes are loaded", () => {
+    quoteQuery.data = { RELIANCE: { symbol: "RELIANCE", ltp: 2500 } };
     render(<BasketTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getAllByTestId("example-chip")).toHaveLength(1);
+    expect(screen.getByText(/thematic stock baskets/)).toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
+  });
+
+  it("does not show the Example chip in Practice when quotes are loaded", () => {
+    quoteQuery.data = { RELIANCE: { symbol: "RELIANCE", ltp: 2500 } };
+    useModeStore.setState({ mode: "practice" });
+    render(<BasketTab />);
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+  });
+
+  it("shows one Example chip when no quotes are loaded", () => {
+    render(<BasketTab />);
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
+  });
+
+  it("does not show the Example chip in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<BasketTab />);
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
   });
 
   it("renders saved baskets from localStorage", () => {

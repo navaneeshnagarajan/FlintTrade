@@ -19,7 +19,7 @@ This pass does **not** squash-merge archive snapshots. PR #132 already excluded 
 |---|---|---|---|
 | `archive-sanitized/fleet-20260810/linux/feature/phase4-practice-proof` | `759db85a` | **Skipped** | v1 harness hardcodes PASS evidence (`assert True` legacy guard, fabricated counts). Not a proof. |
 | `archive-sanitized/fleet-20260810/linux/feature/phase4-practice-proof-v2` | `afb7dc8f` | **Skipped** (partial salvage below) | Widest Phase 4 file set, but Claim B / full-day / verifier are stubs; `BrokerRouter` constructor is stale vs current main. |
-| `archive-wip/fleet-20260810/linux/feature/phase4-practice-proof-v3-real` | `c776602f` | **Ported** | Real Flask → `orders_bp` → isolated `SandboxEngine` + frozen-clock 10/11 burst. Forged Live-header case inverted to 403 (current `_mode_header_mismatch_response`). Stub schema / run scripts not ported. |
+| `archive-wip/fleet-20260810/linux/feature/phase4-practice-proof-v3-real` | `c776602f` | **Ported** | Real Flask → `orders_bp` → isolated Practice fills + frozen-clock 10/11 burst. Forged Live-header case inverted to 403 (current `_mode_header_mismatch_response`). Stub schema / run scripts not ported. |
 | `archive-sanitized/fleet-20260810/linux/fix/hostinger-staging-8d31a9a8` | `6cfd742c` | **Skipped** | Operator-specific Hostinger VPS staging runbooks. Not generic public-site product work. Excluded by #132. |
 | `archive-sanitized/fleet-20260810/linux/review/windows-hostinger-8d31a9a8` | `6bf8bcae` | **Skipped** | Same Hostinger bundle minus `hostinger-public-docs.test.ts`. |
 | `archive-sanitized/fleet-20260810/windows/wt/hostinger-local-staging-prep-e039` | `e22f935a` | **Skipped** | Windows sanitised snapshot of the same Hostinger prep. |
@@ -55,7 +55,7 @@ Groww session approval, Kotak Neo live probe, funded live order smoke, W6 spec, 
 
 ## What this converge ships
 
-- `packages/core/core/tests/test_phase4_practice_http_proof.py` — real `SandboxEngine` Practice fills, 403 on Practice JWT + forged Live header, invalid JWT / routed-live negatives, frozen-clock 21-call burst (10 accepted / 11 rate-limited) with live-path sentinels unused.
+- `packages/core/core/tests/test_phase4_practice_http_proof.py` — real Practice fills, 403 on Practice JWT + forged Live header, invalid JWT / routed-live negatives, frozen-clock 21-call burst (10 accepted / 11 rate-limited) with live-path sentinels unused.
 - `PLAN.md` — Phase 2 Remaining notes #140; Phase 4 Done records the HTTP burst pin without claiming the market-day exit.
 - This inventory.
 

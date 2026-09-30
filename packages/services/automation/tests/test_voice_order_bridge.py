@@ -290,9 +290,10 @@ class TestVoiceOrderBridgeExecute:
         intent = bridge.parse("buy 50 reliance")
         result = asyncio.run(bridge.execute(intent, confirm=False))
 
-        assert result["status"] == "success"
+        assert result["status"] == "error"
         assert result["action"] == "BUY"
-        router.place_order.assert_called_once()
+        assert "Orders are placed through /api/v1/orders/place." in result["message"]
+        router.place_order.assert_not_called()
 
     def test_execute_raises_low_confidence(self):
         import asyncio

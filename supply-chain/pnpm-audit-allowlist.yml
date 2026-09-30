@@ -12,46 +12,15 @@
 #       expires: "2026-08-23"
 allowlist:
   # ---------------------------------------------------------------------------
-  # Both entries below survive only because the advisory metadata is broader
-  # than the fix that actually shipped — not deferred convenience. Everything
-  # that had a real patched version was fixed instead, via the pnpm overrides
-  # block in pnpm-workspace.yaml (js-yaml 4.3.2, postcss 8.5.23,
-  # fast-uri 4.1.4, sharp 0.35.4, maplibre-gl 6.8.0, @xmldom/xmldom 0.8.15,
-  # brace-expansion 2.1.4, qs 6.16.0, fflate 0.6.11) and direct bumps of
-  # next (16.3.4) and react-router (8.3.0).
+  # The brace-expansion entry that used to live here is gone. GHSA-mh99-v99m-4gvg
+  # was republished on 2026-07-31 with per-line ranges, and GHSA-6j4f-fj2g-mc7p
+  # plus GHSA-qhr7-859c-m2p7 have patched 2.1.7 / 3.0.9 / 5.0.12 releases. The
+  # overrides in pnpm-workspace.yaml pin those. Do not allowlist them.
+  # Everything else that had a real patched version was fixed the same way
+  # (js-yaml 4.3.2, postcss 8.5.23, fast-uri 4.1.4, sharp 0.35.4,
+  # maplibre-gl 6.8.0, @xmldom/xmldom 0.8.15, qs 6.16.0, fflate 0.6.11,
+  # undici 7.30.0) plus direct bumps of next (16.3.4) and react-router (8.3.0).
   # ---------------------------------------------------------------------------
-
-  - advisory: "GHSA-mh99-v99m-4gvg"
-    package: "brace-expansion"
-    reason: >-
-      The code IS patched; only the advisory range is stale. brace-expansion
-      2.1.4 (dist-tag maintenance-v2) carries the backported
-      EXPANSION_MAX_LENGTH bound, so the overrides in pnpm-workspace.yaml leave
-      the tree holding only 2.1.4 and 5.0.9. pnpm audit still reports it because
-      GHSA-mh99-v99m-4gvg states one flat range ("<=5.0.7") that matches 2.1.4
-      numerically; the advisory has not been updated since it was published on
-      2026-07-24, so the per-major backports that landed afterwards (1.1.18,
-      2.1.4, 3.0.6) are all inside its range regardless of carrying the fix.
-      Verified 2026-07-31 against the GitHub advisory API.
-      This CANNOT be resolved by moving the tree onto >=5.0.8, and that is a
-      hard blocker rather than a preference. brace-expansion 3.x and 4.x are
-      ESM-only and 5.x replaced the callable default export with a named
-      `expand`, while minimatch 3.x/5.x/9.x call
-      `require('brace-expansion')(pattern)` — so only the 2.x line can serve
-      them. Nor can the dependents be bumped past it: the three roots that pull
-      an old minimatch are electron-builder (via dir-compare, capped at
-      minimatch ^3 in every version ever published, latest 5.0.0),
-      @glideapps/glide-data-grid (via @linaria/utils, capped at minimatch ^9,
-      latest 5.0.2) and eslint (via @eslint/eslintrc, capped at minimatch ^3,
-      latest 3.3.6). No published release of any of the three uses a minimatch
-      on brace-expansion 5.x, so no upgrade closes this.
-      Reachability is low regardless — every path is build-time tooling
-      (electron-builder's packaging chain, the linaria toolchain under
-      @glideapps/glide-data-grid, and eslint), never shipped browser code, and
-      the brace patterns come from repo config rather than user input.
-      Drop this entry once the advisory lists 2.1.4 as patched.
-    accepted_by: "navaneesh"
-    expires: "2026-10-26"
 
   - advisory: "GHSA-qwww-vcr4-c8h2"
     package: "react-router"

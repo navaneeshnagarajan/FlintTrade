@@ -264,8 +264,44 @@ class TestHealthAggregated:
         resp = client.get("/api/v1/health")
         data = resp.get_json()
         assert "broker" in data
+        assert "duckdb" in data
         assert "disk" in data
         assert "memory" in data
+
+    def test_health_host_memory_is_not_a_zero_pair(self, client):
+        """Live health must not report host RAM as 0/0 or as process RSS.
+
+        Args:
+            client: Flask test client.
+        """
+        data = client.get("/api/v1/health").get_json()
+        memory = data["memory"]
+        assert not (memory.get("used_mb") == 0 and memory.get("total_mb") == 0)
+        if memory.get("scope") == "host":
+            assert memory["total_mb"] > 0
+            assert "used_pct" in memory
+            process = memory.get("process")
+            if process is not None:
+                assert process.get("scope") == "process"
+                assert "rss_mb" in process
+        elif memory.get("scope") == "process":
+            assert "used_mb" not in memory
+            assert "total_mb" not in memory
+            assert "rss_mb" in memory.get("process", {})
+        disk = data["disk"]
+        if disk.get("scope") == "host":
+            assert disk["total_gb"] > 0
+            assert disk["used_pct"] == disk["percent_used"]
+        if "cpu" in data:
+            assert data["cpu"]["scope"] == "host"
+            assert data["cpu"]["used_pct"] >= 0
+        if "gpu" in data:
+            assert data["gpu"]["scope"] == "host"
+            assert data["gpu"].get("total_mb", 1) > 0 or "used_pct" in data["gpu"]
+        if "network" in data:
+            assert data["network"]["scope"] == "host"
+            assert data["network"]["bytes_sent"] >= 0
+            assert data["network"]["bytes_recv"] >= 0
 
 
 # ---------------------------------------------------------------------------

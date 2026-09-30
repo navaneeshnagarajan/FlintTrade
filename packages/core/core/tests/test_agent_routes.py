@@ -1177,3 +1177,67 @@ def test_stop_and_status_require_auth(monkeypatch):
     client = _make_app().test_client()
     assert client.get("/api/v1/ai/agent/status").status_code == 401
     assert client.post("/api/v1/ai/agent/stop", json={}).status_code == 401
+
+
+def test_approved_agent_entry_places_and_gtt_is_refused(live_auth, monkeypatch):
+    """An approved entry reaches the live place path. GTT does not."""
+    from types import SimpleNamespace
+
+    from flask import jsonify
+
+    calls: list[tuple[str, str]] = []
+
+    def _dispatch(action, body, _payload, *, adapter_id, account_id):
+        calls.append((action, str(body.get("variety") or "")))
+        assert adapter_id == "openalgo"
+        assert account_id == "default"
+        return jsonify({"status": "success", "orderid": "AGENT-1"}), 200
+
+    monkeypatch.setattr(order_routes_mod, "_dispatch_live_order", _dispatch)
+    stopped = threading.Event()
+    thread = threading.Thread(target=stopped.wait, daemon=True)
+    thread.start()
+    trader = MagicMock()
+    trader.stop_requested = False
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.update({  # noqa: SLF001
+            "producer_ref": "prod-1",
+            "trader": trader,
+            "thread": thread,
+            "loop": None,
+            "params": {"broker": "openalgo", "account_id": "default"},
+        })
+    approval = SimpleNamespace(
+        id="req-1",
+        source="autonomous-agent",
+        intent_type="entry",
+        producer_ref="prod-1",
+        adapter_id="openalgo",
+        account_id="default",
+        order_params={
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 1,
+            "price": 1500,
+            "product": "MIS",
+        },
+        intent_context={"entry_price": 1500.0, "stop_loss": 1400.0, "take_profit": 1600.0},
+    )
+    app = _make_app()
+    try:
+        with app.test_request_context("/api/v1/action-center/approve/req-1", method="POST"):
+            placed = mod.dispatch_action_center_approval(approval)
+        assert placed.succeeded is True
+        assert placed.broker_order_id == "AGENT-1"
+        assert calls == [("place", "")]
+
+        approval.order_params = {**approval.order_params, "variety": "gtt"}
+        with app.test_request_context("/api/v1/action-center/approve/req-1", method="POST"):
+            refused = mod.dispatch_action_center_approval(approval)
+        assert refused.succeeded is False
+        assert refused.status_code == 422
+        assert calls == [("place", "")]
+    finally:
+        stopped.set()
+        thread.join(timeout=1.0)

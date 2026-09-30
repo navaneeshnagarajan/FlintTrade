@@ -1,5 +1,5 @@
 // Migrated to TSX — Phase 4 Batch 1
-// Direct API calls (placeOrder, cancelAllOrders, closePosition, getExpiry, getQuotes)
+// Direct API calls (placeOrder, cancelAllOrders, exitAllPositions, getExpiry, getQuotes)
 // are intentional here: Scalper requires interactive one-click orders, not cached REST data.
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -23,6 +23,7 @@ import { useVoiceAlert } from "@/hooks/useVoiceAlert";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { ScalperControls } from "./ScalperControls";
@@ -125,6 +126,7 @@ function ScalperWidget(props: WidgetProps) {
   const [targetPoints, setTargetPoints] = useState("");
   const [limitPrice, setLimitPrice] = useState("");
   const [oneClick, setOneClick] = useState(false);
+  const [note, setNote] = useState("");
   const [interval, setInterval_] = useState<IntervalValue>("5m");
 
   const [expiries, setExpiries] = useState<string[]>([]);
@@ -459,6 +461,7 @@ function ScalperWidget(props: WidgetProps) {
         product,
         price: orderType === "LIMIT" ? price : 0,
         strategy: "FlintScalper",
+        rationale: admissionRationale(note),
       };
       showStatus(`${action} ${sym} × ${qty}…`, "pending", 0);
       try {
@@ -475,7 +478,7 @@ function ScalperWidget(props: WidgetProps) {
     // that used to sit in this array is not read by the callback and did not
     // cover it — a Live -> Practice downgrade leaves `isExplore` false, so the
     // callback kept checking against the mode it was created under.
-    [mode, ordersArmed, lots, lotSize, lotSizeVerified, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder],
+    [mode, ordersArmed, lots, lotSize, lotSizeVerified, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
   );
 
   const handleOrder = useCallback(
@@ -599,6 +602,9 @@ function ScalperWidget(props: WidgetProps) {
       }}
       className="h-full flex flex-col bg-surface-base text-text-primary focus:outline-none overflow-hidden"
     >
+      <div className="flex-none px-2 py-1 border-b border-border-subtle">
+        <AdmissionNoteField id="scalper-admission-note" value={note} onChange={setNote} />
+      </div>
       {unprotectedBracket && (
         <div
           role="alert"

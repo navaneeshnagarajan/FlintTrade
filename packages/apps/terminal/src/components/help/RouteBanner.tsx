@@ -1,23 +1,24 @@
 /**
  * RouteBanner.tsx
  *
- * Dismissible hint banner rendered at the top of a route.
+ * Dismissible page tip.
  *
  * Behaviour:
  *   - Only renders when `helpPrefs.inlineHints` is true
  *   - Shows a lightbulb icon, hint text, and a dismiss X button
  *   - Dismissed state is persisted in localStorage as
- *     `flinttrade:hint:<hintId>` so it never reappears after dismissal
+ *     `ft-hint-dismissed-<hintId>` so it never reappears after dismissal
  *   - Dismissed hints can be bulk-reset from Settings (same key pattern
- *     used by InlineHint: `ft-hint-dismissed-<hintId>`)
+ *     used by InlineHint)
  *
- * Design:
- *   - Accent-tinted glass surface, consistent with FlintTrade design tokens
- *   - Respects prefers-reduced-motion (no animation when reduced)
+ * Placement: pages render it inside their body, under the page header, as a
+ * rounded Callout. The Trade desk uses the slim full-width `strip` variant
+ * so the canvas keeps its height.
  */
 
 import { useState } from "react";
 import { Lightbulb, X } from "lucide-react";
+import { Callout } from "@/components/ui/Callout";
 import { useHelpPrefs } from "@/hooks/useHelpPrefs";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +55,8 @@ export interface RouteBannerProps {
   hintId: string;
   /** Hint text displayed in the banner */
   text: string;
+  /** Rounded in-page callout (default) or a slim full-width strip. */
+  variant?: "callout" | "strip";
   /** Additional class names on the outer wrapper */
   className?: string;
 }
@@ -62,7 +65,7 @@ export interface RouteBannerProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function RouteBanner({ hintId, text, className }: RouteBannerProps) {
+export function RouteBanner({ hintId, text, variant = "callout", className }: RouteBannerProps) {
   const helpPrefs = useHelpPrefs();
   const [dismissed, setDismissed] = useState(() => isDismissed(hintId));
 
@@ -75,38 +78,40 @@ export function RouteBanner({ hintId, text, className }: RouteBannerProps) {
     setDismissed(true);
   }
 
-  return (
-    <div
-      role="note"
-      aria-label="Hint"
-      className={cn(
-        "flex items-center gap-2 px-4 py-2",
-        "border-b border-accent/20 bg-accent/5",
-        "shrink-0",
-        className,
-      )}
-    >
-      <Lightbulb
-        className="h-3.5 w-3.5 shrink-0 text-accent"
-        aria-hidden="true"
-      />
-      <p className="flex-1 text-xs text-text-secondary leading-relaxed">
-        {text}
-      </p>
-      <button
-        type="button"
-        onClick={handleDismiss}
-        aria-label="Dismiss hint"
+  if (variant === "strip") {
+    return (
+      <div
+        role="note"
+        aria-label="Hint"
         className={cn(
-          "shrink-0 h-5 w-5 rounded flex items-center justify-center",
-          "text-text-muted hover:text-text-primary",
-          "transition-colors duration-150",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "flex shrink-0 items-center gap-2 border-b border-border-default bg-surface-base px-3 py-1.5",
+          className,
         )}
       >
-        <X className="h-3 w-3" />
-      </button>
-    </div>
+        <Lightbulb className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />
+        <p className="flex-1 text-xs leading-relaxed text-text-secondary">{text}</p>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          aria-label="Dismiss hint"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Callout
+      tone="tip"
+      aria-label="Hint"
+      onDismiss={handleDismiss}
+      dismissLabel="Dismiss hint"
+      className={className}
+    >
+      {text}
+    </Callout>
   );
 }
 

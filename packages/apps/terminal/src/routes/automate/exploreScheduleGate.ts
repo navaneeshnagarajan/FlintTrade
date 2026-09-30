@@ -10,14 +10,14 @@ import type { CronJob } from "@/services/ftApi";
 import type { AppMode } from "@/stores/modeStore";
 
 export const SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE =
-  "Sample schedule — control unavailable in Explore";
+  "Example schedule — control unavailable";
 
 export const SEEDED_EXPLORE_SCHEDULE_JOBS: CronJob[] = [
   {
     name: "pre-market-screener",
     description: "Run pre-market screener at 9:00 AM IST every weekday",
     trigger_type: "cron",
-    status: "Sample",
+    status: "Example",
     last_run: null,
     run_count: 0,
     error_count: 0,
@@ -26,7 +26,7 @@ export const SEEDED_EXPLORE_SCHEDULE_JOBS: CronJob[] = [
     name: "eod-position-snapshot",
     description: "Snapshot positions to a CSV at 3:30 PM IST",
     trigger_type: "cron",
-    status: "Sample",
+    status: "Example",
     last_run: null,
     run_count: 0,
     error_count: 0,
@@ -41,7 +41,7 @@ export function isExploreScheduleControlGated(mode: AppMode | string): boolean {
 /**
  * Remint an Explore job status so it cannot read as a live Active badge.
  *
- * Active → Sample; paused → Demo; other values stay as-is (muted fallback).
+ * Active → Example; paused → Demo; other values stay as-is (muted fallback).
  * Practice / Live statuses pass through unchanged.
  */
 export function exploreScheduleDisplayStatus(
@@ -50,7 +50,7 @@ export function exploreScheduleDisplayStatus(
 ): string {
   if (mode !== "explore") return status;
   const lower = status.toLowerCase();
-  if (lower === "active") return "Sample";
+  if (lower === "active") return "Example";
   if (lower === "paused") return "Demo";
   return status;
 }

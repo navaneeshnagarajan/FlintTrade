@@ -10,6 +10,7 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { Newspaper } from "lucide-react";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 type Sentiment = "positive" | "negative" | "neutral";
 
@@ -62,6 +63,7 @@ export function NewsCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Top Stories
           </p>
+          <ExampleLabel testId="news-example-label" />
         </div>
 
         <div className="flex-1 space-y-2">

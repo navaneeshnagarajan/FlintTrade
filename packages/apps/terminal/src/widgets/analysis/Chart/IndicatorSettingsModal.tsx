@@ -203,7 +203,7 @@ export function IndicatorSettingsModal({
                 >
                   {cat}
                   {activeCountByCategory[cat] > 0 && (
-                    <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-accent text-white text-xxs flex items-center justify-center leading-none">
+                    <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-accent text-accent-foreground text-xxs flex items-center justify-center leading-none">
                       {activeCountByCategory[cat]}
                     </span>
                   )}

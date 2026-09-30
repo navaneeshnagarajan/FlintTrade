@@ -1,7 +1,6 @@
 /**
  * placeholderCardBadges.test — home Bento cards that still render fabricated
- * numbers stay quiet. The Mode honesty bar owns the Explore disclaimer, so
- * these cards no longer carry a per-card Sample chip.
+ * numbers show a visible Example label. The retired Sample chip stays quiet.
  *
  * BreadthCard is LIVE-capable (it fetches /ft-api/v1/breadth/current and
  * labels the footer NSE only for genuine non-sample data).
@@ -31,13 +30,13 @@ function renderCard(ui: React.ReactNode) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
-const CARDS: Array<{ name: string; node: React.ReactNode; badgeTestId: string }> = [
-  { name: "GlobalCard", node: <GlobalCard />, badgeTestId: "global-demo-badge" },
-  { name: "SectorCard", node: <SectorCard />, badgeTestId: "sector-demo-badge" },
-  { name: "BreadthCard", node: <BreadthCard />, badgeTestId: "breadth-demo-badge" },
-  { name: "AIPulseCard", node: <AIPulseCard />, badgeTestId: "ai-pulse-demo-badge" },
-  { name: "SIPCard", node: <SIPCard />, badgeTestId: "sip-demo-badge" },
-  { name: "NewsCard", node: <NewsCard />, badgeTestId: "news-demo-badge" },
+const CARDS: Array<{ name: string; node: React.ReactNode; badgeTestId: string; exampleTestId: string }> = [
+  { name: "GlobalCard", node: <GlobalCard />, badgeTestId: "global-demo-badge", exampleTestId: "global-example-label" },
+  { name: "SectorCard", node: <SectorCard />, badgeTestId: "sector-demo-badge", exampleTestId: "sector-example-label" },
+  { name: "BreadthCard", node: <BreadthCard />, badgeTestId: "breadth-demo-badge", exampleTestId: "breadth-example-label" },
+  { name: "AIPulseCard", node: <AIPulseCard />, badgeTestId: "ai-pulse-demo-badge", exampleTestId: "ai-pulse-example-label" },
+  { name: "SIPCard", node: <SIPCard />, badgeTestId: "sip-demo-badge", exampleTestId: "sip-example-label" },
+  { name: "NewsCard", node: <NewsCard />, badgeTestId: "news-demo-badge", exampleTestId: "news-example-label" },
 ];
 
 beforeEach(() => {
@@ -45,16 +44,18 @@ beforeEach(() => {
   mockConnected.mockReturnValue(false);
 });
 
-describe("home placeholder cards stay quiet — the Mode honesty bar owns Explore", () => {
-  it.each(CARDS)("$name does not render a per-card Sample badge", ({ node, badgeTestId }) => {
+describe("home placeholder cards show Example and stay free of the retired Sample chip", () => {
+  it.each(CARDS)("$name shows Example and does not render a Sample badge", ({ node, badgeTestId, exampleTestId }) => {
       renderCard(node);
       expect(screen.queryByTestId(badgeTestId)).not.toBeInTheDocument();
+      expect(screen.getByTestId(exampleTestId)).toHaveTextContent("Example");
     });
 
-  it("BreadthCard (disconnected) shows the placeholder totals without a Sample chip or live NSE label", () => {
+  it("BreadthCard (disconnected) shows the placeholder totals with Example and without a live NSE label", () => {
     renderCard(<BreadthCard />);
     expect(screen.queryByText(/NSE ·/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("breadth-example-label")).toHaveTextContent("Example");
     expect(screen.getByText("1,320")).toBeInTheDocument();
   });
 
@@ -73,6 +74,7 @@ describe("home placeholder cards stay quiet — the Mode honesty bar owns Explor
       renderCard(<BreadthCard />);
       await waitFor(() => expect(screen.getByText(/NSE ·/)).toBeInTheDocument());
       expect(screen.queryByTestId("breadth-demo-badge")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("breadth-example-label")).not.toBeInTheDocument();
       expect(screen.getByText("1,111")).toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();
@@ -94,6 +96,7 @@ describe("home placeholder cards stay quiet — the Mode honesty bar owns Explor
       renderCard(<BreadthCard />);
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
       expect(screen.queryByTestId("breadth-demo-badge")).not.toBeInTheDocument();
+      expect(screen.getByTestId("breadth-example-label")).toHaveTextContent("Example");
       expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
       expect(screen.queryByText(/NSE ·/)).not.toBeInTheDocument();
       expect(screen.getByText("1,320")).toBeInTheDocument();

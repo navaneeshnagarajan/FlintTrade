@@ -2,7 +2,7 @@
  * NetWorthTab.test.tsx — Render tests for the net worth breakdown tab.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -48,31 +48,41 @@ vi.mock("../../DisabledActionButton", () => ({
   ),
 }));
 
-// Mock InvestContext
+const investState = vi.hoisted(() => ({
+  holdings: [
+    { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
+  ],
+  summary: {
+    currentValue: 126000,
+    totalInvested: 122500,
+    totalPnl: 3500,
+    totalPnlPercent: 2.86,
+    availableCash: 50000,
+    positionValue: 0,
+    netWorth: 176000,
+    approximateNetWorth: false,
+    fallbackSymbols: [] as string[],
+    missingAverageSymbols: [] as string[],
+    openLegSymbols: [] as string[],
+    sectorCount: 1,
+    holdingCount: 1,
+  },
+  isLoading: false,
+  isError: false,
+  isSampleData: false,
+  positionBookReady: true,
+  refetchHoldings: vi.fn(),
+}));
+
 vi.mock("../../InvestContext", () => ({
-  useInvest: () => ({
-    holdings: [
-      { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
-    ],
-    summary: {
-      currentValue: 126000,
-      totalInvested: 122500,
-      totalPnl: 3500,
-      totalPnlPercent: 2.86,
-      availableCash: 50000,
-      sectorCount: 1,
-      holdingCount: 1,
-    },
-    isLoading: false,
-    isError: false,
-    refetchHoldings: vi.fn(),
-  }),
+  useInvest: () => investState,
 }));
 
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { formatAccountNetWorth } from "@/lib/accountNetWorth";
 import { NetWorthTab } from "../NetWorthTab";
 
 // ---------------------------------------------------------------------------
@@ -80,6 +90,15 @@ import { NetWorthTab } from "../NetWorthTab";
 // ---------------------------------------------------------------------------
 
 describe("NetWorthTab", () => {
+  beforeEach(() => {
+    investState.summary.positionValue = 0;
+    investState.summary.approximateNetWorth = false;
+    investState.summary.fallbackSymbols = [];
+    investState.summary.netWorth = 176000;
+    investState.isLoading = false;
+    investState.positionBookReady = true;
+  });
+
   it("renders the net worth breakdown heading", () => {
     render(<NetWorthTab />);
     expect(screen.getByText("Net Worth Breakdown")).toBeInTheDocument();
@@ -90,7 +109,7 @@ describe("NetWorthTab", () => {
     render(<NetWorthTab />);
     // "Equity Holdings" appears in both the donut legend and the category cards
     expect(screen.getAllByText("Equity Holdings").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Available Cash").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Cash").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Mutual Funds")).toBeInTheDocument();
     expect(screen.getByText("Gold")).toBeInTheDocument();
     expect(screen.getByText("Fixed Deposits")).toBeInTheDocument();
@@ -101,5 +120,25 @@ describe("NetWorthTab", () => {
 
     expect(screen.getByRole("img", { name: "Live asset allocation donut" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Invested versus current values" })).toBeInTheDocument();
+  });
+
+  it("marks the positions line and the total approximate", () => {
+    investState.summary.positionValue = 2_500;
+    investState.summary.netWorth = 452_300;
+    investState.summary.approximateNetWorth = true;
+    investState.summary.fallbackSymbols = ["NIFTY25JUNFUT"];
+    investState.summary.openLegSymbols = ["NIFTY25JUNFUT"];
+    investState.summary.missingAverageSymbols = [];
+
+    render(<NetWorthTab />);
+
+    const tooltip = "Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.";
+    expect(screen.getByText("Known Total (Cash + Holdings + Positions)").closest("div")).toHaveAttribute("title", tooltip);
+    expect(screen.getByTestId("net-worth-known-total")).toHaveTextContent(formatAccountNetWorth(452_300, true));
+    expect(screen.getByTestId("net-worth-open-positions")).toHaveTextContent(formatAccountNetWorth(2_500, true));
+    expect(screen.getByTestId("net-worth-open-positions")).toHaveAttribute("title", tooltip);
+    expect(screen.getByTestId("net-worth-known-total")).toHaveAccessibleName(
+      `Net Worth, approximately ${formatAccountNetWorth(452_300)}`,
+    );
   });
 });

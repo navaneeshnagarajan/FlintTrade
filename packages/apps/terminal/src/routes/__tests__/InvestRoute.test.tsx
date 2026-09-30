@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
@@ -93,32 +93,54 @@ describe("InvestRoute", () => {
     window.history.replaceState(null, "", "/invest");
   });
 
-  it("renders the Investor Dashboard heading", () => {
+  it("renders the Invest heading, matching its sidebar label", () => {
     render(<InvestRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Investor Dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Invest" })).toBeInTheDocument();
   });
 
-  it("has tab navigation with multiple tabs", () => {
+  it("shows five Invest groups instead of the flat tab row", () => {
     render(<InvestRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
-    expect(screen.getByText("Holdings")).toBeInTheDocument();
-    expect(screen.getByText("SIPs")).toBeInTheDocument();
-    expect(screen.getByText("Net Worth")).toBeInTheDocument();
+    const groups = screen.getByRole("tablist", { name: "Invest sections" });
+    const tabs = within(groups).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      "Overview",
+      "Holdings",
+      "Analyse",
+      "Discover",
+      "Tax",
+    ]);
+    expect(within(groups).getByRole("tab", { name: "Overview" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const views = screen.getByRole("tablist", { name: "Overview views" });
+    expect(within(views).getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(views).getByRole("tab", { name: "Net Worth" })).toBeInTheDocument();
+    expect(within(views).getByRole("tab", { name: "Goals" })).toBeInTheDocument();
+    expect(within(views).queryByRole("tab", { name: "SIPs" })).not.toBeInTheDocument();
   });
 
-  it("shows Dashboard tab as selected by default", () => {
+  it("shows Dashboard as the selected Overview view by default", () => {
     render(<InvestRoute />, { wrapper: createWrapper() });
-    const dashboardTab = screen.getByRole("tab", { name: /Dashboard/i });
-    expect(dashboardTab).toHaveAttribute("aria-selected", "true");
+    const views = screen.getByRole("tablist", { name: "Overview views" });
+    expect(within(views).getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
-  it("switches to the Shareholding panel when the Shareholding tab is selected", async () => {
+  it("opens Shareholding under Analyse", async () => {
     const user = userEvent.setup();
     render(<InvestRoute />, { wrapper: createWrapper() });
 
-    await user.click(screen.getByRole("tab", { name: /Shareholding/i }));
+    await user.click(screen.getByRole("tab", { name: "Analyse" }));
+    const views = screen.getByRole("tablist", { name: "Analyse views" });
+    await user.click(within(views).getByRole("tab", { name: "Shareholding" }));
 
-    expect(screen.getByRole("tab", { name: /Shareholding/i })).toHaveAttribute(
+    expect(within(views).getByRole("tab", { name: "Shareholding" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -129,23 +151,30 @@ describe("InvestRoute", () => {
   });
 
   it.each([
-    ["#holdings", /Holdings/i],
-    ["#sip", /SIPs/i],
-    ["#networth", /Net Worth/i],
-    ["#mf-optimizer", /MF Optimizer/i],
-  ] as const)("selects the matching tab when opened with %s", (hash, tabName) => {
+    ["#holdings", "Holdings", "Holdings"],
+    ["#sip", "Holdings", "SIPs"],
+    ["#networth", "Overview", "Net Worth"],
+    ["#mf-optimizer", "Discover", "MF Optimizer"],
+    ["#sector-rotation", "Analyse", "Sector Rotation"],
+    ["#overview", "Overview", "Dashboard"],
+    ["#tax", "Tax", "Tax"],
+  ] as const)("redirects %s to the %s group and %s view", (hash, groupName, viewName) => {
     window.history.replaceState(null, "", `/invest${hash}`);
 
     render(<InvestRoute />, { wrapper: createWrapper() });
 
-    expect(screen.getByRole("tab", { name: tabName })).toHaveAttribute(
+    const groups = screen.getByRole("tablist", { name: "Invest sections" });
+    expect(within(groups).getByRole("tab", { name: groupName })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
-      "aria-selected",
-      "false",
-    );
+    if (groupName !== viewName) {
+      const views = screen.getByRole("tablist", { name: `${groupName} views` });
+      expect(within(views).getByRole("tab", { name: viewName })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    }
   });
 
   it("keeps Dashboard selected for an unknown Invest hash", () => {
@@ -153,18 +182,19 @@ describe("InvestRoute", () => {
 
     render(<InvestRoute />, { wrapper: createWrapper() });
 
-    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
+    const views = screen.getByRole("tablist", { name: "Overview views" });
+    expect(within(views).getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
   });
 
-  it("syncs the active tab when the Invest hash changes", () => {
+  it("syncs the active group when the Invest hash changes", () => {
     window.history.replaceState(null, "", "/invest#sip");
 
     render(<InvestRoute />, { wrapper: createWrapper() });
 
-    expect(screen.getByRole("tab", { name: /SIPs/i })).toHaveAttribute(
+    expect(within(screen.getByRole("tablist", { name: "Holdings views" })).getByRole("tab", { name: "SIPs" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -174,13 +204,18 @@ describe("InvestRoute", () => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
 
-    expect(screen.getByRole("tab", { name: /Holdings/i })).toHaveAttribute(
+    const groups = screen.getByRole("tablist", { name: "Invest sections" });
+    expect(within(groups).getByRole("tab", { name: "Holdings" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
+    expect(within(groups).getByRole("tab", { name: "Overview" })).toHaveAttribute(
       "aria-selected",
       "false",
+    );
+    expect(within(screen.getByRole("tablist", { name: "Holdings views" })).getByRole("tab", { name: "Holdings" })).toHaveAttribute(
+      "aria-selected",
+      "true",
     );
   });
 });

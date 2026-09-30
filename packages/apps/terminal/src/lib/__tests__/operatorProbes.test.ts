@@ -1,7 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useAuthStore } from "@/stores/authStore";
 import {
   INSTALL_PROBE_URL,
   layaHeartbeatFromBody,
+  layaLiveQualifiedFromBody,
+  layaPortFromBody,
+  layaPracticeFromBody,
+  layaDownloadProgressFromBody,
+  layaReasonFromBody,
   probeDeskHealth,
   probeLocalPing,
   probePublicInternet,
@@ -30,6 +36,29 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaHeartbeatFromBody({ status: "ok" })).toBeNull();
     expect(layaHeartbeatFromBody({ laya: "connected" })).toBeNull();
     expect(layaHeartbeatFromBody(null)).toBeNull();
+    expect(layaPracticeFromBody({ laya_practice: "ready" })).toBe("ready");
+    expect(layaPracticeFromBody({ laya: "down" })).toBeNull();
+    expect(layaLiveQualifiedFromBody({ laya_live_qualified: true })).toBe(true);
+    expect(layaLiveQualifiedFromBody({ laya_live_qualified: false })).toBe(false);
+    expect(layaLiveQualifiedFromBody({ status: "ok" })).toBe(false);
+    expect(layaReasonFromBody({ laya_reason: "still_loading" })).toBe("still_loading");
+    expect(layaReasonFromBody({ laya_reason: "downloading" })).toBe("downloading");
+    expect(layaReasonFromBody({ laya_reason: "download_failed" })).toBe("download_failed");
+    expect(layaDownloadProgressFromBody({
+      laya_download_bytes: 1_200_000_000,
+      laya_download_total: 3_400_000_000,
+    })).toEqual({ done: 1_200_000_000, total: 3_400_000_000 });
+    expect(layaDownloadProgressFromBody({ status: "ok" })).toEqual({ done: null, total: null });
+    expect(layaReasonFromBody({ laya_reason: "stopped" })).toBe("stopped");
+    expect(layaReasonFromBody({ laya_reason: "port_in_use" })).toBe("port_in_use");
+    expect(layaReasonFromBody({ laya_reason: "unverified" })).toBe("unverified");
+    expect(layaReasonFromBody({ laya_reason: "identity_absent" })).toBeNull();
+    expect(layaReasonFromBody({ laya_reason: "key_rejected" })).toBe("key_rejected");
+    expect(layaReasonFromBody({ laya_reason: "key_missing" })).toBe("key_missing");
+    expect(layaReasonFromBody({ laya_reason: "booting" })).toBeNull();
+    expect(layaReasonFromBody({ status: "ok" })).toBeNull();
+    expect(layaPortFromBody({ laya_port: 8123 })).toBe(8123);
+    expect(layaPortFromBody({ status: "ok" })).toBe(8000);
   });
 
   it("does not present Ready when ping fails or omits Laya", async () => {
@@ -49,23 +78,41 @@ describe("Laya heartbeat on desk ping", () => {
 });
 
 describe("desk health probe", () => {
-  it("keeps a degraded /health 503 as degraded", async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL) => jsonResponse({ status: "degraded" }, 503));
-    await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("degraded");
-    expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/\/health$/);
+  beforeEach(() => {
+    useAuthStore.getState().setLoggedOut();
   });
 
-  it("does not treat an unauthenticated /health as unhealthy", async () => {
+  it("uses the public ping when no session is present", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/api/v1/health")) return jsonResponse({ status: "error" }, 200);
+      expect(String(input)).toMatch(/\/api\/v1\/ping$/);
+      return jsonResponse({ status: "ok", laya: "down" }, 200);
+    });
+    await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("healthy");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a degraded /health 503 as degraded when a session exists", async () => {
+    useAuthStore.getState().setLoggedIn("session-jwt", "nav", "");
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toMatch(/\/health$/);
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer session-jwt");
+      return jsonResponse({ status: "degraded" }, 503);
+    });
+    await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("degraded");
+  });
+
+  it("falls back to ping when /health rejects the session", async () => {
+    useAuthStore.getState().setLoggedIn("session-jwt", "nav", "");
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/api/v1/ping")) return jsonResponse({ status: "ok" }, 200);
       return new Response("no", { status: 401 });
     });
-    await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("unhealthy");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain("/api/v1/health");
+    await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("healthy");
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes("/api/v1/health"))).toBe(false);
   });
 
-  it("reads overall_status when that is the field the desk returned", async () => {
+  it("reads overall_status when a signed-in desk returned that field", async () => {
+    useAuthStore.getState().setLoggedIn("session-jwt", "nav", "");
     const fetchImpl = vi.fn(async () => jsonResponse({ overall_status: "unhealthy" }, 503));
     await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("unhealthy");
   });

@@ -6,6 +6,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { TaxSummarySchema, TaxReportSchema } from "@/lib/schemas/ftApi";
 import type { TaxSummary, TaxReport, TaxSegment, TaxSegmentTrade } from "@/lib/schemas/ftApi";
 
@@ -15,7 +16,9 @@ export type { TaxSummary, TaxReport, TaxSegment, TaxSegmentTrade };
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
 async function fetchTaxSummary(fy: string): Promise<TaxSummary> {
-  const res = await fetch(`/ft-api/v1/tax/summary?fy=${encodeURIComponent(fy)}`);
+  const res = await fetch(`/ft-api/v1/tax/summary?fy=${encodeURIComponent(fy)}`, {
+    headers: buildHeaders(false),
+  });
   if (!res.ok) throw new Error(`Tax summary request failed: ${res.status}`);
   const raw: unknown = await res.json();
   const result = TaxSummarySchema.safeParse(raw);
@@ -27,7 +30,9 @@ async function fetchTaxSummary(fy: string): Promise<TaxSummary> {
 }
 
 async function fetchTaxReport(fy: string): Promise<TaxReport> {
-  const res = await fetch(`/ft-api/v1/tax/report?fy=${encodeURIComponent(fy)}`);
+  const res = await fetch(`/ft-api/v1/tax/report?fy=${encodeURIComponent(fy)}`, {
+    headers: buildHeaders(false),
+  });
   if (!res.ok) throw new Error(`Tax report request failed: ${res.status}`);
   const raw: unknown = await res.json();
   const result = TaxReportSchema.safeParse(raw);

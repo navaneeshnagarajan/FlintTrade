@@ -1,5 +1,7 @@
 /**
- * QuickAccessPanel — Glass morphism settings dropdown from TopBar gear icon.
+ * QuickAccessPanel — in-place density, theme, and colour controls.
+ * Opened from Tools → Quick Settings, and from the Compact TopBar control
+ * when the tool ribbon is collapsed. Full Settings stays a separate route.
  *
  * Design: 320px wide, backdrop-blur 24px, green top-edge glow.
  * Animation: motionConfig.variants.scaleIn (scale 0.96→1, opacity 0→1).
@@ -18,6 +20,7 @@ import { layerClassNames } from "@flinttrade/design-system";
 import { useModeStore } from "@/stores/modeStore";
 import {
   Settings,
+  SlidersHorizontal,
   X,
   Sun,
   Moon,
@@ -189,7 +192,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
             variant="outline"
             className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
           >
-            PRACTICE
+            Practice
           </Badge>
         )}
       </div>
@@ -208,7 +211,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
 // ---------------------------------------------------------------------------
 
 const MODE_LABEL: Record<"explore" | "practice" | "live", { text: string; className: string }> = {
-  explore: { text: "Explore", className: "text-text-secondary" },
+  explore: { text: "Example", className: "text-text-secondary" },
   practice: { text: "Practice", className: "text-amber-400" },
   live: { text: "Live", className: "text-profit" },
 };
@@ -376,9 +379,9 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         {/* ------------------------------------------------------------------ */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Settings className="h-3.5 w-3.5 text-text-secondary" aria-hidden="true" />
+            <SlidersHorizontal className="h-3.5 w-3.5 text-text-secondary" aria-hidden="true" />
             <span className="text-sm font-heading font-semibold text-text-primary">
-              Settings
+              Quick Settings
             </span>
           </div>
           <Button

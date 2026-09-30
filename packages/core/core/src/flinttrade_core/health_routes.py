@@ -1,13 +1,14 @@
 """Health check Flask endpoints.
 
 This is the single canonical health surface for the FlintTrade backend.
-Provides a Blueprint with six routes:
+Provides a Blueprint with these routes:
 
 - ``GET /health``         — simple status JSON (one-liner)
 - ``GET /health/detail``  — full :class:`HealthReport` JSON
 - ``GET /healthz``        — Kubernetes liveness probe
 - ``GET /readyz``         — Kubernetes readiness probe
 - ``GET /api/v1/ping``    — simple liveness check with IST timestamp
+- ``POST /api/v1/laya/start`` — start or restart the managed Laya sidecar
 - ``GET /api/v1/health``  — aggregated subsystem health (broker, DuckDB,
   disk, memory) via :class:`HealthAggregator`
 
@@ -107,6 +108,39 @@ def init_health_aggregator(health_agg: HealthAggregator) -> None:
         _health_agg = health_agg
 
 
+def _reconcile_laya_for_desk() -> None:
+    """Apply a command-line stop or start before the desk reads the gate.
+
+    This is the same watch the order gate runs. The chip's ping and an
+    order then publish one status.
+    """
+    try:
+        from flinttrade_core.laya_runtime import process_runtime  # noqa: PLC0415
+
+        runtime = process_runtime()
+        reconcile = getattr(runtime, "reconcile_watched_state", None)
+        if callable(reconcile):
+            reconcile()
+    except Exception:
+        logger.warning("Laya desk reconcile failed", exc_info=True)
+
+
+def _refresh_laya_status() -> None:
+    """Record sidecar health. A missing sidecar leaves the stored status alone."""
+    try:
+        from flinttrade_core.laya_runtime import refresh_process_laya_status  # noqa: PLC0415
+
+        refresh_process_laya_status()
+    except Exception:
+        logger.warning("Laya status probe failed", exc_info=True)
+        try:
+            from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
+
+            process_laya().apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+        except Exception:
+            logger.warning("Laya status could not be recorded", exc_info=True)
+
+
 def reset_health_singletons_for_tests() -> None:
     """Drop both cached singletons so the next call rebuilds them.
 
@@ -130,7 +164,12 @@ def health_simple() -> tuple[Any, int]:
     Returns:
         JSON ``{"status": "healthy"|"degraded"|"unhealthy",
         "timestamp": "<ISO8601>"}``.
+
+    When a Laya sidecar is registered, this probe records Ready, Degraded,
+    or Down from that sidecar before the process report is returned. Ping
+    publishes the stored Live-facing status and does not invent Ready.
     """
+    _refresh_laya_status()
     report = get_health_monitor().check_all()
     http_status = 200 if report.overall_status == "healthy" else 503
     return (
@@ -202,22 +241,59 @@ def ping() -> tuple[Any, int]:
     and responding.  Exempt from API key authentication.
 
     Returns:
-        JSON ``{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}``.
-        ``laya`` starts Down. A ping publishes that status and does not invent Ready.
+        JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar),
+        ``laya_live_qualified``, ``laya_reason``, ``laya_port``, and, while a
+        model download is in progress, ``laya_download_bytes`` and
+        ``laya_download_total``. ``laya`` starts Down. A ping reconciles the
+        watched pid, key, and runtime record the same way an order does, then
+        returns that stored status. It does not invent Ready when those files
+        have not changed, and it does not probe the port on its own.
     """
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 
-    laya = process_laya().note_heartbeat()
+    _reconcile_laya_for_desk()
+    engine = process_laya()
+    practice, live, qualified = engine.desk_heartbeat()
+    reason, port = engine.runtime_reason()
+    progress = engine.download_progress()
     return (
         jsonify(
             {
                 "status": "ok",
                 "timestamp": datetime.now(_IST).isoformat(),
-                "laya": laya.value,
+                "laya": live.value,
+                "laya_practice": practice.value,
+                "laya_live_qualified": qualified,
+                "laya_reason": reason,
+                "laya_port": port,
+                "laya_download_bytes": None if progress is None else progress[0],
+                "laya_download_total": None if progress is None else progress[1],
             }
         ),
         200,
     )
+
+
+@health_bp.route("/api/v1/laya/start", methods=["POST"])
+def start_laya() -> tuple[Any, int]:
+    """Start or restart the managed Laya sidecar.
+
+    Operator session only. A missing sidecar environment is a generic 503.
+    The response does not include paths or the API key.
+    """
+    from flinttrade_core.auth_routes import require_operator_session  # noqa: PLC0415
+
+    denied = require_operator_session()
+    if denied is not None:
+        return denied
+    try:
+        from flinttrade_core.laya_runtime import start_managed_sidecar  # noqa: PLC0415
+
+        start_managed_sidecar()
+    except Exception:
+        logger.warning("Laya sidecar could not be started", exc_info=True)
+        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+    return jsonify({"status": "ok"}), 200
 
 
 @health_bp.route("/api/v1/health", methods=["GET"])
@@ -230,7 +306,10 @@ def health_aggregated() -> tuple[Any, int]:
 
     Returns:
         JSON ``{"status": "ok"|"degraded"|"error", "broker": {...},
-        "duckdb": {...}, "disk": {...}, "memory": {...}}``.
+        "duckdb": {...}, "disk": {...}, "memory": {...}}`` plus ``cpu``,
+        ``gpu``, and ``network`` when the install host can report them.
+        Host memory uses ``used_mb`` / ``total_mb`` / ``used_pct``. Process
+        RSS stays under ``memory.process`` and is not host RAM.
     """
     from flask import current_app  # noqa: PLC0415
 

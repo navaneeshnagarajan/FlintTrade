@@ -22,13 +22,43 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   syntheticApi,
 }) => {
   await seedExploreDemoSession(page);
-  // Explore now probes advisor status (FT-AI-001). No other /ft-api traffic
-  // is expected. `/trade` plus a reload remount `AITutorPill`; React Strict
-  // Mode may invoke the logged-in status effect twice per mount.
+  // Explore probes advisor status (FT-AI-001) and the Mode menu reads
+  // Live-arm status. `useAdvisorLlmStatus` refetches on every mount
+  // (staleTime 0). Template create, clone, the Options Desk switch, the
+  // switch back, and the reload each remount that probe. This journey
+  // makes 12 of those reads.
   registerExploreAdvisorStatusProbe(syntheticApi, {
-    expectedCalls: { minimum: 1, maximum: 8 },
+    expectedCalls: { minimum: 1, maximum: 12 },
   });
-  registerOperatorStatusProbes(syntheticApi);
+  // The Laya chip polls this ping every 1.5 seconds for the whole journey.
+  // Remounts plus that interval sit above the shared operator-probe cap.
+  registerOperatorStatusProbes(syntheticApi, {
+    pingCalls: { minimum: 1, maximum: 16 },
+  });
+  syntheticApi.register({
+    name: "Mode menu Live-arm status",
+    method: "GET",
+    path: "/ft-api/v1/auth/status",
+    expectedCalls: { minimum: 1, maximum: 6 },
+    handler: (request) => {
+      expect(request.postData()).toBeNull();
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization.startsWith("Bearer ")).toBe(true);
+      }
+      return {
+        json: {
+          status: "success",
+          data: {
+            is_setup: true,
+            is_locked: false,
+            has_pin: false,
+            totp_enabled: false,
+          },
+        },
+      };
+    },
+  });
   await page.goto("/trade");
 
   const workspace = page.locator('[data-tour-target="workspace"]');

@@ -25,7 +25,7 @@ _SYSTEM_PROMPT = (
     "options strategies, technical indicators, and portfolio management. "
     "Be concise, accurate, and always remind users that your responses are "
     "informational — not financial advice. Never recommend specific trades "
-    "without proper risk disclaimers. Practice SandboxEngine fills and native "
+    "without proper risk disclaimers. Practice simulated fills and native "
     "Connected (read) feeds are analysis context only — not a live order path "
     "and not a guarantee of profitable alphas. Never place or claim to place "
     "a Live order. Kotak Neo has no Practice sandbox."
@@ -137,7 +137,7 @@ def _practice_sandbox_book_context() -> str:
         logger.debug("Practice sandbox book read failed", exc_info=True)
         return ""
     return (
-        "Practice SandboxEngine book (paper fills only; not a live broker):\n"
+        "Practice book (simulated fills only; not a live broker):\n"
         f"positions: {positions}\n"
         f"orders: {orders}\n"
         f"trades: {trades}"

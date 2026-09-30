@@ -4,13 +4,13 @@ import { MODE_HONESTY_COPY, modeHonestyCopy } from "../modeHonesty";
 describe("mode honesty copy", () => {
   it("gives Explore its sample-desk line", () => {
     expect(modeHonestyCopy("explore")).toBe(
-      "Explore — sample data only. No broker session, no live orders.",
+      "Example data. No broker is connected and no orders are sent.",
     );
   });
 
   it("gives Practice its sandbox line", () => {
     expect(modeHonestyCopy("practice")).toBe(
-      "Practice — SandboxEngine fills. Not your funded broker account.",
+      "Practice — simulated fills, no real money.",
     );
   });
 

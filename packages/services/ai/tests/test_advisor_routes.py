@@ -291,7 +291,7 @@ class TestAdvisorStatus:
 
 
 # ---------------------------------------------------------------------------
-# FT-MONDAY-001 — Practice SandboxEngine book for AI
+# FT-MONDAY-001 — Practice simulated fills for AI
 # ---------------------------------------------------------------------------
 
 
@@ -350,7 +350,7 @@ class TestAdvisorPracticeSandboxBook:
         book_msgs = [
             message
             for message in conversation
-            if "Practice SandboxEngine book" in getattr(message, "content", "")
+            if "Practice book (simulated fills only" in getattr(message, "content", "")
         ]
         assert book_msgs, "Practice fills must be visible to the advisor"
         assert "NIFTY" in book_msgs[0].content
@@ -372,7 +372,7 @@ class TestAdvisorPracticeSandboxBook:
         assert resp.status_code == 200
         conversation = mock_llm.chat.call_args[0][0]
         assert all(
-            "Practice SandboxEngine book" not in getattr(message, "content", "")
+            "Practice book (simulated fills only" not in getattr(message, "content", "")
             for message in conversation
         )
 
@@ -467,7 +467,7 @@ class TestAdvisorNativeLiveReadContext:
         conversation = mock_llm.chat.call_args[0][0]
         contents = [getattr(message, "content", "") for message in conversation]
         assert any("Native Connected (read) feeds" in text for text in contents)
-        assert all("Practice SandboxEngine book" not in text for text in contents)
+        assert all("Practice book (simulated fills only" not in text for text in contents)
 
     def test_explore_jwt_does_not_inject_native_reads(self, app) -> None:
         """Explore stays sample-only — no Connected (read) analysis context."""

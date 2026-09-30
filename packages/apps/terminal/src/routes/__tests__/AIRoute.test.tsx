@@ -1,7 +1,7 @@
 /**
  * AIRoute.test.tsx
  *
- * Smoke tests for the /ai AI Center page.
+ * Smoke tests for the /ai AI Centre page.
  * Mocks stores, hooks, framer-motion, and API services.
  */
 
@@ -227,10 +227,10 @@ describe("AIRoute", () => {
     });
   });
 
-  it("renders the AI Center heading", () => {
+  it("renders the AI Centre heading, matching its sidebar label", () => {
     renderAI();
 
-    expect(screen.getByText("AI Center")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "AI Centre" })).toBeInTheDocument();
   });
 
   it("restores one normalised validated symbol context from a direct reload URL and passes it to chat", () => {
@@ -525,7 +525,7 @@ describe("AIRoute", () => {
 
     renderAI();
 
-    await waitFor(() => expect(screen.getByText("AI Center")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "AI Centre" })).toBeInTheDocument());
     expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
     expect(localStorage.getItem("flinttrade:saved-chat:legacy1")).not.toBeNull();
   });
