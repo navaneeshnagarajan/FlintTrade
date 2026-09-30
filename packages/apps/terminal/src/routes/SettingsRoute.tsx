@@ -39,6 +39,7 @@ import { TickerSettings }    from "@/routes/settings/TickerSettings";
 import { SECTIONS, DEMO_HIDDEN_SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
 import { isPublicDemoBuild } from "@/lib/demoSession";
 import { useSettingsState } from "@/hooks/useSettingsState";
+import { PracticeLaterSetup } from "@/routes/SetupAccountRoute";
 
 const SETTINGS_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
@@ -303,6 +304,7 @@ export default function SettingsRoute() {
           className="min-w-0 flex-1 overflow-y-auto"
         >
           <div className="w-full max-w-3xl px-4 py-5 pb-16 sm:px-6 lg:px-8">
+            <PracticeLaterSetup surface="settings" />
             {activeSection !== "llm" && renderContent()}
             {(llmWasOpened || activeSection === "llm") && (
               <div hidden={activeSection !== "llm"}>

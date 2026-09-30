@@ -8,15 +8,30 @@ Practice, and land on the Practice desk. Later steps come after that.
 1. The mandatory first-run path is only **Create operator → vault →
    Practice desk**. Nothing else blocks that path.
 2. After the vault, the operator affirms Practice and lands on the
-   Practice desk. That affirm happens **before** Trading Defaults, Risk,
-   and Broker.
-3. **Trading Defaults**, **Risk**, and **Broker** stay Later/Skip. They
-   must never appear ahead of the Practice affirm.
-4. **Continue without a broker** is a primary Later path. It is not
-   buried under Native, OpenAlgo, or MCP.
-5. **TOTP**, **broker connect**, **LLM**, and **Monitoring** are
-   Later/Skip on first run. They are not required gates. Choosing Later
-   or Skip does not block the Practice desk.
+   Practice desk. That affirm happens **before** the optional cards.
+3. The optional cards are **Two-factor authentication**,
+   **Broker connect**, **LLM**, and **Trading defaults**. Risk limits
+   and Monitoring stay in Settings. None of these appear ahead of the
+   Practice affirm.
+4. **Continue without a broker** is the first control on the open
+   broker panel. It sits above **FlintTrade Native** and
+   **OpenAlgo Bridge**.
+5. Those four cards are optional. They are not required gates.
+   **Later** on a card row marks that card **Skipped** and does not
+   block the Practice desk. **Later** inside an open authenticator,
+   **LLM**, or trading-defaults panel only closes the panel. It does
+   not mark the card **Skipped** or **Done**, and the strip does not
+   change. A skipped card shows **Skipped** and only **Set up**. A
+   finished card shows **Done** and only **Set up** (no **Later**).
+   A finished **Broker connect** card does not show
+   **Continue without a broker**. That control is on the card only
+   while the card is neither done nor skipped. Card-row **Later**
+   buttons, and **Later** in the open **LLM** and trading-defaults
+   panels, are announced as `Later {title}`. The strip reads
+   `Optional setup · N of 4 done`, and adds `· M skipped` only when M
+   is at least 1. N counts finished cards only. **Dismiss** on the desk
+   moves the strip into Settings. The Settings reminder has **Show**
+   and **Hide**, and no **Dismiss**.
 6. First run does not unlock **Live**. The Practice desk is the finish.
    A later Live unlock, outside this path, keeps the existing
    authenticator and PIN gate. Live place stays fail-closed.
@@ -39,15 +54,21 @@ The mounted wizard is `/setup` (`CanonicalSetupRoute` →
 3. Practice desk
 
 The Practice step is the affirm only. It offers **Open Practice desk**
-and does not render TOTP, broker connect, LLM, Monitoring, Trading
-Defaults, or Risk. Opening the desk mints a Practice session and leaves
-setup for `/trade`.
+and does not render the optional cards, Monitoring, or Risk. Opening
+the desk mints a Practice session and leaves setup for `/trade`.
 
-Those later panels open on the Practice desk after landing. Skip or
-Later stays on the desk and does not change Step N of 3. On the broker
-card, **Continue without a broker** is the primary control. Native,
-OpenAlgo, and MCP stay behind Set up, and inside that panel the same
-control remains above them. There is no Live unlock control on this path.
+The optional strip opens on the Practice desk after landing. **Later**
+on a card row marks the card **Skipped** and does not change Step N of
+3. **Later** inside an open authenticator, **LLM**, or trading-defaults
+panel only closes the panel and leaves the card and the strip
+unchanged. Card titles are plain: **Two-factor authentication**,
+**Broker connect**, **LLM**, and **Trading defaults**. A finished
+**Broker connect** card shows **Done** and **Set up** only. On the open
+broker panel, **Continue without a broker** is the first control, above
+**FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
+the card **Skipped**, the same as on the card. A successful native or
+OpenAlgo connection still marks the card **Done**. There is no Live
+unlock control on this path.
 
 ## Out of scope
 
@@ -62,14 +83,25 @@ control remains above them. There is no Live unlock control on this path.
 1. A new operator can finish first-run Setup only by creating the
    operator, opening the vault, and landing on the Practice desk.
 2. Immediately after the vault, the operator affirms Practice and lands
-   on the Practice desk. Trading Defaults, Risk, and Broker are not on
-   screen yet.
-3. Trading Defaults, Risk, and Broker are Later/Skip, and none of them
-   can appear ahead of that affirm.
-4. **Continue without a broker** is the primary control on the broker
-   Later path. Native, OpenAlgo, and MCP do not sit above it or hide it.
-5. TOTP, broker connect, LLM, and Monitoring are Later/Skip. Skipping
-   any of them still leaves the operator on the Practice desk.
+   on the Practice desk. The optional cards are not on screen yet.
+3. **Two-factor authentication**, **Broker connect**, **LLM**, and
+   **Trading defaults** come after that affirm. Risk limits and
+   Monitoring stay in Settings. None of them can appear ahead of the
+   affirm.
+4. **Continue without a broker** is the first control on the open
+   broker panel. **FlintTrade Native** and **OpenAlgo Bridge** do not
+   sit above it.
+5. Skipping any of the four optional cards still leaves the operator
+   on the Practice desk. **Later** on the card row marks the card
+   **Skipped** and updates the strip. **Later** inside an open
+   authenticator, **LLM**, or trading-defaults panel only closes the
+   panel and leaves the card and the strip unchanged. **Continue without
+   a broker** on the open broker panel marks **Broker connect**
+   **Skipped** and updates the strip. A finished
+   **Broker connect** card shows **Done** and **Set up** only. The
+   strip counts finished cards only, and omits `· M skipped` when
+   nothing is skipped. Settings keeps the reminder after **Dismiss**,
+   without a **Dismiss** of its own.
 6. First run has no Live unlock control and cannot mint a Live session.
 7. Step N of M counts only Create operator, vault, and Practice desk.
    Later/Skip controls are absent from that fraction.
