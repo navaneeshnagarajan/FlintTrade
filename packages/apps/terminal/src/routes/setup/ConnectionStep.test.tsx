@@ -59,6 +59,21 @@ describe("ConnectionStep", () => {
     });
   });
 
+  it("records brokerless continuation through its own callback", () => {
+    const onComplete = vi.fn();
+    const onContinueWithoutBroker = vi.fn();
+    render(
+      <ConnectionStep
+        onComplete={onComplete}
+        onContinueWithoutBroker={onContinueWithoutBroker}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /continue without a broker/i }));
+    expect(onContinueWithoutBroker).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it("does not commit untested values to the connection store when Test Connection runs", async () => {
     // Item 4: the old handleTest wrote host/apiKey into connectionStore BEFORE
     // the test ran, so a failed test still repointed the app at an unverified

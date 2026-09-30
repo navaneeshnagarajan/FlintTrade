@@ -646,6 +646,34 @@ describe("LoginRoute", () => {
     expect(mockSetMode).not.toHaveBeenCalled();
   });
 
+  it("keeps a plain Unlock button for Explore, Connected (read), and an unknown Mode", () => {
+    // Connected (read) is a broker status. The button reads the session
+    // mode claim, the same source as the lock-screen heading, so that
+    // status never becomes a desk name.
+    modeState.mode = "live";
+    const claims = ["explore", "Connected (read)", "not-a-mode"];
+    for (const claim of claims) {
+      Object.assign(authState, {
+        status: "pin-required",
+        token: null,
+        reauthToken: sessionJwt(claim),
+        username: "testuser",
+      });
+      const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+      const button = screen.getByRole("button", { name: "Unlock" });
+      expect(button).toBeInTheDocument();
+      expect(button).not.toHaveAttribute("aria-label");
+      expect(button).not.toHaveAttribute("title");
+      expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+      expect(screen.getByText("Quick Unlock")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+      view.unmount();
+    }
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("live");
+  });
+
   it("keeps the plain Unlock button for an unknown session value", () => {
     modeState.mode = "practice";
     Object.assign(authState, {

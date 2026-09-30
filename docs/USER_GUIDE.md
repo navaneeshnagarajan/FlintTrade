@@ -550,13 +550,15 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
-2. A fresh desk is already in **Practice**. Open the Mode menu if the
-   chip says **Example** and choose **Practice** (a sample-data session is
-   sent to Setup). Practice does not ask for a PIN. The UI calls
-   `POST /v1/auth/mode` so the session matches. To look at sample data
-   instead, use **Try with example data** from Welcome or sign-in.
-3. From the dock sidebar, drag the **Order Pad** widget into the workspace
-   (or pick a preset that contains it).
+2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
+   **Sample Buy** — sample review, then a local sample fill (no broker).
+   For the full native-sandbox path this walkthrough uses, click the
+   badge once to switch to Practice. There is no confirmation dialog.
+   The UI calls `POST /v1/auth/mode` so the JWT matches.
+3. Open **+ Widget** (the dialog title is **Add Widget**) and choose
+   **Order Pad**, or pick a preset that contains it. If an Order Pad is
+   already open, choosing it again focuses that pad. It does not add a
+   second one.
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity to 1 lot. After you select the future, Order Pad
@@ -682,8 +684,8 @@ software safeguards, prompts, and recovery controls in a local setup.
       live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
 - [ ] The authenticator is enrolled, or you will confirm a one-time
-      authenticator code in the Live switch dialog (if you chose **Set up
-      later** on the optional authenticator panel). Example data and Practice stay
+      authenticator code in the Live switch dialog (if you chose **Later**
+      on the **Two-factor authentication** card). Example and Practice stay
       password-only until enrolment. First-run Setup does not unlock Live.
 - [ ] An **exactly 6-digit** PIN is set under Settings → Security
       (`/settings#security`). The Live switch asks for this PIN together
@@ -706,10 +708,13 @@ See [Laya on place](#laya-on-place).
 
 ### Walkthrough
 
-1. Open the Mode menu and choose **Live**. The dialog warns that real orders will be
-   placed and asks for your **exactly 6-digit PIN**. The Live switch requires a confirmed authenticator
-   enrolment plus the PIN. Enrol the authenticator before Live if you deferred it with **Set up later**
-   on the optional authenticator panel. `POST /v1/auth/live` refuses
+1. Click the **PRACTICE** badge in the top bar, or select **Live** on
+   the welcome mode picker. The dialog warns that real orders will be
+   placed and asks for an **authenticator code** and your **exactly
+   6-digit PIN**. The Live switch requires both — a confirmed authenticator
+   enrolment plus the PIN. If you chose **Later** on the
+   **Two-factor authentication** card, enter a one-time authenticator code
+   in the dialog to enrol, then the PIN. `POST /v1/auth/live` refuses
    403 `totp_required` until the authenticator is enabled. Quick Unlock
    reopens the same Mode the session already had, with the correct PIN,
    and never changes the Mode. Set the PIN under Settings → Security
@@ -752,9 +757,9 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). Password and setup logins open in Practice. An idle lock opens the Welcome lock screen: heading `Practice desk locked`, `Live desk locked`, or plain `Locked`, with **Quick Unlock** as the PIN label — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so sample data stays reachable if setup is unfinished. There is no `/login` URL. |
-| `/demo-app` | Hosted public demo. The landing is **Demo (example data)**. Installed web and desktop builds send the old sample-data URL to `/welcome`. Enter example data from Welcome or sign-in → **Try with example data**. |
-| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
+| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -767,15 +772,46 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
 First-run Setup finishes on the Practice desk. Step N of 3 counts only
-Create operator, Vault, and Practice desk. After the affirm, Later / Skip
-covers the authenticator (TOTP; the control may still say **Set up later**),
-broker connect, LLM, Monitoring, trading defaults, and risk. Those panels
-never appear before the affirm, never block Practice, and never change
-Step N of 3. On the broker Later path, **Continue without a broker** is
-the first control, above FlintTrade Native and OpenAlgo Bridge. Persona
-is not a required first-run gate and is not part of that count. First run
-has no Live unlock. Live place stays fail-closed. A later Live unlock,
-outside this path, still needs the authenticator and PIN.
+Create operator, Vault, and Practice desk. After the affirm, the desk
+shows a one-line strip. With nothing skipped it reads
+`Optional setup · N of 4 done`. N counts finished cards only. Skipping
+a card does not increase N. When at least one card is skipped, the strip
+adds the skipped count:
+`Optional setup · N of 4 done · M skipped`. When M is 0, that
+`· M skipped` clause is left off.
+
+**Show** expands the cards in place. **Hide** collapses them. **Dismiss**
+on the desk removes the strip there and leaves the same reminder at the
+top of Settings. The Settings reminder has **Show** and **Hide**. It has
+no **Dismiss**.
+
+The four cards use these titles, with no " — later" suffix:
+**Two-factor authentication**, **Broker connect**, **LLM**, and
+**Trading defaults**. A card that is still open offers **Set up** and
+**Later**, except **Broker connect**, which offers
+**Continue without a broker** and **Set up** only while that card is
+neither done nor skipped. A skipped card shows a **Skipped** tag and
+only **Set up** (no **Later**, and no **Continue without a broker**).
+A finished card shows a **Done** tag and only **Set up** (no **Later**,
+and no **Continue without a broker**). **Later** on the card row marks
+that card **Skipped** and updates the strip. **Later** inside an open
+authenticator, **LLM**, or trading-defaults panel only closes the
+panel. It does not mark the card **Skipped** or **Done**, and the strip
+does not change. The authenticator panel's actions are **Enrol** and
+**Later**. Card-row **Later** buttons, and **Later** in the open
+**LLM** and **Trading defaults** panels, are announced as
+`Later {title}`.
+
+Monitoring and risk limits stay in Settings. They are not cards on this
+strip. The cards never appear before the affirm, never block Practice,
+and never change Step N of 3. On the broker panel,
+**Continue without a broker** stays the first control, above
+**FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
+**Broker connect** **Skipped**, the same as on the card. A successful
+native or OpenAlgo connection still marks the card **Done**. Persona is not a required
+first-run gate and is not part of that count. First run has no Live
+unlock. Live place stays fail-closed. A later Live unlock, outside this
+path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
@@ -855,6 +891,11 @@ from the widget registry
   Strategy Templates, Audit Trail, Economic Calendar, Expiry Countdown,
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
+
+**+ Widget** on the trade desk opens **Add Widget**. Choosing
+**Order Pad** when one is already open focuses that pad. It does not
+add a second Order Pad. A watchlist **Buy** or **Sell** retargets that
+same open pad.
 
 Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
@@ -1305,8 +1346,11 @@ Lives in your platform-specific workspace directory:
 | Windows | `%APPDATA%\flinttrade\workspace.json` |
 | Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
-The Setup and Settings UI write `workspace.json`. Key
-Settings panels:
+The Setup and Settings UI write `workspace.json`. If optional setup was
+dismissed from the Practice desk, Settings opens with that same strip
+(`Optional setup · N of 4 done`, and `· M skipped` only when M is at
+least 1). The Settings reminder has **Show** and **Hide**. It has no
+**Dismiss**. Key Settings panels:
 
 | Settings panel | Maps to | Configures |
 |---|---|---|
@@ -1328,24 +1372,29 @@ not `^[0-9]{6}$`. Setting or changing the PIN does not change Mode.
 
 ### Idle lock and Quick Unlock
 
-An idle lock leaves the desk and opens the Welcome lock screen. The same
-screen is the PIN step on `/welcome`.
+Welcome and the idle lock overlay both take their heading from the
+session JWT `mode` claim:
 
-The Welcome heading is `Practice desk locked` or `Live desk locked`. A
-sample-data session, a retired session claim, or any other value that is
-not Practice or Live uses the plain heading `Locked`. `Quick Unlock` is
-the small label above the PIN field, not the heading. The primary button
-reads `Unlock Practice desk`, `Unlock Live desk`, or plain `Unlock`.
-Connected (read) is a broker status on a Practice session, so that
-session keeps the Practice heading. The lock screen does not print
-Connected (read).
+- Practice: `Practice desk locked`
+- Live: `Live desk locked`
+- Example data (the `explore` claim), a retired claim, or any other
+  value: `Locked`
 
-The desk layout also defines an idle overlay. Its heading is the unlock
-label: `Unlock Practice desk`, `Unlock Live desk`, or plain `Locked`. The
-PIN field there is labelled `Enter your 6-digit PIN`. Idle lock on a
-signed-in desk unmounts that layout and shows the Welcome lock screen, so
-the heading an operator sees is `Practice desk locked`, `Live desk locked`,
-or `Locked`.
+A Practice session whose broker status is Connected (read) keeps
+`Practice desk locked`. Connected (read) is a broker status, not a
+session Mode, so it does not choose the heading. A claim that is
+itself the words Connected (read) is not Practice or Live, and stays
+on the plain heading `Locked`.
+
+On Welcome, **Quick Unlock** is the small label above the PIN field,
+not a heading. The PIN field's accessible name is
+`Enter your 6-digit PIN`. The primary button reads
+`Unlock Practice desk`, `Unlock Live desk`, or plain `Unlock`, for the
+same cases as the heading.
+
+The idle lock overlay uses that same heading. Its PIN field's
+accessible name is `Enter your 6-digit PIN`. The PIN submits itself
+when six digits are entered. The overlay has no Unlock button.
 
 Quick Unlock reopens the same Mode the session already had, with the
 correct PIN. It keeps that Mode. The request is `POST /v1/auth/pin` with

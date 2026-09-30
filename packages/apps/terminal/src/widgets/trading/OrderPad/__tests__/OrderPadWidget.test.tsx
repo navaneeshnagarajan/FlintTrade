@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -69,7 +69,7 @@ vi.mock("jotai", async () => {
 // ---------------------------------------------------------------------------
 
 import OrderPadWidget from "../OrderPadWidget";
-import { OrderApiError, placeOrder, getSymbol } from "@/services/api";
+import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/api";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
@@ -167,6 +167,105 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
     // Symbol seeded into the search field.
     expect(screen.getByDisplayValue("RELIANCE")).toBeInTheDocument();
+  });
+
+  it("applies a watchlist prefill for this pad only", () => {
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+      api: { id: "pad-1", updateParameters: () => {} },
+    })} />);
+    const input = screen.getByPlaceholderText("Search symbol…") as HTMLInputElement;
+    expect(input.value).toBe("SBIN");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: { tabId: "other-pad", params: { symbol: "TCS", exchange: "NSE", action: "BUY" } },
+      }));
+    });
+    expect(input.value).toBe("SBIN");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: { tabId: "pad-1", params: { symbol: "RELIANCE", exchange: "NSE", action: "SELL" } },
+      }));
+    });
+    expect(input.value).toBe("RELIANCE");
+  });
+
+  it("reapplies the same quick-trade target when the event nonce changes", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "INFY", exchange: "NSE" }]);
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      api: { id: "pad-1", updateParameters: () => {} },
+    })} />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "pad-1",
+          nonce: "trade-1",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "SELL" }));
+    fireEvent.change(screen.getByLabelText("Symbol"), { target: { value: "INFY" } });
+    fireEvent.click(await screen.findByRole("button", { name: /INFY/ }));
+    expect(screen.getByDisplayValue("INFY")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "pad-1",
+          nonce: "trade-2",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("INFY")).not.toBeInTheDocument();
+  });
+
+  it("Enter selects the typed symbol and does not submit the previous one", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "INFY", exchange: "NSE" }]);
+    render(
+      <OrderPadWidget
+        {...makeWidgetPanelProps({
+          params: { symbol: "NIFTY", exchange: "NSE", action: "BUY" },
+        })}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText("Search symbol…");
+    fireEvent.change(input, { target: { value: "INFY" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByDisplayValue("INFY")).toBeInTheDocument());
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(screen.queryByText(/No match for INFY/)).not.toBeInTheDocument();
+  });
+
+  it("Enter shows no match and does not submit the previous symbol", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([]);
+    render(
+      <OrderPadWidget
+        {...makeWidgetPanelProps({
+          params: { symbol: "NIFTY", exchange: "NSE", action: "BUY" },
+        })}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText("Search symbol…");
+    fireEvent.change(input, { target: { value: "ZZZNOT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByText("No match for ZZZNOT")).toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("ZZZNOT")).toBeInTheDocument();
   });
 
   it("has order type pills (MARKET, LIMIT, SL, SL-M)", () => {

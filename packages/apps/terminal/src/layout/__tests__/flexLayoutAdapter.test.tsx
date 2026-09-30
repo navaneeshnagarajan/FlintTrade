@@ -131,6 +131,68 @@ describe("createWorkspaceApi", () => {
     expect(doc).toContain('"NIFTY"');
   });
 
+  it("focuses the open Order Pad instead of adding a second one", () => {
+    const { api, getModel } = makeApi(emptyWorkspaceJson());
+    api.addPanel({ component: "orderpad", title: "Order Pad" });
+    api.addPanel({ component: "chart", title: "Chart" });
+    expect(api.panelCount()).toBe(2);
+    expect(getModel().getActiveTabset()?.getSelectedNode()?.getComponent()).toBe("chart");
+
+    expect(api.retargetOrderPad({})).toBe(true);
+
+    expect(api.panelCount()).toBe(2);
+    expect(JSON.stringify(api.toJSON()).match(/"component":"orderpad"/g)).toHaveLength(1);
+    expect(getModel().getActiveTabset()?.getSelectedNode()?.getComponent()).toBe("orderpad");
+  });
+
+  it("retargets an existing Order Pad instead of adding another", () => {
+    const { api, getModel } = makeApi(emptyWorkspaceJson());
+    expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" }, "Order — SBIN")).toBe(false);
+
+    api.addPanel({
+      component: "orderpad",
+      title: "Order Pad",
+      params: { symbol: "NIFTY", exchange: "NSE", action: "BUY" },
+    });
+    expect(api.panelCount()).toBe(1);
+
+    const prefill = vi.fn();
+    window.addEventListener("flinttrade:orderPadPrefill", prefill);
+    expect(api.retargetOrderPad(
+      { symbol: "SBIN", exchange: "NSE", action: "SELL" },
+      "Order — SBIN",
+    )).toBe(true);
+    window.removeEventListener("flinttrade:orderPadPrefill", prefill);
+    expect(prefill).toHaveBeenCalledTimes(1);
+
+    expect(api.panelCount()).toBe(1);
+    const doc = JSON.stringify(getModel().toJson());
+    expect(doc).toContain('"SBIN"');
+    expect(doc).toContain('"SELL"');
+    expect(doc).toContain("Order — SBIN");
+    expect(doc.match(/"component":"orderpad"/g)).toHaveLength(1);
+  });
+
+  it("gives each Order Pad retarget its own prefill nonce", () => {
+    const { api } = makeApi(emptyWorkspaceJson());
+    api.addPanel({ component: "orderpad", title: "Order Pad" });
+    const nonces: string[] = [];
+    const prefill = (event: Event) => {
+      const detail = (event as CustomEvent<{ nonce?: string }>).detail;
+      nonces.push(detail?.nonce ?? "");
+    };
+    window.addEventListener("flinttrade:orderPadPrefill", prefill);
+    expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" })).toBe(true);
+    expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" })).toBe(true);
+    window.removeEventListener("flinttrade:orderPadPrefill", prefill);
+
+    expect(nonces).toHaveLength(2);
+    expect(nonces[0]).toEqual(expect.any(String));
+    expect(nonces[0].length).toBeGreaterThan(0);
+    expect(nonces[1].length).toBeGreaterThan(0);
+    expect(nonces[0]).not.toBe(nonces[1]);
+  });
+
   it("loadModelJson replaces the model through the load callback", () => {
     const { api, loadModel } = makeApi(emptyWorkspaceJson());
     api.loadModelJson(

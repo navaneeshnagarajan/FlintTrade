@@ -141,11 +141,29 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
 
 interface ConnectionStepProps {
   onComplete: (values: ConnectionFormValues) => void;
+  /**
+   * Brokerless continuation on the Practice desk tray. When set, the primary
+   * control records a skip instead of a successful connection. The first-run
+   * wizard omits it and still advances through `onComplete`.
+   */
+  onContinueWithoutBroker?: () => void;
   defaultValues?: Partial<ConnectionFormValues>;
 }
 
-export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
+export function ConnectionStep({
+  onComplete,
+  onContinueWithoutBroker,
+  defaultValues,
+}: ConnectionStepProps) {
   const [mode, setMode] = useState<ConnectionMode | null>(null);
+
+  function continueWithoutBroker() {
+    if (onContinueWithoutBroker) {
+      onContinueWithoutBroker();
+      return;
+    }
+    onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" });
+  }
 
   return (
     <div className="space-y-5">
@@ -157,7 +175,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         <Button
           type="button"
           className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-          onClick={() => onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" })}
+          onClick={continueWithoutBroker}
         >
           Continue without a broker
           <ArrowRight className="size-4 ml-2" />
