@@ -219,7 +219,8 @@ describe("accountNetWorth", () => {
     }];
 
     expect(accountCharges(practiceBook)).toBe(40);
-    expect(accountNetWorth([], accountLedgerCash(practiceBook), positions, 40, false)).toBe(1_000_100);
+    // Ledger 1_000_000 plus the ₹100 futures mark, minus the ₹40 estimate.
+    expect(accountNetWorth([], accountLedgerCash(practiceBook), positions, 40, false)).toBe(1_000_060);
   });
 });
 
