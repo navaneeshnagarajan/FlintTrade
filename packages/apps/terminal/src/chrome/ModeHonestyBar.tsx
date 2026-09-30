@@ -2,14 +2,15 @@
  * One static Mode line under the TopBar.
  *
  * Desk-first: a single tinted line, with horizontal scroll only when the
- * copy cannot fit. Each mode keeps one colour everywhere (Explore info blue,
+ * copy cannot fit. Each mode keeps one colour everywhere (Example info blue,
  * Practice amber, Live green). It is Mode chrome, never an outage banner.
- * Sample-data sessions get a way to create a real account from here.
+ * An example-data session gets a way to create a real account from here.
  */
 
 import { Compass, FlaskConical, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router";
+import { Button } from "@/components/ui/button";
 import { modeHonestyCopy } from "@/lib/modeHonesty";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
@@ -33,24 +34,26 @@ const MODE_STYLE: Record<AppMode, { Icon: LucideIcon; bar: string; icon: string 
   },
 };
 
-function SampleSessionAction() {
+function ExampleSessionAction() {
   const navigate = useNavigate();
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       onClick={() => navigate("/setup")}
-      className="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium text-info transition-colors hover:bg-info/10"
+      className="h-6 shrink-0 px-1.5 text-xs text-info hover:bg-info/10 hover:text-info"
       data-testid="mode-bar-setup"
     >
       Create your account →
-    </button>
+    </Button>
   );
 }
 
 export default function ModeHonestyBar({ mode }: { mode: AppMode }) {
   const line = modeHonestyCopy(mode);
   const { Icon, bar, icon } = MODE_STYLE[mode];
-  const sampleSession = useAuthStore((s) => s.token === "demo-user");
+  const exampleSession = useAuthStore((s) => s.token === "demo-user");
 
   return (
     <div
@@ -62,7 +65,7 @@ export default function ModeHonestyBar({ mode }: { mode: AppMode }) {
       <p className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs text-text-secondary [scrollbar-width:none]">
         {line}
       </p>
-      {mode === "explore" && sampleSession ? <SampleSessionAction /> : null}
+      {mode === "explore" && exampleSession ? <ExampleSessionAction /> : null}
     </div>
   );
 }
