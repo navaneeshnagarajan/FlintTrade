@@ -43,7 +43,34 @@ _MAX_TERMINAL_DRAIN_SECONDS = 5.0
 # The worker publishes its completion stamp in a finally that can lose the GIL
 # race with the timeout callback. This grace only lets that stamp be observed.
 # A stamp later than the original deadline still times the hook out.
+# It is polled on the event loop. Waiting via ``asyncio.to_thread`` would queue
+# on the default executor, which ``stop_all`` may already have filled with
+# synchronous hooks that never return.
 _SYNC_HOOK_PUBLISH_GRACE_SECONDS = 0.01
+
+
+async def _await_thread_event(event: threading.Event, timeout: float) -> bool:
+    """Wait for a worker-thread event without using the default executor.
+
+    ``asyncio.to_thread(event.wait, timeout)`` queues on that executor. When
+    ``stop_all`` has already filled it with synchronous hooks that never
+    return, the grace would sit in that queue and shutdown would not time out.
+
+    Args:
+        event: The stamp the worker sets when the hook returns.
+        timeout: How long the event loop may wait to observe that stamp.
+
+    Returns:
+        Whether the event was set before the grace elapsed.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    while not event.is_set():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.001, remaining))
+    return True
 
 
 @dataclass
@@ -1079,7 +1106,7 @@ class StrategyRunner:
         if settlement is None:
             return False
         if not settlement.finished.is_set():
-            await asyncio.to_thread(settlement.finished.wait, _SYNC_HOOK_PUBLISH_GRACE_SECONDS)
+            await _await_thread_event(settlement.finished, _SYNC_HOOK_PUBLISH_GRACE_SECONDS)
         # The sync body already returned, but the loop has not resumed the
         # worker future. Collect that result, then keep the original deadline
         # for an awaitable the hook returned. A hook that is still running,

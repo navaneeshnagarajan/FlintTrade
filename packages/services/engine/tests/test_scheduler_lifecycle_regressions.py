@@ -767,6 +767,66 @@ async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions()
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_publish_grace_times_out_while_the_default_executor_is_full() -> None:
+    """A full default executor must not swallow the lifecycle grace.
+
+    The grace used to call ``asyncio.to_thread`` on the same pool that runs
+    synchronous hooks. Filling that pool with workers that never return left
+    the grace queued, so the lifecycle timeout never started.
+    """
+    loop = asyncio.get_running_loop()
+    await asyncio.to_thread(lambda: None)
+    executor = loop._default_executor
+    assert executor is not None
+    release_pool = threading.Event()
+    running = 0
+    running_lock = threading.Lock()
+
+    def block_pool_worker() -> None:
+        nonlocal running
+        with running_lock:
+            running += 1
+        release_pool.wait()
+
+    for _ in range(executor._max_workers):
+        loop.run_in_executor(None, block_pool_worker)
+    for _ in range(500):
+        if running >= executor._max_workers:
+            break
+        await asyncio.sleep(0.01)
+    assert running >= executor._max_workers
+
+    scheduler = StrategyScheduler(client=MagicMock())
+    strategy = _TestStrategy(name="executor-full")
+    runner = scheduler.register(strategy)
+    runner.scheduler = _open_time_scheduler()
+    runner.client.quotes = AsyncMock(return_value=None)
+    runner.lifecycle_timeout = 0.05
+    release_hook = threading.Event()
+
+    def never_returning_start() -> None:
+        release_hook.wait()
+
+    strategy.start = never_returning_start
+    start = asyncio.create_task(scheduler.start_one(strategy.name))
+    try:
+        done, _pending = await asyncio.wait({start}, timeout=2.0)
+        assert start in done, "a full default executor stalled the lifecycle grace"
+        result = (await asyncio.gather(start, return_exceptions=True))[0]
+        assert isinstance(result, TimeoutError)
+    finally:
+        release_pool.set()
+        release_hook.set()
+        await asyncio.gather(start, return_exceptions=True)
+        start_hook = runner._start_hook_task
+        if start_hook is not None:
+            await asyncio.wait_for(start_hook, timeout=_LIFECYCLE_SETTLE_TIMEOUT)
+        if runner.has_live_owner:
+            await runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_failed_start_drain_honours_its_cleanup_deadline() -> None:
     scheduler = StrategyScheduler(client=MagicMock())
     strategy = _TestStrategy(name="bounded-drain")
