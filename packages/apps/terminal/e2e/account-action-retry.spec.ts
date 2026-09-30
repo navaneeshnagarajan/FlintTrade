@@ -1,4 +1,4 @@
-import { expect, registerOperatorStatusProbes, test } from "./fixture-registry";
+import { expect, registerExploreAdvisorStatusProbe, registerOperatorStatusProbes, test } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 
 test.use({ benignConsoleErrors: [{
@@ -56,6 +56,14 @@ test("broker connection retry retains its action identity after an ambiguous res
     });
   }
   registerOperatorStatusProbes(syntheticApi, { includeLlmConfig: false });
+  // Chat readiness and the tutor pill each read advisor status; Strict Mode can run each read twice.
+  registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 4 } });
+  syntheticApi.register({
+    name: "Mode menu Live-arm status", method: "GET", path: "/ft-api/v1/auth/status",
+    handler: () => ({ json: { status: "success", data: {
+      is_setup: false, is_locked: false, has_pin: false, totp_enabled: false,
+    } } }),
+  });
   await page.goto("/settings#brokers");
   await expect(page).toHaveURL("http://localhost:5173/settings#brokers");
   await expect(page).toHaveTitle(/FlintTrade/i);
