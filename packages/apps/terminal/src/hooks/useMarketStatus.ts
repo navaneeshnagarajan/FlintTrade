@@ -20,7 +20,7 @@ export function useTimings(enabled = true) {
     queryFn: () => getTimings(),
     staleTime: MARKET_TIMINGS_MAX_AGE_MS,
     refetchInterval: enabled ? MARKET_TIMINGS_REFRESH_INTERVAL_MS : false,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     enabled,
   });
 }
