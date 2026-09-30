@@ -5,7 +5,7 @@ lockfiles below carry their own licences; see the NOTICE/notices bundle and
 supply-chain/licence-allowlist.yml for the compatibility policy.
 
 - uv.lock: present (sha256: 6d4199924487e1c0eed843dd350852e6c9d83455ba8b8a3528b53953266ab48b)
-- requirements.lock: present (sha256: cab37946205032ba405a8ee28742cb27b32f4fe7e6b1117274f4da407285cccd)
+- requirements.lock: present (sha256: 27e8ac501ff9a8013623f0afb1745c2bfeba5dbde7e50b12b234383fdc277490)
 - broker-sdk-build.lock: present (sha256: 07877fa17c1d3479e56451b444f7924d45d2d6948f57ffa6040686297ccb8eee)
 - pnpm-lock.yaml: present (sha256: 0be4b7bace7c1ba6defd849005cbb4aab710d59853ae82a21ad6ce2fdf3b3280)
 - brokers.lock: present (sha256: 611bf98cbce388ecc40a409c3450021873e24d524614736fef9c2f21cfd59ab4)
