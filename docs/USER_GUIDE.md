@@ -808,8 +808,8 @@ See [Settings reference](#11-settings-reference) for what else lives there.
   Settings), full screen, notifications and your profile. The account
   switcher appears once a broker account is connected. Feed provenance is
   the chip at the start of the ticker.
-- **Trade desk toolbar.** The active workspace, **Add widget**, **Layouts**
-  and, on a Compact desk, **Watchlist & tools**.
+- **Trade desk toolbar.** The active workspace, **+ Widget** (opens **Add
+  Widget**), **Layouts** and, on a Compact desk, **Watchlist & tools**.
 - **Tips** appear under the page header and can be dismissed; Settings can
   bring them back.
 
