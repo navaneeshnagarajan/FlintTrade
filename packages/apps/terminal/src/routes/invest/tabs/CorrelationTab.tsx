@@ -29,7 +29,7 @@ import { AlertCircle, RefreshCw, TrendingUp, TrendingDown, Repeat2 } from "lucid
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import { getCorrelationMatrix, type MarketRegime } from "@/services/ftApi";
 
@@ -313,7 +313,7 @@ export function CorrelationTab() {
 
   return (
     <div className="space-y-5">
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4">

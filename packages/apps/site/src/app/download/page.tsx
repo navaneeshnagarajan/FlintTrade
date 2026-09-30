@@ -441,7 +441,7 @@ export default async function DownloadPage() {
 
         <p className="hero-disclaimer">
           {desktopAvailabilityNote(manifest, installerReleaseAvailable, lookupFailed)}{' '}
-          Use Explore and Practice modes first; Live mode remains your own risk.
+          Use Practice and example data first; Live mode remains your own risk.
         </p>
       </section>
       <SiteFooter />

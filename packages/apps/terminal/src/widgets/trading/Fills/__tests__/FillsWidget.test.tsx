@@ -710,6 +710,38 @@ describe("FillsTable (embedded, date-ranged)", () => {
     expect(screen.queryByText("NIFTY 22200 CE")).not.toBeInTheDocument();
     expect(screen.getByText("5 Sep 2026 10:03:00")).toBeInTheDocument();
   });
+
+  it("tags a restored fill and keeps the backup strategy name off the row", () => {
+    runtime.mode = "explore";
+    const trades: JournalTrade[] = [
+      {
+        timestamp: "2026-09-05T10:03:00+05:30",
+        symbol: "INFY",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        price: 1500,
+        pnl: 250,
+        strategy: "Restored from backup",
+        entry_price: 1500,
+        exit_price: 1750,
+        fees: 0,
+      },
+    ];
+    renderFills(
+      <FillsTable
+        startDate="2026-09-04"
+        endDate="2026-09-10"
+        exploreJournalTrades={trades}
+      />,
+    );
+    const tag = screen.getByText("Restored");
+    expect(tag).toHaveAttribute(
+      "title",
+      "Restored from backup. Not sent to a broker or checked by Laya.",
+    );
+    expect(screen.queryByText("Restored from backup")).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

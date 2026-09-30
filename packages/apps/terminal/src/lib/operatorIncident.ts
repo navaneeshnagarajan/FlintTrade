@@ -21,9 +21,9 @@
  *   single broker timeout.
  * - llm_provider — advisor chrome error or disconnected. Info only.
  *   Chat or Suggest offline never mutes Live.
- * - laya — Laya is Down. Money-path Blocked. Live place and mirror close.
- *   Kill All stays reachable. Broker and LLM stay their own surfaces.
- *   Degraded does not use this class.
+ * - laya — Laya is Down. Money-path Blocked. New orders are paused.
+ *   Closes stay available. Kill All stays reachable. Broker and LLM stay
+ *   their own surfaces. Degraded does not use this class.
  *
  * Strip priority inside this classifier: host tier (network_local,
  * host_unhealthy, backend_unreachable) then broker trust (exchange and
@@ -55,6 +55,13 @@ export const FAILURE_CLASSES = [
 ] as const;
 
 export type FailureClass = (typeof FAILURE_CLASSES)[number];
+
+/** Refusal shown when a new order is paused because Laya is Down. */
+export const LAYA_DOWN_REFUSAL =
+  "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+
+/** Success copy when a close fills and Laya is not Ready. */
+export const LAYA_EXIT_WHILE_DOWN = "Closed. Exits are allowed while Laya is Down.";
 
 export type OperatorStripLevel = "info" | "degraded" | "blocked";
 
@@ -146,8 +153,7 @@ const RECTIFY: Record<FailureClass, string> = {
     "The broker reports maintenance. Wait, then check the broker status page. Live orders stay closed. FlintTrade cannot file a dispute.",
   llm_provider:
     "Chat is unavailable. Retest or switch provider under Settings. Trading does not use Chat to place orders.",
-  laya:
-    "Live orders stay closed until Laya is Ready. Chat cannot place an order in its place. Kill All stays available.",
+  laya: `${LAYA_DOWN_REFUSAL} Kill All stays available.`,
   host_unhealthy:
     "Free disk space and restart the desk, then read the desk health detail. Live orders stay closed until the desk and broker trust are back. A restart does not recover broker fills. FlintTrade does not hold funds.",
   backend_unreachable:
@@ -364,7 +370,7 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
   }
 
   if (signals.decisionStatus === "down") {
-    return makeIncident("laya", "blocked", true, false, "Laya is Down — Live orders paused.");
+    return makeIncident("laya", "blocked", true, false, LAYA_DOWN_REFUSAL);
   }
 
   if (

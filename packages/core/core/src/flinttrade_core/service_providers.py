@@ -20,6 +20,7 @@ class ServiceKind(StrEnum):
     LLM = "llm"
     AGENT_RUNTIME = "agent_runtime"
     EMBEDDING = "embedding"
+    DECISION = "decision"
 
 
 class EvidenceUseScope(StrEnum):

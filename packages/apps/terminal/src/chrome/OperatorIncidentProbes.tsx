@@ -5,14 +5,30 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAdvisorLlmStatus } from "@/hooks/useAdvisorLlmStatus";
-import { probeDeskHealth, probeLocalPing, probePublicInternet, probePublicSite } from "@/lib/operatorProbes";
+import { LAYA_STATUS_POLL_MS } from "@/lib/layaStatus";
+import {
+  probeDeskHealth,
+  probeLocalPing,
+  probePublicInternet,
+  probePublicSite,
+  type PingProbe,
+} from "@/lib/operatorProbes";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
+
+interface LayaPingSample {
+  probe: PingProbe;
+  epoch: number;
+}
 
 export function OperatorIncidentProbes() {
   const ping = useQuery({
     queryKey: ["operator", "ping"],
-    queryFn: () => probeLocalPing(),
-    refetchInterval: 30_000,
+    queryFn: async (): Promise<LayaPingSample> => {
+      const epoch = useOperatorSignalStore.getState().layaEpoch;
+      return { probe: await probeLocalPing(), epoch };
+    },
+    refetchInterval: LAYA_STATUS_POLL_MS,
+    refetchIntervalInBackground: true,
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -44,8 +60,16 @@ export function OperatorIncidentProbes() {
   useEffect(() => {
     if (!ping.data) return;
     const store = useOperatorSignalStore.getState();
-    store.setPing(ping.data);
-    store.setDecisionStatus(ping.data.laya ?? "down");
+    if (ping.data.epoch !== store.layaEpoch) return;
+    const sample = ping.data.probe;
+    store.setLayaChecking(false);
+    store.setPing(sample);
+    store.setDecisionStatus(sample.laya ?? "down");
+    store.setLayaPracticeStatus(sample.layaPractice ?? "down");
+    store.setLayaLiveQualified(sample.layaLiveQualified);
+    store.setLayaReason(sample.layaReason);
+    store.setLayaPort(sample.layaPort);
+    store.setLayaDownloadProgress(sample.layaDownloadBytes, sample.layaDownloadTotal);
   }, [ping.data]);
 
   useEffect(() => {

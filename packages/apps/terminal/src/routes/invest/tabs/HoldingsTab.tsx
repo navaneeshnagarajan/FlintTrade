@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import type { Holding } from "@/types/api";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
@@ -182,13 +182,13 @@ export function HoldingsTab() {
       {/* Demo banner */}
       {isDemo && (
         <div className="px-2 pt-2 shrink-0">
-          <DemoBanner />
+          <ExampleChip />
         </div>
       )}
 
       {/* Toolbar */}
       <div className="flex items-center justify-between px-2 py-2 border-b border-border-default shrink-0">
-        <span className="text-xs text-text-muted">
+        <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
           {holdings.length} stock{holdings.length !== 1 ? "s" : ""}
         </span>
         <div className="flex items-center gap-1">

@@ -24,7 +24,7 @@ export function BentoGrid({ children, className = "", "data-testid": testId }: B
       className={`bento-grid ${className}`}
       style={{
         display: "grid",
-        gap: "8px",
+        gap: "12px",
         alignItems: "start",
       }}
     >
@@ -32,6 +32,7 @@ export function BentoGrid({ children, className = "", "data-testid": testId }: B
       <style>{`
         .bento-grid {
           grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          min-width: 0;
         }
         @media (min-width: 1800px) {
           .bento-grid {
@@ -45,12 +46,17 @@ export function BentoGrid({ children, className = "", "data-testid": testId }: B
         }
         @media (max-width: 768px) {
           .bento-grid {
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
         @media (max-width: 480px) {
           .bento-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr);
+          }
+          /* One column: a 2-wide card would add an implicit second column
+             and push content off-screen. */
+          .bento-grid > [data-bento-size] {
+            grid-column: auto !important;
           }
         }
       `}</style>

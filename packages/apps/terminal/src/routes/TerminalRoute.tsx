@@ -17,6 +17,8 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
+import { EmptyState } from "@/components/ui/states";
 import { classifySerializedLayout, useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -318,10 +320,14 @@ function TradeCompactWorkspace({
   onOpenPresetPicker: () => void;
 }) {
   const [activeWidgetId, setActiveWidgetId] = useState<CompactTradeWidgetId>("chart");
+  const [orderPadParams, setOrderPadParams] = useState<Record<string, unknown> | undefined>();
   const tabRefs = useRef<Partial<Record<CompactTradeWidgetId, HTMLButtonElement | null>>>({});
   const activeWidget = COMPACT_TRADE_WIDGETS.find((widget) => widget.id === activeWidgetId) ?? COMPACT_TRADE_WIDGETS[0];
   const ActiveWidgetPanel = widgetComponents[activeWidget.id];
-  const panelProps = detachedPanelProps(`compact-${activeWidget.id}`);
+  const panelProps = detachedPanelProps(
+    `compact-${activeWidget.id}`,
+    activeWidget.id === "orderpad" ? orderPadParams : undefined,
+  );
 
   function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | undefined;
@@ -338,6 +344,20 @@ function TradeCompactWorkspace({
     setActiveWidgetId(nextId);
     tabRefs.current[nextId]?.focus();
   }
+
+  useEffect(() => {
+    function onAddWidget(event: Event) {
+      const detail = (event as CustomEvent<{
+        widgetId?: string;
+        props?: Record<string, unknown>;
+      }>).detail;
+      if (detail?.widgetId !== "orderpad") return;
+      setActiveWidgetId("orderpad");
+      if (detail.props) setOrderPadParams(detail.props);
+    }
+    window.addEventListener("flinttrade:addWidget", onAddWidget);
+    return () => window.removeEventListener("flinttrade:addWidget", onAddWidget);
+  }, []);
 
   return (
     <section
@@ -366,12 +386,7 @@ function TradeCompactWorkspace({
                 tabIndex={isActive ? 0 : -1}
                 onClick={() => setActiveWidgetId(id)}
                 onKeyDown={(event) => handleTabKeyDown(event, index)}
-                className={[
-                  "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors",
-                  isActive
-                    ? "border-profit/40 bg-profit/15 text-profit shadow-[0_0_18px_rgba(34,197,94,0.12)]"
-                    : "border-border-default bg-surface-card text-text-secondary hover:border-profit/25 hover:text-text-primary",
-                ].join(" ")}
+                className="ft-tray-tab inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs"
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden />
                 {label}
@@ -409,7 +424,7 @@ function TradeCompactWorkspace({
             onClick={onOpenWidgetPicker}
           >
             <LayoutGrid className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Add
+            + Widget
           </Button>
           <Button
             type="button"
@@ -743,6 +758,13 @@ export default function TerminalRoute() {
       if (!api) return;
 
       const meta = widgetCatalog.find((widget) => widget.id === widgetId);
+      if (widgetId === "orderpad") {
+        const reused = api.retargetOrderPad(
+          detail.props ?? {},
+          detail.props ? detail.title : undefined,
+        );
+        if (reused) return;
+      }
       api.addPanel({
         id: `${widgetId}-${Date.now()}`,
         component: widgetId,
@@ -763,7 +785,60 @@ export default function TerminalRoute() {
   return (
     <CinematicLayout mode="focused">
     <div className="relative h-full flex flex-col text-text-primary overflow-hidden select-none">
-      <h1 className="sr-only">Trade Workspace</h1>
+      {/* Desk toolbar: the page name, the active workspace and the two ways
+          to change the canvas are always one click away. */}
+      <div
+        className="flex h-9 shrink-0 items-center gap-3 border-b border-border-default bg-surface-base px-3"
+        data-testid="desk-toolbar"
+      >
+        <h1 className="ft-text-card-title text-text-primary">Trade</h1>
+        <span aria-hidden="true" className="h-4 w-px bg-border-default" />
+        <WorkspaceSwitcher />
+        <div className="ml-auto flex items-center gap-1">
+          {progressive && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-text-secondary"
+              aria-expanded={toolsExpanded}
+              aria-label="Watchlist and desk tools"
+              data-testid="desk-tools-toggle"
+              onClick={() => {
+                const next = !toolsExpanded;
+                setToolsExpanded(next);
+                const api = useLayoutStore.getState().workspaceApi;
+                if (!api) return;
+                applyCompactDeskToolsDisclosure(api, next, buildCompactDesk);
+              }}
+            >
+              {toolsExpanded ? "Hide watchlist & tools" : "Watchlist & tools"}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-text-secondary"
+            onClick={() => setWidgetPickerOpen(true)}
+            aria-label="Add widget"
+            data-testid="add-widget-button"
+          >
+            + Widget
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-text-secondary"
+            onClick={() => setPresetPickerOpen(true)}
+            data-testid="desk-layouts"
+          >
+            <Layers aria-hidden="true" />
+            Layouts
+          </Button>
+        </div>
+      </div>
       <PracticeLaterSetup />
       {layoutPersistenceError && (
         <p
@@ -774,31 +849,10 @@ export default function TerminalRoute() {
           {layoutPersistenceError}
         </p>
       )}
-      {progressive && (
-        <div className="shrink-0 flex items-center justify-end gap-2 border-b border-border-default px-3 py-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            aria-expanded={toolsExpanded}
-            aria-label="Watchlist and desk tools"
-            data-testid="desk-tools-toggle"
-            onClick={() => {
-              const next = !toolsExpanded;
-              setToolsExpanded(next);
-              const api = useLayoutStore.getState().workspaceApi;
-              if (!api) return;
-              applyCompactDeskToolsDisclosure(api, next, buildCompactDesk);
-            }}
-          >
-            {toolsExpanded ? "Hide watchlist & tools" : "Watchlist & tools"}
-          </Button>
-        </div>
-      )}
       {/* Hint is not a primary banner — suppress it when Explore/Practice already owns the strip. */}
       {showRouteHint && (
         <RouteBanner
+          variant="strip"
           hintId="trade-shortcuts"
           text="Press Ctrl+K to open the command palette. Use X to exit all positions and C to cancel all orders."
         />
@@ -870,40 +924,35 @@ export default function TerminalRoute() {
                   {panelCount === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                       <div
-                        className="pointer-events-auto flex flex-col items-center gap-4 px-8 py-10 rounded-xl border border-border-default bg-surface-card/80 backdrop-blur-sm shadow-lg animate-fade-in text-center max-w-xs"
+                        className="pointer-events-auto max-w-sm rounded-xl border border-border-default bg-surface-card shadow-floating animate-fade-in"
                         role="status"
                       >
-                        <LayoutGrid className="h-10 w-10 text-text-muted" />
-                        <div className="space-y-1">
-                          <p className="font-heading font-semibold text-base text-text-primary">
-                            Your workspace is empty
-                          </p>
-                          <p className="text-sm text-text-secondary">
-                            {level === "beginner"
+                        <EmptyState
+                          icon={LayoutGrid}
+                          title="Your workspace is empty"
+                          description={
+                            level === "beginner"
                               ? "Add your first widget — start with the Watchlist or Chart"
-                              : "Add widgets or choose a template to get started"}
-                          </p>
-                        </div>
-                        <div className="flex gap-2 mt-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs border-border-default text-text-secondary hover:text-text-primary"
-                            onClick={() => setWidgetPickerOpen(true)}
-                            data-tour-target="widget-picker"
-                          >
-                            <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
-                            Add Widgets
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
-                            onClick={() => setPresetPickerOpen(true)}
-                          >
-                            <Layers className="h-3.5 w-3.5 mr-1.5" />
-                            Choose Template
-                          </Button>
-                        </div>
+                              : "Add widgets or choose a template to get started"
+                          }
+                          action={
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setWidgetPickerOpen(true)}
+                                data-tour-target="widget-picker"
+                              >
+                                <LayoutGrid aria-hidden="true" />
+                                + Widget
+                              </Button>
+                              <Button size="sm" onClick={() => setPresetPickerOpen(true)}>
+                                <Layers aria-hidden="true" />
+                                Choose Template
+                              </Button>
+                            </>
+                          }
+                        />
                       </div>
                     </div>
                   )}

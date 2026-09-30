@@ -348,6 +348,19 @@ describe("applyTheme CSS properties", () => {
     );
   });
 
+  it("labels primary buttons with the accent's readable text colour", () => {
+    const style = document.documentElement.style;
+    // Graphite dark: near-black on the bright emerald accent, not white.
+    expect(style.getPropertyValue("--primary-foreground")).toBe(
+      style.getPropertyValue("--accent-foreground"),
+    );
+    expect(style.getPropertyValue("--primary-foreground")).not.toBe("0 0% 100%");
+
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "light" });
+    useThemeStore.getState().applyTheme();
+    expect(style.getPropertyValue("--primary-foreground")).toBe("0 0% 100%");
+  });
+
   it("sets --color-profit to fixed #22c55e in dark mode regardless of theme", () => {
     useThemeStore.setState({ mode: "dark" });
     useThemeStore.getState().setTheme("midnight");

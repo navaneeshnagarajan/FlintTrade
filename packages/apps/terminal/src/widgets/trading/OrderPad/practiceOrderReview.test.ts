@@ -3,6 +3,7 @@ import {
   createPracticeOrderReviewSnapshot,
   isPracticeOrderReviewCurrent,
   practiceOrderIntentIdentity,
+  practiceReviewPlacedQuantity,
   type PracticeOrderIntentValues,
 } from "./practiceOrderReview";
 
@@ -66,5 +67,15 @@ describe("Practice order review model", () => {
 
     expect(isPracticeOrderReviewCurrent(review, values)).toBe(true);
     expect(isPracticeOrderReviewCurrent(review, { ...values, qty: 150 })).toBe(false);
+  });
+
+  it("shows the placed quantity after Place N", () => {
+    const review = createPracticeOrderReviewSnapshot(values, params);
+    const placed = practiceReviewPlacedQuantity(review, 1);
+
+    expect(placed.params.quantity).toBe(1);
+    expect(placed.estimatedExposure).toBe(123.45);
+    expect(isPracticeOrderReviewCurrent(placed, { ...values, qty: 1 })).toBe(true);
+    expect(isPracticeOrderReviewCurrent(placed, values)).toBe(false);
   });
 });

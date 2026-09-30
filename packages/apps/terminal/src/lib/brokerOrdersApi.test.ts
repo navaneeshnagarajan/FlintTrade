@@ -179,7 +179,7 @@ describe("forever orders", () => {
       quantity1: 10,
     });
     const { url, init } = lastCall();
-    expect(url).toBe("/ft-api/api/v1/orders/forever");
+    expect(url).toBe("/ft-api/api/v1/orders/place");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
@@ -401,9 +401,17 @@ describe("multi / cancel-all / smart cancel", () => {
       broker: "upstox",
     });
     const { url, init } = lastCall();
-    expect(url).toBe("/ft-api/api/v1/orders/multi");
+    expect(url).toBe("/ft-api/api/v1/orders/place");
     expect(init.method).toBe("POST");
-    expect((lastBody().orders as unknown[]).length).toBe(1);
+    expect(lastBody()).toMatchObject({
+      symbol: "TCS",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 5,
+      pricetype: "MARKET",
+      broker: "upstox",
+    });
+    expect(lastBody().orders).toBeUndefined();
   });
 
   it("cancel-all posts broker + optional narrowing fields", async () => {

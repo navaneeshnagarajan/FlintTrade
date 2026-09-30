@@ -21,7 +21,7 @@ import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isMondayReadBroker,
-} from "@/lib/mondayReadChrome";
+} from "@/lib/connectedReadChrome";
 
 type ConnectionMode = "openalgo" | "direct";
 
@@ -39,7 +39,7 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
       className={[
         "flex-1 py-1.5 text-xs font-medium rounded-md transition-colors",
         active
-          ? "bg-accent text-white"
+          ? "bg-accent text-accent-foreground"
           : "text-text-secondary hover:text-text-primary",
       ].join(" ")}
       aria-pressed={active}
@@ -141,23 +141,41 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
 
 interface ConnectionStepProps {
   onComplete: (values: ConnectionFormValues) => void;
+  /**
+   * Brokerless continuation on the Practice desk tray. When set, the primary
+   * control records a skip instead of a successful connection. The first-run
+   * wizard omits it and still advances through `onComplete`.
+   */
+  onContinueWithoutBroker?: () => void;
   defaultValues?: Partial<ConnectionFormValues>;
 }
 
-export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
+export function ConnectionStep({
+  onComplete,
+  onContinueWithoutBroker,
+  defaultValues,
+}: ConnectionStepProps) {
   const [mode, setMode] = useState<ConnectionMode | null>(null);
+
+  function continueWithoutBroker() {
+    if (onContinueWithoutBroker) {
+      onContinueWithoutBroker();
+      return;
+    }
+    onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" });
+  }
 
   return (
     <div className="space-y-5">
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
-          Practice uses FlintTrade&apos;s SandboxEngine for paper fills. You do not
+          Practice — simulated fills, no real money. You do not
           need a broker for Practice.
         </p>
         <Button
           type="button"
           className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-          onClick={() => onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" })}
+          onClick={continueWithoutBroker}
         >
           Continue without a broker
           <ArrowRight className="size-4 ml-2" />
@@ -188,7 +206,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         {mode === "openalgo" && (
           <p className="text-xs text-text-muted">
             Settings fallback only — not the primary connect path. Practice
-            fills still use the native SandboxEngine.
+            still uses simulated fills, with no real money.
           </p>
         )}
         {mode === "direct" && (

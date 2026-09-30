@@ -207,8 +207,8 @@ def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monke
         pytest.fail("proofless construction acquired scheduling ownership")
 
     # Sibling xdist modules assign OPENALGO_API_KEY / FLINTTRADE_API_KEY on
-    # os.environ directly. A leftover key 401s this probe before the
-    # proofless 503 can be observed.
+    # os.environ directly. A leftover key is not what this probe is checking;
+    # the status route still needs a session before the proofless 503.
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     for owner in ("TimeScheduler", "CronStrategyScheduler"):
@@ -220,7 +220,11 @@ def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monke
     assert app.config.get("CRON_SCHEDULER") is None
     assert app.config.get("ROTATION_SCHEDULER") is None
     assert app.config.get("CREDENTIALS_ROTATOR") is None
-    response = app.test_client().get("/admin/credentials/rotation/status")
+    from flinttrade_core.auth_routes import _create_token
+
+    with app.app_context():
+        headers = {"Authorization": f"Bearer {_create_token('operator', mode='explore')}"}
+    response = app.test_client().get("/admin/credentials/rotation/status", headers=headers)
     assert response.status_code == 503
     assert response.json["error"] == "backend_lease_unavailable"
 
@@ -397,9 +401,7 @@ def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
         pytest.fail("proofless factory constructed broker authority")
 
     # Sibling modules assign OPENALGO_API_KEY / FLINTTRADE_API_KEY on
-    # os.environ directly. docs/API.md keeps /healthz API-key-gated when a
-    # key is configured; isolate the leak so this probe uses the
-    # loopback-no-key path instead of 401-ing.
+    # os.environ directly. The public liveness probe does not need a key.
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.setattr(module, "CredentialStore", forbidden)
@@ -411,7 +413,7 @@ def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
     assert app.config["CLIENT"] is None
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BACKEND_LEASE_READY"] is False
-    assert app.test_client().get("/healthz").status_code == 200
+    assert app.test_client().get("/api/v1/ping").status_code == 200
 
 
 def test_desktop_validates_live_proof_before_its_runtime_factory(tmp_path, monkeypatch):

@@ -38,12 +38,13 @@ import AISuggestionsPanel from "@/routes/ai/AISuggestionsPanel";
 import SentimentPanel from "@/routes/ai/SentimentPanel";
 import RegimePanel from "@/routes/ai/RegimePanel";
 import AgentPanel from "@/routes/ai/AgentPanel";
-import { getBase } from "@/services/ftApi.helpers";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Page, PageHeader } from "@/components/layout/Page";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   analyzeSentiment,
@@ -702,7 +703,7 @@ function KnowledgeSection() {
 
 async function fetchAdvisorStatus(): Promise<AdvisorStatusData> {
   const base = getBase();
-  const resp = await fetch(`${base}/api/v1/advisor/status`);
+  const resp = await fetch(`${base}/api/v1/advisor/status`, { headers: buildHeaders(false) });
   if (!resp.ok) throw new Error(`advisor/status: HTTP ${resp.status}`);
   const raw: unknown = await resp.json();
   const result = AdvisorStatusResponseSchema.safeParse(raw);
@@ -858,7 +859,7 @@ function FloatingPillNav({ active, onSelect, sections = SECTIONS }: FloatingPill
       data-tour-target="ai-section-nav"
       className="min-w-0 max-w-full overflow-x-auto scrollbar-none"
     >
-      <div className="inline-flex items-center gap-0.5 bg-glass-chrome backdrop-blur-md border border-glass-l2 rounded-full px-1.5 py-1.5 shadow-lg">
+      <div className="inline-flex items-center gap-0.5 rounded-lg border border-border-default bg-surface-card p-0.5">
         {sections.map((section) => {
           const Icon = section.icon;
           const isActive = active === section.id;
@@ -869,14 +870,14 @@ function FloatingPillNav({ active, onSelect, sections = SECTIONS }: FloatingPill
               onClick={() => onSelect(section.id)}
               aria-current={isActive ? "true" : undefined}
               aria-label={section.label}
-              className="relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="relative flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               style={{ zIndex: 1 }}
             >
               {/* Sliding pill background */}
               {isActive && (
                 <motion.span
                   layoutId={reducedMotion ? undefined : "pill-indicator"}
-                  className="absolute inset-0 bg-accent rounded-full"
+                  className="absolute inset-0 rounded-md bg-accent"
                   style={{ zIndex: -1 }}
                   transition={
                     reducedMotion
@@ -887,12 +888,12 @@ function FloatingPillNav({ active, onSelect, sections = SECTIONS }: FloatingPill
               )}
               <Icon
                 className={`w-3.5 h-3.5 shrink-0 transition-colors duration-150 ${
-                  isActive ? "text-white" : "text-text-muted"
+                  isActive ? "text-[var(--color-accent-text)]" : "text-text-muted"
                 }`}
               />
               <span
                 className={`transition-colors duration-150 ${
-                  isActive ? "text-white" : "text-text-secondary"
+                  isActive ? "text-[var(--color-accent-text)]" : "text-text-secondary"
                 }`}
               >
                 {section.label}
@@ -1095,28 +1096,28 @@ export default function AIRoute() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Top header bar */}
-      <div className="border-b border-glass-chrome bg-glass-chrome backdrop-blur-md px-5 py-3 shrink-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <Bot className="w-5 h-5 text-accent" />
-            <div className="flex-1 min-w-[12rem]">
-              <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
-                AI Center
-              </h1>
-              {analysisContext && (
-                <div className="mt-1 text-[10px] text-accent/80 font-mono" data-testid="ai-symbol-context">
-                  {analysisContext.symbol} ({analysisContext.exchange}) • {analysisContext.source}
-                </div>
-              )}
-              <p className="text-xxs text-text-muted mt-0.5">
-                {level === "beginner"
-                  ? "Ask me anything about markets, stocks, or how to trade"
-                  : level === "intermediate"
-                    ? "Local LLM advisor · Rule + ML signals · Market sentiment · Regime detector"
-                  : "Local LLM advisor · Rule + ML signals · Market sentiment · Regime · Knowledge base"}
-              </p>
-            </div>
+    <Page>
+      <PageHeader
+        title="AI Centre"
+        description={
+          level === "beginner"
+            ? "Ask anything about markets, stocks, or how to trade."
+            : level === "intermediate"
+              ? "Local LLM advisor, rule and ML signals, market sentiment and regime detection."
+              : "Local LLM advisor, rule and ML signals, sentiment, regime and your knowledge base."
+        }
+        meta={
+          analysisContext ? (
+            <span
+              className="rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-xs text-accent"
+              data-testid="ai-symbol-context"
+            >
+              {analysisContext.symbol} ({analysisContext.exchange}) • {analysisContext.source}
+            </span>
+          ) : null
+        }
+        actions={
+          <>
             {visibleSections.length > 1 && (
               <FloatingPillNav
                 active={activeSection}
@@ -1125,11 +1126,11 @@ export default function AIRoute() {
               />
             )}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => void handleShare()}
               disabled={messages.length === 0}
-              className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs shrink-0"
+              className="shrink-0"
               aria-label="Share conversation"
             >
               {shareState === "copied" ? (
@@ -1149,11 +1150,12 @@ export default function AIRoute() {
                 </>
               )}
             </Button>
-          </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Main content area — relative for overlay positioning */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {/* Chat is always rendered underneath (full height) */}
         <div className="absolute inset-0">
           <ChatSection analysisContext={analysisContext ?? undefined} />
@@ -1183,6 +1185,6 @@ export default function AIRoute() {
           steps={TOUR_DEFINITIONS["ai-beginner"] ?? []}
         />
       )}
-    </div>
+    </Page>
   );
 }

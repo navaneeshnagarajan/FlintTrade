@@ -449,7 +449,7 @@ function CreateAlertForm({ onSubmit, onCancel }: CreateAlertFormProps) {
         <Button
           type="submit"
           size="sm"
-          className="h-6 px-2.5 text-xxs bg-accent text-white hover:bg-accent/90"
+          className="h-6 px-2.5 text-xxs bg-accent text-accent-foreground hover:bg-accent/90"
         >
           Set Alert
         </Button>

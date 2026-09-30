@@ -579,7 +579,7 @@ function SizingTab({ form, values, errors, method, onMethodChange }: SizingTabPr
             onClick={() => onMethodChange(m.id)}
             className={`flex-1 py-1 text-xs font-medium transition-colors ${
               method === m.id
-                ? "bg-accent text-white"
+                ? "bg-accent text-accent-foreground"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
             }`}
           >

@@ -28,8 +28,10 @@ export function PracticeSection() {
       {!isPractice && (
         <div className="p-4 rounded-lg border border-border-default bg-surface-card">
           <p className="text-sm text-text-secondary">
-            Switch to <strong>Practice</strong> mode from the TopBar to access virtual trading controls.
-            You are currently in <strong>{mode === "explore" ? "Explore" : "Live"}</strong> mode.
+            Switch to <strong>Practice</strong> from the TopBar to access virtual trading controls.
+            {mode === "live" ? (
+              <> You are currently in <strong>Live</strong>.</>
+            ) : null}
           </p>
         </div>
       )}

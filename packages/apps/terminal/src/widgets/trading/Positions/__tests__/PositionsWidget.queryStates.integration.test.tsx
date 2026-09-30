@@ -32,6 +32,7 @@ const mockListBrokerAccounts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api", () => ({
   getPositionbook: mockGetPositionbook,
+  getOrderbook: vi.fn().mockResolvedValue([]),
   placeOrder: mockPlaceOrder,
 }));
 vi.mock("@/services/ftApi.helpers", () => ({

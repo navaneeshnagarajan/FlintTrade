@@ -33,6 +33,9 @@ const v1ModeSchema = z.object({
   state: z.object({ mode: z.string() }).optional(),
 }).optional();
 
+/** Desk mode when `flinttrade:mode` has no record. Explore is example data, not the signed-in default. */
+export const INITIAL_MODE: AppMode = "practice";
+
 function migrateFromV1(): AppMode {
   const raw = sessionStorage.getItem("flinttrade:mode");
   if (!raw) return "explore";
@@ -52,7 +55,7 @@ const storeImpl: StateCreator<ModeStore, [["zustand/persist", unknown]]> = (
   set,
   get
 ) => ({
-  mode: "explore",
+  mode: INITIAL_MODE,
 
   setMode: (mode) => set({ mode }),
 

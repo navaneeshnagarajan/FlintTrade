@@ -5,6 +5,7 @@ Run with:
 """
 from __future__ import annotations
 
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,7 +25,13 @@ class TestHealthAggregator:
         agg = self._make()
         result = agg.check_memory()
         assert "status" in result
-        assert result["status"] in ("ok", "degraded", "error")
+        assert result["status"] in ("ok", "degraded", "error", "unavailable")
+        # A missing host reading must not be painted as 0/0 RAM.
+        assert not (result.get("used_mb") == 0 and result.get("total_mb") == 0)
+        if result.get("scope") == "host":
+            assert result["total_mb"] > 0
+            assert "used_mb" in result
+            assert "used_pct" in result
 
     def test_check_disk_space_ok(self, tmp_path):
         agg = self._make()
@@ -32,6 +39,9 @@ class TestHealthAggregator:
         assert "status" in result
         assert "free_gb" in result
         assert result["free_gb"] > 0
+        assert result["scope"] == "host"
+        assert result["used_pct"] == result["percent_used"]
+        assert result["total_gb"] > 0
 
     def test_check_duckdb_readable(self, tmp_path):
         """Creates a valid DuckDB file and verifies check passes."""
@@ -88,6 +98,223 @@ class TestHealthAggregator:
         assert result["disconnected"] == 1
         assert result["total"] == 2
         assert result["status"] == "degraded"
+
+
+# ---------------------------------------------------------------------------
+# Install-host resources (FT-SET-MONITOR-001)
+# ---------------------------------------------------------------------------
+
+
+class TestHostResourceReadings:
+    """Host totals stay distinct from process RSS and from invented zeros."""
+
+    def _make(self):
+        from flinttrade_core.monitoring import HealthAggregator
+        return HealthAggregator()
+
+    def _psutil(self, monkeypatch):
+        from flinttrade_core import monitoring as monitoring_mod
+
+        mock = MagicMock()
+        monkeypatch.setattr(monitoring_mod, "_load_psutil", lambda: mock)
+        return monitoring_mod, mock
+
+    @pytest.mark.unit
+    def test_memory_reports_host_totals_and_nests_process(self, monkeypatch):
+        monitoring_mod, mock = self._psutil(monkeypatch)
+        mock.virtual_memory.return_value = MagicMock(
+            total=16 * 1024 ** 3,
+            available=12 * 1024 ** 3,
+            percent=25.0,
+        )
+        mock.Process.return_value.memory_info.return_value = MagicMock(
+            rss=200 * 1024 ** 2,
+            vms=800 * 1024 ** 2,
+        )
+        mock.Process.return_value.memory_percent.return_value = 1.25
+
+        result = monitoring_mod.HealthAggregator().check_memory()
+
+        assert result["scope"] == "host"
+        assert result["total_mb"] == pytest.approx(16384.0, rel=0.01)
+        assert result["used_mb"] == pytest.approx(4096.0, rel=0.01)
+        assert result["used_pct"] == 25.0
+        assert result["process"]["scope"] == "process"
+        assert result["process"]["rss_mb"] == pytest.approx(200.0, rel=0.01)
+        assert result["used_mb"] != result["process"]["rss_mb"]
+        assert "rss_mb" not in result
+
+    @pytest.mark.unit
+    def test_process_rss_is_not_reported_as_host_memory(self, monkeypatch):
+        monitoring_mod, mock = self._psutil(monkeypatch)
+        mock.virtual_memory.side_effect = OSError("host ram unreadable")
+        mock.Process.return_value.memory_info.return_value = MagicMock(
+            rss=180 * 1024 ** 2,
+            vms=900 * 1024 ** 2,
+        )
+        mock.Process.return_value.memory_percent.return_value = 1.1
+
+        result = monitoring_mod.HealthAggregator().check_memory()
+
+        assert result["scope"] == "process"
+        assert result["status"] == "unavailable"
+        assert "used_mb" not in result
+        assert "total_mb" not in result
+        assert "used_pct" not in result
+        assert result["process"]["rss_mb"] == pytest.approx(180.0, rel=0.01)
+        assert result["process"]["scope"] == "process"
+
+    @pytest.mark.unit
+    def test_missing_psutil_does_not_invent_zero_memory(self, monkeypatch):
+        from flinttrade_core import monitoring as monitoring_mod
+
+        monkeypatch.setattr(monitoring_mod, "_load_psutil", lambda: None)
+        result = monitoring_mod.HealthAggregator().check_memory()
+
+        assert result == {
+            "status": "unavailable",
+            "scope": "unavailable",
+            "note": "Host memory unavailable",
+        }
+
+    @pytest.mark.unit
+    def test_zero_host_ram_total_is_unavailable(self, monkeypatch):
+        monitoring_mod, mock = self._psutil(monkeypatch)
+        mock.virtual_memory.return_value = MagicMock(total=0, available=0, percent=0.0)
+        mock.Process.return_value.memory_info.side_effect = OSError("no process")
+
+        result = monitoring_mod.HealthAggregator().check_memory()
+
+        assert result["scope"] == "unavailable"
+        assert "used_mb" not in result
+        assert "total_mb" not in result
+
+    @pytest.mark.unit
+    def test_cpu_is_a_host_reading(self, monkeypatch):
+        monitoring_mod, mock = self._psutil(monkeypatch)
+        mock.cpu_percent.return_value = 12.5
+        mock.cpu_count.return_value = 8
+
+        result = monitoring_mod.HealthAggregator().check_cpu()
+
+        assert result is not None
+        assert result["scope"] == "host"
+        assert result["used_pct"] == 12.5
+        assert result["cores"] == 8
+        mock.cpu_percent.assert_called_once_with(interval=0.1)
+
+    @pytest.mark.unit
+    def test_cpu_is_omitted_without_psutil(self, monkeypatch):
+        from flinttrade_core import monitoring as monitoring_mod
+
+        monkeypatch.setattr(monitoring_mod, "_load_psutil", lambda: None)
+        assert monitoring_mod.HealthAggregator().check_cpu() is None
+
+    @pytest.mark.unit
+    def test_network_counters_are_host_scoped(self, monkeypatch):
+        monitoring_mod, mock = self._psutil(monkeypatch)
+        mock.net_io_counters.return_value = MagicMock(bytes_sent=1500, bytes_recv=2500)
+
+        result = monitoring_mod.HealthAggregator().check_network()
+
+        assert result == {
+            "status": "ok",
+            "scope": "host",
+            "bytes_sent": 1500,
+            "bytes_recv": 2500,
+        }
+
+    @pytest.mark.unit
+    def test_network_is_omitted_when_counters_are_missing(self, monkeypatch):
+        monitoring_mod, mock = self._psutil(monkeypatch)
+        mock.net_io_counters.return_value = None
+        assert monitoring_mod.HealthAggregator().check_network() is None
+
+    @pytest.mark.unit
+    def test_gpu_is_omitted_when_nvidia_smi_is_absent(self, monkeypatch):
+        from flinttrade_core import monitoring as monitoring_mod
+
+        monkeypatch.setattr(monitoring_mod.shutil, "which", lambda _name: None)
+        assert monitoring_mod.HealthAggregator().check_gpu() is None
+
+    @pytest.mark.unit
+    def test_gpu_parses_a_real_nvidia_smi_row(self, monkeypatch):
+        from flinttrade_core import monitoring as monitoring_mod
+
+        monkeypatch.setattr(monitoring_mod.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+        monkeypatch.setattr(
+            monitoring_mod.subprocess,
+            "run",
+            lambda *args, **kwargs: MagicMock(returncode=0, stdout="Example GPU, 10, 512, 8192\n"),
+        )
+
+        result = monitoring_mod.HealthAggregator().check_gpu()
+
+        assert result is not None
+        assert result["scope"] == "host"
+        assert result["name"] == "Example GPU"
+        assert result["used_pct"] == 10.0
+        assert result["used_mb"] == 512.0
+        assert result["total_mb"] == 8192.0
+
+    @pytest.mark.unit
+    def test_gpu_does_not_invent_numbers_from_an_unreadable_probe(self, monkeypatch):
+        from flinttrade_core import monitoring as monitoring_mod
+
+        monkeypatch.setattr(monitoring_mod.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+        monkeypatch.setattr(
+            monitoring_mod.subprocess,
+            "run",
+            lambda *args, **kwargs: MagicMock(
+                returncode=0,
+                stdout="Example GPU, [N/A], [N/A], [N/A]\n",
+            ),
+        )
+
+        assert monitoring_mod.HealthAggregator().check_gpu() is None
+
+    @pytest.mark.unit
+    def test_get_health_omits_unreadable_gpu_and_keeps_cpu_off_the_rollup(self, monkeypatch):
+        agg = self._make()
+        monkeypatch.setattr(agg, "check_cpu", lambda: {"status": "error", "scope": "host", "used_pct": 99.0})
+        monkeypatch.setattr(agg, "check_gpu", lambda: None)
+        monkeypatch.setattr(
+            agg,
+            "check_network",
+            lambda: {"status": "ok", "scope": "host", "bytes_sent": 1, "bytes_recv": 2},
+        )
+        monkeypatch.setattr(
+            agg,
+            "check_disk_space",
+            lambda data_dir=None: {
+                "status": "ok",
+                "scope": "host",
+                "total_gb": 10.0,
+                "free_gb": 5.0,
+                "used_pct": 50.0,
+                "percent_used": 50.0,
+            },
+        )
+        monkeypatch.setattr(
+            agg,
+            "check_memory",
+            lambda: {
+                "status": "ok",
+                "scope": "host",
+                "used_mb": 1024.0,
+                "total_mb": 2048.0,
+                "used_pct": 50.0,
+            },
+        )
+
+        health = agg.get_health()
+
+        assert health["status"] == "ok"
+        assert "gpu" not in health
+        assert health["cpu"]["used_pct"] == 99.0
+        assert health["network"]["scope"] == "host"
+        assert health["memory"]["scope"] == "host"
+        assert health["disk"]["used_pct"] == 50.0
 
 
 # ---------------------------------------------------------------------------

@@ -282,7 +282,7 @@ export function ScalperControls({
             }
             className={`flex items-center gap-1.5 px-4 h-8 font-semibold text-sm transition-colors ${
               oneClick
-                ? "bg-accent text-white shadow-sm hover:bg-accent/90"
+                ? "bg-accent text-accent-foreground shadow-sm hover:bg-accent/90"
                 : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary"
             }`}
           >
