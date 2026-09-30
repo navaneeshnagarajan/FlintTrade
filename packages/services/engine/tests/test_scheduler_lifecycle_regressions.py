@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from flinttrade_core.models import OHLCV, Order, Quote
+from flinttrade_engine import scheduler as scheduler_module
 from flinttrade_engine.scheduler import StrategyRunner, StrategyScheduler, TimeScheduler
 from flinttrade_engine.strategy import BaseStrategy
 from flinttrade_engine.laya import DecisionStatus, process_laya
@@ -435,6 +436,33 @@ async def test_timed_out_sync_stop_hook_remains_owned_without_blocking_loop() ->
 
 
 @pytest.mark.asyncio
+async def test_sync_hook_returned_before_deadline_survives_late_loop_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A finished sync hook must not time out while the loop is still observing it.
+
+    The lifecycle deadline still rejects a hook that is running when the
+    deadline passes. Only the gap after the worker has returned is ignored.
+    """
+    strategy = _TestStrategy(name="late-observe")
+    runner = _runner(strategy, lifecycle_timeout=0.02)
+    real_to_thread = asyncio.to_thread
+
+    async def observe_late(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        result = await real_to_thread(func, *args, **kwargs)
+        await asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(scheduler_module.asyncio, "to_thread", observe_late)
+
+    await runner.start()
+    assert strategy.state.value == "ACTIVE"
+    await runner.stop()
+    assert strategy.state.value == "STOPPED"
+    assert runner.cleanup_required is False
+
+
+@pytest.mark.asyncio
 async def test_square_off_sync_stop_timeout_retains_owned_worker() -> None:
     strategy = _TestStrategy(name="square-off-stop")
     runner = _runner(strategy, lifecycle_timeout=0.02)
@@ -754,11 +782,12 @@ async def test_failed_start_drain_honours_its_cleanup_deadline() -> None:
         release_hook.wait()
 
     strategy.start = blocked_start
-    start_hook, worker_active = runner._create_lifecycle_hook_task(strategy.start)
+    start_hook, worker_active, settlement = runner._create_lifecycle_hook_task(strategy.start)
     with runner._ownership_lock:
         runner._cleanup_required = True
         runner._start_hook_task = start_hook
         runner._start_hook_worker_active = worker_active
+        runner._start_hook_settlement = settlement
     try:
         assert await asyncio.to_thread(hook_entered.wait, 0.5)
         started = asyncio.get_running_loop().time()
