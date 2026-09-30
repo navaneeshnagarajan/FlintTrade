@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router";
@@ -85,14 +85,15 @@ vi.mock("@/services/advisorApi", () => ({
 
 import { AITutorPill } from "../AITutorPill";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
+import { TOGGLE_AI_TUTOR_EVENT } from "@/lib/aiTutorEvents";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function renderPill() {
+function renderPill(path = "/") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <AITutorPill />
     </MemoryRouter>,
   );
@@ -183,6 +184,22 @@ describe("AITutorPill", () => {
 
     expect(screen.getByRole("button", { name: "Open AI Tutor" })).toBeInTheDocument();
     expect(screen.getByText("Ask AI")).toBeInTheDocument();
+  });
+
+  it("keeps the floating pill off app routes, where the TopBar launches the tutor", () => {
+    renderPill("/home");
+
+    expect(screen.queryByRole("button", { name: "Open AI Tutor" })).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new CustomEvent(TOGGLE_AI_TUTOR_EVENT));
+    });
+    expect(screen.getByLabelText("Message input")).toBeInTheDocument();
+  });
+
+  it("does not float over onboarding", () => {
+    renderPill("/welcome");
+
+    expect(screen.queryByRole("button", { name: "Open AI Tutor" })).not.toBeInTheDocument();
   });
 
   it("sends session_id on real auth sessions so tutor chats are captured server-side", async () => {

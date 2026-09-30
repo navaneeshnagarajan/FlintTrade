@@ -23,7 +23,10 @@ logger = logging.getLogger("flinttrade.core.telegram_routes")
 
 telegram_bp = Blueprint("telegram", __name__, url_prefix="/api/v1")
 
-_EXPLORE_TELEGRAM_BLOCKED = "Telegram tests are blocked in Explore (sample-only)."
+_EXPLORE_TELEGRAM_BLOCKED = (
+    "Telegram tests are blocked for Example. "
+    "Switch to Practice or Live with Telegram configured to send a real test."
+)
 
 
 def _clean(value: Any) -> str:

@@ -1,22 +1,19 @@
 /**
- * ModeIndicator — unified TopBar mode pill + toggle.
+ * ModeIndicator — TopBar mode menu.
  *
- * Replaces both SandboxToggle and ModePill with a single component.
- *
- * Behaviour per mode:
- *   Explore  → Grey "EXPLORE" button. Real users switch to Practice; demo
- *              users are sent to setup so sample mode does not hit live APIs.
- *   Practice → Amber "PRACTICE" button. Clicking toggles to Live (requires PIN).
- *   Live     → Green "LIVE" button. Clicking toggles to Practice (instant, no dialog).
- *
- * Visual design follows Thinkorswim-style prominence:
- *   - The dangerous mode (Live) is visually loud
- *   - The safe mode (Practice) is visually distinct but calmer
- *   - Explore is the most subdued
+ * The chip opens a menu of Practice, Connected (read), and Live.
+ * Connected (read) stays disabled until a broker is connected.
+ * Live stays disabled while any lock reason applies: missing 2FA or broker,
+ * no quick-unlock PIN, and, when the place gate reports it, Laya qualification.
+ * A deferred authenticator or a skipped PIN links to Settings → Security,
+ * outside the disabled Live item so the link can be followed.
+ * Opening the menu never opens the Live dialog. The PIN unlock runs only
+ * after the operator chooses an eligible Live item.
  */
 
-import { useState, useCallback } from "react";
-import { Compass, FlaskConical, Zap } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
+import { Compass, Eye, FlaskConical, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,54 +26,133 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
-import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useLiveArmFactors } from "@/hooks/useTotpEnrolled";
+import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
+import {
+  CREATE_A_PIN,
+  ENROL_2FA_AND_CONNECT_BROKER,
+  liveMenuLockReasons,
+} from "@/chrome/liveLockReasons";
+import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+export const CONNECT_BROKER_FIRST = "Connect a broker first";
+export const LIVE_LOCKED_REASON = ENROL_2FA_AND_CONNECT_BROKER;
+export const ENROL_AUTHENTICATOR_HREF = "/settings#security";
+export const ENROL_AUTHENTICATOR_LINK = "Enrol authenticator in Settings";
 
-export default function ModeIndicator() {
+export interface ModeIndicatorProps {
+  /**
+   * Laya Live qualification, when the place gate reports it.
+   * Omit this while that status does not exist. `false` adds
+   * "Not qualified for Live" to the disabled Live reasons.
+   */
+  layaQualifiedForLive?: boolean;
+}
+
+const CHIP_CLASS = {
+  example:
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/25 hover:bg-text-muted/25 hover:text-text-secondary",
+  practice:
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400",
+  connectedRead:
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 hover:text-sky-300",
+  live:
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit",
+} as const;
+
+export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorProps = {}) {
   const mode = useModeStore((s) => s.mode);
   const setMode = useModeStore((s) => s.setMode);
   const token = useAuthStore((s) => s.token);
   const updateToken = useAuthStore((s) => s.updateToken);
+  const brokerConnected = useBrokerConnected();
+  const { totpEnrolled, hasPin } = useLiveArmFactors();
+  const liveReasons = liveMenuLockReasons({
+    brokerConnected,
+    totpEnrolled,
+    hasPin,
+    layaQualifiedForLive,
+  });
+  const liveEligible = liveReasons.length === 0;
 
+  const [readPosture, setReadPosture] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pin, setPin] = useState("");
-  const [totpCode, setTotpCode] = useState("");
   const [pinError, setPinError] = useState("");
   const [toggleError, setToggleError] = useState("");
 
-  const handleToggle = useCallback(async () => {
-    if (mode === "live") {
-      // Live → Practice: must revoke the live-unlocked JWT on the server
-      // and replace it with a fresh Practice JWT. Without this the
-      // backend's require_live_unlocked guard would still let the stale
-      // token place real orders even though the UI says Practice.
-      setToggleError("");
-      try {
-        const authState = useAuthStore.getState();
-        const newToken = await downgradeMode("practice", authState.token);
-        if (!updateToken(newToken, authState.sessionGeneration)) return;
-      } catch {
-        setToggleError("Could not downgrade to Practice — try again.");
-        return;
-      }
-      setMode("practice");
-    } else {
-      // Practice → Live: requires PIN confirmation (and TOTP if deferred)
-      setPin("");
-      setTotpCode("");
-      setPinError("");
-      setConfirmOpen(true);
+  const showConnectedRead = readPosture && brokerConnected && mode === "practice";
+  const chipLabel = mode === "live"
+    ? "Live"
+    : showConnectedRead
+      ? "Connected (read)"
+      : mode === "practice"
+        ? "Practice"
+        : "Example";
+
+  useEffect(() => {
+    setConnectedReadPosture(showConnectedRead);
+    return () => setConnectedReadPosture(false);
+  }, [showConnectedRead]);
+  const chipClass = mode === "live"
+    ? CHIP_CLASS.live
+    : showConnectedRead
+      ? CHIP_CLASS.connectedRead
+      : mode === "practice"
+        ? CHIP_CLASS.practice
+        : CHIP_CLASS.example;
+
+  const switchToPractice = useCallback(async () => {
+    setToggleError("");
+    if (token === "demo-user") {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:navigate", { detail: { path: "/setup" } }),
+      );
+      return false;
     }
-    // `token` is deliberately not a dependency: the live→practice branch reads
-    // the freshest token from `useAuthStore.getState()` rather than the closure,
-    // so listing it here only churned this callback's identity on every refresh.
-  }, [mode, setMode, updateToken]);
+    if (mode === "practice") return true;
+    try {
+      const authState = useAuthStore.getState();
+      const newToken = await downgradeMode("practice", authState.token);
+      if (!updateToken(newToken, authState.sessionGeneration)) return false;
+    } catch {
+      setToggleError(
+        mode === "live"
+          ? "Could not downgrade to Practice — try again."
+          : "Could not switch to Practice — try again.",
+      );
+      return false;
+    }
+    setMode("practice");
+    return true;
+  }, [mode, setMode, token, updateToken]);
+
+  const selectPractice = useCallback(async () => {
+    setReadPosture(false);
+    await switchToPractice();
+  }, [switchToPractice]);
+
+  const selectConnectedRead = useCallback(async () => {
+    if (!brokerConnected) return;
+    const switched = mode === "practice" ? true : await switchToPractice();
+    if (switched) setReadPosture(true);
+  }, [brokerConnected, mode, switchToPractice]);
+
+  const selectLive = useCallback(() => {
+    if (!liveEligible || mode === "live") return;
+    setPin("");
+    setPinError("");
+    setConfirmOpen(true);
+  }, [liveEligible, mode]);
 
   const handleConfirmLive = useCallback(async () => {
     if (pin.length !== 6 || /\D/.test(pin)) {
@@ -85,214 +161,161 @@ export default function ModeIndicator() {
     }
     try {
       const expectedGeneration = useAuthStore.getState().sessionGeneration;
-      if (totpCode.length === 6) {
-        await enableFlintTradeTotp(totpCode);
-      }
-      // Explicit Live arm: unlockWithPin defaults to mode "live", so the
-      // backend mints a live_mode_unlocked JWT. Capturing it is essential —
-      // otherwise the in-memory token stays at the Explore/Practice JWT from
-      // login and the server-side require_live_unlocked guard rejects every
-      // order. (Fixed 2026-05-19 per Codex audit; centralised in Phase 1.)
-      const { token: newToken } = await unlockWithPin(pin, "live");
+      // Explicit Live switch. Quick unlock does not change Mode; this call
+      // does, and only after the server accepts the PIN and enrolment check.
+      const { token: newToken } = await confirmLiveMode(pin);
       if (!updateToken(newToken, expectedGeneration)) return;
     } catch (err) {
-      // Surface the server's message — the backend distinguishes a wrong PIN
-      // from no-PIN-set (code `pin_not_set` points the operator at Settings →
-      // Security to create one). The hardcoded string is a last-resort
-      // fallback only.
       const message = err instanceof Error ? err.message.trim() : "";
       setPinError(message || "Incorrect PIN. Try again.");
       return;
     }
     setPinError("");
     setConfirmOpen(false);
+    setReadPosture(false);
     setMode("live");
-  }, [pin, totpCode, setMode, updateToken]);
+  }, [pin, setMode, updateToken]);
 
   const handleCancel = useCallback(() => {
     setConfirmOpen(false);
     setPin("");
-    setTotpCode("");
     setPinError("");
   }, []);
 
-  const handleExploreClick = useCallback(async () => {
-    if (token === "demo-user") {
-      window.dispatchEvent(
-        new CustomEvent("flinttrade:navigate", { detail: { path: "/setup" } }),
-      );
-      return;
-    }
-    // Explore → Practice must upgrade the JWT server-side. Login always mints
-    // an `explore` JWT, so without this call the UI would show Practice while
-    // the backend still saw Explore and rejected every sandbox order 403
-    // `mode_blocked` — the Phase 1 G1 bug that made Practice trading
-    // unreachable. `/auth/mode` accepts the practice downgrade from an explore
-    // token (explore is the lowest mode; practice is a broker-free sandbox).
-    setToggleError("");
-    try {
-      const authState = useAuthStore.getState();
-      const newToken = await downgradeMode("practice", authState.token);
-      if (!updateToken(newToken, authState.sessionGeneration)) return;
-    } catch {
-      setToggleError("Could not switch to Practice — try again.");
-      return;
-    }
-    setMode("practice");
-  }, [setMode, token, updateToken]);
+  const ChipIcon = mode === "live" ? Zap : showConnectedRead ? Eye : mode === "practice" ? FlaskConical : Compass;
 
-  // ── Explore → Practice ──────────────────────────────────────────────────
-  if (mode === "explore") {
-    return (
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={handleExploreClick}
-          aria-label={
-            token === "demo-user"
-              ? "Explore mode active — sample data only. Click to set up Practice mode."
-              : "Explore mode active — sample data only. Click to switch to Practice mode."
-          }
-          data-testid="execution-mode"
-          className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary"
-        >
-          <Compass size={11} aria-hidden="true" />
-          EXPLORE
-        </Button>
-        {toggleError && (
-          <span role="alert" className="text-xs text-loss">
-            {toggleError}
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  // ── Practice ↔ Live toggle ──────────────────────────────────────────────
-
-  if (mode === "practice") {
-    return (
-      <>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={handleToggle}
-          aria-label="Practice mode active — virtual capital. Click to switch to Live trading."
-          data-testid="execution-mode"
-          className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400"
-        >
-          <FlaskConical size={11} aria-hidden="true" />
-          PRACTICE
-        </Button>
-
-        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Switch to Live Trading?</AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <div className="space-y-3">
-                  <p>
-                    You are about to switch to <strong>Live mode</strong>. All
-                    orders will be executed with <strong>real money</strong>{" "}
-                    through your broker.
-                  </p>
-                  <div>
-                    <label
-                      htmlFor="mode-totp"
-                      className="text-xs font-medium text-text-secondary block mb-1.5"
-                    >
-                      Authenticator code
-                    </label>
-                    <Input
-                      id="mode-totp"
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={totpCode}
-                      onChange={(e) => {
-                        setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6));
-                        if (pinError) setPinError("");
-                      }}
-                      placeholder="6-digit code if not enrolled yet"
-                      aria-label="Enter your authenticator code to enrol before Live"
-                      className="text-center font-mono text-lg tracking-widest max-w-40"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="mode-pin"
-                      className="text-xs font-medium text-text-secondary block mb-1.5"
-                    >
-                      Enter your PIN to confirm
-                    </label>
-                    <Input
-                      id="mode-pin"
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={pin}
-                      onChange={(e) => {
-                        setPin(e.target.value.replace(/\D/g, ""));
-                        if (pinError) setPinError("");
-                      }}
-                      placeholder="6-digit PIN"
-                      className="text-center font-mono text-lg tracking-widest max-w-40"
-                      onKeyDown={(e) => e.key === "Enter" && handleConfirmLive()}
-                      autoFocus
-                    />
-                    {pinError && (
-                      <p className="text-xs text-loss mt-1">{pinError}</p>
-                    )}
-                  </div>
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={handleCancel}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(e) => {
-                  // Radix's Action closes the dialog on click by default,
-                  // which hid every PIN error. Prevent that so a failed PIN
-                  // keeps the dialog open with the server's message visible;
-                  // handleConfirmLive closes it explicitly on success.
-                  e.preventDefault();
-                  void handleConfirmLive();
-                }}
-                disabled={pin.length !== 6}
-                className="bg-profit hover:bg-profit/90 text-white"
-              >
-                Switch to Live
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
-    );
-  }
-
-  // mode === "live"
   return (
     <div className="flex items-center gap-2">
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={handleToggle}
-        aria-label="Live trading mode active — real money. Click to switch to Practice mode."
-        data-testid="execution-mode"
-        className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit"
-      >
-        <Zap size={11} aria-hidden="true" />
-        LIVE
-      </Button>
-      {toggleError && (
-        <span
-          role="alert"
-          className="text-xs text-loss"
-        >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            data-testid="execution-mode"
+            aria-label={`${chipLabel} mode. Open the mode menu.`}
+            className={chipClass}
+          >
+            <ChipIcon size={11} aria-hidden="true" />
+            {chipLabel}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" aria-label="Mode" className="w-64">
+          <DropdownMenuItem onSelect={() => { void selectPractice(); }}>
+            Practice
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!brokerConnected}
+            onSelect={() => { void selectConnectedRead(); }}
+          >
+            <span className="flex flex-col items-start gap-0.5">
+              <span>Connected (read)</span>
+              {!brokerConnected ? (
+                <span className="text-xxs text-text-muted">{CONNECT_BROKER_FIRST}</span>
+              ) : null}
+            </span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!liveEligible}
+            onSelect={selectLive}
+          >
+            <span className="flex flex-col items-start gap-0.5">
+              <span>Live</span>
+              {liveReasons.length > 0 ? (
+                <span
+                  data-testid="live-lock-reasons"
+                  className="flex flex-col items-start gap-0.5 text-xxs text-text-muted"
+                >
+                  {liveReasons.map((reason) => (
+                    <span key={reason}>{reason}</span>
+                  ))}
+                </span>
+              ) : null}
+            </span>
+          </DropdownMenuItem>
+          {!totpEnrolled ? (
+            <DropdownMenuItem asChild>
+              <Link
+                to={ENROL_AUTHENTICATOR_HREF}
+                data-testid="live-enrol-link"
+              >
+                {ENROL_AUTHENTICATOR_LINK}
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {!hasPin ? (
+            <DropdownMenuItem asChild>
+              <Link
+                to={ENROL_AUTHENTICATOR_HREF}
+                data-testid="live-pin-link"
+              >
+                {CREATE_A_PIN}
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {toggleError ? (
+        <span role="alert" className="text-xs text-loss">
           {toggleError}
         </span>
-      )}
+      ) : null}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch to Live Trading?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  You are about to switch to <strong>Live mode</strong>. All
+                  orders will be executed with <strong>real money</strong>{" "}
+                  through your broker.
+                </p>
+                <div>
+                  <label
+                    htmlFor="mode-pin"
+                    className="text-xs font-medium text-text-secondary block mb-1.5"
+                  >
+                    Enter your PIN to confirm
+                  </label>
+                  <Input
+                    id="mode-pin"
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={pin}
+                    onChange={(e) => {
+                      setPin(e.target.value.replace(/\D/g, ""));
+                      if (pinError) setPinError("");
+                    }}
+                    placeholder="6-digit PIN"
+                    className="text-center font-mono text-lg tracking-widest max-w-40"
+                    onKeyDown={(e) => e.key === "Enter" && void handleConfirmLive()}
+                    autoFocus
+                  />
+                  {pinError ? (
+                    <p className="text-xs text-loss mt-1">{pinError}</p>
+                  ) : null}
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancel}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmLive();
+              }}
+              disabled={pin.length !== 6}
+              className="bg-profit hover:bg-profit/90 text-white"
+            >
+              Switch to Live
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

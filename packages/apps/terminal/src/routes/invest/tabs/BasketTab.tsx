@@ -59,11 +59,11 @@ import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { useModeStore } from "@/stores/modeStore";
 import { formatINR, formatPercent } from "../formatters";
 
-const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable in Explore";
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Example basket — editing unavailable";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -344,11 +344,13 @@ export function BasketTab() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  const isDemo = Object.keys(quotes).length === 0 && !isLoading;
+  // Explore quotes are filled in, so an empty book is not the only example signal.
+  // Practice and Live keep the chip off once quotes have loaded.
+  const isDemo = isExplore || (Object.keys(quotes).length === 0 && !isLoading);
 
   return (
     <div className="space-y-6">
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div className="flex items-center justify-between">

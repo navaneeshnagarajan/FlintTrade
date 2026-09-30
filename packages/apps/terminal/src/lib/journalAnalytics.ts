@@ -7,6 +7,7 @@
 
 import type { JournalTrade } from "@/services/ftApi";
 import { toIstIsoDate } from "@/lib/ist";
+import { isRestoredFromBackup } from "@/lib/restoredFills";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,6 +98,11 @@ function getClosedTrades(trades: JournalTrade[]): JournalTrade[] {
   return trades.filter((t) => typeof t.pnl === "number" && t.pnl !== 0);
 }
 
+/** Closed fills that may score Laya or a strategy. Restored fills stay in P&L. */
+function getScoredTrades(trades: JournalTrade[]): JournalTrade[] {
+  return getClosedTrades(trades).filter((t) => !isRestoredFromBackup(t.strategy));
+}
+
 function sortChronological(trades: JournalTrade[]): JournalTrade[] {
   return [...trades].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
@@ -140,11 +146,12 @@ function getDateLabel(d: Date): string {
 // ---------------------------------------------------------------------------
 
 export function computeAnalytics(trades: JournalTrade[]): TradeAnalytics {
-  const closed = getClosedTrades(trades);
+  const closedPnl = getClosedTrades(trades);
+  const closed = getScoredTrades(trades);
 
   const wins = closed.filter((t) => t.pnl > 0);
   const losses = closed.filter((t) => t.pnl <= 0);
-  const netPnl = closed.reduce((s, t) => s + t.pnl, 0);
+  const netPnl = closedPnl.reduce((s, t) => s + t.pnl, 0);
   const avgWin = wins.length
     ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length
     : 0;
@@ -155,13 +162,13 @@ export function computeAnalytics(trades: JournalTrade[]): TradeAnalytics {
   const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
   const profitFactor =
     grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
-  const bestTrade = closed.length ? Math.max(...closed.map((t) => t.pnl)) : 0;
-  const worstTrade = closed.length ? Math.min(...closed.map((t) => t.pnl)) : 0;
+  const bestTrade = closedPnl.length ? Math.max(...closedPnl.map((t) => t.pnl)) : 0;
+  const worstTrade = closedPnl.length ? Math.min(...closedPnl.map((t) => t.pnl)) : 0;
 
   // By day of week
   const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const dowMap: Record<string, { pnl: number; count: number }> = {};
-  closed.forEach((t) => {
+  closedPnl.forEach((t) => {
     try {
       const d = new Date(t.timestamp);
       const key = DOW[d.getDay()];
@@ -180,7 +187,7 @@ export function computeAnalytics(trades: JournalTrade[]): TradeAnalytics {
 
   // By symbol
   const symMap: Record<string, { pnl: number; trades: number }> = {};
-  closed.forEach((t) => {
+  closedPnl.forEach((t) => {
     if (!symMap[t.symbol]) symMap[t.symbol] = { pnl: 0, trades: 0 };
     symMap[t.symbol].pnl += t.pnl;
     symMap[t.symbol].trades += 1;
@@ -222,12 +229,34 @@ export function computeAnalytics(trades: JournalTrade[]): TradeAnalytics {
   };
 }
 
+export interface StrategyScore {
+  strategy: string;
+  trades: number;
+  pnl: number;
+}
+
+/** Strategy track-record. Restored fills are omitted. */
+export function computeStrategyStats(trades: JournalTrade[]): StrategyScore[] {
+  const closed = getScoredTrades(trades);
+  const map = new Map<string, { trades: number; pnl: number }>();
+  for (const trade of closed) {
+    const name = trade.strategy || "Unknown";
+    const bucket = map.get(name) ?? { trades: 0, pnl: 0 };
+    bucket.trades += 1;
+    bucket.pnl += trade.pnl;
+    map.set(name, bucket);
+  }
+  return [...map.entries()]
+    .map(([strategy, bucket]) => ({ strategy, trades: bucket.trades, pnl: bucket.pnl }))
+    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+}
+
 // ---------------------------------------------------------------------------
 // Enhanced analytics — win rate over time
 // ---------------------------------------------------------------------------
 
 export function computeWeeklyWinRate(trades: JournalTrade[]): WeeklyWinRate[] {
-  const closed = sortChronological(getClosedTrades(trades));
+  const closed = sortChronological(getScoredTrades(trades));
   const weekMap = new Map<string, { wins: number; losses: number }>();
 
   for (const t of closed) {
@@ -254,7 +283,7 @@ export function computeWeeklyWinRate(trades: JournalTrade[]): WeeklyWinRate[] {
 }
 
 export function computeMonthlyWinRate(trades: JournalTrade[]): MonthlyWinRate[] {
-  const closed = sortChronological(getClosedTrades(trades));
+  const closed = sortChronological(getScoredTrades(trades));
   const monthMap = new Map<string, { wins: number; losses: number }>();
 
   for (const t of closed) {
@@ -399,7 +428,7 @@ export function computeHoldingTime(trades: JournalTrade[]): HoldingTimeStats {
 // ---------------------------------------------------------------------------
 
 export function computeAllStreaks(trades: JournalTrade[]): StreakRecord[] {
-  const sorted = sortChronological(getClosedTrades(trades));
+  const sorted = sortChronological(getScoredTrades(trades));
   if (sorted.length === 0) return [];
 
   const streaks: StreakRecord[] = [];

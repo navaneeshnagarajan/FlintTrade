@@ -45,7 +45,6 @@ def _make_mock_engine(starting_capital: float = 500_000.0) -> MagicMock:
     engine.get_pnl_history.return_value = []
     engine.config = SandboxConfig(starting_capital=starting_capital)
     engine.update_config.return_value = engine.config
-    engine.square_off_all.return_value = 2
     engine.cancel_order.return_value = {
         "status": "CANCELLED",
         "order_id": "SB-001",
@@ -60,11 +59,6 @@ def _make_mock_engine(starting_capital: float = 500_000.0) -> MagicMock:
         "status": "PENDING",
         "order_id": "SB-001",
         "message": "Practice order modified",
-    }
-    engine.place_order.return_value = {
-        "status": "COMPLETE",
-        "order_id": "SB-001",
-        "message": "Order filled",
     }
     engine.reset.return_value = {
         "capital": starting_capital,
@@ -126,82 +120,6 @@ class TestGetCapital:
     def test_no_engine_returns_503(self, client_no_engine):
         resp = client_no_engine.get("/v1/sandbox/capital")
         assert resp.status_code == 503
-
-
-# ---------------------------------------------------------------------------
-# Tests — Place Order
-# ---------------------------------------------------------------------------
-
-
-class TestPlaceOrder:
-    def test_place_order_success(self, client, engine):
-        resp = client.post("/v1/sandbox/order", json={
-            "symbol": "NIFTY",
-            "exchange": "NSE_INDEX",
-            "action": "BUY",
-            "quantity": 50,
-            "price": 24000.0,
-        })
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["order"]["order_id"] == "SB-001"
-        engine.place_order.assert_called_once_with(
-            symbol="NIFTY",
-            exchange="NSE_INDEX",
-            action="BUY",
-            quantity=50,
-            price=24000.0,
-            product="MIS",
-            order_type="MARKET",
-            trigger_price=0.0,
-            strategy="",
-        )
-
-    def test_pending_order_is_success_and_forwards_union_fields(self, client, engine):
-        engine.place_order.return_value = {
-            "status": "PENDING",
-            "order_id": "SB-LIMIT",
-            "message": "Pending",
-        }
-        resp = client.post("/v1/sandbox/order", json={
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "action": "BUY",
-            "quantity": 10,
-            "price": 1_500.0,
-            "pricetype": "LIMIT",
-            "trigger_price": 1_490.0,
-            "strategy": "mean-revert",
-        })
-
-        assert resp.status_code == 200
-        engine.place_order.assert_called_once_with(
-            symbol="INFY",
-            exchange="NSE",
-            action="BUY",
-            quantity=10,
-            price=1_500.0,
-            product="MIS",
-            order_type="LIMIT",
-            trigger_price=1_490.0,
-            strategy="mean-revert",
-        )
-
-    def test_place_order_missing_fields(self, client):
-        resp = client.post("/v1/sandbox/order", json={"symbol": "NIFTY"})
-        assert resp.status_code == 400
-        assert "Missing required fields" in resp.get_json()["message"]
-
-    def test_place_order_invalid_quantity(self, client):
-        resp = client.post("/v1/sandbox/order", json={
-            "symbol": "NIFTY",
-            "exchange": "NSE_INDEX",
-            "action": "BUY",
-            "quantity": "abc",
-            "price": 24000.0,
-        })
-        assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
@@ -341,14 +259,19 @@ class TestMergedSandboxSurface:
         assert resp.status_code == 200
         assert resp.get_json()["data"]["funds"]["total_equity"] == 500_500.0
 
-    def test_square_off_forwards_exchange_qualified_ticks(self, client, engine):
-        ticks = {"NSE:INFY": 1_510.0, "NSE:TCS": 3_900.0}
+    def test_place_and_square_off_are_not_mounted(self, client):
+        """Paper placement is not a sandbox route."""
+        placed = client.post("/v1/sandbox/order", json={
+            "symbol": "NIFTY",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 1,
+            "price": 100.0,
+        })
+        squared = client.post("/v1/sandbox/square-off", json={"latest_ticks": {"NSE:NIFTY": 100.0}})
 
-        resp = client.post("/v1/sandbox/square-off", json={"latest_ticks": ticks})
-
-        assert resp.status_code == 200
-        assert resp.get_json()["data"]["closed_positions"] == 2
-        engine.square_off_all.assert_called_once_with(ticks)
+        assert placed.status_code == 404
+        assert squared.status_code == 404
 
     def test_cancel_modify_and_cancel_all_reach_engine(self, client, engine):
         cancelled = client.delete("/v1/sandbox/order/SB-001")

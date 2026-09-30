@@ -194,7 +194,7 @@ function AddForm({ onAdd, onCancel }: { onAdd: (idea: TradeIdea) => void; onCanc
       <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags (comma-separated)"
         className="h-7 text-xs font-mono bg-surface-hover border-border-default text-text-primary" aria-label="Tags" />
       <div className="flex gap-2">
-        <Button type="submit" size="sm" className="flex-1 h-7 text-xs bg-accent text-white hover:bg-accent/80">
+        <Button type="submit" size="sm" className="flex-1 h-7 text-xs bg-accent text-accent-foreground hover:bg-accent/80">
           <Check size={11} aria-hidden="true" />Save Idea
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={onCancel} className="h-7 px-3 text-xs border-border-default text-text-muted hover:bg-surface-hover">

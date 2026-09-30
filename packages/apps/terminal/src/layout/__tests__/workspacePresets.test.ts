@@ -39,6 +39,7 @@ function mockApi(): { api: WorkspaceApi; loaded: IJsonModel[] } {
   const loaded: IJsonModel[] = [];
   const api = {
     addPanel: vi.fn(),
+    retargetOrderPad: vi.fn(() => false),
     panelCount: vi.fn(() => 0),
     toJSON: vi.fn(() => ({})),
     loadModelJson: vi.fn((json: IJsonModel) => {
@@ -160,6 +161,13 @@ describe("workspacePresets", () => {
     expect(json).toBeDefined();
     const components = collectTabs(json!).map((t) => t.component).sort();
     expect(components).toEqual(["chart", "indexstrip", "orderpad", "positions", "watchlist"]);
+  });
+
+  it("market-watch drops the Live Prices ticker and keeps Positions", () => {
+    const components = collectTabs(buildPresetJsonById("market-watch")!).map((t) => t.component);
+    expect(components).toContain("positions");
+    expect(components).toContain("watchlist");
+    expect(components).not.toContain("ticker");
   });
 
   it("compact-desk defaults to chart + order pad + positions only", () => {

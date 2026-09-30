@@ -1,3 +1,4 @@
+import { EXAMPLE_LABEL, visibleServiceNote } from "@/lib/operatorModeLabel";
 import { noteObservedFailure } from "@/stores/operatorSignalStore";
 
 import {
@@ -213,18 +214,26 @@ const DEMO_SECURITY_SETTINGS: SecuritySettings = {
 };
 
 /**
- * Explore fallback when the install host cannot be read.
+ * Example-data fallback when the install host cannot be read.
  *
- * Service rows may say Explore. Host disk, RAM, CPU, GPU, and network are
- * unavailable — sample gigabytes must not be painted as this machine.
+ * Service rows say Example. They are not a Mode: Practice means simulated
+ * fills. Host disk, RAM, CPU, GPU, and network stay unavailable — sample
+ * gigabytes must not be painted as this machine.
  */
-const EXPLORE_HEALTH: SystemHealth = {
-  status: "degraded",
-  broker: { status: "degraded", note: "Explore", scope: "unavailable" },
-  duckdb: { status: "degraded", note: "Explore", scope: "unavailable" },
-  disk: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
-  memory: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
-};
+function sampleHealthFallback(): SystemHealth {
+  return {
+    status: "degraded",
+    broker: { status: "degraded", note: EXAMPLE_LABEL, scope: "unavailable" },
+    duckdb: { status: "degraded", note: EXAMPLE_LABEL, scope: "unavailable" },
+    disk: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
+    memory: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
+  };
+}
+
+function withoutRetiredModeNote(row: HealthSubsystem): HealthSubsystem {
+  const note = visibleServiceNote(row.note);
+  return note === row.note ? row : { ...row, note };
+}
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -301,6 +310,8 @@ export function normaliseLiveHealth(raw: SystemHealth): SystemHealth {
 
   return {
     ...raw,
+    ...(raw.broker ? { broker: withoutRetiredModeNote(raw.broker) } : {}),
+    ...(raw.duckdb ? { duckdb: withoutRetiredModeNote(raw.duckdb) } : {}),
     disk,
     memory,
     cpu: normaliseCpu(raw.cpu),
@@ -402,10 +413,10 @@ export const updateSecuritySettings = (settings: Partial<SecuritySettings>) =>
 /**
  * Install-host health for Settings → Monitoring.
  *
- * Live and Explore both prefer ``GET /api/v1/health`` when the backend
- * answers, including a degraded (HTTP 503) body that still carries host
- * totals. Explore falls back to service rows plus unavailable host
- * resources — never sample disk or RAM figures.
+ * Live and the sample session both prefer ``GET /api/v1/health`` when the
+ * backend answers, including a degraded (HTTP 503) body that still carries
+ * host totals. A sample session falls back to service rows named for the
+ * current Mode, plus unavailable host resources — never sample disk or RAM.
  */
 export async function getHealth(): Promise<SystemHealth> {
   try {
@@ -415,13 +426,13 @@ export async function getHealth(): Promise<SystemHealth> {
     const body: unknown = await resp.json().catch(() => undefined);
     if (isSystemHealthBody(body)) return normaliseLiveHealth(body);
     if (resp.ok) return body as SystemHealth;
-    if (isDemoAuthSession()) return EXPLORE_HEALTH;
+    if (isDemoAuthSession()) return sampleHealthFallback();
     const message = `FT API health: HTTP ${resp.status}`;
     noteObservedFailure({ message, httpStatus: resp.status, provenance: "general" });
     throw new FtApiError(message, resp.status, body);
   } catch (err) {
     if (err instanceof FtApiError) throw err;
-    if (isDemoAuthSession()) return EXPLORE_HEALTH;
+    if (isDemoAuthSession()) return sampleHealthFallback();
     throw err;
   }
 }

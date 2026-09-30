@@ -529,6 +529,30 @@ describe("OrderLadderWidget derivative lot validation", () => {
     expect(mockPlaceOrder.mock.calls[0][0]).toMatchObject({ quantity: 75, exchange: "NFO" });
   });
 
+  it("sends the admission note with the ladder place", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY", exchange: "NFO", lotsize: 75, tick_size: 0.05,
+    });
+    mockMode.value = "live";
+    mockWsTicks.value = { "NFO:NIFTY": { ltp: 100 } };
+    render(<OrderLadderWidget symbol="NIFTY" exchange="NFO" />);
+    fireEvent.change(screen.getByLabelText("Order quantity"), { target: { value: "75" } });
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Ladder bid" },
+    });
+    await waitFor(() => {
+      const askBtn = screen
+        .getAllByRole("button")
+        .find((b) => b.getAttribute("title")?.startsWith("BUY"));
+      fireEvent.click(askBtn as HTMLElement);
+      expect(mockPlaceOrder).toHaveBeenCalled();
+    });
+    expect(mockPlaceOrder.mock.calls[0][0]).toMatchObject({
+      quantity: 75,
+      rationale: "Ladder bid",
+    });
+  });
+
   it("fails closed while the derivative lot size is unconfirmed", async () => {
     mockGetSymbol.mockRejectedValue(new Error("symbol master unavailable"));
     mockMode.value = "live";
@@ -743,7 +767,7 @@ describe("OrderLadderWidget explore sample book", () => {
   it("uses the sample book in explore mode without enabling the depth query", () => {
     render(<OrderLadderWidget />);
 
-    expect(screen.getByLabelText("Showing sample data")).toHaveTextContent("Sample data");
+    expect(screen.getByLabelText("Showing Example")).toHaveTextContent("Example");
     expect(mockDepthQuery).toHaveBeenCalledWith("NIFTY", "NSE", false);
     expect(screen.queryByText("Explore · sample")).toBeNull();
   });

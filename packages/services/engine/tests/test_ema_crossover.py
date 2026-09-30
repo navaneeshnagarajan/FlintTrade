@@ -166,6 +166,7 @@ class TestEMACrossover:
         orders = strategy.generate_orders()
         assert len(orders) >= 1
         assert orders[0].action.value == "BUY"
+        assert orders[0].admission_note == "EMA crossover plan: BUY RELIANCE"
 
         # generate_orders clears the list
         assert strategy.generate_orders() == []

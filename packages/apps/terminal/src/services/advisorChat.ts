@@ -294,6 +294,7 @@ export async function probeAdvisorStatus(
   try {
     const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`, {
       signal: gated.signal,
+      headers: buildHeaders(false),
     });
     if (!resp.ok) return { availability: "unknown", provider: "", source: "" };
     let raw: unknown;

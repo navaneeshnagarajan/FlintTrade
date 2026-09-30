@@ -124,6 +124,7 @@ vi.mock("@/lib/journalAnalytics", () => ({
   computeInstrumentPnl: () => [],
   computeHoldingTime: () => ({ avgMinutes: 0, minMinutes: 0, maxMinutes: 0 }),
   computeAllStreaks: () => [],
+  computeStrategyStats: () => [],
   getLongestWinStreak: () => 0,
   getLongestLossStreak: () => 0,
   computeRiskRewardDistribution: () => [],

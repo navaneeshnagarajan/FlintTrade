@@ -305,9 +305,11 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     app = _app(router, backend_lease_factory=backend_lease_factory)
-    app.config["SAFETY"] = SafetySystem(
+    safety = SafetySystem(
         SafetyConfig(qty_limits={"NSE": 1}, check_market_hours=False),
     )
+    safety.check_order = MagicMock(return_value=[SimpleNamespace(passed=True)])
+    app.config["SAFETY"] = safety
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
         source="custom",
@@ -329,7 +331,9 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["status"] == "error"
-    assert "Second-leg quantity 2 exceeds NSE limit of 1" in result["message"]
+    assert result["code"] == "gtt_unsupported"
+    assert result["message"] == "Not placed. GTT orders aren't supported right now."
+    app.config["SAFETY"].check_order.assert_not_called()
     router.place_order.assert_not_called()
 
 
@@ -564,7 +568,42 @@ def test_degraded_webhook_clamp_does_not_place(*, backend_lease_factory) -> None
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["code"] == "laya_clamp"
-    assert result["message"] == "Qty reduced to 1 (Laya limit)"
+    assert result["message"] == "Not placed. Laya allows up to 1."
     assert result["applied_quantity"] == 1
     app.config["SAFETY"].check_order.assert_not_called()
+
+
+def test_webhook_model_deny_never_reaches_safety(*, backend_lease_factory) -> None:
+    from flinttrade_engine.laya import process_laya
+
+    class _Host:
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            return {
+                "answers": {
+                    "rationale": {"probabilities": {"A": 0.9, "B": 0.1}},
+                    "tilt": {"probabilities": {"A": 0.96, "B": 0.04}},
+                    "side": {"probabilities": {"A": 0.1, "B": 0.9}},
+                }
+            }
+
+    process_laya().set_decision_client(_Host())
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    app = _app(router, backend_lease_factory=backend_lease_factory)
+    dispatcher = _dispatcher(app, "place_order")
+    payload = WebhookPayload(
+        source="custom",
+        action="place_order",
+        symbol="NIFTY",
+        exchange="NSE",
+        data={"side": "BUY", "quantity": "1", "rationale": "Revenge on the last loser."},
+        webhook_nonce="verified-laya-model",
+        webhook_path="/v1/webhook/custom/test-endpoint",
+    )
+
+    result = asyncio.run(dispatcher.place_order(payload))
+
+    assert result["code"] == "laya_denied"
+    app.config["SAFETY"].check_order.assert_not_called()
+    router.place_order.assert_not_called()
     router.place_order.assert_not_called()

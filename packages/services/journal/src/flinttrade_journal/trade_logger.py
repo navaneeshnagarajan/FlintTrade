@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from flinttrade_core.restored_fills import is_restored_from_backup
 from flinttrade_data.storage import StorageManager
 
 logger = logging.getLogger("flinttrade.journal.trade_logger")
@@ -151,6 +152,10 @@ class TradeLogger:
             trade_date: YYYY-MM-DD
             strategy: strategy name
         """
+        d = date.fromisoformat(trade_date)
+        if is_restored_from_backup(strategy):
+            return TradeSummary(trade_date=d, strategy=strategy)
+
         trades = self._storage.get_trades_by_strategy(strategy, trade_date, trade_date)
 
         total = len(trades)
@@ -185,7 +190,6 @@ class TradeLogger:
                 total_fees += fees
 
         net_pnl = gross_pnl - total_fees
-        d = date.fromisoformat(trade_date)
 
         summary = TradeSummary(
             trade_date=d,

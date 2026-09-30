@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Workflow } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Page, PageBody, PageHeader } from "@/components/layout/Page";
 import TabTransition from "@/components/motion/TabTransition";
 import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
@@ -80,27 +79,23 @@ export default function AutomateRoute() {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="border-b border-glass-chrome bg-glass-chrome backdrop-blur-md px-6 py-4 shrink-0">
-        <div className="flex items-center gap-3">
-          <Workflow className="w-6 h-6 text-accent" />
-          <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">Automation Hub</h1>
-            <p className="text-xxs text-text-muted">
-              Flow builder, cron scheduler, Telegram alerts, and safety controls
-            </p>
-          </div>
-          {killSwitchActive && (
-            <div className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full bg-loss/10 border border-loss/30">
-              <span className="ft-dot-kill" />
-              <span className="text-xs text-loss font-medium">Kill Switch Active</span>
-            </div>
-          )}
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Automate"
+        description="Flows, schedules, strategy monitors, webhooks and the safety controls that stop them."
+        meta={
+          killSwitchActive ? (
+            <span className="flex items-center gap-1.5 rounded-full border border-loss/30 bg-loss/10 px-2.5 py-0.5">
+              <span className="ft-dot-kill" aria-hidden="true" />
+              <span className="text-xs font-medium text-[var(--color-bearish-text,var(--color-loss))]">
+                Kill Switch Active
+              </span>
+            </span>
+          ) : null
+        }
+      />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
         <AutomateSidebar
           activeSection={activeSection}
           onSelect={setActiveSection}
@@ -110,24 +105,28 @@ export default function AutomateRoute() {
           uploadedRunningCount={uploadedRunningCount}
         />
 
-        <ScrollArea className="flex-1">
+        {activeSection === "flows" ? (
           <div
             role="tabpanel"
             id={`automate-tabpanel-${activeSection}`}
             aria-labelledby={`automate-tab-${activeSection}`}
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"
           >
-            <TabTransition
-              tabKey={activeSection}
-              className={
-                activeSection === "flows"
-                  ? "h-[calc(100vh-8rem)] p-3"
-                  : "p-6 max-w-4xl mx-auto"
-              }
-            >
+            <TabTransition tabKey={activeSection} className="flex min-h-0 flex-1 flex-col p-3">
               {sectionContent[activeSection]}
             </TabTransition>
           </div>
-        </ScrollArea>
+        ) : (
+          <PageBody
+            role="tabpanel"
+            id={`automate-tabpanel-${activeSection}`}
+            aria-labelledby={`automate-tab-${activeSection}`}
+          >
+            <TabTransition tabKey={activeSection}>
+              {sectionContent[activeSection]}
+            </TabTransition>
+          </PageBody>
+        )}
       </div>
 
       {/* Guided tour — beginner only, first visit */}
@@ -137,6 +136,6 @@ export default function AutomateRoute() {
           steps={TOUR_DEFINITIONS["automate-beginner"] ?? []}
         />
       )}
-    </div>
+    </Page>
   );
 }

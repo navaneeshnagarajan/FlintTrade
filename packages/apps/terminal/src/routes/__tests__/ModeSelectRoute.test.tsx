@@ -30,15 +30,18 @@ describe("ModeSelectRoute", () => {
     expect(practiceButton).not.toBeNull();
     expect(practiceButton).toHaveTextContent(/no broker needed/i);
     expect(practiceButton).toHaveTextContent(/primary Practice path/i);
-    expect(practiceButton).toHaveTextContent(/SandboxEngine/i);
+    expect(practiceButton).toHaveTextContent(/simulated fills, no real money/i);
+    expect(practiceButton).not.toHaveTextContent(/SandboxEngine/i);
     expect(practiceButton).not.toHaveTextContent(/broker required/i);
     expect(practiceButton).not.toHaveTextContent(/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent(/API smoke/i);
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Practice");
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Live");
+    expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent("Explore");
 
-    const exploreButton = screen.getByText("Explore").closest("button") as HTMLButtonElement;
-    expect(exploreButton).toHaveTextContent(/sample/i);
+    const connectedRead = screen.getByRole("radio", { name: /Connected \(read\)/i });
+    expect(connectedRead).toBeDisabled();
+    expect(connectedRead).toHaveTextContent("Connect a broker first");
 
     // Live stays fail-closed until funded unlock — never a Monday place CTA.
     const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
@@ -78,10 +81,10 @@ describe("ModeSelectRoute", () => {
     );
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       2,
-      "/ft-api/v1/auth/pin",
+      "/ft-api/v1/auth/live",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ pin: "123456", mode: "live" }),
+        body: JSON.stringify({ pin: "123456" }),
       }),
     );
   });
@@ -104,12 +107,12 @@ describe("ModeSelectRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue with live/i }));
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith("live", "live-unlocked-jwt"));
-    // Routed through unlockWithPin, which always sends the explicit live mode.
+    // Explicit Live switch — separate from quick unlock, which does not change Mode.
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/ft-api/v1/auth/pin",
+      "/ft-api/v1/auth/live",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ pin: "123456", mode: "live" }),
+        body: JSON.stringify({ pin: "123456" }),
       }),
     );
   });
@@ -130,9 +133,7 @@ describe("ModeSelectRoute", () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
     expect(onSelect).not.toHaveBeenCalled();
-    // unlockWithPin throws on a missing token; the route now surfaces the
-    // ACTUAL reason (audit fix — the old blanket "Incorrect PIN" mislabelled a
-    // missing/expired session).
+    // confirmLiveMode throws on a missing token; the route surfaces that reason.
     expect(screen.getByText(/no token/i)).toBeInTheDocument();
   });
 
@@ -142,7 +143,7 @@ describe("ModeSelectRoute", () => {
     render(<ModeSelectRoute initialMode="practice" onSelect={onSelect} />);
 
     expect(screen.getByRole("radio", { name: /Practice/i })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: /Explore/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("radio", { name: /Connected \(read\)/i })).toHaveAttribute("aria-checked", "false");
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

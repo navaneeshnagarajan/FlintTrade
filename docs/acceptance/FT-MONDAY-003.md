@@ -1,7 +1,7 @@
 # FT-MONDAY-003 — AI on live broker reads
 
 Product tip for GitHub issue [#254](https://github.com/navaneeshnagarajan/FlintTrade/issues/254)
-on tracking PR #256. AI Chat may use Practice SandboxEngine fills and
+on tracking PR #256. AI Chat may use Practice fills and
 native Dhan/Neo Connected (read) feeds when an LLM is configured.
 Suggest stays labelled illustrative. Live place stays fail-closed.
 
@@ -13,14 +13,14 @@ Wire AI to Practice + native live-read feeds for analysis (not
 ## Locked behaviour
 
 - **Chat live-reads** — when an LLM is configured, AI Chat may use
-  Practice SandboxEngine fills and native live-read feeds for analysis
+  Practice fills and native live-read feeds for analysis
 - **Suggest stays labelled illustrative** — local filter UI; not the
   Chat live-read path; never sold as live alpha
 - **Never green Connected without a real LLM** — same honesty bar as
   FT-AI-002 / FT-AI-004
 - **Not a “profitable alphas” release criterion** — analysis context only;
   measure later
-- AI may consume Dhan/Neo Connected (read) / Practice SandboxEngine
+- AI may consume Dhan/Neo Connected (read) / Practice
   data for context — not place Live orders
 - This does **not** lift the native broker HTTP freeze and does not
   invent Neo Practice

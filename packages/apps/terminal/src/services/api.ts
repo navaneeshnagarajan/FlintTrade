@@ -18,7 +18,6 @@ import type {
   PlaceOrderParams,
   ModifyOrderParams,
   OrderStatusParams,
-  OpenPositionParams,
   BasketOrderParams,
   BasketOrderResult,
   SplitOrderParams,
@@ -39,9 +38,12 @@ import type {
   BrokerCapabilities,
   LeverageSettings,
 } from "@/types/api";
+import { layaOrderRefused } from "@/lib/layaStatus";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { liveWritesMuted } from "@/lib/operatorIncident";
+import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -285,6 +287,8 @@ function normaliseFundsShape(value: unknown): Funds {
     row.usedMargin ?? row.utiliseddebits ?? row.usedmargin ?? row.used_margin
       ?? row.utilized_margin ?? row.utilised_margin,
   );
+  const ledgerBalance = optionalFinite(row.ledgerBalance ?? row.ledger_balance);
+  const futuresFlag = row.futuresMtmInLedger ?? row.futures_mtm_in_ledger;
   return {
     availableCash,
     usedMargin,
@@ -292,7 +296,15 @@ function normaliseFundsShape(value: unknown): Funds {
       row.totalBalance ?? row.totalbalance ?? row.total_balance ?? row.total ?? row.net
         ?? (availableCash + usedMargin),
     ),
+    ...(ledgerBalance !== undefined ? { ledgerBalance } : {}),
+    ...(typeof futuresFlag === "boolean" ? { futuresMtmInLedger: futuresFlag } : {}),
   };
+}
+
+function optionalFinite(value: unknown): number | undefined {
+  if (value == null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2087,7 +2099,7 @@ function mockOrders(): Order[] {
     orderType: order.orderType,
     status: order.status,
     product: order.product,
-    strategy: "Explore",
+    strategy: "Example",
     timestamp: order.timestamp,
   }));
 }
@@ -2152,6 +2164,7 @@ function normalisePracticePosition(value: unknown): Position | undefined {
     ltp,
     pnl,
     pnlPercent: cost > 0 ? (pnl / cost) * 100 : 0,
+    restored: value.restored === true,
   };
 }
 
@@ -2192,6 +2205,9 @@ function normalisePracticeTrade(value: unknown): Trade | undefined {
     quantity: toNumber(value.quantity),
     price: toNumber(value.price ?? value.fill_price ?? value.avg_fill_px),
     timestamp: String(value.timestamp ?? value.traded_at ?? value.fill_time ?? ""),
+    ...(typeof value.strategy === "string" && value.strategy
+      ? { strategy: value.strategy }
+      : {}),
   };
 }
 
@@ -2218,15 +2234,24 @@ async function readPracticeAccountData<T>(
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
   if (!kind || !NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) return undefined;
 
-  if (endpoint === "funds" || endpoint === "limits") {
+  if (endpoint === "funds") {
+    const payload = await getFtV1<{ funds?: unknown }>("sandbox/funds", signal);
+    const row = isRecord(payload.funds) ? payload.funds : {};
+    // Practice get_funds: available_balance is after margin, current_balance
+    // is the untouched ledger, and ledger_balance has option premium and
+    // equity notional applied. futures_mtm_in_ledger is false.
+    return normaliseFundsShape({
+      available_balance: row.available_balance,
+      used_margin: row.used_margin,
+      total_balance: row.current_balance,
+      ledger_balance: row.ledger_balance,
+      futures_mtm_in_ledger: row.futures_mtm_in_ledger,
+    }) as T;
+  }
+  if (endpoint === "limits") {
     const payload = await getFtV1<{ capital?: unknown }>("sandbox/capital", signal);
     const capital = isRecord(payload.capital) ? payload.capital : {};
-    const funds = normaliseFundsShape({
-      availableCash: capital.available,
-      usedMargin: capital.used_margin,
-      totalBalance: capital.current,
-    });
-    return (endpoint === "funds" ? funds : capital) as T;
+    return capital as T;
   }
   if (endpoint === "positionbook") {
     const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions", signal);
@@ -2447,7 +2472,7 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
 
 function getExploreBrokerCapabilities(): BrokerCapabilities {
   return {
-    broker_name: "Explore",
+    broker_name: "Example",
     broker_type: "multi",
     supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
     features: {
@@ -2525,6 +2550,11 @@ export type OrderAuthorityPin = AccountAuthorityIdentity;
 
 type PostOrderAuthorityPin = ModeOrderAuthorityPin | OrderAuthorityPin;
 
+/** Client-only. Never sent on the body. The server decides reduce-only. */
+export type PlaceOrderOptions = {
+  exit?: boolean;
+};
+
 function isExactOrderAuthorityPin(
   authority: unknown,
 ): authority is OrderAuthorityPin {
@@ -2601,8 +2631,6 @@ function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } 
 
 const LIVE_PLACE_ENDPOINTS = new Set([
   "place",
-  "place-smart",
-  "open-position",
   "basket",
   "split",
   "options",
@@ -2613,6 +2641,7 @@ async function postOrder<T>(
   ftEndpoint: string,
   body: object = {},
   authority?: PostOrderAuthorityPin,
+  options?: PlaceOrderOptions,
 ): Promise<T> {
   // Explore paper fill for place only. Checked before the generic mode-pin
   // mismatch so Order Pad can confirm with a Practice pin while the store is
@@ -2623,7 +2652,7 @@ async function postOrder<T>(
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
       throw new Error(
-        `Order blocked: mode changed from ${authority.mode} to ${currentModeForExplore} before submission.`,
+        `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
       );
     }
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
@@ -2638,7 +2667,7 @@ async function postOrder<T>(
   const currentMode = useModeStore.getState().mode;
   if (authority?.mode && authority.mode !== currentMode) {
     throw new Error(
-      `Order blocked: mode changed from ${authority.mode} to ${currentMode} before submission.`,
+      `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {
@@ -2651,8 +2680,12 @@ async function postOrder<T>(
   const mode = authority?.mode ?? currentMode;
   if (mode === "live" && LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) {
     const incident = readOperatorIncident();
-    if (liveWritesMuted(incident)) {
-      throw new Error(incident?.rectify ?? "Live orders are closed.");
+    const layaExit = options?.exit === true && incident?.failureClass === "laya";
+    if (liveWritesMuted(incident) && !layaExit) {
+      const message = incident?.failureClass === "laya"
+        ? incident.headline
+        : (incident?.rectify ?? "Live orders are closed.");
+      throw new Error(message);
     }
   }
   const apiKey = useConnectionStore.getState().apiKey;
@@ -2697,7 +2730,15 @@ async function postOrder<T>(
   }
 
   if (!resp.ok) {
-    const errorBody = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const errorBody = await resp.json().catch(() => null) as {
+      message?: string;
+      error?: string;
+      code?: string;
+      reason?: string;
+    } | null;
+    if (layaOrderRefused(errorBody)) {
+      useOperatorSignalStore.getState().noteLayaDown();
+    }
     const serverMsg = errorBody?.message ?? errorBody?.error ?? null;
     let message: string;
     if (resp.status === 401) {
@@ -2722,7 +2763,16 @@ async function postOrder<T>(
   if (responseStatus === "ERROR" || responseStatus === "REJECTED") {
     throw new Error(json.message || `Order API ${ftEndpoint} error`);
   }
+  if (LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) noteAdmittedPlace(mode);
   return (json.data ?? json) as T;
+}
+
+function noteAdmittedPlace(mode: string): void {
+  const state = useOperatorSignalStore.getState();
+  const confirmed = mode === "live"
+    ? state.decisionStatus === "ready" || state.decisionStatus === "degraded"
+    : state.layaPracticeStatus === "ready" || state.layaPracticeStatus === "degraded";
+  if (!confirmed) state.noteLayaUnconfirmed();
 }
 
 async function postOrderMutation<T>(
@@ -2764,7 +2814,7 @@ async function post<T>(
     if (fallback !== undefined) return fallback;
     const kind = NATIVE_READ_ENDPOINTS[endpoint];
     if (kind && NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) {
-      throw new Error(`${endpoint} is not available in Explore mode.`);
+      throw new Error(`${endpoint} is not available in this session.`);
     }
   }
 
@@ -2910,13 +2960,13 @@ async function get<T>(
 //
 // The leaf names below MUST match the backend route registrations:
 //
-//   core   orders_bp at /api/v1/orders : place, place-smart, modify, cancel,
-//                                        cancel-all, close-position,
-//                                        open-position, options, options-multi
+//   core   orders_bp at /api/v1/orders : place, modify, cancel, cancel-all,
+//                                        options, options-multi
 //   engine order_bp  at /api/v1/orders : basket, split, options-strategy
 //
-// Pre-2026-05-19 this file mixed FT-proxy names (place, place-smart,
-// cancel-all, close-position) with OpenAlgo-style names (cancelorder,
+// Practice opens and closes are `place` (an opposite MARKET order for a
+// close). Pre-2026-05-19 this file mixed FT-proxy names (place,
+// cancel-all) with OpenAlgo-style names (cancelorder,
 // openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
 // so half the order endpoints 404'd in production. Codex stop-gate review
 // caught the mismatch on 2026-05-19 (task-mpcpfmws-5rokaa). A follow-up
@@ -2933,9 +2983,8 @@ async function get<T>(
 export const placeOrder = (
   params: PlaceOrderParams,
   authority?: PostOrderAuthorityPin,
-) => postOrder<{ orderId: string }>("place", params, authority);
-export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
-  postOrder<{ orderId: string }>("place-smart", params);
+  options?: PlaceOrderOptions,
+) => postOrder<{ orderId: string }>("place", params, authority, options);
 export const cancelAllOrders = () =>
   postOrder<void>("cancel-all");
 export const cancelOrder = (
@@ -2943,10 +2992,87 @@ export const cancelOrder = (
   strategy: string,
   authority: OrderAuthorityPin,
 ) => postOrderMutation<void>("cancel", { orderId, strategy }, authority);
-export const closePosition = (strategy = "Flint") =>
-  postOrder<void>("close-position", { strategy });
+
+const PRACTICE_SQUARE_OFF_PRODUCTS = new Set(["MIS", "CNC", "NRML"]);
+
+function practiceSquareOffFailure(symbol: string, err: unknown): string {
+  if (err instanceof OrderApiError && err.body && typeof err.body === "object") {
+    const body = err.body as Record<string, unknown>;
+    if (body.code === "laya_denied") {
+      const reason = typeof body.reason === "string" && body.reason
+        ? body.reason
+        : err.message;
+      const limits = body.limits;
+      const max = limits && typeof limits === "object"
+        ? (limits as { max_quantity?: unknown }).max_quantity
+        : null;
+      const limitsLine = typeof max === "number" && Number.isInteger(max) && max >= 1
+        ? ` Max quantity ${max}.`
+        : "";
+      return `${symbol}: Laya denied. ${reason}${limitsLine}`;
+    }
+    if (body.code === "laya_clamp" && typeof body.message === "string" && body.message) {
+      return `${symbol}: ${body.message}`;
+    }
+  }
+  const message = err instanceof Error ? err.message : "Square-off failed.";
+  return `${symbol}: ${message}`;
+}
+
+/** Place one opposite MARKET order per open Practice position. */
+async function squareOffPracticePositions(): Promise<void> {
+  const pinnedMode = "practice" as const;
+  const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
+  const modeAfterFetch = useModeStore.getState().mode;
+  if (modeAfterFetch !== pinnedMode) {
+    throw new Error(
+      `Order blocked: mode changed from ${pinnedMode} to ${modeAfterFetch} before submission.`,
+    );
+  }
+  const positions = (payload.positions ?? [])
+    .map(normalisePracticePosition)
+    .filter((position): position is Position => position !== undefined)
+    .filter((position) => position.quantity !== 0);
+  const failures: string[] = [];
+  for (const position of positions) {
+    const product = position.product.toUpperCase();
+    if (!PRACTICE_SQUARE_OFF_PRODUCTS.has(product)) {
+      failures.push(
+        `${position.symbol}: unrecognised product${position.product ? ` ${position.product}` : ""}`,
+      );
+      continue;
+    }
+    const price = position.ltp > 0
+      ? position.ltp
+      : position.averagePrice > 0
+        ? position.averagePrice
+        : 0;
+    try {
+      await postOrder("place", {
+        symbol: position.symbol,
+        exchange: position.exchange,
+        action: position.quantity > 0 ? "SELL" : "BUY",
+        product: product as "MIS" | "CNC" | "NRML",
+        orderType: "MARKET",
+        quantity: Math.abs(position.quantity),
+        price,
+        triggerPrice: 0,
+        strategy: "FlintPositions",
+      }, { mode: pinnedMode }, { exit: true });
+    } catch (err) {
+      failures.push(practiceSquareOffFailure(position.symbol, err));
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join("\n"));
+  }
+}
+
 export const exitAllPositions = () => {
   const mode = useModeStore.getState().mode;
+  if (mode === "practice") {
+    return squareOffPracticePositions();
+  }
   const apiKey = useConnectionStore.getState().apiKey;
   if (mode !== "live") {
     throw new Error("Exit all positions is available only in Live mode. Use the Positions widget for practice trades.");
@@ -2962,8 +3088,6 @@ export const modifyOrder = (params: ModifyOrderParams, authority: OrderAuthority
   postOrderMutation<{ orderId: string }>("modify", params, authority);
 export const orderStatus = (params: OrderStatusParams) =>
   post<{ status: string }>("orderstatus", params);
-export const openPosition = (params: OpenPositionParams) =>
-  postOrder<{ orderId: string }>("open-position", params);
 // The backend basket route (order_routes `place_basket`) reads a `legs` array
 // with snake_case per-leg fields; `normaliseOrderBody` only aliases top-level
 // keys, so the nested legs are mapped onto the wire contract here. `price` /
@@ -3466,7 +3590,7 @@ export const getMaxPain = async (
 ) => {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (isExploreMode()) throw new Error("Max Pain is not available in Explore mode.");
+  if (isExploreMode()) throw new Error("Max Pain is not available in this session.");
   const value = await awaitMarketDataAuthority(
     () => postFtApi<BackendMaxPainData>(
       "maxpain",

@@ -35,7 +35,7 @@ describe('marketing primary nav (FT-SITE-001)', () => {
   it('keeps every primary destination, including Contribute, in the header', () => {
     const required = [
       { href: '/download', label: 'Download' },
-      { href: '/demo-app/welcome', label: 'Explore demo' },
+      { href: '/demo-app/welcome', label: 'Demo (example data)' },
       { href: '/docs', label: 'Docs' },
       { href: '/api-reference', label: 'API' },
       { href: '/mcp', label: 'MCP' },
@@ -70,7 +70,7 @@ describe('marketing primary nav (FT-SITE-001)', () => {
 describe('marketing primary nav (FT-SITE-003)', () => {
   const css = readSite('src/app/globals.css');
 
-  it('compacts to two-across chips at phone widths so Explore demo is not cramped', () => {
+  it('compacts to two-across chips at phone widths so the demo link is not cramped', () => {
     const phone = mediaBlock(css, 'max-width: 480px');
     const nav = rule(phone, '\\.main-nav');
     const links = rule(phone, '\\.main-nav a');

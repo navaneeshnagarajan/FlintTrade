@@ -6,6 +6,7 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { RefreshCw } from "lucide-react";
 import { format, addDays } from "date-fns";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 interface SIPItem {
   id: string;
@@ -31,6 +32,7 @@ export function SIPCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Example SIPs
           </p>
+          <ExampleLabel testId="sip-example-label" />
         </div>
 
         <div className="flex-1 space-y-2">

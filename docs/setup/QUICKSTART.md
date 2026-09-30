@@ -1,8 +1,8 @@
 # Machine Setup Guide
 
 > Works on any Windows, macOS, or Ubuntu machine — including a new contributor's box.
-> FlintTrade `v0.0.1` is not production ready; use Explore and Practice
-> modes before connecting any live broker workflow.
+> FlintTrade `v0.0.1` is not production ready; use Practice, and example data,
+> before connecting any live broker workflow.
 
 ## 1. Install FlintTrade
 
@@ -194,8 +194,9 @@ python scripts/ft.py start
 ```
 
 Non-loopback binds fail closed: the backend refuses to start until the operator
-account exists (complete setup locally first) or `FLINTTRADE_API_KEY` is set,
-and every remote request must carry a session JWT or that API key. Settings
+account exists (complete setup locally first) or `FLINTTRADE_API_KEY` is set.
+Every non-public route, on loopback and on a remote bind, requires a session
+JWT or that API key. Settings
 writes such as OpenAlgo and LLM configuration stay loopback-only — change those
 at the machine that runs the backend. Live market data streams from OpenAlgo's
 WebSocket directly, so point the OpenAlgo host configuration at an address the

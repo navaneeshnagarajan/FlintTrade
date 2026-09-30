@@ -5,7 +5,7 @@
  * logo, particles, meteors, shimmer CTA, and a calm glassy control layer.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
@@ -22,10 +22,12 @@ import type { ColorMode } from "@/lib/cinematicThemes";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import LoginRoute from "@/routes/LoginRoute";
+import TwoOperatorUpdateScreen from "@/routes/TwoOperatorUpdateScreen";
+import { migrationBlockedFromStatus } from "@/lib/twoOperatorGuide";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
+import { EXAMPLE_USER_DISPLAY_NAME, isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
 import { readPersistedAuthSession } from "@/lib/homeEntry";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -59,7 +61,7 @@ export const CINEMATIC_STEP_SCHEDULE = [
 
 const WELCOME_FEATURES = [
   "OpenAlgo bridge plus verified native brokers",
-  "Explore, Practice, and Live safety modes",
+  "Practice, Connected (read), and Live",
   "Option chain, Greeks, order flow, and depth",
   "Strategy lab, SIP tracking, and AI context",
 ] as const;
@@ -275,6 +277,10 @@ export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [flowStep, setFlowStep] = useState<FlowStep>("cinematic");
+  const [migrationBlocked, setMigrationBlocked] = useState(false);
+  const migrationBlockedRef = useRef(migrationBlocked);
+  migrationBlockedRef.current = migrationBlocked;
+  const [statusAttempt, setStatusAttempt] = useState(0);
   const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
   const authStatus = useAuthStore((s) => s.status);
@@ -301,22 +307,14 @@ export default function WelcomeRoute() {
   useEffect(() => {
     if (authStatus !== "unknown" && authStatus !== "logged-out") return;
 
-    // Explore-first / Try with sample data persist a demo session. Restore it
-    // before the public auth probe, or is_setup=true logs the operator out
-    // onto the daily login wall and /home bounces back here.
-    const persisted = readPersistedAuthSession();
-    if (persisted) {
-      useAuthStore.getState().setLoggedIn(
-        persisted.token,
-        persisted.username,
-        persisted.expiresAt,
-      );
-      return;
-    }
+    // Sample-data Explore is not an operator database. Restore it without a
+    // status probe so a paused update cannot drop the hatch session.
     if (isDemoSessionActive()) {
-      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
       return;
     }
+
+    const persisted = readPersistedAuthSession();
 
     // Time-box the probe so a hung backend can't strand the user on
     // "Checking workspace…" forever.
@@ -329,12 +327,30 @@ export default function WelcomeRoute() {
       .then((data) => {
         if (cancelled) return;
         if (isDemoSessionActive()) {
-          useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+          useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
+          return;
+        }
+        if (migrationBlockedFromStatus(data)) {
+          setMigrationBlocked(true);
+          return;
+        }
+        setMigrationBlocked(false);
+        // A signed-in tab is restored only after the probe says the update
+        // is not paused. is_setup=true must not log that tab out.
+        if (persisted) {
+          useAuthStore.getState().setLoggedIn(
+            persisted.token,
+            persisted.username,
+            persisted.expiresAt,
+          );
           return;
         }
         if (!data.data?.is_setup) {
           useAuthStore.getState().setSetupRequired();
-        } else {
+        } else if (useAuthStore.getState().status !== "logged-out") {
+          // setLoggedOut purges the query cache, which remounts the app and
+          // this route; repeating it for an already logged-out visitor looped
+          // the auth probe until the backend rate-limited it.
           useAuthStore.getState().setLoggedOut();
         }
       })
@@ -343,6 +359,18 @@ export default function WelcomeRoute() {
         // effects in development. That cleanup abort is not a failed backend
         // probe and must not overwrite a valid returning-user state.
         if (cancelled) return;
+        // A paused update stays on screen until a later status check
+        // succeeds and reports that nothing is pending. A failed retry must
+        // not restore a persisted session and open the desk.
+        if (migrationBlockedRef.current) return;
+        if (persisted && useAuthStore.getState().status === "unknown") {
+          useAuthStore.getState().setLoggedIn(
+            persisted.token,
+            persisted.username,
+            persisted.expiresAt,
+          );
+          return;
+        }
         // Backend unreachable, errored, or timed out. Degrade gracefully in
         // every build (not just DEV) so the welcome screen always offers a way
         // forward — "Get Started" once the backend is up, and "Explore
@@ -359,7 +387,7 @@ export default function WelcomeRoute() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [authStatus]);
+  }, [authStatus, statusAttempt]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -396,11 +424,12 @@ export default function WelcomeRoute() {
   }, []);
 
   useEffect(() => {
+    if (migrationBlocked) return;
     if (authStatus === "logged-in") {
       const persona = useSettingsStore.getState().persona;
       navigate(personaDefaultRoute(persona), { replace: true });
     }
-  }, [authStatus, navigate]);
+  }, [authStatus, migrationBlocked, navigate]);
 
   useEffect(() => {
     if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
@@ -430,8 +459,18 @@ export default function WelcomeRoute() {
     // British English: "Try with sample data".
     useModeStore.getState().setMode("explore");
     markDemoSessionActive();
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
     navigate("/home");
+  }
+
+  if (migrationBlocked) {
+    return (
+      <TwoOperatorUpdateScreen
+        onRetry={() => {
+          setStatusAttempt((attempt) => attempt + 1);
+        }}
+      />
+    );
   }
 
   if (authStatus === "logged-out" && flowStep === "greeting") {
@@ -575,6 +614,17 @@ export default function WelcomeRoute() {
       <h1 className="sr-only">Welcome to FlintTrade</h1>
       <ThemeToggle />
       <CinematicBackdrop particleColors={particleColors} />
+      {step < 5 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={skipToEnd}
+          className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-full border-border-default/70 bg-surface-card/70 px-4 text-xs text-text-secondary backdrop-blur-xl hover:text-text-primary"
+        >
+          Skip intro
+        </Button>
+      )}
 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-16 text-center">
         <motion.div
@@ -698,9 +748,9 @@ export default function WelcomeRoute() {
                       variant="ghost"
                       onClick={handleExplore}
                       className="text-sm text-text-muted hover:text-text-primary"
-                      aria-label="Try with sample data without creating an account"
+                      aria-label="Try with example data without creating an account"
                     >
-                      Try with sample data →
+                      Try with example data →
                     </Button>
                   </>
                 ) : (

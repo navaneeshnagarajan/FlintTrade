@@ -228,8 +228,10 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
     expect(screen.getAllByTestId("ticker-strip")).toHaveLength(1);
     expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
-    // <main> landmark with aria-label from route title
-    expect(screen.getByRole("main", { name: /trading workspace/i })).toBeInTheDocument();
+    // <main> landmark named after the route, matching its sidebar label
+    expect(screen.getByRole("main", { name: "Trade" })).toBeInTheDocument();
+    // The shell leaves the single H1 to the route itself
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
   it("keeps route-local icon SVG markup out of the layout source", () => {
@@ -253,7 +255,7 @@ describe("AppLayout", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "practice");
     expect(bar).toHaveTextContent(
-      "Practice — SandboxEngine fills. Not your funded broker account.",
+      "Practice — simulated fills, no real money.",
     );
     expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });
@@ -268,7 +270,7 @@ describe("AppLayout", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "explore");
     expect(bar).toHaveTextContent(
-      "Explore — sample data only. No broker session, no live orders.",
+      "Example data. No broker is connected and no orders are sent.",
     );
     expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });
@@ -327,6 +329,17 @@ describe("AppLayout", () => {
     renderApp();
 
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
+  });
+
+  it("does not show the greeting toast on Home or Trade", () => {
+    mockLocation.pathname = "/trade";
+    const { unmount } = renderApp();
+    expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
+    unmount();
+
+    mockLocation.pathname = "/home";
+    renderApp();
+    expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
   });
 
   it("does not show the daily welcome card in explore mode", () => {

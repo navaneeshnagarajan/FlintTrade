@@ -2,7 +2,7 @@
  * WidgetPicker.test.tsx — Render and search tests for the widget catalog dialog.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -11,9 +11,18 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 // Layout store
+const { layoutState } = vi.hoisted(() => ({
+  layoutState: {
+    workspaceApi: null as null | {
+      addPanel: (options: unknown) => void;
+      retargetOrderPad: (params: Record<string, unknown>, title?: string) => boolean;
+    },
+  },
+}));
+
 vi.mock("@/stores/layoutStore", () => ({
-  useLayoutStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ workspaceApi: null }),
+  useLayoutStore: (selector: (s: { workspaceApi: typeof layoutState.workspaceApi }) => unknown) =>
+    selector({ workspaceApi: layoutState.workspaceApi }),
 }));
 
 // Widget catalog — provide a representative test catalog
@@ -24,6 +33,7 @@ vi.mock("@/layout/widgetFactory", () => ({
     { id: "chart", name: "Chart", icon: "CandlestickChart", category: "Analysis" },
     { id: "optionchain", name: "Option Chain", icon: "Grid3x3", category: "Analysis" },
     { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility" },
+    { id: "orderpad", name: "Order Pad", icon: "FileEdit", category: "Trading" },
     { id: "calculator", name: "Calculator", icon: "Calculator", category: "Utility" },
   ],
 }));
@@ -66,6 +76,10 @@ import WidgetPicker from "../WidgetPicker";
 // ---------------------------------------------------------------------------
 
 describe("WidgetPicker", () => {
+  beforeEach(() => {
+    layoutState.workspaceApi = null;
+  });
+
   it("renders the widget catalog when open", () => {
     render(<WidgetPicker isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByText("Add Widget")).toBeInTheDocument();
@@ -93,7 +107,7 @@ describe("WidgetPicker", () => {
 
   it("shows total widget count when search is empty", () => {
     render(<WidgetPicker isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText("6 widgets")).toBeInTheDocument();
+    expect(screen.getByText("7 widgets")).toBeInTheDocument();
   });
 
   it("filters widgets by name when searching", () => {
@@ -156,5 +170,34 @@ describe("WidgetPicker", () => {
     expect(screen.getByText("Chart")).toBeInTheDocument();
     expect(screen.queryByText("Scalper")).not.toBeInTheDocument();
     expect(screen.queryByText("Watchlist")).not.toBeInTheDocument();
+  });
+
+  it("reuses an open Order Pad instead of adding a second one", () => {
+    const addPanel = vi.fn();
+    const retargetOrderPad = vi.fn(() => true);
+    layoutState.workspaceApi = { addPanel, retargetOrderPad };
+    const onClose = vi.fn();
+    render(<WidgetPicker isOpen={true} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Order Pad widget" }));
+
+    expect(retargetOrderPad).toHaveBeenCalledWith({});
+    expect(addPanel).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("adds the first Order Pad when the desk has none", () => {
+    const addPanel = vi.fn();
+    const retargetOrderPad = vi.fn(() => false);
+    layoutState.workspaceApi = { addPanel, retargetOrderPad };
+    render(<WidgetPicker isOpen={true} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Order Pad widget" }));
+
+    expect(retargetOrderPad).toHaveBeenCalledWith({});
+    expect(addPanel).toHaveBeenCalledWith(expect.objectContaining({
+      component: "orderpad",
+      title: "Order Pad",
+    }));
   });
 });

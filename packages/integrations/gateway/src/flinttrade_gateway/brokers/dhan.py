@@ -522,6 +522,20 @@ class DhanAdapter(BrokerAdapter):
         # are part of the SafetyContext-hashed order), so a bracket/cover/iceberg
         # order is gated identically to a regular one — no parallel order path.
         variety = str(getattr(order, "variety", "regular")).lower()
+        # GTT is not a Dhan variety. Forever orders are ``/forever/orders`` and
+        # broker-held target/stop legs are ``/super/orders``. Neither endpoint
+        # is reachable from a submit. Modify, cancel, and list stay on their
+        # own methods.
+        if variety == "gtt":
+            raise UnsupportedCapabilityError(
+                "Not placed. GTT orders aren't supported right now.",
+                broker_id="dhan",
+            )
+        if variety in ("bracket", "cover"):
+            raise UnsupportedCapabilityError(
+                "Not placed. Broker-held target and stop orders aren't supported right now.",
+                broker_id="dhan",
+            )
         client = self._client(session)
         if variety in ("regular", ""):
             resp = await self._call(client.place_order, **M.to_place_order_kwargs(order, security_id, tag=tag))
@@ -534,12 +548,8 @@ class DhanAdapter(BrokerAdapter):
             resp = await self._call(
                 self._http(session).post, M.ORDERS_ENDPOINT, M.to_amo_order_payload(order, security_id, tag=tag)
             )
-        elif variety in ("bracket", "cover"):
-            resp = await self._call(client.place_super_order, **M.to_super_order_kwargs(order, security_id, tag=tag))
         elif variety == "iceberg":
             resp = await self._call(client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag))
-        elif variety == "gtt":
-            resp = await self._call(client.place_forever, **M.to_forever_kwargs(order, security_id, tag=tag))
         else:
             raise BrokerError(f"Dhan does not support order variety {variety!r}")
         return M.extract_order_id(resp)

@@ -112,10 +112,11 @@ test.describe('Settings page', () => {
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('back button is present in settings header', async ({ page }) => {
-    // The slim header has a back button with aria-label="Go back"
-    const backBtn = page.getByRole('button', { name: 'Go back' });
-    await expect(backBtn).toBeVisible();
+  test('settings uses the shared page header', async ({ page }) => {
+    // Settings is reached from the sidebar like every page, so its header names
+    // the page and holds its action instead of a Back button.
+    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
   test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
@@ -634,7 +635,7 @@ test.describe('Settings page', () => {
     await expect(sectionTabs.getByRole('tab', { name: 'Report Bug' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('switch', { name: 'Include diagnostic summary in GitHub draft' })).not.toBeChecked();
     await expect(page.getByLabel('GitHub draft preview')).toContainText('Not included in this GitHub draft.');
-    await expect(page.getByText(/Diagnostics are unavailable in Explore demo/i)).toBeVisible();
+    await expect(page.getByText(/Diagnostics are unavailable for Example/i)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Download diagnostics' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Open AI Tutor' })).toHaveCount(0);
     expect(diagnosticsRequested).toBe(false);

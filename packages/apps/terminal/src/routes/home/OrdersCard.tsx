@@ -12,6 +12,7 @@ import {
 } from "@/lib/accountQueryState";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { ClipboardList, Loader2 } from "lucide-react";
 
 export function OrdersCard() {
@@ -39,6 +40,7 @@ export function OrdersCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Recent Orders
           </p>
+          {isExplore && <ExampleLabel testId="orders-example-label" />}
         </div>
 
         {isError && (

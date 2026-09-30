@@ -502,6 +502,7 @@ class WheelStrategy(BaseStrategy):
                 product=self.product,
                 quantity=str(qty),
                 strategy=self.strategy_tag,
+                admission_note=f"Wheel plan: sell {symbol}",
             )
         )
         logger.info("WheelStrategy: queued SELL intent for %s qty=%d", symbol, qty)
@@ -530,6 +531,7 @@ class WheelStrategy(BaseStrategy):
                 price=str(sl_price),
                 trigger_price=str(trigger),
                 strategy=self.strategy_tag,
+                admission_note=f"Wheel plan: buy a protective stop on {symbol}",
             )
         )
         logger.info(

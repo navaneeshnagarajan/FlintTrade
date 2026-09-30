@@ -235,8 +235,12 @@ def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch, backend_l
     assert getattr(scheduler, "running", True) is False  # factory never starts it
 
     c = app.test_client()
-    # Status read keeps the loopback allowance.
-    assert c.get("/admin/credentials/rotation/status").status_code == 200
+    from flinttrade_core.auth_routes import _create_token
+
+    with app.app_context():
+        session = {"Authorization": f"Bearer {_create_token('operator', mode='explore')}"}
+    assert c.get("/admin/credentials/rotation/status").status_code == 401
+    assert c.get("/admin/credentials/rotation/status", headers=session).status_code == 200
     # Writes need the operator session (G9).
     assert c.post("/admin/credentials/rotation/dhan/rotate-now").status_code == 401
 

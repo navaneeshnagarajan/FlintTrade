@@ -8,6 +8,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { StockScanResponseSchema } from "@/lib/schemas/ftApi";
+import { buildHeaders } from "@/services/ftApi.helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,7 +63,7 @@ async function fetchStockScan(
   const qs = searchParams.toString();
   const url = `${getBase()}/v1/stocks/scan${qs ? `?${qs}` : ""}`;
 
-  const resp = await fetch(url);
+  const resp = await fetch(url, { headers: buildHeaders(false) });
   if (!resp.ok) {
     throw new Error(`Stock scan failed: HTTP ${resp.status}`);
   }

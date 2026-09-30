@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -328,7 +328,7 @@ function LeaderboardSection() {
       {/* Demo banner */}
       {isDemo && !isLoading && (
         <div className="px-4 pt-3">
-          <DemoBanner />
+          <ExampleChip />
         </div>
       )}
 
@@ -566,9 +566,6 @@ function MarketplaceSection() {
           Refresh
         </Button>
       </div>
-
-      {/* Demo banner */}
-      {isDemo && !isLoading && <DemoBanner />}
 
       {/* Category filter pills */}
       <div className="flex items-center gap-1.5">

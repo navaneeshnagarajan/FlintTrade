@@ -43,7 +43,7 @@ describe("MarketClockWidget", () => {
   it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
     render(<MarketClockWidget />);
     const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip.textContent).toBe("Sample");
+    expect(chip.textContent).toBe("Example");
     expect(chip.getAttribute("data-state")).toBe("sample");
     expect(chip.textContent).not.toMatch(/Live/);
   });

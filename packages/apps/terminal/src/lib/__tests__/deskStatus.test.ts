@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { classifyOperatorSignals } from "../operatorIncident";
-import { brokerSurfaceLabel, chatSurfaceLabel, decisionSurfaceLabel } from "../deskStatus";
+import {
+  brokerSurfaceLabel,
+  chatSurfaceLabel,
+  decisionSurfaceLabel,
+  summariseDeskStatus,
+} from "../deskStatus";
 
 describe("desk status surfaces", () => {
   it("keeps broker, Laya, and LLM on separate labels", () => {
@@ -44,5 +49,37 @@ describe("desk status surfaces", () => {
     expect(decisionSurfaceLabel(null)).toBe("Degraded");
     expect(decisionSurfaceLabel(undefined)).toBe("Degraded");
     expect(decisionSurfaceLabel(null)).not.toBe("Ready");
+  });
+});
+
+describe("summariseDeskStatus", () => {
+  const ready = { broker: "Connected", decision: "Ready" as const, chat: "Connected (suggest only)" };
+
+  it("keeps Example data neutral even though nothing is connected", () => {
+    expect(summariseDeskStatus({ mode: "explore", broker: "Unavailable", decision: "Down", chat: "Not configured" }))
+      .toEqual({ tone: "neutral", label: "Example data only" });
+  });
+
+  it("puts a down Laya first", () => {
+    expect(summariseDeskStatus({ ...ready, mode: "practice", decision: "Down" }))
+      .toEqual({ tone: "down", label: "Laya down" });
+  });
+
+  it("treats a missing broker as normal in Practice and as the first fix in Live", () => {
+    expect(summariseDeskStatus({ ...ready, mode: "practice", broker: "Unavailable" }).tone).toBe("ok");
+    expect(summariseDeskStatus({ ...ready, mode: "live", broker: "Unavailable" }))
+      .toEqual({ tone: "down", label: "No broker connected" });
+  });
+
+  it("separates blocked and degraded broker incidents", () => {
+    expect(summariseDeskStatus({ ...ready, mode: "live", broker: "Unavailable — order path" }).tone).toBe("down");
+    expect(summariseDeskStatus({ ...ready, mode: "live", broker: "Degraded — rate limit" }))
+      .toEqual({ tone: "warn", label: "Broker degraded" });
+  });
+
+  it("warns on a failing LLM but stays quiet when it is simply not configured", () => {
+    expect(summariseDeskStatus({ ...ready, mode: "practice", chat: "Error" }).tone).toBe("warn");
+    expect(summariseDeskStatus({ ...ready, mode: "practice", chat: "Not configured" }))
+      .toEqual({ tone: "ok", label: "All systems ready" });
   });
 });

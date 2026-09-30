@@ -97,7 +97,10 @@ def test_send_telegram_rejects_explore_mode_jwt(
     body = response.get_json()
     assert body["status"] == "error"
     assert body["code"] == "mode_blocked"
-    assert body["message"] == "Telegram tests are blocked in Explore (sample-only)."
+    assert body["message"] == (
+        "Telegram tests are blocked for Example. "
+        "Switch to Practice or Live with Telegram configured to send a real test."
+    )
     assert sent == []
 
 
