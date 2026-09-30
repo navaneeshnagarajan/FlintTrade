@@ -18,7 +18,6 @@ import {
   DollarSign,
   ArrowUpRight,
   ArrowDownRight,
-  Percent,
 } from "lucide-react";
 import { xirr } from "@/lib/xirr";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -26,8 +25,7 @@ import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
 import { cn } from "@/lib/utils";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
-import { DemoBanner } from "@/components/ui/DemoBanner";
-import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import {
   accountNetWorth,
   accountNetWorthAccessibleName,
@@ -35,7 +33,6 @@ import {
   NET_WORTH_LABEL,
   netWorthFigureTitleForBook,
 } from "@/lib/accountNetWorth";
-import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
 import { maskValue, VALUE_MASK } from "@/lib/formatters";
@@ -81,8 +78,6 @@ export function DashboardTab() {
     isSampleData,
     positionBookReady,
   } = useInvest();
-  const isPractice = useModeStore((s) => s.mode === "practice");
-
   // Count and rows come from InvestContext only — never a local sample
   // overlay that would disagree with the header badge (FT-TRADE-010).
   const isDemo = Boolean(isSampleData);
@@ -186,14 +181,7 @@ export function DashboardTab() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      {/* Demo banner */}
-      {isDemo && (
-        <div className="lg:col-span-3">
-          <DemoBanner />
-        </div>
-      )}
-
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3" data-testid="dashboard-figures">
       {/* Hero: Net Worth (full width) */}
       <GlassCard className="lg:col-span-3 p-5 gap-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -203,7 +191,6 @@ export function DashboardTab() {
               title={figureTitle}
             >
               <GlossaryTooltip term="Net Worth">{NET_WORTH_LABEL}</GlossaryTooltip>
-              {isDemo && <ExampleLabel testId="invest-net-worth-example" />}
             </p>
             <div className="flex items-baseline gap-3">
               <span
@@ -239,18 +226,22 @@ export function DashboardTab() {
             </div>
             <p className="text-xs text-text-muted">
               {holdings.length} holdings &middot; {money(totalInvested)} invested
-              {" "}&middot;{" "}
-              <span
-                data-testid="invest-xirr-subline"
-                className={cn(
-                  "font-mono font-semibold tabular-nums",
-                  portfolioXirr === null
-                    ? "text-text-muted"
-                    : portfolioXirr >= 0 ? "text-profit" : "text-loss",
-                )}
-              >
-                {portfolioXirr === null ? "XIRR —" : `XIRR ${formatPercent(portfolioXirr * 100)}`}
-              </span>
+              {portfolioXirr !== null && (
+                <>
+                  {" "}&middot;{" "}
+                  <span data-testid="sample-xirr" className="inline-flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "font-mono font-semibold tabular-nums",
+                        portfolioXirr >= 0 ? "text-profit" : "text-loss",
+                      )}
+                    >
+                      XIRR {formatPercent(portfolioXirr * 100)}
+                    </span>
+                    {isDemo ? <ExampleChip /> : null}
+                  </span>
+                </>
+              )}
             </p>
           </div>
 
@@ -280,9 +271,8 @@ export function DashboardTab() {
           <div className="size-7 rounded-lg flex items-center justify-center bg-bullish-bg">
             <Wallet className="size-3.5 text-profit" />
           </div>
-          <span className="text-xxs text-text-muted uppercase tracking-wider inline-flex items-center gap-1.5">
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
             Available Funds
-            {isDemo && <ExampleLabel testId="invest-funds-example" />}
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-available-funds">
@@ -296,9 +286,8 @@ export function DashboardTab() {
           <div className="size-7 rounded-lg flex items-center justify-center bg-surface-elevated">
             <DollarSign className="size-3.5 text-text-secondary" />
           </div>
-          <span className="text-xxs text-text-muted uppercase tracking-wider inline-flex items-center gap-1.5">
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
             Invested Value
-            {isDemo && <ExampleLabel testId="invest-invested-example" />}
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
@@ -321,9 +310,8 @@ export function DashboardTab() {
               <TrendingDown className="size-3.5 text-loss" />
             )}
           </div>
-          <span className="text-xxs text-text-muted uppercase tracking-wider inline-flex items-center gap-1.5">
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
             <GlossaryTooltip term="Day P&L">Day P&amp;L</GlossaryTooltip>
-            {isDemo && <ExampleLabel testId="invest-pnl-example" />}
           </span>
         </div>
         <div
@@ -344,14 +332,15 @@ export function DashboardTab() {
       {/* Row 3: Allocation donut + Top Movers */}
       <GlassCard className="lg:col-span-2 p-5 gap-3">
         <div>
-          <h3 className="font-heading font-semibold text-sm text-text-primary inline-flex items-center gap-1.5">
+          <h3 className="font-heading font-semibold text-sm text-text-primary">
             Portfolio Allocation
-            {isDemo && <ExampleLabel testId="invest-allocation-example" />}
           </h3>
           <p className="text-xs text-text-muted mt-0.5">
-            {isPractice
-              ? "Practice account. Debt / MF requires NAV data source."
-              : "Equity + Cash from your connected broker. Debt / MF requires NAV data source."}
+            {isDemo ? (
+              <ExampleChip />
+            ) : (
+              "Equity + Cash from your connected broker. Debt / MF requires NAV data source."
+            )}
           </p>
         </div>
 
@@ -377,22 +366,17 @@ export function DashboardTab() {
           </div>
         ) : (
           <div className="text-center py-6 text-text-muted text-xs">
-            {isPractice
-              ? "No holdings or cash in this account yet."
-              : "No holdings or cash data available. Connect a broker to see allocation."}
+            No holdings or cash data available. Connect a broker to see allocation.
           </div>
         )}
       </GlassCard>
 
       <GlassCard className="p-5 gap-3">
-        <h3 className="font-heading font-semibold text-sm text-text-primary inline-flex items-center gap-1.5">
-          Top Movers
-          {isDemo && <ExampleLabel testId="invest-movers-example" />}
-        </h3>
+        <h3 className="font-heading font-semibold text-sm text-text-primary">Top Movers</h3>
 
         {holdings.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
-            {isPractice ? "No movers in this account yet." : "Connect a broker to see movers."}
+            Connect a broker to see movers.
           </div>
         ) : (
           <div className="space-y-3">
@@ -441,10 +425,7 @@ export function DashboardTab() {
       <GlassCard className="p-4 gap-1.5">
         <div className="flex items-center gap-2">
           <BarChart3 className="size-4 text-text-muted" />
-          <span className="text-xxs text-text-muted uppercase tracking-wider inline-flex items-center gap-1.5">
-            Holdings
-            {isDemo && <ExampleLabel testId="invest-holdings-count-example" />}
-          </span>
+          <span className="text-xxs text-text-muted uppercase tracking-wider">Holdings</span>
         </div>
         <div className="text-3xl font-mono font-bold tabular-nums text-text-primary">
           {holdings.length}
@@ -464,9 +445,8 @@ export function DashboardTab() {
       <GlassCard className="p-4 gap-1.5">
         <div className="flex items-center gap-2">
           <PieChart className="size-4 text-text-muted" />
-          <span className="text-xxs text-text-muted uppercase tracking-wider inline-flex items-center gap-1.5">
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
             Sector Breakdown
-            {isDemo && <ExampleLabel testId="invest-sector-count-example" />}
           </span>
         </div>
         <div className="text-3xl font-mono font-bold tabular-nums text-text-primary">
@@ -475,49 +455,8 @@ export function DashboardTab() {
         <p className="text-xs text-text-muted">Sectors represented</p>
       </GlassCard>
 
-      <GlassCard className="lg:col-span-3 p-4 gap-2">
-        <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "size-7 rounded-lg flex items-center justify-center",
-              portfolioXirr === null
-                ? "bg-surface-elevated"
-                : portfolioXirr >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
-            )}
-          >
-            <Percent className={cn(
-              "size-3.5",
-              portfolioXirr === null
-                ? "text-text-muted"
-                : portfolioXirr >= 0 ? "text-profit" : "text-loss",
-            )} />
-          </div>
-          <span className="text-xxs text-text-muted uppercase tracking-wider">
-            Portfolio XIRR
-          </span>
-        </div>
-        <div className="flex items-baseline gap-3">
-          <span
-            data-testid="invest-xirr"
-            className={cn(
-              "text-2xl font-mono font-bold tabular-nums",
-              portfolioXirr === null
-                ? "text-text-muted"
-                : portfolioXirr >= 0 ? "text-profit" : "text-loss",
-            )}
-          >
-            {portfolioXirr === null ? "—" : formatPercent(portfolioXirr * 100)}
-          </span>
-          <span className="text-xs text-text-muted">
-            Annualised return on irregular cash flows (SIPs + lump sum)
-          </span>
-        </div>
-      </GlassCard>
-
       <p className="lg:col-span-3 text-xs text-text-muted">
-        {isPractice
-          ? "Holdings refresh every 60s. Cash refreshes every 30s."
-          : "Holdings refresh every 60s. Cash refreshes every 30s from your active broker data source."}
+        Holdings refresh every 60s. Cash refreshes every 30s from your active broker data source.
       </p>
     </div>
   );

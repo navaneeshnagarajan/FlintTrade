@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import { formatPercent } from "../formatters";
 import { useInvest } from "../InvestContext";
@@ -160,6 +161,9 @@ export function BenchmarkTab() {
 
   return (
     <div className="space-y-6">
+      {/* These returns are hard-coded examples in every mode. */}
+      <ExampleChip always />
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="size-8 rounded-lg flex items-center justify-center bg-surface-elevated">

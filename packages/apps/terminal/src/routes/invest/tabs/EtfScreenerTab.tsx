@@ -68,7 +68,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import {
   getEtfScreener,
@@ -528,7 +528,7 @@ export function EtfScreenerTab() {
 
   return (
     <div className="space-y-5">
-      {isDemo && <ExampleLabel />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4">

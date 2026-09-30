@@ -5,7 +5,7 @@
  *   GET /ft-api/api/v1/health         → broker, DuckDB, and this host's disk,
  *                                     RAM, CPU, GPU, and network. Process RSS
  *                                     is separate. Missing host figures are
- *                                     Unavailable, never Explore sample totals.
+ *                                     Unavailable, never sample totals.
  *   GET /ft-api/api/v1/traffic/stats  → requests/sec, error rate, top endpoints
  *   GET /ft-api/api/v1/latency/stats  → order latency per broker (avg/p50/p95/p99)
  */
@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { SectionTitle } from "./shared";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
+import { visibleServiceNote } from "@/lib/operatorModeLabel";
 import {
   getHealth,
   getTrafficStats,
@@ -221,11 +222,11 @@ function HealthPanel({ data }: { data: SystemHealth }) {
         <div className="space-y-1">
           <StatusDot
             ok={data.broker?.status === "ok"}
-            label={`Broker — ${data.broker?.note ?? data.broker?.status ?? "unknown"}`}
+            label={`Broker — ${visibleServiceNote(data.broker?.note) ?? data.broker?.status ?? "unknown"}`}
           />
           <StatusDot
             ok={data.duckdb?.status === "ok"}
-            label={`DuckDB — ${data.duckdb?.status === "ok" ? "Healthy" : data.duckdb?.note ?? "Error"}`}
+            label={`DuckDB — ${data.duckdb?.status === "ok" ? "Healthy" : visibleServiceNote(data.duckdb?.note) ?? "Error"}`}
           />
         </div>
       </div>

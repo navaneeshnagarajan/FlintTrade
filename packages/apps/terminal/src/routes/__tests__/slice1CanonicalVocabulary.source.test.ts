@@ -40,11 +40,11 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
     expect(src).not.toMatch(/sandbox\s+testing/i);
   });
 
-  it("MiniChartCard shows an Example label and sample-data aria (not DEMO/demo data)", () => {
+  it("MiniChartCard shows SAMPLE provenance and sample-data aria (not DEMO/demo data)", () => {
     const src = stripComments(read(miniChartPath));
-    // Visible mark is Example. The sparkline aria still says sample data.
-    expect(src).toMatch(/ExampleLabel|>\s*Example\s*</);
-    expect(src).toMatch(/\(sample data\)/);
+    // Visible badge text must be Sample via ProvenanceBadge or literal Sample
+    expect(src).toMatch(/ProvenanceBadge|label=\{?["']Sample["']\}?|>\s*Sample\s*</);
+    expect(src).toMatch(/\(Example\)/);
     // Forbidden browser-visible legacy strings
     expect(src).not.toMatch(/>\s*Demo\s*</);
     expect(src).not.toMatch(/\(demo data\)/i);
@@ -168,9 +168,9 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
 
   it("OrderLadder Explore a11y says sample data (not demo data)", () => {
     const src = stripComments(read(orderLadderPath));
-    expect(src).toMatch(/Showing sample data/);
+    expect(src).toMatch(/Showing Example/);
     expect(src).not.toMatch(/Showing demo data/);
-    expect(src).toMatch(/>\s*Sample data\s*</);
+    expect(src).toMatch(/>\s*Example\s*</);
     expect(src).not.toMatch(/>\s*Demo data\s*</);
   });
 

@@ -196,5 +196,5 @@ def test_explore_stays_on_the_mode_refusal() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body.get("code") == "mode_blocked"
-    assert "Explore mode" in body["message"]
+    assert "Example" in body["message"]
     safety.check_order.assert_not_called()

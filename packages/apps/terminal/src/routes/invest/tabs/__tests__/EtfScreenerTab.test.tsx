@@ -37,10 +37,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="example-label">Demo mode</div>,
-}));
-
 // Mock TanStack Query — data=undefined, isError=false → demo path
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
@@ -60,6 +56,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { EtfScreenerTab } from "../EtfScreenerTab";
+import { useModeStore } from "@/stores/modeStore";
 import { useQuery } from "@tanstack/react-query";
 
 const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
@@ -72,6 +69,7 @@ const NO_DATA = { data: undefined, isLoading: false, isError: false, refetch: vi
 
 describe("EtfScreenerTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
     mockUseQuery.mockReturnValue(NO_DATA);
   });
 
@@ -79,13 +77,13 @@ describe("EtfScreenerTab", () => {
     // Provenance fails closed — an absent flag is sample, never live.
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { etfs: [] } });
     render(<EtfScreenerTab />);
-    expect(screen.getByTestId("example-label")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("drops the demo banner only on an explicit is_sample_data: false", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, etfs: [] } });
     render(<EtfScreenerTab />);
-    expect(screen.queryByTestId("example-label")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
   });
 
   it("renders the section heading", () => {
@@ -95,7 +93,7 @@ describe("EtfScreenerTab", () => {
 
   it("shows demo banner when API is unavailable", () => {
     render(<EtfScreenerTab />);
-    expect(screen.getByTestId("example-label")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("renders the category select with default All", () => {

@@ -59,11 +59,11 @@ import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
-import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { useModeStore } from "@/stores/modeStore";
 import { formatINR, formatPercent } from "../formatters";
 
-const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable in Explore";
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Example basket — editing unavailable";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -344,14 +344,11 @@ export function BasketTab() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  const showsSeededSample = baskets.some((basket) => isSeededSampleBasket(basket.id));
-  // Quotes still loading must not paint seeded sample cards without a label.
-  // The chip is in the first frame whenever those cards are shown.
-  const showExampleChip = showsSeededSample || (Object.keys(quotes).length === 0 && !isLoading);
+  const isDemo = Object.keys(quotes).length === 0 && !isLoading;
 
   return (
     <div className="space-y-6">
-      {showExampleChip && <ExampleLabel />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div className="flex items-center justify-between">

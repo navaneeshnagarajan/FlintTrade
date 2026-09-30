@@ -7,7 +7,7 @@
 
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
-import { isDemoSessionActive } from "@/lib/demoSession";
+import { EXAMPLE_USER_DISPLAY_NAME, isDemoSessionActive } from "@/lib/demoSession";
 import { decideHomeEntry, readPersistedAuthSession, WELCOME_GATE_PATH } from "@/lib/homeEntry";
 import {
   captureAuthSessionFence,
@@ -42,7 +42,7 @@ export function useAuthGuard(): {
       if (isDemoSessionActive()) {
         useAuthStore
           .getState()
-          .setLoggedInIfCurrent("demo-user", "Explorer", "", probeFence);
+          .setLoggedInIfCurrent("demo-user", EXAMPLE_USER_DISPLAY_NAME, "", probeFence);
         return;
       }
 
@@ -59,7 +59,7 @@ export function useAuthGuard(): {
           if (isDemoSessionActive()) {
             useAuthStore
               .getState()
-              .setLoggedInIfCurrent("demo-user", "Explorer", "", probeFence);
+              .setLoggedInIfCurrent("demo-user", EXAMPLE_USER_DISPLAY_NAME, "", probeFence);
             return;
           }
           const result = AuthStatusSchema.safeParse(raw);

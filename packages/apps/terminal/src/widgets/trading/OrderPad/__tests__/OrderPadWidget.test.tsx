@@ -85,7 +85,7 @@ const defaultProps = makeWidgetPanelProps();
 async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell)/i): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: buttonName }));
   const confirm = await screen.findByRole("button", {
-    name: /confirm (simulated practice|sample) order/i,
+    name: /confirm (simulated practice|example) order/i,
   });
   fireEvent.click(confirm);
 }
@@ -374,22 +374,22 @@ describe("OrderPadWidget", () => {
   });
 
   it("shows Laya denied under the confirm control and leaves it off", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Explore cannot place orders.", 403, {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
       code: "laya_denied",
-      reason: "Explore cannot place orders.",
-      message: "Explore cannot place orders.",
+      reason: "Example cannot place orders.",
+      message: "Example cannot place orders.",
       limits: { max_quantity: 100 },
     }));
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const confirm = await screen.findByRole("button", {
-      name: /confirm (simulated practice|sample) order/i,
+      name: /confirm (simulated practice|example) order/i,
     });
     fireEvent.click(confirm);
     const denied = await screen.findByTestId("laya-denied");
     expect(denied).toHaveTextContent("Laya denied");
-    expect(denied).toHaveTextContent("Explore cannot place orders.");
+    expect(denied).toHaveTextContent("Example cannot place orders.");
     expect(denied).toHaveTextContent("Max quantity 100.");
     expect(confirm).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
@@ -408,7 +408,7 @@ describe("OrderPadWidget", () => {
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const confirm = await screen.findByRole("button", {
-      name: /confirm (simulated practice|sample) order/i,
+      name: /confirm (simulated practice|example) order/i,
     });
     fireEvent.click(confirm);
     expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
@@ -419,7 +419,7 @@ describe("OrderPadWidget", () => {
     });
 
     expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
   });
 
   it("shows a quantity clamp before the place completes", async () => {
@@ -435,13 +435,13 @@ describe("OrderPadWidget", () => {
     fireEvent.change(qty, { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     fireEvent.click(await screen.findByRole("button", {
-      name: /confirm (simulated practice|sample) order/i,
+      name: /confirm (simulated practice|example) order/i,
     }));
     expect(await screen.findByTestId("laya-clamp")).toHaveTextContent("Qty reduced to 1 (Laya limit)");
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
     expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
   });
 
   it("shows tighter Degraded limits without Blocked chrome", async () => {
@@ -554,7 +554,7 @@ describe("OrderPadWidget options premium prefill", () => {
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
-    expect(screen.getByText(/Sample premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Example premium ₹623.45/)).toBeInTheDocument();
     expect(screen.queryByText(/Live premium/i)).not.toBeInTheDocument();
   });
 
@@ -689,11 +689,11 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockMode.current = "explore";
     render(<OrderPadWidget {...defaultProps} />);
 
-    expect(screen.getByRole("button", { name: /sample buy/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /example buy/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /practice buy/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /sample buy/i }));
+    fireEvent.click(screen.getByRole("button", { name: /example buy/i }));
 
-    expect(await screen.findByRole("dialog", { name: /review sample order/i })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /review example order/i })).toBeInTheDocument();
     expect(screen.queryByText(/connect a broker to place orders/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -703,7 +703,7 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockPlaceOrder.mockResolvedValue({ orderId: "SAMPLE-EXPLORE" });
     render(<OrderPadWidget {...defaultProps} />);
 
-    await reviewAndConfirmPractice(/sample buy/i);
+    await reviewAndConfirmPractice(/example buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
@@ -791,8 +791,9 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     expect(reviewQueries.getByText("1")).toBeInTheDocument();
     expect(reviewQueries.getByText("₹250.50 (estimated fill)")).toBeInTheDocument();
     expect(reviewQueries.getByText("₹250.50")).toBeInTheDocument();
-    expect(reviewQueries.getByText(/simulation only/i)).toBeInTheDocument();
-    expect(reviewQueries.getByText(/no broker or native trading api is contacted/i)).toBeInTheDocument();
+    expect(reviewQueries.getByText("Confirm places this simulated order.")).toBeInTheDocument();
+    expect(reviewQueries.queryByText(/Explore records a sample fill/i)).not.toBeInTheDocument();
+    expect(reviewQueries.queryByText(/sandboxengine/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 

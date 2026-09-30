@@ -39,7 +39,7 @@ export default function NotFoundRoute() {
                 Go Home
               </Button>
               <Button variant="outline" onClick={() => navigate("/explore")} className="w-full sm:w-auto">
-                Explore
+                Demo (example data)
               </Button>
           </div>
       </div>

@@ -471,13 +471,13 @@ gated-session model; never add plaintext credential storage.
 
 The 5-layer safety system lives in `packages/services/engine/`. Every
 **Live** order placed through FlintTrade is checked by those layers.
-Practice orders skip L1–L5 and go to `SandboxEngine`. Practice **place**
-runs `Laya.admit` before that sandbox; a refusal or a quantity clamp
-stops before the sandbox. Other Practice verbs go straight to the
-sandbox. Live operator and automate **place** is Mode guard →
+Practice orders skip L1–L5 and go to the Practice fill path. Practice **place**
+runs `Laya.admit` before that path; a refusal or a quantity clamp
+stops before a simulated fill. Other Practice verbs go straight to the
+Practice fill path. Live operator and automate **place** is Mode guard →
 `Laya.admit` → SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
-Explore placement is refused by the backend (`mode_blocked`); Order Pad
-Sample Buy is a local client fill (no HTTP order route, no Laya admit,
+Example-data placement is refused by the backend (`mode_blocked`); Order Pad
+Example Buy is a local example fill (no HTTP order route, no Laya admit,
 no SafetySystem). Other Live write verbs still reach SafetySystem
 without this place admission. Runtime fail-fast order in
 `_check_order_locked` is **L5 → L4 → L1 → L2 → L3** (not L1–L5 numerical

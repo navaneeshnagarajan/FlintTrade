@@ -75,10 +75,12 @@ import {
   HOLDINGS_RETURN_TOOLTIP,
   portfolioBookReturn,
 } from "../BenchmarkTab";
+import { useModeStore } from "@/stores/modeStore";
 
 function holding(pnl: number, averagePrice = 100, quantity = 2) {
   return { symbol: "SBIN", averagePrice, quantity, pnl };
 }
+
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -88,6 +90,7 @@ describe("BenchmarkTab", () => {
   beforeEach(() => {
     investState.holdings = [holding(50)];
     investState.isSampleData = false;
+    useModeStore.setState({ mode: "explore" });
     vi.clearAllMocks();
   });
 
@@ -150,6 +153,26 @@ describe("BenchmarkTab", () => {
     expect(within(portfolio).getByTestId("benchmark-portfolio-example")).toHaveTextContent("Example");
     expect(screen.queryByRole("table", { name: HOLDINGS_RETURN_LABEL })).not.toBeInTheDocument();
     expect(screen.queryByTitle(HOLDINGS_RETURN_TOOLTIP)).not.toBeInTheDocument();
+  });
+
+  it("renders the demo banner", () => {
+    render(<BenchmarkTab />);
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
+  });
+
+  it("keeps the Example chip on hard-coded returns in Practice and Live", () => {
+    investState.holdings = [];
+    investState.isSampleData = false;
+    useModeStore.setState({ mode: "practice" });
+    const { rerender } = render(<BenchmarkTab />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getByText("Your Portfolio")).toBeInTheDocument();
+
+    useModeStore.setState({ mode: "live" });
+    rerender(<BenchmarkTab />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getByText("+14.20%")).toBeInTheDocument();
+    expect(screen.queryByText("+18.45%")).not.toBeInTheDocument();
   });
 
   it("shows the portfolio row", () => {

@@ -37,10 +37,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="example-label">Demo mode</div>,
-}));
-
 // TanStack Query — disabled (no symbol yet) → data=undefined, isLoading=false
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
@@ -60,6 +56,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { ShareholdingTab } from "../ShareholdingTab";
+import { useModeStore } from "@/stores/modeStore";
 import { useQuery } from "@tanstack/react-query";
 
 const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
@@ -113,6 +110,7 @@ function fetchSymbol(symbol = "TCS") {
 
 describe("ShareholdingTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
     mockUseQuery.mockReturnValue(NO_DATA);
   });
 
@@ -121,21 +119,21 @@ describe("ShareholdingTab", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: LIVE_PAYLOAD });
     render(<ShareholdingTab />);
     fetchSymbol();
-    expect(screen.getByTestId("example-label")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("drops the demo banner only on an explicit is_sample_data: false", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { ...LIVE_PAYLOAD, is_sample_data: false } });
     render(<ShareholdingTab />);
     fetchSymbol();
-    expect(screen.queryByTestId("example-label")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
   });
 
   it("treats an absent response as demo once a symbol has been fetched", () => {
     // The tab renders DEMO_RESPONSE in this state, so it must say so.
     render(<ShareholdingTab />);
     fetchSymbol();
-    expect(screen.getByTestId("example-label")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("renders the section heading", () => {
@@ -157,7 +155,7 @@ describe("ShareholdingTab", () => {
 
   it("shows demo banner when showing sample data", () => {
     render(<ShareholdingTab />);
-    expect(screen.getByTestId("example-label")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("shows demo symbol RELIANCE in the default state", () => {

@@ -21,7 +21,7 @@ import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isMondayReadBroker,
-} from "@/lib/mondayReadChrome";
+} from "@/lib/connectedReadChrome";
 
 type ConnectionMode = "openalgo" | "direct";
 
@@ -169,7 +169,7 @@ export function ConnectionStep({
     <div className="space-y-5">
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
-          Practice uses FlintTrade&apos;s SandboxEngine for paper fills. You do not
+          Practice — simulated fills, no real money. You do not
           need a broker for Practice.
         </p>
         <Button
@@ -206,7 +206,7 @@ export function ConnectionStep({
         {mode === "openalgo" && (
           <p className="text-xs text-text-muted">
             Settings fallback only — not the primary connect path. Practice
-            fills still use the native SandboxEngine.
+            still uses simulated fills, with no real money.
           </p>
         )}
         {mode === "direct" && (

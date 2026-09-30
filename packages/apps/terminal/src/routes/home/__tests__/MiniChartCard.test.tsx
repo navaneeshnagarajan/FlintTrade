@@ -11,17 +11,16 @@ describe("MiniChartCard", () => {
     render(<MiniChartCard />);
 
     const sparkline = screen.getByRole("img", {
-      name: /NIFTY 50 1D illustrative sparkline \(sample data\)/i,
+      name: /NIFTY 50 1D illustrative sparkline \(Example\)/i,
     });
     expect(sparkline).toHaveAttribute("viewBox", "0 0 160 42");
     expect(sparkline.querySelector("polyline")).not.toBeInTheDocument();
     expect(sparkline.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
-  it("marks the sparkline as Example (illustrative shape, not live data)", () => {
+  it("badges the sparkline as SAMPLE (illustrative shape, not live data)", () => {
     render(<MiniChartCard />);
     expect(screen.queryByText("Sample")).not.toBeInTheDocument();
-    expect(screen.getByTestId("mini-chart-example-label")).toHaveTextContent("Example");
   });
 
   it("shows a dash, never a fabricated price, when there is no live NIFTY tick", () => {

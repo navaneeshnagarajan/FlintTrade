@@ -91,6 +91,7 @@ vi.mock("@/stores/connectionStore", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useDirectBrokerConnected: () => mockDirectBrokerConnected.value,
+  useBrokerConnected: () => false,
 }));
 
 vi.mock("@/hooks/useMarketStatus", () => ({
@@ -236,6 +237,7 @@ describe("TopBarV2", () => {
   it("reports the market session as unavailable until timing data is trustworthy", () => {
     renderTopBarV2();
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
   });
 
@@ -263,7 +265,7 @@ describe("TopBarV2", () => {
 
     const { unmount } = renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Closed");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
     unmount();
   });
@@ -314,7 +316,7 @@ describe("TopBarV2", () => {
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Closed");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Continuous");
   });
 
@@ -327,6 +329,7 @@ describe("TopBarV2", () => {
     renderTopBarV2();
 
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 
@@ -340,6 +343,7 @@ describe("TopBarV2", () => {
     renderTopBarV2();
 
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 
@@ -360,14 +364,12 @@ describe("TopBarV2", () => {
     expect(screen.queryByRole("region", { name: "Market indices" })).not.toBeInTheDocument();
   });
 
-  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+  it("does not repeat the feed chip in the TopBar", () => {
     useModeStore.setState({ mode: "explore" });
     renderTopBarV2();
 
-    const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Sample");
-    expect(chip).toHaveAttribute("data-state", "sample");
-    expect(chip).not.toHaveTextContent("Live");
+    expect(screen.queryByTestId("feed-freshness-chip")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Sample");
   });
 
@@ -527,8 +529,8 @@ describe("TopBarV2", () => {
 
   it("mounts the trading mode indicator (Explore by default)", () => {
     renderTopBarV2();
-    // ModeIndicator renders the EXPLORE pill when modeStore is at its default.
-    expect(screen.getByText("EXPLORE")).toBeInTheDocument();
+    // Sample data is Example. Practice is a Mode and is not the default chip.
+    expect(screen.getByTestId("execution-mode")).toHaveTextContent("Example");
   });
 
   it("uses adaptive glass chrome tokens for the background", () => {
@@ -598,7 +600,8 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
   it("keeps Mode visible and tappable at ~390px", () => {
     renderTopBarV2();
 
-    const mode = screen.getByText("EXPLORE");
+    const mode = screen.getByTestId("execution-mode");
+    expect(mode).toHaveTextContent("Example");
     expect(mode).toBeVisible();
     expect(mode.closest("button")).toBeEnabled();
   });
@@ -690,7 +693,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
 
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
     expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
-    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
     expect(screen.getByTestId("topbar-more-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
   });
@@ -738,7 +741,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     mockTimingsQuery.dataUpdatedAt = Date.now();
     renderTopBarV2();
 
-    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toHaveTextContent("Example");
     const session = screen.getByTestId("market-session-status");
     expect(session).toHaveAccessibleName(/market status: continuous/i);
     expect(session).toHaveTextContent(/continuous/i);
@@ -791,7 +794,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     useSettingsStore.setState({ density: "comfortable" });
     renderTopBarV2();
 
-    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
     expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
     expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();

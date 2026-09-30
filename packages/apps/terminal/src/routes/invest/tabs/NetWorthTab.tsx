@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { cn } from "@/lib/utils";
-import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
 import {
@@ -34,7 +34,6 @@ import {
 } from "@/lib/accountNetWorth";
 import { formatINRCompact, formatPercent } from "../formatters";
 import { maskValue } from "@/lib/formatters";
-import { useModeStore } from "@/stores/modeStore";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 
 // ─── Asset category definition ────────────────────────────────────────────────
@@ -70,7 +69,7 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 
 export function NetWorthTab() {
   const { holdings, summary, isLoading, isError, isSampleData, positionBookReady } = useInvest();
-  const isPractice = useModeStore((s) => s.mode === "practice");
+  const isExample = Boolean(isSampleData);
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
   const ledgerCash = summary.ledgerCash ?? availableCash;
   const positionValue = summary.positionValue ?? 0;
@@ -81,7 +80,7 @@ export function NetWorthTab() {
     openLegSymbols: summary.openLegSymbols,
     fallbackSymbols: summary.fallbackSymbols,
   });
-  const sourceNote = isPractice ? "Practice account" : "Live from broker";
+  const sourceNote = "Live from broker";
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
 
   const knownTotal = typeof summary.netWorth === "number"
@@ -97,7 +96,7 @@ export function NetWorthTab() {
     {
       label: "Equity Holdings",
       value: isLoading ? null : currentValue,
-      note: isSampleData ? "Example book" : sourceNote,
+      note: sourceNote,
       hexColor: "#3b82f6",
       tailwindBg: "bg-blue-500",
       tailwindText: "text-blue-400",
@@ -108,7 +107,7 @@ export function NetWorthTab() {
     {
       label: "Cash",
       value: isLoading ? null : ledgerCash,
-      note: isSampleData ? "Example cash" : sourceNote,
+      note: sourceNote,
       hexColor: "#22c55e",
       tailwindBg: "bg-emerald-500",
       tailwindText: "text-emerald-400",
@@ -155,7 +154,7 @@ export function NetWorthTab() {
     categories.splice(1, 0, {
       label: "Open Positions",
       value: isLoading ? null : positionValue,
-      note: isSampleData ? "Example book" : sourceNote,
+      note: sourceNote,
       hexColor: "#22c55e",
       tailwindBg: "bg-emerald-500",
       tailwindText: "text-emerald-400",
@@ -169,15 +168,15 @@ export function NetWorthTab() {
   const donutTotal = knownCategories.reduce((acc, c) => acc + (c.value ?? 0), 0);
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl" data-testid="net-worth-figures">
       {/* Header */}
       <div>
         <h3 className="font-heading font-semibold text-sm text-text-primary">
           Net Worth Breakdown
         </h3>
         <p className="text-xs text-text-muted mt-0.5">
-          {isPractice
-            ? "Practice account. Other asset classes require additional data sources."
+          {isExample
+            ? "Example equity and cash. Connect a broker to see yours."
             : "Live equity and cash from your connected broker. Other asset classes require additional data sources."}
         </p>
       </div>
@@ -191,7 +190,6 @@ export function NetWorthTab() {
             title={figureTitle}
           >
             Known Total (Cash + Holdings + Positions)
-            {isSampleData && <ExampleLabel testId="net-worth-tab-example" />}
           </div>
           <div
             className={cn(
@@ -244,14 +242,17 @@ export function NetWorthTab() {
 
         {/* Donut chart */}
         <GlassCard className="p-5 flex flex-col items-center gap-4">
-          <div className="text-xxs text-text-muted uppercase tracking-wider self-start">
-            Allocation (live assets only)
+          <div className="self-start flex items-center gap-2">
+            <span className="text-xxs text-text-muted uppercase tracking-wider">
+              {isExample ? "Allocation" : "Allocation (live assets only)"}
+            </span>
+            {isExample ? <ExampleChip /> : null}
           </div>
           {knownCategories.length > 0 ? (
             <>
               <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
                 <FlintDonutBreakdown
-                  ariaLabel="Live asset allocation donut"
+                  ariaLabel={isExample ? "Allocation donut" : "Live asset allocation donut"}
                   slices={knownCategories.map((c) => ({
                     label: c.label,
                     value: c.value ?? 0,
@@ -285,7 +286,7 @@ export function NetWorthTab() {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
-              {isPractice ? "No tracked assets in this account yet." : "Connect a broker to see allocation chart."}
+              Connect a broker to see allocation chart.
             </div>
           )}
         </GlassCard>
@@ -312,7 +313,9 @@ export function NetWorthTab() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold text-text-primary">{cat.label}</div>
-                  <div className="text-xs text-text-muted">{cat.note}</div>
+                  <div className="text-xs text-text-muted">
+                    {isExample && cat.note === "Live from broker" ? <ExampleChip /> : cat.note}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {cat.value !== null ? (

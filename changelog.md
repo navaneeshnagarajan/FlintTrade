@@ -91,6 +91,18 @@ changelog rebuilds itself from the first release cut after this baseline.
   `Your holdings (unrealised)` instead of
   `Your Portfolio (since first buy)`. Example holdings stay
   `Your Portfolio` with the Example chip.
+- **Example markers on sample Invest figures.** The sample Dashboard XIRR
+  is the inline `XIRR` figure plus one Example chip. There is no
+  Portfolio XIRR card. On sample figures, Net Worth reads
+  `Example equity and cash. Connect a broker to see yours.`; the
+  allocation label is `Allocation` with the Example chip, and each
+  `Live from broker` note on those figures is the Example chip. The
+  chip paints only on example data. A
+  connected book keeps the live equity sentence,
+  `Allocation (live assets only)`, and `Live from broker`. Mutual
+  Funds on example data reads `Example NAVs · as of 10-Sep-2026`.
+  Example order review confirms with **Continue**. Practice review
+  keeps **Confirm simulation**.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
@@ -528,8 +540,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   stays leaf-only, with no group chrome.
 
 - **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
-  Explore `/invest#mutual-funds` now labels the fixture
-  `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily
+  Example data on `/invest#mutual-funds` labels the fixture
+  `Example NAVs · as of 10-Sep-2026` and drops “Updated daily
   after market close.” The sample date was refreshed once so
   the as-of is not months stale; it does not auto-update.
   Practice and Live keep the daily-update sentence when the

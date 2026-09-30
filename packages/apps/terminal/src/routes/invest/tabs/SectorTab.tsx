@@ -30,7 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { getSectorBreakdown, type SectorBreakdownEntry } from "@/lib/sectors";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { formatINRCompact } from "../formatters";
@@ -159,7 +159,7 @@ export function SectorTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div>

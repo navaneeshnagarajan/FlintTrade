@@ -16,7 +16,7 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { TrendingUp } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { niftyAtom } from "@/atoms/marketAtoms";
-import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { ProvenanceBadge } from "@/routes/home/DemoBadge";
 
 type Timeframe = "1D" | "1W" | "1M" | "3M";
 const TIMEFRAMES: Timeframe[] = ["1D", "1W", "1M", "3M"];
@@ -70,12 +70,16 @@ export function MiniChartCard() {
         </div>
 
         {/* Sparkline — illustrative shape, badged so it cannot read as live data */}
-        <div className="flex flex-1 flex-col gap-1">
-          <ExampleLabel testId="mini-chart-example-label" />
+        <div className="flex-1 relative">
+          <ProvenanceBadge
+            label="Sample"
+            testId="mini-chart-demo-badge"
+            title="Illustrative shape only — not live price history"
+          />
           <FlintMiniSparkline
             points={shape}
             positive={positive}
-            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (sample data)`}
+            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (Example)`}
             className="h-full w-full"
           />
         </div>
