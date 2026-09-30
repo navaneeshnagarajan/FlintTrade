@@ -185,7 +185,7 @@ export default [
   {
     // Playwright infrastructure is outside src/, but carries the same two
     // TypeScript safety rules. Hooks rules are irrelevant to non-React E2E code.
-    files: ["e2e/**/*.ts", "playwright.config.ts", "playwright.infra.config.ts"],
+    files: ["e2e/**/*.ts", "playwright.config.ts", "playwright.infra.config.ts", "playwright.visual.config.ts"],
     plugins: { local: localRules },
     languageOptions: {
       parser: babelParser,

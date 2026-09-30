@@ -122,6 +122,42 @@ npx vitest run -t "renders the order pad"  # single test by name
 npx vitest                                 # watch mode (great for TDD)
 ```
 
+### Visual and accessibility checks
+
+Playwright screenshot comparison and axe checks live in
+`packages/apps/terminal/e2e/visual-a11y.spec.ts`. They cover Home, the
+Trading Desk dashboard, the Practice Order Pad before and after a refused
+order, the Laya row in the labels the desk actually paints (Ready,
+Degraded, Down), the TopBar Status menu, the two-operator
+screen, sign-in, and setup. Each one runs at 1440×900 and 2560×1440.
+
+The checks use Example sample data, a frozen clock, motion turned off,
+fonts loaded, and masks on the ticker and canvases. Route mocks come from
+the same fail-closed registry as the other Playwright specs, so an
+unmocked `/ft-api` call still fails the fixture.
+
+Reticle does not judge these pictures. Reticle reads network, app state,
+and the console. It cannot see contrast, spacing, or clipping.
+
+The lane is advisory. `.github/workflows/visual-a11y.yml` writes diffs and
+axe results to the job summary, uploads the images, and finishes green
+while `VISUAL_AXE_GATE` is `"0"`. Change that one value to `"1"` to make
+the job fail on a regression. It is not a required check, and it should
+stay advisory until it has run quiet on a few pull requests.
+
+Screenshot baselines are generated only by that workflow on `ubuntu-latest`
+(the same hosted image as the terminal Playwright job). Dispatch **Visual
+and accessibility** with **Regenerate screenshot baselines** enabled, on
+the branch that should receive the files. The job commits the
+`*-chromium-linux.png` baselines and pushes them. Do not commit baselines
+taken on any other machine. See `packages/apps/terminal/e2e/visual/baselines/README.md`.
+
+From `packages/apps/terminal`:
+
+```bash
+pnpm run e2e:visual
+```
+
 ### Desktop (Electron)
 
 From the repository root, using the locked pnpm workspace:
