@@ -158,7 +158,7 @@ adjusts virtual capital and square-off times; it does not place.
 
 | Route | What it does |
 |---|---|
-| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` |
+| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data that calls this route is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` The `/trade` Order Pad records `Example order placed` (id starting `SAMPLE-`) on the client for that click. |
 | `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before admission, including when the variety spelling differs only by case or separators. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
 | `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before the live check, the reduce-only proof, and any broker call. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
 | `POST /api/v1/orders/bracket` | Live, PIN-unlocked. Entry plus exactly one of a stop-loss or a target. Each leg is admitted through Laya, then placed through SafetySystem, `gate_order`, and `BrokerRouter`. Success is HTTP 201. Practice is HTTP 403 `practice_unsupported`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. A broker-held variety is HTTP 422 `broker_held_unsupported` (`Not placed. Broker-held bracket legs aren't supported. Use one stop-loss or one target.`). A stop-loss and a target together are HTTP 422 `oco_unsupported`. A trailing stop is HTTP 422 `trailing_unsupported`. |
@@ -324,7 +324,11 @@ a connection does not resolve, probe, authenticate to, or start that provider.
 The catalogue is composed at app startup from the AI, historical, and gateway
 contributor descriptors. Catalogue `service_kinds` values include
 `broker_execution`, `market_data_live`, `market_data_historical`, `news`,
-`llm`, `forecast`, `agent_runtime`, and `embedding`.
+`llm`, `forecast`, `agent_runtime`, `embedding`, and `decision`.
+
+`decision` entries are catalogue providers for place admission, not LLM chat
+profiles. Their default evidence scope is offline qualification until a Live
+qualification record exists. Listing them does not probe or start the host.
 
 | Endpoint | Purpose |
 |---|---|
@@ -520,7 +524,7 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 |---|---|
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. `data.migration_blocked` is `two_operators` when more than one operator account is present, and null otherwise. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`) with `mode` `practice`. That token is a Practice session. It is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. A second create, including one that overlaps the first, raises `Account already set up` in the account service. The route answers HTTP 409 with `code: "operator_exists"` and message `Request conflicts with the current state`. The setup screen maps that code to **This machine already has an operator. Sign in to finish setup.** A 409 without `operator_exists` keeps the generic message. |
-| `POST auth/setup/resume` | Public. A reload mid-setup drops the setup-session JWT that lived only in the browser tab, so this proves the password and mints a setup-session JWT again. Body `{ "password", "totp_code"? }`. Once an authenticator is enrolled, that code is required as well. No operator yet is HTTP 409 `Create an operator before continuing setup.` A finished setup is HTTP 409 `Setup is already complete. Sign in.` A wrong password is HTTP 401 `Invalid credentials.` It does not require a session that is already in the browser. |
+| `POST auth/setup/resume` | Public. A reload mid-setup drops the setup-session JWT that lived only in the browser tab, so this proves the password and mints a setup-session JWT again. It mints a Practice setup session, the same as `POST /v1/auth/setup` (`setup_session` true, Live not unlocked). Body `{ "password", "totp_code"? }`. Once an authenticator is enrolled, that code is required as well. No operator yet is HTTP 409 `Create an operator before continuing setup.` A finished setup is HTTP 409 `Setup is already complete. Sign in.` A wrong password is HTTP 401 `Invalid credentials.` It does not require a session that is already in the browser. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
 | `POST auth/setup/complete` | Session-bound. Records that first-run setup has finished. Requires the operator's session JWT; the setup-session JWT qualifies, and an API key does not. The operator must already exist and the vault must be open. Success is `{ "setup_finished": true }` under `data`. A missing session is HTTP 401 `Sign in to continue setup.` |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires an active session, the password, and the current authenticator code (`totp_code`). An API key is not a session. A signed-out request on a finished account changes nothing. When an authenticator is enrolled the response is HTTP 403 `Sign in to reset this account. You'll need your password and authenticator code.` Otherwise it is HTTP 401 `Sign in to reset this account. You'll need your password.` The body includes `authenticator_enrolled`. A successful wipe bumps the account epoch, so other session tokens stop working. |
@@ -565,7 +569,7 @@ The terminal has two development proxy namespaces:
 | `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, session scope `admin.observability.run`, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
 | `/health`, `/health/detail` | Process health. Not public: a session JWT or `FLINTTRADE_API_KEY` is required. `/health` returns `status` (`healthy`, `degraded`, or `unhealthy`) and `timestamp`. `/health/detail` includes per-check detail. |
 | `/healthz`, `/readyz` | Public process probes. The body is status only: `/healthz` is HTTP 200 `{"status": "ok"}`; `/readyz` is HTTP 200 `{"status": "ready"}` or HTTP 503 `{"status": "not_ready"}`. Signed-out probes use these, not `/health`. |
-| `GET /api/v1/ping` | Process liveness. The body includes `laya` (`ready`, `degraded`, or `down`). |
+| `GET /api/v1/ping` | Process liveness. The body includes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`. |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
 | `/api/v1/admin/activity` | Operator activity feed. |
@@ -574,13 +578,150 @@ The terminal has two development proxy namespaces:
 `GET /api/v1/ping` is the FlintTrade process probe, not the OpenAlgo
 passthrough `ping` (POST). It is on the public allowlist. The
 response is JSON
-`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
-`status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
-`"degraded"`, or `"down"`. The body has no component, version, or path
-detail. Laya starts Down. A ping publishes that process status and does
-not invent Ready. Ready and Degraded are recorded by `Laya.set_status`,
-not by ping. Clients must not treat a missing or omitted `laya` as Ready;
-the desk uses `laya ?? "down"`.
+`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down", "laya_practice": "ready"|"degraded"|"down", "laya_live_qualified": true|false, "laya_reason": "<code>|null", "laya_port": 8000, "laya_download_bytes": "<int>|null", "laya_download_total": "<int>|null"}`.
+`laya` is the Live-facing status. `laya_practice` is the sidecar status the
+Practice chip shows. `laya_live_qualified` is true only when a qualification
+record covers the pin. `laya_reason` is one of `not_started`, `stopped`,
+`port_in_use`, `still_loading`, `downloading`, `download_failed`,
+`unreachable`, `wrong_revision`, `unverified`, `key_rejected`, or `key_missing`, or
+`null` when Ready or Degraded has cleared it. `identity_absent` is not a
+`laya_reason`. While `laya_reason` is `downloading`, `laya_download_bytes`
+and `laya_download_total` are the live byte counts; otherwise both are
+`null`. Chip labels are Not started, Stopped, `Port <n> in use`,
+Still loading, `Downloading the model · X of Y GB`, Can't download the
+model, Unreachable, Can't verify the model, Wrong model version,
+Can't reach Laya, and The Laya API key file is missing. A health check does not replace `key_missing` with Not started. `<n>` is `laya_port`. Tooltips for `not_started`,
+`stopped`, `port_in_use`, `still_loading`, and `unreachable` are the label
+followed by `. Next: python -m flinttrade_core.laya_runtime start`.
+`downloading` has no tooltip and no Next line. Its status word is Down,
+not Still loading, and the chip text is live progress such as
+`Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`). `download_failed` uses the same
+status word Down. Orders for both are refused with
+"Laya is Down. New orders are paused until it's Ready. You can still close positions." The `download_failed`
+tooltip is "Check your connection, then Start Laya again." The
+`unverified` tooltip is "The installed model couldn't be checked against
+the pinned version. Restart Laya. If it keeps happening, reinstall it."
+That code applies when this start did not download. A failed download,
+including one over an older unverified snapshot, is `download_failed`
+("Can't download the model").
+The `wrong_revision` tooltip is "Laya is running a different model than
+FlintTrade expects." That code is only a real mismatch: a complete
+download whose files do not match the pin, a snapshot already on disk
+that this start is not replacing, or a running sidecar that reports
+another revision or digest. A dropped connection, a partial download, or
+a failed download or swap, including one that puts the previous
+checkpoint back, is `download_failed`, not this code. The `key_rejected`
+tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
+Down and orders are refused. When a place is refused because Laya cannot
+be reached, or because it rejects the key, the chip updates on that same
+order: Unreachable, or Can't reach Laya. Every chip-Down refusal reads
+"Laya is Down. New orders are paused until it's Ready. You can still close positions." When the chip is Ready
+and a single decision carries no proof, place returns `laya_unverified`
+and "Not placed. Laya's decision couldn't be verified. Try again." On each
+sidecar start FlintTrade hashes `model.safetensors` and each file in
+`[checkpoint.manifest]` before launch. That manifest pins
+`rl_agent_config.json`, `encoder/config.json`,
+`tokenizer/tokenizer_config.json`, and `tokenizer/tokenizer.json` by
+sha256, beside the `[checkpoint]` `revision` and weights sha256. The runtime record holds
+the sha256, pid, and start token, and each file's inode, size, and
+modification time (`<workspace>/runtime/laya/verification.json`, with the
+token and pid also in `run.json`). When the files are already on disk and this start is not replacing them,
+a missing pinned file, a shard index, or any extra weights file or other
+file the launcher could read is `unverified` ("Can't verify the model")
+and the sidecar does not start. A changed byte in a snapshot that this
+start is not replacing is `wrong_revision` ("Wrong model version") and the
+sidecar does not start. A changed byte in the runtime checkpoint starts
+the download below; the sidecar does not start on that tree. Laya does
+not reach Ready in these cases. `start` downloads the pinned revision
+into `<workspace>/runtime/laya/staging` when the weights file or a
+manifest file is not on disk, and when the runtime checkpoint is on disk
+but its hashes are not the pin. The download asks for the commit in
+`[checkpoint] revision`, not the default branch, and it does not start
+the sidecar. That download sets `HF_HOME` to
+`<workspace>/runtime/laya/hf-home` and `HF_HUB_DISABLE_XET=1`, so transfer
+logs stay out of the shared cache. The model is about 2.37 GB, and that
+size is reported once. While it runs,
+including a pin change, the reason is
+`downloading` (`Downloading the model · X of Y GB`), the status word
+is Down, and there is no Updating label. When no checkpoint is already
+there, a full match renames staging onto `checkpoint`. When a checkpoint
+is already there, the current copy stays in place until the new files
+match. On a full match that checkpoint is renamed aside to
+`checkpoint.old-<random>` in the same runtime directory, staging is
+renamed onto `checkpoint`, then the old copy is deleted. The sidecar is
+not started until the move, and that launch keeps hub access off. If that
+second rename fails, the old checkpoint is renamed back and the reason is
+`download_failed`, not `wrong_revision`. A complete download whose files
+do not match the pin is `wrong_revision`, staging is deleted, and the
+checkpoint already on disk stays. An extra loadable file in a complete
+download is `unverified`. A dropped connection, a partial or missing
+file, or a read error is `download_failed`. The sidecar does not start on
+files that do not match the pin. If the download does not finish, the reason is `download_failed`, not
+`wrong_revision` and not `unverified`, whatever older snapshot is on
+disk. `unverified` stays when this start did not download. A snapshot
+already on disk is `wrong_revision` only when this start did not
+download. Those failures delete the staging directory and leave the
+shared model cache alone. Leftover staging directories and
+`checkpoint.old-*` copies are removed at the start of `start` once a
+checkpoint is in place, with no chip change and no message. If
+`checkpoint` is missing and one or more `checkpoint.old-*` copies remain,
+the last `checkpoint.old-*` name is restored onto `checkpoint` and any
+other aside copies are removed. If that restore fails, the aside copy stays where it is and
+that cleanup is skipped. A copy that was restored is then checked against
+the pin. If it does not
+match, the sidecar does not start on it; the pinned download runs
+instead, and a failed download leaves `download_failed` with that copy
+still on disk.
+The download log line is `laya download repo=<repo> revision=<revision>`.
+A verified boot sets
+`LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in the
+standard Hugging Face cache is accepted. When that file is the cache
+symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), the
+launch path is the snapshot file, not the blob. A blob path is still
+refused. The boot runs offline
+(`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo id
+or a revision. When the sidecar health document leaves the revision empty,
+FlintTrade fills the pinned revision from the verified manifest, so the
+chip leaves Still loading. The launch log line is
+`laya weights path=<path> sha256=<digest>`. Those identity values are
+rechecked, without hashing again, when Laya reports Ready and on each
+watch tick, about every 1.5 seconds. A mismatch is `unverified`
+("Can't verify the model"). The log line is
+`laya weights path=<path> changed=<field>`, and `<path>` is the file that
+changed. The same watch reads the pid file (`runtime/laya/sidecar.pid`),
+the key file (`runtime/laya/api.key`), and the runtime record, so a
+command-line stop or start, or a key rotation, is reconciled by that
+watch. The desk polls `GET /api/v1/ping` every 1.5 seconds. That ping
+reconciles the pid, the key, and the runtime record the same way an
+order does, so the chip and the order gate read the same state. A stop
+or a start shows on the chip by the next 1.5-second check. After Start Laya,
+until the ping confirms the new state, the chip says Checking in the
+neutral colour and the popover says Checking Laya…. It does not show a
+stale Ready during that wait. An admitted place while the chip is not
+Ready or Degraded also shows Checking until the next ping. A confirmed first load still says Still
+loading. A place refused with exactly "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to Down on that response. A non-exit order is HTTP 403. The refusal
+line is unchanged. Every `stop` deletes the runtime record, as does a start
+that fails after it was written. A record from an earlier run is rejected.
+A decision without `revision` or `sha256` is checked against that record
+for both admitted and clamped orders. The decision log is
+`<workspace>/runtime/laya/decisions.jsonl`. It stores `proof=decision` or
+`proof=runtime`. An admitted Practice place with an empty note skips the
+model and writes one line, `effect=clamp` with `failure=note_absent` and
+no proof, including when the quantity already fits. When this run's
+record stood in, each model allow keeps its own `effect=allow`
+`proof=runtime` line. There is no dedupe. A model decision with no proof is still
+refused. `laya_port` is the sidecar
+port (`LAYA_PORT`, default 8000). Laya starts Down. A ping does not invent Ready.
+`GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
+one is registered. With no sidecar, that probe leaves the stored status alone.
+Live stays unqualified until a qualification record matches the pinned
+revision and policy, so a Practice Ready probe still publishes `down` on
+`laya` and `ready` on `laya_practice`. Clients must not treat a missing or
+omitted `laya` as Ready; the desk uses `laya ?? "down"`. The chip tooltip
+and the popover line are "Not qualified for Live" when
+the sidecar is Ready or Degraded and Live is not qualified. During the
+first load `laya_reason` is `still_loading` and the chip says "Still loading".
+Orders stay refused with the Down sentence. A port clash is `port_in_use`.
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
@@ -827,7 +968,7 @@ the guard returns one of three verdicts:
 
 | Verdict | Behaviour |
 |---|---|
-| `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. |
+| `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. The `/trade` Order Pad records a sample fill on the client for that click (`Example order placed`, id starting `SAMPLE-`). This HTTP refusal is what the route returns when a client calls it. |
 | `practice` | Route supported single-leg order flows to the Practice fill path; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that path. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have Practice parity fail closed with `practice_unsupported`. A Practice close is an opposite order on `POST /api/v1/orders/place`. A Practice bracket is HTTP 403 `practice_unsupported`. |
 | `live` | Require a JWT with `live_mode_unlocked=true`. The submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, `POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket` when the body has exactly one stop-loss or one target. Both place routes, and each bracket leg, run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed, except a GTT body (`"variety": "gtt"`, any case or separator spelling), which is HTTP 422 `gtt_unsupported` on those submit routes before Laya, SafetySystem, and any broker call. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. |
 
@@ -859,10 +1000,21 @@ continuation, and environment variables are read as `$env:NAME`).
 ### 7.1 Exercise the practice order path
 
 This example is for a locally issued **Practice-mode** FlintTrade session JWT.
-Place is admitted before the sandbox. Laya starts **Down**, so a place while
-Down returns HTTP 403 `laya_denied` and the sandbox is not called. A quantity
-above the active ceiling returns HTTP 409 `laya_clamp` and places neither
-size. The sandbox body below is the response when admission allows the
+Place is admitted before the sandbox. Laya starts **Down**, so a Practice
+place while Down returns HTTP 403 `laya_denied` with "Laya is Down. New orders are paused until it's Ready. You can still close positions." and the sandbox is not called. That sentence
+is the same in Live. A Live place while Laya is Ready or Degraded, with no
+matching qualification record, returns "Laya isn't qualified for Live yet.
+Practice orders are available." A Practice refusal never says Live. A quantity
+greater than the allowed quantity returns HTTP 409 `laya_clamp` and places
+neither size. The clamp message is "Not placed. Laya allows up to N."
+Place N sends that quantity. On Order Pad, "Review Practice order" then
+shows the placed quantity. Place 1 on "Not placed. Laya allows up to 1."
+places, because that request
+is already at the allowed quantity. A request that is already at the
+allowed quantity is an allow. An empty note is
+not a hard reject: Practice returns that clamp when the requested quantity
+is greater than the tighter ceiling, and Live returns HTTP 403
+`laya_denied` with "Laya is uncertain. Live stays closed." The sandbox body below is the response when admission allows the
 requested quantity. The call does not send an order to OpenAlgo or any broker.
 Do not use the OpenAlgo passthrough endpoint as an example for live broker
 execution. Live operator place uses this order proxy after a Live-mode JWT
@@ -1060,7 +1212,9 @@ Core operator place, after the mode guard, admits before SafetySystem
 and before the Practice sandbox. A client `source` field is ignored, so
 the request cannot present itself as chat or as automate. A refusal is
 HTTP 403 `laya_denied`. A quantity clamp is HTTP 409 `laya_clamp` and
-places neither size.
+places neither size. It applies only when the requested quantity is
+greater than the allowed one. A decision with no proof, while the chip
+can stay Ready, is HTTP 409 `laya_unverified`.
 `http_status` is not part of the JSON body. A Live JWT without PIN unlock
 on that same proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
@@ -1074,8 +1228,9 @@ Not every endpoint emits `code`:
 | Code or status | Meaning |
 |---|---|
 | `mode_blocked` | A sample-data session (or another blocked session) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` sample-data refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` sample-data refusals (same header/claim gate). Example-data place stays on this code, with message `Orders are not available for Example. Switch to Practice or Live to trade.` |
-| `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text), and `limits.max_quantity`. There is no `applied_quantity`. |
-| `laya_clamp` | Operator place asked for more than the active quantity ceiling — HTTP 409. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Qty reduced to <applied_quantity> (Laya limit)`), `reason` (empty string), `limits.max_quantity`, and `applied_quantity`. Neither quantity is placed. The caller places `applied_quantity` itself if it still wants that size. |
+| `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text). The desk shows that `reason` under the denial on a line named Laya decision, inside one alert (`role="alert"`), the only live region. That line is not its own status. Down is "Laya is Down. New orders are paused until it's Ready. You can still close positions." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Laya isn't qualified for Live yet. Practice orders are available." An empty Live note is "Laya is uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |
+| `laya_unverified` | One decision carried no proof. The chip can stay Ready. This is not a chip reason — HTTP 409. Body: `status: "error"`, `code: "laya_unverified"`, `message` and `reason` both "Not placed. Laya's decision couldn't be verified. Try again." The decision log records `identity_absent` and does not store `proof`. There is no `limits` field. |
+| `laya_clamp` | Operator place was not placed — HTTP 409. The requested quantity is greater than the allowed quantity. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Not placed. Laya allows up to <applied_quantity>.`), `reason`, `limits.max_quantity`, and `applied_quantity`. An empty Practice note that reduces the quantity sets `reason` to "Laya is uncertain. Quantity stays inside the tighter limit." A ceiling clamp can leave `reason` empty. Nothing is placed until the desk sends that quantity through admit again. Place 1 on "Not placed. Laya allows up to 1." is admitted, because that request is already at the allowed quantity. An allow then continues into SafetySystem and gate_order. A request already at the allowed quantity is an allow, including when an uncertain note tightened the ceiling without shrinking the number. Live uncertain, including an empty note, is `laya_denied`, not this code. |
 | `exit_pending` | A second reduce-only exit on the same broker account while one of this desk's exits on that contract is still unfilled — HTTP 409. Practice uses this code on the Practice book. On Live it is the code when the broker order book can be read. The Live hold is for that broker account. `message` and `reason` are `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.` The Positions row shows **Exit pending**. The label is the symbol, or `this contract` when the symbol is empty. |
 | `exit_orders_unreadable` | On Live, that second exit on the same broker account while the broker order book cannot be read — HTTP 409. `message` and `reason` are `Not placed. One exit at a time for <symbol> until your broker's orders load.` The label is the symbol, or `this contract` when the symbol is empty. |
 | `gtt_unsupported` | `"variety": "gtt"` (any case or separator spelling) on place, routed place, exit-all, or a bracket — HTTP 422. `message` is `Not placed. GTT orders aren't supported right now.` The refusal is before Laya, SafetySystem, and any broker call. |

@@ -39,7 +39,7 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
       className={[
         "flex-1 py-1.5 text-xs font-medium rounded-md transition-colors",
         active
-          ? "bg-accent text-white"
+          ? "bg-accent text-accent-foreground"
           : "text-text-secondary hover:text-text-primary",
       ].join(" ")}
       aria-pressed={active}

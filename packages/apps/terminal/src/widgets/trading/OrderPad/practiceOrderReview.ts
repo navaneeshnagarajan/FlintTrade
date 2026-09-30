@@ -65,6 +65,23 @@ export function createPracticeOrderReviewSnapshot(
   });
 }
 
+/** Review snapshot after Place N, showing the quantity that will be placed. */
+export function practiceReviewPlacedQuantity(
+  review: PracticeOrderReviewSnapshot,
+  quantity: number,
+): PracticeOrderReviewSnapshot {
+  const fields: unknown[] = JSON.parse(review.identity);
+  fields[5] = quantity;
+  const params = Object.freeze({ ...review.params, quantity });
+  const estimatedExposure = review.estimatedPrice === null ? null : review.estimatedPrice * quantity;
+  return Object.freeze({
+    identity: JSON.stringify(fields),
+    params,
+    estimatedPrice: review.estimatedPrice,
+    estimatedExposure,
+  });
+}
+
 export function isPracticeOrderReviewCurrent(
   review: PracticeOrderReviewSnapshot,
   values: PracticeOrderIntentValues,

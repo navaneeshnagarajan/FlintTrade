@@ -21,6 +21,7 @@ const {
   mockSetLoggedOut,
   authState,
   settingsPersona,
+  motionFlags,
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockSetMode: vi.fn(),
@@ -29,6 +30,7 @@ const {
   mockSetLoggedOut: vi.fn(),
   authState: { status: "setup-required" as string },
   settingsPersona: { value: "trader" as string },
+  motionFlags: { reduced: true },
 }));
 
 vi.mock("react-router", () => ({
@@ -62,7 +64,7 @@ vi.mock("framer-motion", () => ({
 
 vi.mock("@/lib/motion", () => ({
   motionConfig: {
-    prefersReducedMotion: () => true,
+    prefersReducedMotion: () => motionFlags.reduced,
     duration: { fast: 0.1, normal: 0.2, slow: 0.3 },
     ease: { enter: [0, 0, 1, 1], exit: [0, 0, 1, 1] },
     transitions: { fade: { duration: 0.2 } },
@@ -174,6 +176,7 @@ describe("WelcomeRoute", () => {
     sessionStorage.clear();
     authState.status = "setup-required";
     settingsPersona.value = "trader";
+    motionFlags.reduced = true;
   });
 
   it("renders the welcome heading", () => {
@@ -413,6 +416,59 @@ describe("WelcomeRoute", () => {
     expect(mockSetSetupRequired).not.toHaveBeenCalled();
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("does not re-run logout for an operator who is already signed out", async () => {
+    authState.status = "logged-out";
+    sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: { is_setup: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<WelcomeRoute />);
+
+    expect(await screen.findByTestId("login-route")).toBeInTheDocument();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await Promise.resolve();
+    // setLoggedOut purges the query cache and remounts the app; calling it for
+    // an already logged-out visitor looped the status probe.
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("keeps the daily greeting before sign-in for a returning operator", async () => {
+    authState.status = "logged-out";
+    sessionStorage.removeItem("flinttrade:greeted-today");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: { is_setup: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<WelcomeRoute />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Welcome back" }));
+    expect(await screen.findByTestId("login-route")).toBeInTheDocument();
+    fetchSpy.mockRestore();
+  });
+
+  it("offers Skip intro while the intro plays and still plays it on the next visit", () => {
+    motionFlags.reduced = false;
+
+    const first = render(<WelcomeRoute />);
+    expect(screen.queryByText("Get Started")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip intro" }));
+    expect(screen.getByText("Get Started")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip intro" })).not.toBeInTheDocument();
+    first.unmount();
+
+    render(<WelcomeRoute />);
+    expect(screen.queryByText("Get Started")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip intro" })).toBeInTheDocument();
   });
 
   it("logged-in trader continues to Trade (persona default)", async () => {

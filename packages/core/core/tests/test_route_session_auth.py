@@ -127,7 +127,17 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
         assert set(readyz.get_json()) == {"status"}
         ping = client.get("/api/v1/ping")
         assert ping.status_code == 200
-        assert set(ping.get_json()) == {"status", "timestamp", "laya"}
+        assert set(ping.get_json()) == {
+            "status",
+            "timestamp",
+            "laya",
+            "laya_practice",
+            "laya_live_qualified",
+            "laya_reason",
+            "laya_port",
+            "laya_download_bytes",
+            "laya_download_total",
+        }
         assert client.get("/api/v1/health").status_code == 401
         assert client.get("/health").status_code == 401
 

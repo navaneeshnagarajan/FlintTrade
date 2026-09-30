@@ -28,7 +28,7 @@
  */
 
 import type { JSX } from "react";
-import { Activity } from "lucide-react";
+import { Page, PageBody, PageHeader } from "@/components/layout/Page";
 
 // Existing observability surfaces — imported directly from their real paths
 // (no barrel imports, per the repo's bundle conventions).
@@ -75,22 +75,14 @@ function ObservabilitySection({ title, description, children, wide }: SectionPro
 
 export function ObservabilityDashboard(): JSX.Element {
   return (
-    <div className="min-h-screen bg-background text-text-primary">
-      {/* Page header */}
-      <header className="sticky top-0 z-10 bg-glass-chrome backdrop-blur-md border-b border-glass-chrome">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Activity className="w-4 h-4 text-accent" aria-hidden="true" />
-          <div>
-            <h1 className="text-lg font-semibold">Observability</h1>
-            <p className="text-xs text-text-muted">
-              Live visualisation of platform health, behaviour, and authorisation
-            </p>
-          </div>
-        </div>
-      </header>
+    <Page>
+      <PageHeader
+        title="Observability"
+        description="Live visualisation of platform health, behaviour, and authorisation"
+      />
 
       {/* Composed grid */}
-      <main aria-label="Observability dashboard" className="max-w-7xl mx-auto px-4 py-6">
+      <PageBody width="wide" aria-label="Observability dashboard">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Server resource metrics — CPU / memory / disk / network / uptime */}
           <ObservabilitySection
@@ -127,8 +119,8 @@ export function ObservabilityDashboard(): JSX.Element {
             </div>
           </ObservabilitySection>
         </div>
-      </main>
-    </div>
+      </PageBody>
+    </Page>
   );
 }
 

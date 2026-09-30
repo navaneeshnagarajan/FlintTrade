@@ -260,6 +260,84 @@ async def test_degraded_automate_clamp_does_not_shrink_and_place() -> None:
     process_laya().set_status(DecisionStatus.DEGRADED)
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
-    with pytest.raises(RuntimeError, match=r"Qty reduced to 1 \(Laya limit\)"):
+    with pytest.raises(RuntimeError, match=r"Not placed\. Laya allows up to 1\."):
         await dispatcher.dispatch_order(Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="2"))
+    safety.check_order.assert_not_called()
+
+
+def _allowing_answers() -> dict[str, object]:
+    return {
+        "rationale": {"probabilities": {"A": 0.9, "B": 0.1}},
+        "tilt": {"probabilities": {"A": 0.1, "B": 0.9}},
+        "side": {"probabilities": {"A": 0.1, "B": 0.9}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_model_deny_never_reaches_safety() -> None:
+    seen: list[str] = []
+
+    class _Host:
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            seen.append(state)
+            answers = _allowing_answers()
+            answers["tilt"] = {"probabilities": {"A": 0.97, "B": 0.03}}
+            return {"answers": answers}
+
+    process_laya().set_decision_client(_Host())
+    safety = MagicMock()
+    dispatcher = _automate_dispatcher(safety)
+    order = Order(
+        symbol="RELIANCE",
+        exchange="NSE",
+        action="BUY",
+        quantity="1",
+        admission_note="Chasing the loss from the last trade.",
+    )
+    with pytest.raises(RuntimeError, match="tilt or revenge"):
+        await dispatcher.dispatch_order(order)
+    safety.check_order.assert_not_called()
+    assert seen == ["Order side: BUY\nNote:\nChasing the loss from the last trade."]
+
+
+@pytest.mark.asyncio
+async def test_admission_runs_off_the_event_loop() -> None:
+    import asyncio
+    import time
+
+    events: list[str] = []
+
+    class _Slow:
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            events.append("decide-start")
+            time.sleep(0.3)
+            events.append("decide-end")
+            answers = _allowing_answers()
+            answers["tilt"] = {"probabilities": {"A": 0.97, "B": 0.03}}
+            return {"answers": answers}
+
+    process_laya().set_decision_client(_Slow())
+    safety = MagicMock()
+    dispatcher = _automate_dispatcher(safety)
+    order = Order(
+        symbol="RELIANCE",
+        exchange="NSE",
+        action="BUY",
+        quantity="1",
+        admission_note="Buying the planned breakout.",
+    )
+
+    async def _watch() -> None:
+        await asyncio.sleep(0.05)
+        events.append("loop")
+
+    watch = asyncio.create_task(_watch())
+    task = asyncio.create_task(dispatcher.dispatch_order(order))
+    await watch
+    assert "decide-start" in events
+    assert "loop" in events
+    assert "decide-end" not in events
+    with pytest.raises(RuntimeError, match="tilt or revenge"):
+        await task
+    assert events.index("loop") < events.index("decide-end")
     safety.check_order.assert_not_called()

@@ -154,6 +154,7 @@ class EMACrossover(BaseStrategy):
             product=self.product,
             quantity=str(qty),
             strategy=self.name,
+            admission_note=f"EMA crossover plan: {action} {self.symbol}",
         )
 
         self._pending_orders.append(order)

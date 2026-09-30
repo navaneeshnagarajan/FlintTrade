@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { FlaskConical, Loader2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { EmptyState } from "@/components/ui/states";
 import {
   runBacktest,
   getStrategies,
@@ -124,15 +125,12 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
         ) : lastResult ? (
           <BacktestResultDisplay result={lastResult} />
         ) : (
-          <GlassCard className="min-h-40 justify-center gap-2 p-8 text-center">
-            <FlaskConical className="w-8 h-8 text-text-muted mx-auto mb-2" />
-            <p className="text-sm font-semibold text-text-secondary">
-              No results yet
-            </p>
-            <p className="text-xs text-text-muted">
-              Configure and run a backtest to see performance metrics, equity
-              curve, and trade log.
-            </p>
+          <GlassCard className="min-h-40 justify-center p-0">
+            <EmptyState
+              icon={FlaskConical}
+              title="No results yet"
+              description="Configure and run a backtest to see performance metrics, equity curve, and trade log."
+            />
           </GlassCard>
         )}
       </div>

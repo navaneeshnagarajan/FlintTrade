@@ -394,6 +394,7 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         trigger_price=str(body.get("trigger_price", "0")),
         disclosed_quantity=str(body.get("disclosed_quantity", "0")),
         strategy=str(body.get("strategy") or "Flint"),
+        admission_note=str(body.get("rationale") or body.get("note") or body.get("admission_note") or ""),
         market_protection=body.get("market_protection"),
         **extra,
     )

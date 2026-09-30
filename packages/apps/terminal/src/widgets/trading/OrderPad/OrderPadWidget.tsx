@@ -77,6 +77,7 @@ import {
   orderSuccessToast,
 } from "@/lib/modeVocabulary";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
+import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { LAYA_EXIT_WHILE_DOWN, liveWritesMuted } from "@/lib/operatorIncident";
@@ -87,6 +88,7 @@ import {
   createPracticeOrderReviewSnapshot,
   isPracticeOrderReviewCurrent,
   practiceOrderIntentIdentity,
+  practiceReviewPlacedQuantity,
   type PracticeOrderReviewSnapshot,
 } from "./practiceOrderReview";
 
@@ -137,6 +139,7 @@ const orderSchema = z.object({
   price: z.number().min(0).optional(),
   trigPrice: z.number().min(0).optional(),
   discQty: z.number().int().min(0).optional(),
+  note: z.string().max(4000).optional(),
 });
 
 type OrderFormValues = z.infer<typeof orderSchema>;
@@ -180,7 +183,7 @@ function PillGroup({ value, options, onChange, className = "", label }: PillGrou
           onClick={() => onChange(opt)}
           className={`flex-1 h-8 text-xs font-medium transition-colors ${
             value === opt
-              ? "bg-accent text-white"
+              ? "bg-accent text-accent-foreground"
               : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
           }`}
         >
@@ -476,6 +479,7 @@ function OrderPadWidget(props: WidgetProps) {
       price: undefined,
       trigPrice: undefined,
       discQty: undefined,
+      note: "",
     },
   });
 
@@ -542,6 +546,7 @@ function OrderPadWidget(props: WidgetProps) {
   const price = watch("price");
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
+  const note = watch("note");
   const appMode = useModeStore((s) => s.mode);
   const { data: openPositions } = usePositions({
     enabled: appMode === "practice" || appMode === "live",
@@ -571,7 +576,7 @@ function OrderPadWidget(props: WidgetProps) {
       if (current?.kind === "clamp" && current.appliedQuantity === qty) return current;
       return null;
     });
-  }, [symbol, exchange, action, orderType, product, qty, price, trigPrice, discQty]);
+  }, [symbol, exchange, action, orderType, product, qty, price, trigPrice, discQty, note]);
 
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
@@ -1039,6 +1044,7 @@ function OrderPadWidget(props: WidgetProps) {
         ? { disclosedQuantity: values.discQty }
         : {}),
       strategy: "FlintOrderPad",
+      rationale: admissionRationale(values.note ?? ""),
     };
     if (isPracticeOrExplore) {
       // Practice and Explore open a dedicated review stage; no placement call
@@ -1052,6 +1058,31 @@ function OrderPadWidget(props: WidgetProps) {
     lastExitRef.current = false;
     await submitOrder(params, { mode: "live" });
   };
+
+  const handlePlaceClamped = useCallback(async (quantity: number) => {
+    const review = practiceReviewRef.current;
+    const base = review?.params ?? lastParamsRef.current;
+    if (!base || quantity < 1) return;
+    if (review) {
+      const placed = practiceReviewPlacedQuantity(review, quantity);
+      practiceReviewRef.current = placed;
+      setPracticeReview(placed);
+      setValue("qty", quantity, { shouldValidate: true });
+    }
+    const modeAtClick = useModeStore.getState().mode;
+    const mode = review
+      ? "practice"
+      : modeAtClick === "live"
+        ? "live"
+        : "practice";
+    const succeeded = await submitOrder({ ...base, quantity }, { mode });
+    if (succeeded) setPracticeReview(null);
+  }, [setValue, submitOrder]);
+
+  const handleCancelClamp = useCallback(() => {
+    setAdmission(null);
+    setPracticeReview(null);
+  }, []);
 
   const handlePracticeBack = useCallback(() => {
     if (practiceConfirmInFlightRef.current) return;
@@ -1419,7 +1450,7 @@ function OrderPadWidget(props: WidgetProps) {
               onClick={() => setInputMode("qty")}
               className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
                 inputMode === "qty"
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-foreground"
                   : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
               }`}
               aria-pressed={inputMode === "qty"}
@@ -1432,7 +1463,7 @@ function OrderPadWidget(props: WidgetProps) {
               onClick={() => setInputMode("fund")}
               className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
                 inputMode === "fund"
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-foreground"
                   : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
               }`}
               aria-pressed={inputMode === "fund"}
@@ -1593,6 +1624,18 @@ function OrderPadWidget(props: WidgetProps) {
           </div>
         )}
 
+        <Controller
+          control={control}
+          name="note"
+          render={({ field }) => (
+            <OrderPadReasonField
+              id="orderpad-admission-note"
+              value={field.value ?? ""}
+              onChange={field.onChange}
+            />
+          )}
+        />
+
         {/* Trigger + Disclosed row */}
         <div className="grid grid-cols-2 gap-3">
           <Controller
@@ -1701,7 +1744,7 @@ function OrderPadWidget(props: WidgetProps) {
         ) : null}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny"}
+          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny" || admission?.kind === "clamp"}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
@@ -1714,7 +1757,13 @@ function OrderPadWidget(props: WidgetProps) {
         ) : (
           <LayaDegradedLimitsNote status={decisionStatus} />
         )}
-        {liveMuted || practiceReview ? null : <LayaAdmissionNotice notice={admission} />}
+        {liveMuted || practiceReview ? null : (
+          <LayaAdmissionNotice
+            notice={admission}
+            onPlaceClamped={(quantity) => void handlePlaceClamped(quantity)}
+            onCancelClamp={handleCancelClamp}
+          />
+        )}
       </form>
 
       {/* Toast */}
@@ -1728,6 +1777,8 @@ function OrderPadWidget(props: WidgetProps) {
           admission={admission}
           onBack={handlePracticeBack}
           onConfirm={() => void handlePracticeConfirm()}
+          onPlaceClamped={(quantity) => void handlePlaceClamped(quantity)}
+          onCancelClamp={handleCancelClamp}
         />
       ) : null}
     </div>
