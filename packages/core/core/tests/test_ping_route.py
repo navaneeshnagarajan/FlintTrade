@@ -58,7 +58,17 @@ class TestPingRoute:
         response = client.get("/api/v1/ping")
         data = response.get_json()
         assert data is not None
-        assert set(data) == {"status", "timestamp", "laya"}
+        assert set(data) == {
+            "status",
+            "timestamp",
+            "laya",
+            "laya_practice",
+            "laya_live_qualified",
+            "laya_reason",
+            "laya_port",
+            "laya_download_bytes",
+            "laya_download_total",
+        }
         assert data["status"] == "ok"
         assert data["laya"] in {"ready", "degraded", "down"}
         assert isinstance(data["timestamp"], str)
