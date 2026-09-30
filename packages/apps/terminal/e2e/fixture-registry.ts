@@ -626,6 +626,8 @@ export function registerOperatorStatusProbes(
     expectedCalls?: SyntheticHandlerRegistration["expectedCalls"];
     pingCalls?: SyntheticHandlerRegistration["expectedCalls"];
     includeLlmConfig?: boolean;
+    /** Heartbeat the desk paints on the Laya row. Omitted leaves that row Down. */
+    laya?: "ready" | "degraded" | "down";
   } = {},
 ): void {
   const expectedCalls = options.expectedCalls ?? OPERATOR_PROBE_CALLS;
@@ -643,7 +645,11 @@ export function registerOperatorStatusProbes(
     handler: (request) => {
       assertReadOnlyProbe(request);
       expect(request.headers()["authorization"]).toBeUndefined();
-      return { json: { status: "ok" } };
+      return {
+        json: options.laya === undefined
+          ? { status: "ok" }
+          : { status: "ok", laya: options.laya },
+      };
     },
   });
   const healthCalls = typeof expectedCalls === "number"

@@ -16,6 +16,7 @@ workflow YAML should read this once.
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
 | `test.yml` | push to `main` / `dev`; non-draft PR (no `paths` / `paths-ignore` on the PR trigger) | `changed-surfaces` classifier + 10 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Every non-draft PR to `main`/`dev` instantiates the workflow so required check contexts exist. Documentation, site, and former inert-file edits still run `python-tests`, `node-core-tests`, `secrets-check` and `terminal-e2e-infra-self-tests`; the expensive lanes gate on `changed-surfaces`. |
+| `visual-a11y.yml` | push to `main` / `dev`; PR to `main` / `dev`; manual dispatch | 1 Linux job | Advisory screenshot and axe lane for the terminal. Not one of the ten Test jobs and not a required check. The job finishes green while `VISUAL_AXE_GATE` is `"0"`. Set that value to `"1"` to fail the job. Dispatch with **Regenerate screenshot baselines** to commit baselines from `ubuntu-latest`. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external-fork `pull_request` events only — skipped on push/schedule/owner and same-repo bot merges). |
 | `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and `site.yml` itself) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Documentation changes still instantiate `test.yml` (cheap lanes only) and also run this workflow. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | Python on macOS, Windows and Ubuntu 26.04; Electron directory packages on macOS, Windows and Linux | Catches slow-burn platform and packaging regressions before they accumulate. |
@@ -60,6 +61,12 @@ parallel jobs to keep wall-clock time low:
     lint, then Chromium-only fail-closed self-tests plus selected product
     journeys (`e2e/infra-self-tests.spec.ts`, `e2e/workspace-lifecycle.spec.ts`,
     `e2e/order-pad-practice.spec.ts`). Not gated on `changed-surfaces`.
+
+`visual-a11y.yml` is not an eleventh Test job. It reports screenshot diffs
+and axe violations, uploads the images, and finishes green while
+`VISUAL_AXE_GATE` is `"0"`. Reticle does not judge those pictures: it reads
+network, app state, and the console, and it cannot see contrast, spacing,
+or clipping.
 
 All ten must be green for the workflow to be reported as passing. The shard
 path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
