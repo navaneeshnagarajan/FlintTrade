@@ -21,6 +21,7 @@ from flinttrade_core.laya_runtime import (
     LAYA_BIND_HOST,
     LAYA_DOWNLOAD_BOOTSTRAP,
     LAYA_DOWNLOAD_LOG,
+    LAYA_PINNED_WEIGHT_BOOTSTRAP,
     LAYA_SERVE_REQUIREMENT,
     LAYA_WATCH_INTERVAL_SECONDS,
     LAYA_WEIGHTS_DRIFT_LOG,
@@ -2169,4 +2170,157 @@ def test_missing_key_refusal_survives_a_health_tick(tmp_path: Path, monkeypatch:
     assert report["detail"] == "The Laya API key file is missing."
     runtime.stop()
     assert process_laya().runtime_reason()[0] == "not_started"
+    reset_process_laya_for_tests()
+
+
+def _bootstrap_accepts_weights(path: str) -> bool:
+    """Run the sidecar path guard. True when that path is the checkpoint file."""
+    prefix = LAYA_PINNED_WEIGHT_BOOTSTRAP.split("from laya.router", 1)[0]
+    previous = os.environ.get("LAYA_WEIGHTS_PATH")
+    os.environ["LAYA_WEIGHTS_PATH"] = path
+    try:
+        exec(compile(prefix, "<laya-bootstrap>", "exec"), {"__name__": "laya_bootstrap"})  # noqa: S102
+    except SystemExit:
+        return False
+    finally:
+        if previous is None:
+            os.environ.pop("LAYA_WEIGHTS_PATH", None)
+        else:
+            os.environ["LAYA_WEIGHTS_PATH"] = previous
+    return True
+
+
+@pytest.mark.unit
+def test_start_rewrites_the_runtime_key_the_environment_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``LAYA_API_KEY_FILE`` at ``runtime/laya/api.key`` is the file start writes."""
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        artifact_checker=_unchecked_ready,
+        watch=False,
+    )
+    key = runtime.workspace_dir / "runtime" / "laya" / "api.key"
+    assert key == runtime.runtime_root / "api.key"
+    key.parent.mkdir(parents=True)
+    key.write_text("old-key", encoding="utf-8")
+    monkeypatch.setenv("LAYA_API_KEY_FILE", str(key))
+    runtime.start()
+    written = key.read_text(encoding="utf-8").strip()
+    assert written
+    assert written != "old-key"
+    assert process_laya().runtime_reason()[0] != "key_missing"
+    runtime.stop()
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_standard_cache_symlink_is_the_snapshot_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blobs symlink still launches as ``snapshots/<rev>/model.safetensors``."""
+    policy = load_policy()
+    root = tmp_path / "hub"
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(root))
+    _accept_pinned_digests(monkeypatch, policy)
+    snapshot = snapshot_weight_path(
+        root,
+        repo=policy.repo,
+        revision=policy.revision,
+        filename=policy.weight_file,
+    )
+    blob_dir = snapshot.parents[2] / "blobs"
+    blob_dir.mkdir(parents=True)
+    blob = blob_dir / "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c"
+    blob.write_bytes(b"pinned-weights")
+    snapshot.parent.mkdir(parents=True)
+    try:
+        snapshot.symlink_to(Path("../../blobs") / blob.name)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    for name, _digest in policy.manifest:
+        companion = snapshot.parent / name
+        companion.parent.mkdir(parents=True, exist_ok=True)
+        target = blob_dir / name.replace("/", "--")
+        target.write_bytes(b"companion:" + name.encode())
+        companion.symlink_to(Path(os.path.relpath(target, companion.parent)))
+    launched: list[dict[str, str]] = []
+
+    def factory(_argv: list[str], env: dict[str, str]) -> _Process:
+        launched.append(dict(env))
+        return _Process()
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=factory,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime.start()
+    assert launched
+    weights = launched[0]["LAYA_WEIGHTS_PATH"]
+    assert Path(weights) == snapshot.parent.resolve() / snapshot.name
+    assert Path(weights).name == "model.safetensors"
+    assert Path(weights).resolve() == blob.resolve()
+    assert _bootstrap_accepts_weights(weights) is True
+    assert _bootstrap_accepts_weights(str(blob)) is False
+    assert process_laya().runtime_reason()[0] != "stopped"
+    runtime.stop()
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_ping_and_the_order_gate_share_a_cli_stop(tmp_path: Path) -> None:
+    """A ping reconciles a command-line stop, then the gate refuses with the same status."""
+    from flinttrade_engine.laya import place_block
+
+    policy = load_policy()
+
+    class _Live(_Process):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pid = 424242
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Live(),
+        health_reader=lambda _url: _healthy(),
+        artifact_checker=lambda: ArtifactCheck(
+            ok=True,
+            reason=None,
+            revision=policy.revision,
+            sha256=policy.sha256,
+        ),
+        watch=False,
+    )
+    runtime.start()
+    set_process_runtime(runtime)
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    process = runtime._process  # noqa: SLF001
+    assert process is not None
+    process.returncode = 0
+    runtime._pid_path.unlink()  # noqa: SLF001
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(health_bp)
+    ping = app.test_client().get("/api/v1/ping").get_json()
+    assert ping is not None
+    assert ping["laya_practice"] == "down"
+    assert ping["laya_reason"] == "stopped"
+    verdict = process_laya().admit(
+        Proposal(
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            mode="practice",
+            rationale="Planned breakout",
+        )
+    )
+    blocked = place_block(verdict, 1)
+    assert blocked is not None
+    assert blocked["message"] == "Laya is Down. Orders are paused until it's Ready."
+    runtime.stop()
     reset_process_laya_for_tests()

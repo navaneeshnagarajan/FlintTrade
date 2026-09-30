@@ -620,3 +620,40 @@ def test_decision_log_records_the_proof_kind(laya_host: FakeLayaHost, tmp_path: 
 def test_append_decision_log_is_a_no_op_without_a_path() -> None:
     set_decision_log_path(None)
     append_decision_log((("proof", "runtime"),), effect="allow")
+
+
+@pytest.mark.unit
+def test_an_admitted_empty_note_is_logged_beside_runtime_allows(
+    laya_host: FakeLayaHost, tmp_path: Path
+) -> None:
+    """Three admitted places write three lines. An empty note is not a second allow.
+
+    The model is not called for an empty note, so that line has no proof.
+    There is no dedupe: each model allow keeps its own ``proof=runtime`` line.
+    """
+    from flinttrade_engine.laya import place_block
+
+    log = tmp_path / "decisions.jsonl"
+    set_decision_log_path(log)
+    try:
+        payload = json.loads(_body(_answers()))
+        payload.pop("revision")
+        payload.pop("sha256")
+        laya_host.response_body = json.dumps(payload).encode()
+        engine = _engine(laya_host, verified=True)
+        first = engine.admit(_proposal(quantity=1))
+        empty = engine.admit(_proposal(quantity=1, rationale=""))
+        third = engine.admit(_proposal(quantity=1, rationale="Another planned entry."))
+        assert place_block(first, 1) is None
+        assert place_block(empty, 1) is None
+        assert place_block(third, 1) is None
+        lines = log.read_text(encoding="utf-8").splitlines()
+        allows = [line for line in lines if "effect=allow" in line and "proof=runtime" in line]
+        assert allows == [lines[0], lines[2]]
+        assert len(lines) == 3
+        assert lines[1].startswith("effect=clamp")
+        assert "failure=note_absent" in lines[1]
+        assert "proof=" not in lines[1]
+        assert len(laya_host.requests) == 2
+    finally:
+        set_decision_log_path(None)

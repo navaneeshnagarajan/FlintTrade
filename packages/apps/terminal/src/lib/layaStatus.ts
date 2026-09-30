@@ -47,6 +47,26 @@ export function formatDownloadProgress(doneBytes: number, totalBytes: number): s
   return `Downloading the model · ${done} of ${total} GB`;
 }
 
+/** Desk poll for the same Laya status the order gate reads. Matches the 1.5s watch. */
+export const LAYA_STATUS_POLL_MS = 1_500;
+
+/** Chip label while a stop or start has not been confirmed. */
+export const LAYA_CHECKING_LABEL = "Checking";
+
+/** Popover line for that unconfirmed window. Neutral colour, not Ready. */
+export const LAYA_CHECKING_DETAIL = "Checking Laya…";
+
+/** Exact order refusal when the gate says Laya is Down. */
+export const LAYA_DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready.";
+
+/** True when a failed place is the Down pause. Other denials leave the chip alone. */
+export function layaOrderRefused(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  const record = body as { code?: unknown; message?: unknown; reason?: unknown };
+  if (record.code !== "laya_denied") return false;
+  return record.message === LAYA_DOWN_PAUSE || record.reason === LAYA_DOWN_PAUSE;
+}
+
 /** User guide section "Start Laya". The heading is written in the docs. */
 export const LAYA_START_DOCS_HREF =
   "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/docs/USER_GUIDE.md#start-laya";
@@ -107,7 +127,9 @@ export function layaChipLabel(input: {
   practice: LayaStatus | null | undefined;
   live: LayaStatus | null | undefined;
   reason?: string | null;
-}): "Ready" | "Degraded" | "Down" | "Still loading" {
+  checking?: boolean;
+}): "Ready" | "Degraded" | "Down" | "Still loading" | "Checking" {
+  if (input.checking) return LAYA_CHECKING_LABEL;
   if (input.reason === "still_loading") return "Still loading";
   return decisionSurfaceLabel(layaChipStatus(input));
 }

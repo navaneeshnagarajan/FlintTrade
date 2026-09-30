@@ -447,8 +447,9 @@ sidecar is not **Ready** or **Degraded**. A signed-out desk does not
 get it, and neither does a demo session. While the start request is in flight the button reads **Starting…**.
 If the start fails, the popover says **Laya could not be started.**
 **Start Laya** calls `POST /api/v1/laya/start`. After that click the chip
-stays on **Still loading** until Laya is **Ready** or **Degraded**, or
-the probe reports a reason other than `not_started`.
+says **Checking** and the popover says **Checking Laya…** until the ping
+confirms **Ready**, **Degraded**, or a reason other than `not_started`.
+A confirmed first load still says **Still loading**.
 
 The popover prints the chip label, not the raw code. For `download_failed`,
 `unverified`, `wrong_revision`, and `key_rejected` it also prints the tooltip, because
@@ -521,7 +522,10 @@ run is rejected. A decision without `revision` or `sha256` is checked
 against that record for both admitted and clamped orders. The decision
 log is `<workspace>/runtime/laya/decisions.jsonl`. It records
 `proof=decision` when the decision carried the pin, or `proof=runtime`
-when this run's record stood in. A decision with no proof is refused
+when this run's record stood in. An empty note does not call the model.
+Practice still writes `effect=clamp` with `failure=note_absent` and no
+proof, including when the quantity already fits and the order is admitted.
+Each model allow keeps its own line. There is no dedupe. A model decision with no proof is refused
 with `Not placed. Laya's decision couldn't be verified. Try again.`
 A health document that omits the digest is **Ready** when that record
 matches the pin. Laya is not **Ready** by default.
@@ -540,7 +544,10 @@ in a copy that this start is not replacing shows **Wrong model version**
 and the sidecar does not start. A changed byte in the runtime checkpoint
 starts the download below; the sidecar does not start on that tree.
 Laya does not reach **Ready** in these cases. A verified boot sets
-`LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
+`LAYA_WEIGHTS_PATH` to that hashed weights file. When the file is a
+symlink in a Hugging Face snapshot (`snapshots/<revision>/model.safetensors`
+pointing at `blobs/`), that path is the snapshot file, not the blob.
+The sidecar loads the snapshot directory. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. When the sidecar health document leaves the revision
 empty, FlintTrade fills the pinned revision from the verified manifest,
@@ -554,6 +561,11 @@ changes, the chip shows **Can't verify the model** and the log line is
 reads the pid file (`runtime/laya/sidecar.pid`), the key file
 (`runtime/laya/api.key`), and the runtime record, so a command-line
 stop or start, or a key rotation, shows on the chip within that interval.
+The desk ping runs that same check, and the chip reads the ping. Until
+the ping confirms a stop or a start, the chip says **Checking** in the
+neutral colour and the popover says **Checking Laya…**. It does not stay
+on **Ready** while orders are refused. The refusal line stays **Laya is
+Down. Orders are paused until it's Ready.**
 
 **Command line.** From the FlintTrade environment (the project `.venv`
 after setup, or `uv run python`):
@@ -583,7 +595,9 @@ opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
 
 `start` listens on `127.0.0.1` only. The port comes from `LAYA_PORT` and
 defaults to 8000. A port clash is **Down** with `port_in_use`. `start`
-writes a fresh API key to `<workspace>/runtime/laya/api.key`. `stop`
+writes a fresh API key to `<workspace>/runtime/laya/api.key`. When
+`LAYA_API_KEY_FILE` is that same path, `start` still writes the new key.
+It does not treat the file it is about to write as missing. `stop`
 stops the sidecar, deletes that key, and records **Down** with
 `not_started`. `status` prints the report, including `reason` and the
 plain-words `detail`, and does not print the API key. If

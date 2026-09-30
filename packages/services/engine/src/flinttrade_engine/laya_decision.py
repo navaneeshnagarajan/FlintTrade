@@ -303,7 +303,9 @@ def evaluate_free_text(
     active = policy or load_policy()
     note = rationale.strip()
     if not note:
-        return _uncertain_decision(active, mode, requested_quantity, degraded_ceiling, "note_absent")
+        return _logged(
+            _uncertain_decision(active, mode, requested_quantity, degraded_ceiling, "note_absent")
+        )
     if len(note) > _MAX_NOTE_CHARS:
         return TextDecision(
             effect="deny",

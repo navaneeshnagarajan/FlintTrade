@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  LAYA_CHECKING_DETAIL,
+  LAYA_CHECKING_LABEL,
+  LAYA_DOWN_PAUSE,
   LAYA_NOT_QUALIFIED_FOR_LIVE,
   LAYA_START_COMMAND,
   LAYA_START_DOCS_HREF,
+  LAYA_STATUS_POLL_MS,
+  layaOrderRefused,
   formatDownloadProgress,
   layaChipLabel,
   layaChipStatus,
@@ -71,5 +76,28 @@ describe("Laya chip status", () => {
     expect(layaReasonTooltip("key_missing", 8000)).toBe("The Laya API key file is missing.");
     expect(LAYA_START_DOCS_HREF).toContain("USER_GUIDE.md#start-laya");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "not_started" })).toBe("Down");
+  });
+
+  it("says Checking instead of Ready while a stop or start is unconfirmed", () => {
+    expect(LAYA_STATUS_POLL_MS).toBe(1_500);
+    expect(LAYA_CHECKING_DETAIL).toBe("Checking Laya…");
+    expect(LAYA_DOWN_PAUSE).toBe("Laya is Down. Orders are paused until it's Ready.");
+    const checking = layaChipLabel({
+      mode: "practice",
+      practice: "ready",
+      live: "ready",
+      checking: true,
+    });
+    expect(checking).toBe(LAYA_CHECKING_LABEL);
+    expect(checking).not.toMatch(/Ready/);
+    expect(layaOrderRefused({
+      code: "laya_denied",
+      message: LAYA_DOWN_PAUSE,
+      reason: LAYA_DOWN_PAUSE,
+    })).toBe(true);
+    expect(layaOrderRefused({
+      code: "laya_denied",
+      message: "Laya denied this order. The note does not state a concrete reason.",
+    })).toBe(false);
   });
 });

@@ -126,6 +126,8 @@ export function useOperatorIncident(): OperatorIncident | null {
       layaPort,
       layaDownloadBytes,
       layaDownloadTotal,
+      layaChecking: false,
+      layaEpoch: 0,
     },
     sessionClockClosed,
   }), [

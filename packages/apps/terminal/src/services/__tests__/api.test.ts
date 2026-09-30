@@ -3419,6 +3419,41 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(headers["Content-Type"]).toBe("application/json");
   });
 
+  it("placeOrder drops Ready on the Laya pause and says Checking when a Down chip then admits", async () => {
+    const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    const pause = "Laya is Down. Orders are paused until it's Ready.";
+    resetOperatorSignals();
+    useOperatorSignalStore.setState({
+      decisionStatus: "ready",
+      layaPracticeStatus: "ready",
+      layaChecking: false,
+    });
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY" as const,
+      quantity: 1,
+      product: "MIS" as const,
+      orderType: "MARKET" as const,
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "error",
+      code: "laya_denied",
+      message: pause,
+      reason: pause,
+    }, 403));
+    await expect(placeOrder(order)).rejects.toThrow(pause);
+    expect(useOperatorSignalStore.getState().decisionStatus).toBe("down");
+    expect(useOperatorSignalStore.getState().layaPracticeStatus).toBe("down");
+    expect(useOperatorSignalStore.getState().layaChecking).toBe(false);
+
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { orderId: "ORD-1" } }));
+    await placeOrder(order);
+    expect(useOperatorSignalStore.getState().layaChecking).toBe(true);
+    resetOperatorSignals();
+  });
+
   it("placeOrder sends the operator admission note and an empty note", async () => {
     fetchSpy.mockImplementation(() => Promise.resolve(
       jsonResponse({ status: "success", data: { orderId: "ORD-NOTE" } }),

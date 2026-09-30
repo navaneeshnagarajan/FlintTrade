@@ -618,7 +618,11 @@ watch tick, about every 1.5 seconds. A mismatch is `unverified`
 changed. The same watch reads the pid file (`runtime/laya/sidecar.pid`),
 the key file (`runtime/laya/api.key`), and the runtime record, so a
 command-line stop or start, or a key rotation, shows on the chip within
-that interval. Every `stop` deletes the runtime record, as does a start
+that interval. `GET /api/v1/ping` runs that same check before it answers,
+and the chip reads the ping, so the desk follows within 1.5 seconds.
+Until the ping confirms a stop or a start, the chip says Checking and
+the popover says Checking Laya…. It does not stay on Ready while orders
+are refused. Every `stop` deletes the runtime record, as does a start
 that fails after it was written. A record from an earlier run is rejected.
 A decision without `revision` or `sha256` is checked against that record
 for both admitted and clamped orders. The decision log is

@@ -36,6 +36,10 @@ export interface OperatorSignalSnapshot {
   layaDownloadBytes: number | null;
   /** Bytes expected while the reason is `downloading`. */
   layaDownloadTotal: number | null;
+  /** True after a stop or start until the next ping confirms the gate. */
+  layaChecking: boolean;
+  /** Bumps when a place updates the chip, so an older ping cannot overwrite it. */
+  layaEpoch: number;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -57,6 +61,8 @@ const INITIAL: OperatorSignalSnapshot = {
   layaPort: 8000,
   layaDownloadBytes: null,
   layaDownloadTotal: null,
+  layaChecking: false,
+  layaEpoch: 0,
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {
@@ -71,6 +77,12 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setLayaReason: (layaReason: string | null) => void;
   setLayaPort: (layaPort: number) => void;
   setLayaDownloadProgress: (layaDownloadBytes: number | null, layaDownloadTotal: number | null) => void;
+  /** The order gate refused because Laya is Down. The chip must not stay Ready. */
+  noteLayaDown: () => void;
+  /** A stop or start is not confirmed yet. The chip says Checking, not the last label. */
+  noteLayaUnconfirmed: () => void;
+  /** Clear or set Checking without moving the epoch. A confirmed ping clears it. */
+  setLayaChecking: (layaChecking: boolean) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -97,6 +109,17 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   setLayaReason: (layaReason) => set({ layaReason }),
   setLayaPort: (layaPort) => set({ layaPort }),
   setLayaDownloadProgress: (layaDownloadBytes, layaDownloadTotal) => set({ layaDownloadBytes, layaDownloadTotal }),
+  noteLayaDown: () => set((state) => ({
+    decisionStatus: "down",
+    layaPracticeStatus: "down",
+    layaChecking: false,
+    layaEpoch: state.layaEpoch + 1,
+  })),
+  noteLayaUnconfirmed: () => set((state) => ({
+    layaChecking: true,
+    layaEpoch: state.layaEpoch + 1,
+  })),
+  setLayaChecking: (layaChecking) => set({ layaChecking }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

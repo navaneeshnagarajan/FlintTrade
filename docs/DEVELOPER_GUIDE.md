@@ -607,7 +607,9 @@ start is not replacing is `wrong_revision` ("Wrong model version") and the
 sidecar does not start. A changed byte in the runtime checkpoint is the
 download above; the sidecar does not start on that tree. Laya does not
 reach Ready in these cases. A verified boot sets
-`LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
+`LAYA_WEIGHTS_PATH` to that hashed weights file. A standard cache symlink
+(`snapshots/<revision>/model.safetensors` into `blobs/`) is passed as the
+snapshot file, not the blob. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. When that sidecar's health document leaves the revision
 null, FlintTrade fills the pinned revision from the verified manifest, so
@@ -622,7 +624,10 @@ watch tick, about every 1.5 seconds. A mismatch is `unverified`
 file that changed. The same watch reads the pid file
 (`runtime/laya/sidecar.pid`), the key file (`runtime/laya/api.key`), and
 the runtime record, so a command-line stop or start, or a key rotation,
-shows on the chip within that interval. Every `stop` deletes the runtime
+shows on the chip within that interval. The desk ping runs that same
+check, and the chip reads the ping. Until the ping confirms a stop or a
+start, the chip says Checking in the neutral colour and the popover says
+Checking Laya…. It does not stay on Ready while orders are refused. Every `stop` deletes the runtime
 record, as does a start that fails after it was written. A record from
 an earlier run is rejected. A health document without the weight digest
 is Ready when that record matches the pin. If the record cannot be

@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { brokerSurfaceLabel, chatSurfaceLabel } from "@/lib/deskStatus";
 import { buildHeaders, getBase, isDemoAuthSession } from "@/services/ftApi.helpers";
 import {
+  LAYA_CHECKING_DETAIL,
   LAYA_START_DOCS_HREF,
   layaChipLabel,
   layaChipStatus,
@@ -34,6 +35,7 @@ export function DeskStatusCluster() {
   const layaPort = useOperatorSignalStore((state) => state.layaPort);
   const layaDownloadBytes = useOperatorSignalStore((state) => state.layaDownloadBytes);
   const layaDownloadTotal = useOperatorSignalStore((state) => state.layaDownloadTotal);
+  const layaChecking = useOperatorSignalStore((state) => state.layaChecking);
   const llmChrome = useOperatorSignalStore((state) => state.llmChrome);
   const readOnly = accounts.some((account) => mondayReadChrome(account) !== null);
   const placeable = accounts.some(
@@ -60,11 +62,16 @@ export function DeskStatusCluster() {
     practice: practiceStatus,
     live: liveStatus,
     reason: shownReason,
+    checking: layaChecking,
   });
-  const plainReason = layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
-    ?? liveReason
-    ?? (decision === "Down" ? "Not started" : null);
-  const tooltip = layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
+  const plainReason = layaChecking
+    ? LAYA_CHECKING_DETAIL
+    : layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
+      ?? liveReason
+      ?? (decision === "Down" ? "Not started" : null);
+  const tooltip = layaChecking
+    ? LAYA_CHECKING_DETAIL
+    : layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
   const offerStart = operator && !sidecarUp && !awaitingLaya;
   const chat = chatSurfaceLabel(llmChrome);
   const decisionTone = decision === "Down"
@@ -80,10 +87,14 @@ export function DeskStatusCluster() {
     if (same) return;
     if (practiceStatus === "ready" || practiceStatus === "degraded") {
       setAwaitingLaya(false);
+      useOperatorSignalStore.getState().setLayaChecking(false);
       return;
     }
     if (layaReason === "still_loading") return;
-    if (layaReason && layaReason !== "not_started") setAwaitingLaya(false);
+    if (layaReason && layaReason !== "not_started") {
+      setAwaitingLaya(false);
+      useOperatorSignalStore.getState().setLayaChecking(false);
+    }
   }, [awaitingLaya, practiceStatus, layaReason]);
 
   async function startLaya() {
@@ -101,6 +112,7 @@ export function DeskStatusCluster() {
       }
       startSnapshot.current = { reason: layaReason, practice: practiceStatus };
       setAwaitingLaya(true);
+      useOperatorSignalStore.getState().noteLayaUnconfirmed();
       setStartNote(null);
     } catch {
       setStartNote("Laya could not be started.");
@@ -154,7 +166,7 @@ export function DeskStatusCluster() {
           {startNote ? <p role="status">{startNote}</p> : null}
         </PopoverContent>
       </Popover>
-      <LayaDegradedLimitsNote status={chipStatus} />
+      <LayaDegradedLimitsNote status={layaChecking ? null : chipStatus} />
       <span aria-hidden="true">·</span>
       <span data-testid="llm-surface">LLM {chat}</span>
     </div>

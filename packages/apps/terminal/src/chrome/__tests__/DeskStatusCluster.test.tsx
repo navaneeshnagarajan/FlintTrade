@@ -68,6 +68,40 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-degraded-limits").className).not.toMatch(/text-loss/);
   });
 
+  it("shows Checking Laya in the neutral colour and never Ready while unconfirmed", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "ready",
+      layaPracticeStatus: "ready",
+      layaLiveQualified: true,
+      layaChecking: true,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Checking");
+    expect(chip.textContent).not.toMatch(/Ready/);
+    expect(chip.className).toContain("text-text-secondary");
+    expect(chip.className).not.toContain("text-loss");
+    expect(chip.className).not.toContain("text-amber");
+    expect(chip).toHaveAttribute("title", "Checking Laya…");
+    fireEvent.click(chip);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Checking Laya…");
+  });
+
+  it("drops Ready when the order gate has already refused", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "ready",
+      layaPracticeStatus: "ready",
+      layaLiveQualified: true,
+    });
+    useOperatorSignalStore.getState().noteLayaDown();
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip.textContent).not.toMatch(/Ready/);
+  });
+
   it("shows Laya Ready when the LLM is not configured", () => {
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({
@@ -271,7 +305,7 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
   });
 
-  it("starts the sidecar from the popover and shows Still loading", async () => {
+  it("starts the sidecar from the popover and shows Checking until Ready", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
     );
@@ -290,8 +324,10 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-reason")).toHaveTextContent("Stopped");
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
     fireEvent.click(screen.getByRole("button", { name: "Start Laya" }));
-    await waitFor(() => expect(chip).toHaveTextContent("Laya Still loading"));
+    await waitFor(() => expect(chip).toHaveTextContent("Laya Checking"));
+    expect(chip.textContent).not.toMatch(/Ready/);
     expect(chip.textContent).not.toMatch(/Down/);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Checking Laya…");
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/api/v1/laya/start");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");

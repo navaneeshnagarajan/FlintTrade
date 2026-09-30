@@ -17,6 +17,19 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Laya chip, runtime key, and snapshot launch.** `start` rewrites
+  `runtime/laya/api.key` when `LAYA_API_KEY_FILE` names that file, and
+  does not refuse it as missing. The desk ping uses the same watch as
+  the order gate, so a stop or a start shows on the chip within 1.5
+  seconds. Until that ping confirms the new state, the chip says
+  Checking and the popover says Checking Laya…. It does not stay Ready
+  while orders are refused. A standard cache symlink is launched as the
+  snapshot `model.safetensors`, not the blob. An admitted empty note is
+  written to the decision log as `effect=clamp` with `failure=note_absent`
+  and no proof. Each model allow keeps its own `proof=runtime` line.
+
 ### Added
 
 - **Opt-in Laya decision sidecar for place admission (FT-LAYA-MODEL-001).**

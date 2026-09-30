@@ -67,9 +67,11 @@ LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ.pop("LAYA_REVISION", None)
-    directory = os.path.dirname(os.path.abspath(path))
-    weight = os.path.join(directory, "model.safetensors")
-    if os.path.abspath(weight) != os.path.abspath(path):
+    # abspath keeps a snapshot symlink. realpath would follow it into
+    # blobs/<sha>, and that directory does not contain model.safetensors.
+    logical = os.path.abspath(path)
+    directory = os.path.dirname(logical)
+    if os.path.basename(logical) != "model.safetensors":
         sys.stderr.write("laya weights path is not the checkpoint file\\n")
         raise SystemExit(1)
     from laya.router import Router
@@ -687,6 +689,20 @@ def huggingface_cache_root_for(weight: Path) -> Path | None:
     return None
 
 
+def checkpoint_launch_path(path: Path) -> str:
+    """Absolute checkpoint path that keeps a snapshot symlink name.
+
+    A standard Hugging Face cache stores
+    ``snapshots/<revision>/model.safetensors`` as a symlink into
+    ``blobs/<sha>``. The sidecar loads the snapshot directory, where the
+    companion files sit beside that name. Resolving the symlink points the
+    launcher at the blob, and that directory is not the checkpoint file.
+    """
+    if not path.exists():
+        return str(path)
+    return str(path.parent.resolve() / path.name)
+
+
 def verify_weight_file(
     path: Path,
     *,
@@ -698,9 +714,10 @@ def verify_weight_file(
 
     A shard index or any other weights file in the same snapshot is
     unverified, before the digest is compared. A readable file whose
-    digest is not the pin is a real mismatch.
+    digest is not the pin is a real mismatch. The recorded path keeps a
+    snapshot symlink so the launcher loads that directory.
     """
-    resolved = str(path.resolve()) if path.exists() else str(path)
+    resolved = checkpoint_launch_path(path)
     if snapshot_has_extra_weights(path.parent, path.name):
         return ArtifactCheck(
             ok=False,
@@ -1146,7 +1163,7 @@ class LayaRuntime:
             self._launch_refusal = None
             self._weight_drift = None
             process_laya().clear_sticky_refusal()
-            if _api_key_file_missing():
+            if _api_key_file_missing(self._key_path):
                 self._refuse_missing_key()
             self._settle_checkpoint_dirs()
             weighed = self._weigh_before_launch(policy)
@@ -2546,12 +2563,28 @@ def _launch_refusal_message(check: ArtifactCheck) -> str:
     return "Can't verify the model"
 
 
-def _api_key_file_missing() -> bool:
-    """True when ``LAYA_API_KEY_FILE`` names a file that is not there."""
+def _same_path(left: Path, right: Path) -> bool:
+    """True when both paths name the same file, even if it is not there yet."""
+    try:
+        return left.expanduser().resolve() == right.expanduser().resolve()
+    except OSError:
+        return False
+
+
+def _api_key_file_missing(managed_key: Path | None = None) -> bool:
+    """True when ``LAYA_API_KEY_FILE`` names a file that is not there.
+
+    ``start`` deletes ``runtime/laya/api.key`` and then writes a new key.
+    When the variable points at that same path, the file is the one this
+    start is about to write, not an external key that has to already exist.
+    """
     text = os.environ.get("LAYA_API_KEY_FILE", "").strip()
     if not text:
         return False
-    return not Path(text).expanduser().is_file()
+    path = Path(text).expanduser()
+    if managed_key is not None and _same_path(path, managed_key):
+        return False
+    return not path.is_file()
 
 
 def _record_missing_key(port: int = _DEFAULT_PORT) -> None:

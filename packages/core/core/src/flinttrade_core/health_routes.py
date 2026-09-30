@@ -108,6 +108,23 @@ def init_health_aggregator(health_agg: HealthAggregator) -> None:
         _health_agg = health_agg
 
 
+def _reconcile_laya_for_desk() -> None:
+    """Apply a command-line stop or start before the desk reads the gate.
+
+    This is the same watch the order gate runs. The chip's ping and an
+    order then publish one status.
+    """
+    try:
+        from flinttrade_core.laya_runtime import process_runtime  # noqa: PLC0415
+
+        runtime = process_runtime()
+        reconcile = getattr(runtime, "reconcile_watched_state", None)
+        if callable(reconcile):
+            reconcile()
+    except Exception:
+        logger.warning("Laya desk reconcile failed", exc_info=True)
+
+
 def _refresh_laya_status() -> None:
     """Record sidecar health. A missing sidecar leaves the stored status alone."""
     try:
@@ -227,11 +244,14 @@ def ping() -> tuple[Any, int]:
         JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar),
         ``laya_live_qualified``, ``laya_reason``, ``laya_port``, and, while a
         model download is in progress, ``laya_download_bytes`` and
-        ``laya_download_total``. ``laya`` starts Down. A ping does not invent
-        Ready and does not probe the port.
+        ``laya_download_total``. ``laya`` starts Down. A ping reconciles the
+        watched pid, key, and runtime record the same way an order does, then
+        returns that stored status. It does not invent Ready when those files
+        have not changed, and it does not probe the port on its own.
     """
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 
+    _reconcile_laya_for_desk()
     engine = process_laya()
     practice, live, qualified = engine.desk_heartbeat()
     reason, port = engine.runtime_reason()

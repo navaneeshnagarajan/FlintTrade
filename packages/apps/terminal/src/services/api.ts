@@ -39,7 +39,9 @@ import type {
   BrokerCapabilities,
   LeverageSettings,
 } from "@/types/api";
+import { layaOrderRefused } from "@/lib/layaStatus";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { liveWritesMuted } from "@/lib/operatorIncident";
 import { useModeStore } from "@/stores/modeStore";
@@ -2697,7 +2699,15 @@ async function postOrder<T>(
   }
 
   if (!resp.ok) {
-    const errorBody = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const errorBody = await resp.json().catch(() => null) as {
+      message?: string;
+      error?: string;
+      code?: string;
+      reason?: string;
+    } | null;
+    if (layaOrderRefused(errorBody)) {
+      useOperatorSignalStore.getState().noteLayaDown();
+    }
     const serverMsg = errorBody?.message ?? errorBody?.error ?? null;
     let message: string;
     if (resp.status === 401) {
@@ -2722,7 +2732,16 @@ async function postOrder<T>(
   if (responseStatus === "ERROR" || responseStatus === "REJECTED") {
     throw new Error(json.message || `Order API ${ftEndpoint} error`);
   }
+  if (LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) noteAdmittedPlace(mode);
   return (json.data ?? json) as T;
+}
+
+function noteAdmittedPlace(mode: string): void {
+  const state = useOperatorSignalStore.getState();
+  const confirmed = mode === "live"
+    ? state.decisionStatus === "ready" || state.decisionStatus === "degraded"
+    : state.layaPracticeStatus === "ready" || state.layaPracticeStatus === "degraded";
+  if (!confirmed) state.noteLayaUnconfirmed();
 }
 
 async function postOrderMutation<T>(

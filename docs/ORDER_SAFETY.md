@@ -234,6 +234,11 @@ changes, the chip shows Can't verify the model and the log line is
 reads the pid file (`runtime/laya/sidecar.pid`), the key file
 (`runtime/laya/api.key`), and the runtime record, so a command-line
 stop or start, or a key rotation, shows on the chip within that interval.
+The desk ping runs that same check, and the chip reads the ping. Until
+the ping confirms a stop or a start, the chip says Checking in the
+neutral colour and the popover says Checking Laya…. It does not stay on
+Ready while orders are refused. The refusal line stays "Laya is Down.
+Orders are paused until it's Ready."
 New orders stay paused. A reduce-only close is unchanged.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
@@ -241,7 +246,8 @@ Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
-one is registered. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`,
+one is registered. The desk ping reconciles the watched pid, key, and runtime record, then
+publishes Live-facing `laya`, sidecar `laya_practice`,
 `laya_live_qualified`, `laya_reason`, and `laya_port`. It does not invent Ready. The Laya chip label follows
 the current mode, so Practice shows the sidecar and does not read Down while
 Practice orders are being admitted. During the first load the chip says
