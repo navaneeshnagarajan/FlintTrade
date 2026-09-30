@@ -530,12 +530,7 @@ Home and Invest share `accountNetWorth` in
 `packages/apps/terminal/src/lib/accountNetWorth.ts`. The total is ledger
 cash, including blocked margin, plus holdings at market value, plus each
 open position. Opening an F&O position does not reduce
-the total by its margin. `accountNetWorth` accepts a charges argument,
-but Live funds pass through `normaliseFundsShape` in
-`packages/apps/terminal/src/services/api.ts`, which drops any charges
-field, so `accountCharges` is 0 and that argument does not change the
-figure. Practice funds have no charges field, and a fill does not reduce
-sandbox capital by charges. A Practice round trip at an unchanged price
+the total by its margin. A Practice round trip at an unchanged price
 leaves the total at the starting cash, for example ₹10,00,000. The Invest
 label is `Net Worth (Cash + Holdings + Positions)`. Options, and equity positions that are not
 already holdings, add signed market value: last traded price × quantity
@@ -574,9 +569,12 @@ Allocation percentages are not marked. Invest publishes the total only
 after the position book has loaded (`positionBookReady` in
 `InvestContext`). Home uses that same check in `PortfolioCard`: while
 the book is pending or has failed, the amount is `—`, never a cash-only
-figure. The amount appears once positions have loaded, including when
-it is negative. Home allocation stays on the Example split until funds,
-holdings, and positions have all succeeded (`PortfolioCard`).
+figure. The sample book does not wait on that book. The amount appears
+once positions have loaded, including when it is negative: `-₹50,000`,
+or `≈ -₹50,000` when the mark is approximate. Home allocation stays on
+the Example split until funds, holdings, and positions have all
+succeeded (`PortfolioCard`). That split uses `ExampleLabel`, not
+`ExampleChip`.
 
 The Home greeting is `useOperatorGreetingName` in
 `packages/apps/terminal/src/routes/home/operatorGreetingName.ts`. The
@@ -587,7 +585,32 @@ unset placeholder and is never shown. Hour buckets are Asia/Kolkata in
 Real holdings on Benchmark use `HOLDINGS_RETURN_LEGEND`
 (`Your holdings (unrealised)`), with `HOLDINGS_RETURN_TOOLTIP` and
 table label `HOLDINGS_RETURN_LABEL` (`Unrealised return on holdings`).
-Example holdings stay `Your Portfolio` with the Example chip.
+That row has no Example mark. An empty book, and example holdings, use
+`Your Portfolio`. Example holdings add `ExampleLabel` on the row.
+`BenchmarkTab` renders `ExampleChip` with `always` on the hard-coded
+index returns, so the chip stays in Practice and Live. Each index row
+also renders `ExampleLabel`.
+
+Home Open Positions percent is `formatPositionPnlPercent` in
+`packages/apps/terminal/src/routes/home/PositionsCard.tsx`. Cost is the
+absolute average price times quantity. The percent is P&L divided by cost when cost is above zero; otherwise
+the cell is `—`.
+Dhan and Neo rows do not carry `pnlPercent`.
+
+Sample Invest figures use `ExampleChip`
+(`packages/apps/terminal/src/components/ui/ExampleChip.tsx`), which
+paints when the session is example data unless `always` is set.
+Correlation, ETF Screener, ETFs, Risk-Return, Sector, Sector Rotation,
+Shareholding, and Social render that chip, not `ExampleLabel`.
+`BasketTab` renders one when quotes are empty and not loading.
+`HoldingsTab` renders one. `DashboardTab` renders one on the inline
+sample XIRR and one on sample Portfolio Allocation, and does not render
+a Portfolio XIRR card. With no holdings the inline XIRR is omitted.
+`NetWorthTab` sample copy is
+`Example equity and cash. Connect a broker to see yours.`,
+with the chip on that sample allocation and on each `Live from broker`
+note. A connected book keeps
+`Allocation (live assets only)` and `Live from broker`.
 
 ### OpenAlgo bugs to work around
 

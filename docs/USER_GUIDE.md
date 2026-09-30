@@ -346,10 +346,8 @@ this order:
 
 **Example-data marker.** Where a sample figure still uses the shared banner,
 that banner reads `Example data. Connect a broker to see your own.` It never
-shows in Practice. On Invest, an **Example** chip on the view replaces that
-banner. The sample Dashboard carries that chip on the single inline sample
-XIRR figure (`XIRR` plus one `Example` chip). There is no Portfolio XIRR
-card. Practice leaves the XIRR unmarked.
+shows in Practice. On Invest, an Example chip on a sample view replaces that
+banner. Where those chips sit is under [Invest](#invest).
 
 **Order review.** Practice reads `Confirm places this simulated order.`
 The confirm button reads **Confirm simulation** (accessible name
@@ -413,12 +411,9 @@ of the UI.
 label. Example data reads `Example data. No broker is connected and no orders are sent.`
 Practice reads `Practice — simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
-Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own Example chip. An incident strip,
 Widgets stay quiet: they do not repeat a second feed chip for the same fact.
-Mode is not provenance. Benchmark figures stay hard-coded in every Mode
-and keep the **Example** chip. The example-data banner
-`Example data. Connect a broker to see your own.` never shows in Practice.
-On Invest, an Example chip on each view replaces that banner. An incident strip,
+Mode is not provenance. A figure that stays fabricated in Practice and Live,
+such as benchmark index returns, keeps the Example chip. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 
@@ -847,9 +842,9 @@ Home and Invest share one net-worth figure: ledger cash, plus the market
 value of holdings, plus open positions. On Invest the label is
 `Net Worth (Cash + Holdings + Positions)`. Ledger cash includes
 blocked margin. It is not the available margin, so opening an F&O position
-does not reduce Net Worth by its margin. The figure does not subtract
-charges. A Practice round trip at an unchanged price leaves Net Worth
-at the starting cash, for example ₹10,00,000. Options add signed market value
+does not reduce Net Worth by its margin. A Practice round trip at an
+unchanged price leaves Net Worth at the starting cash, for example
+₹10,00,000. Options add signed market value
 (last traded price × quantity when that price is positive, otherwise the
 entry price × quantity). A long is positive and a short is negative,
 because the premium has already gone through cash. Equity positions that
@@ -905,26 +900,31 @@ also shows `≈`, and it has no tooltip. On the Net Worth view, the label
 `Open Positions` value. That line is shown only when the positions
 contribution is above zero. The donut centre (`tracked`) shows `≈` on
 the same total and has no tooltip. Cash on that view is not marked.
-Those labels do not name charges, and the figure does not subtract them.
 
 Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
 until funds, holdings, and positions have all loaded successfully. If any
 of those books is still loading or has failed, the split stays on that
 Example mix. The sample-data Home keeps that mix. After all three succeed
 on an account, the bar is the account split: Cash, Positions, and Equity.
-The Example chip sits on that split only while it is the example mix.
+The Example label sits on that split only while it is the example mix.
 While holdings or funds are still loading, Invest Dashboard shows
 `Loading portfolio data...` and the Net Worth view shows `—`. After
 those books settle, both leave the total as `—` until the position
 book has loaded. A position book that is still loading or has failed
 does not publish the total.
 
-The sample book does not wait on a position book. On an account, Home
-shows `—` while the position book is pending or has failed, the same
-check Invest uses. It does not draw a cash-only figure. The amount
-appears once positions have loaded. A negative Net Worth is drawn as
-the number, including `≈` when the mark is approximate, the same as on
-Invest.
+The sample book does not wait on a position book.
+
+On an account, Home shows `—` while the position book is pending or has
+failed, the same check Invest uses. It does not draw a cash-only figure.
+The amount appears once positions have loaded. A negative Net Worth is
+drawn as the number, for example `-₹50,000`, or `≈ -₹50,000` when the
+mark is approximate, the same as on Invest.
+
+On Home, each open position's P&L percent is derived from cost: the
+absolute average price times quantity. Dhan and Neo do not send a
+percent. When cost is missing or not above zero, or the profit figure
+is missing, the percent is `—`.
 
 ### Invest
 
@@ -952,42 +952,83 @@ would otherwise hide it.
 **Overlap.** With zero or one fund or basket, Overlap shows
 `No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.`
 The view opens at two or more. The sample book appears only in the web
-demo, labelled `Demo (example data)`, or with the Example chip before any
+demo, labelled `Demo (example data)`, or with an Example label before any
 account snapshot exists. Practice with no holdings always shows the empty
 state.
 
-**Example views.** Sample figures on Baskets, Sector Rotation, Benchmark,
-Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
-carry the Example chip. On Benchmark, index rows keep the Example chip.
-With real holdings, the series legend is `Your holdings (unrealised)`.
+**Benchmark.** Hard-coded index returns carry the Example chip in every
+mode, and each index name also shows an Example label. With real
+holdings, the series legend is `Your holdings (unrealised)`.
 That legend replaces `Your Portfolio (since first buy)`. Its tooltip reads
 `Gain or loss on the shares you hold now, compared with what you paid. Sold shares and dividends aren't included.`
 The comparison's accessible name is `Unrealised return on holdings`.
-The row carries no chip. When the holdings are
-Example, that row is plain `Your Portfolio` and keeps the Example chip.
+That row carries no Example mark. When the holdings are example data,
+that row is `Your Portfolio` and keeps an Example label. With no
+holdings, the row is plain `Your Portfolio`, shows `—`, and
+`Add holdings to compare against benchmarks.`
 Benchmarks beaten, alpha, and the other outperformance figures are
 replaced by
 `Comparison needs real index data.`
-That note is shown on the sample book and whenever there are holdings.
-With no holdings, the row is plain `Your Portfolio`, shows `—`, and
-`Add holdings to compare against benchmarks.`
+That note is shown whenever there are holdings, including on the sample book.
 The view also reads
 `Benchmark data is illustrative. Live index data requires a market data subscription.`
 and `Returns are absolute (not annualised) for periods under 1Y.`
 
-**Practice.** In Practice the source line says `Practice account`.
-Dashboard allocation reads
-`Practice account. Debt / MF requires NAV data source.`
-The Net Worth view reads
-`Practice account. Other asset classes require additional data sources.`
-On that view, Equity Holdings and Cash read `Practice account`
-once the figures are the account book. While those figures are the sample
-feed they read `Example book` and `Example cash`. The connect banner
+**Example chips.** Sector, Sector Rotation, Shareholding, ETF Screener,
+Social, ETFs, Risk-Return, and Correlation use the Example chip on sample
+figures. They do not use the Example label. Shareholding omits the chip
+when the read has failed. Social shows the chip after loading has finished.
+On example data, Baskets show one Example chip when quotes are empty and
+not loading. The chip stays off while quotes are loading. Seeded cards do
+not add a second marker. Seeded example baskets disable **Edit** and
+**Delete**, with the title `Example basket — editing unavailable`. Baskets
+created in Practice or Live keep **Edit** and **Delete**. An empty Baskets
+view reads `No baskets yet`.
+
+**Holdings.** On example data, the Holdings view shows one Example chip
+when the book is sample data. The Investor Dashboard header badge reads `N holdings` and
+matches that table. On a sample book the badge has an Example label
+beside it. The Holdings toolbar reads `N stocks` for the same count.
+The banner `Example data. Connect a broker to see your own.` is not
+repeated on the view, and it never shows in Practice. A cold load waits
+until the holdings query has settled before the sample fallback, so a
+pending book is not covered by the sample count. Practice waits until
+that query has settled empty. A failed holdings read shows
+`Failed to load holdings` and `Refresh`, and does not show `0 holdings`,
+`No holdings`, or a sample table under that failure. An empty connected
+book shows `0 holdings` and `No holdings`. An account snapshot replaces
+the sample book, including a Practice snapshot with cash and an empty
+holdings list.
+
+**Dashboard and Net Worth figures.** The sample Dashboard marks the
+inline sample XIRR with one Example chip (`XIRR` plus that chip).
+Portfolio Allocation on that sample dashboard shows one Example chip in
+place of
+`Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
+A connected book keeps that sentence. There is no Portfolio XIRR card.
+With no holdings, the inline XIRR is omitted. On sample figures,
+`/invest#networth` reads
+`Example equity and cash. Connect a broker to see yours.`
+The allocation label is `Allocation` with the Example chip, and each
+`Live from broker` note, including Equity Holdings and Cash, is that
+chip. A connected book keeps
+`Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
+the label `Allocation (live assets only)`, and the note `Live from broker`.
+Those sentences follow the sample-figure flag, including a Practice book
+that has fallen back to sample holdings. The Example chip paints only on
+example data, so that Practice fallback shows the example sentences
+without the chip. Practice does not mark the XIRR figure as Example.
+The connect banner
 `Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here.`
 is hidden in Practice.
 
-**XIRR.** With no holdings, Portfolio XIRR shows `—` and the net-worth
-subline shows `XIRR —`. That figure has no Example chip.
+**Mutual funds.** With example data, `/invest#mutual-funds` labels the
+static fixture `Example NAVs · as of 10-Sep-2026` on the view header and
+again on the disclaimer, and does not claim "Updated daily after market
+close." The as-of date is the fixture date and does not auto-update.
+Practice and Live keep
+`Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close.`
+when the live feed is in use.
 
 **Cash.** Available Funds on Dashboard is the balance left after blocked
 margin. The Net Worth view's Cash line is the ledger, including that
@@ -995,74 +1036,6 @@ blocked margin, so opening a position does not shrink the total by the
 margin. Both show full rupees, in Indian grouping, with no paise.
 When the total is approximate, Available Funds shows `≈` as well.
 Cash on the Net Worth view does not.
-
-**Holdings and funds.** While the sample book is showing, the Invest
-header badge is `N holdings` and matches the table, with an Example chip.
-Holdings and Dashboard also show
-`Showing sample data — connect a broker for live data`.
-An account snapshot replaces that book, including a Practice snapshot
-with cash and an empty holdings list. A cold load waits until the
-holdings query has settled before that sample fallback, so a pending
-book is not covered by the sample count. A failed holdings read shows
-`Failed to load holdings` and `Refresh`. An empty holdings book shows
-`0 holdings` and `No holdings`.
-
-Mutual Funds on the sample feed reads `Sample NAVs · as of` the fixture
-date, and does not say `Updated daily after market close.` Practice and
-Live use
-`Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close.`
-when the live feed is in use.
-
-Sample Baskets show the Example chip from the first frame, including
-while quotes load. Seeded sample baskets disable **Edit** and
-**Delete**. Baskets you create in Practice or Live keep **Edit** and
-**Delete**.
-With example data, `/invest#mutual-funds` labels the static
-fixture `Example NAVs · as of 10-Sep-2026`
-on the view header and again on the disclaimer, and does not claim
-"Updated daily after market close." The as-of is the
-fixture date and does not auto-update. Practice and Live keep the live
-AMFI sentence ("Updated daily after market close") when the live feed is
-in use.
-
-On `/invest` → Holdings with no broker, the header
-badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
-sample table. Example data shows one Example chip on the view. The banner
-`Example data. Connect a broker to see your own.` is not repeated there, and
-it never shows in Practice. The sample Dashboard marks the sample XIRR with
-that same one **Example** chip. There is no Portfolio XIRR card. On sample
-figures, `/invest#networth` reads `Example equity and cash. Connect a broker to see yours.`
-The allocation label is `Allocation` with the Example chip, and each
-`Live from broker` note on Equity Holdings and Available Cash is that
-chip. Those sentences follow the sample-figure flag, including a Practice
-book that has fallen back to sample holdings. A connected book
-keeps `Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
-the label `Allocation (live assets only)`, and the note `Live from broker`.
-The Example chip itself paints only on example data, so that Practice
-fallback shows the example sentences without the chip. On the sample
-Dashboard, Portfolio Allocation replaces `Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
-with the Example chip; a connected book keeps that sentence. The Mode line on example data is
-`Example data. No broker is connected and no orders are sent.`
-The Practice Mode line (`Practice — simulated fills, no real money.`)
-does not call that book Example. Dashboard and "N stocks"
-use that same N. Practice waits
-until the holdings query has settled empty before the sample fallback,
-so a cold load does not flash the sample N over a pending book.
-Dashboard `Net Worth (Equity + Cash)` uses that same shared demo book
-as Holdings. A broker read failure shows muted `Failed to load holdings`
-plus `Refresh` — never `0 holdings`, `No holdings`, or a sample table
-under a failed load. A connected broker with no positions shows
-`0 holdings` and an honest empty state (`No holdings`) — no sample
-table under a zero badge. Connected positions use the live count only
-(FT-TRADE-010).
-
-With example data, `/invest#basket` (Stock Baskets) shows one Example chip
-for the view. Seeded cards do not add a second marker. Bare ₹ / P&L
-is acceptable once **Edit** and **Delete** cannot look
-live. Seeded example baskets disable **Edit** and **Delete**, with title
-helper `Example basket — editing unavailable`. User-created
-Practice or Live baskets keep full Edit/Delete. An empty example-data
-view is an honest empty state or a clearly labelled sample set (FT-INVEST-002).
 
 ### The widgets (71)
 

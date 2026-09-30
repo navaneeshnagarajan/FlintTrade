@@ -57,24 +57,24 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
-- **Home and Invest net worth, greeting, and benchmark legend.**
+- **Home and Invest net worth, greeting, benchmark legend, and Example markers.**
   Home and Invest share one total: ledger cash, including blocked
   margin, plus holdings at market value, plus open positions. Opening
-  an F&O position does not reduce the total by its margin. The figure
-  does not subtract charges. A Practice round trip at an unchanged
-  price leaves it at the starting cash, for example ₹10,00,000.
-  Options add signed market value. Futures add unrealised
-  P&L. Dhan marks from the mark-to-market average, or from `costPrice`
-  when that average is absent. Kotak Neo marks an open future from
-  the open-leg average. Practice marks a future from the entry price.
-  An estimated futures mark shows `≈`. Dhan does this for `costPrice`.
-  Kotak Neo does this for an open future. Practice never does. The
-  mark clears when that position is flat or the average arrives. The
-  tooltip and `≈` sit on the Home Net Worth amount, the Known Total
-  amount, and the Open Positions value. The Invest Dashboard label
-  `Net Worth (Cash + Holdings + Positions)` carries the tooltip, and
-  `≈` sits on the amount under it. Available Funds shows that `≈`
-  with no tooltip. Dhan's tooltip, when the average was missing, is
+  an F&O position does not reduce the total by its margin. A Practice
+  round trip at an unchanged price leaves it at the starting cash, for
+  example ₹10,00,000. Options add signed market value. Futures add
+  unrealised P&L. Dhan marks from the mark-to-market average, or from
+  `costPrice` when that average is absent. Kotak Neo marks an open
+  future from the open-leg average. Practice marks a future from the
+  entry price. An estimated futures mark shows `≈`. Dhan does this for
+  `costPrice`. Kotak Neo does this for an open future. Practice never
+  does. The mark clears when that position is flat or the average
+  arrives. The tooltip and `≈` sit on the Home Net Worth amount, the
+  Known Total amount, and the Open Positions value. The Invest
+  Dashboard label `Net Worth (Cash + Holdings + Positions)` carries
+  the tooltip, and `≈` sits on the amount under it. Available Funds
+  shows that `≈` with no tooltip. Dhan's tooltip, when the average was
+  missing, is
   `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
   Neo's is
   `Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
@@ -83,26 +83,32 @@ changelog rebuilds itself from the first release cut after this baseline.
   Allocation percentages are not marked. Home allocation stays on the
   Example split until funds, holdings, and positions have all loaded.
   Home and Invest both wait for the position book before they publish
-  the total. While that book is pending or has failed, Home shows `—`
-  and does not draw cash alone. A negative total is shown as the number.
+  the total. The sample book does not. While that book is pending or
+  has failed, Home shows `—` and does not draw cash alone. A negative
+  total is the number, for example `-₹50,000`, or `≈ -₹50,000` when
+  the mark is approximate. Home derives each open position's P&L
+  percent from cost, and shows `—` when cost is missing or not above
+  zero.
   The greeting uses the saved display name, then the username, and
   stays plain `Good morning` (or afternoon or evening) until a name
   is known. It never uses `Trader`. On Benchmark, real holdings use
   `Your holdings (unrealised)` instead of
-  `Your Portfolio (since first buy)`. Example holdings stay
-  `Your Portfolio` with the Example chip.
-- **Example markers on sample Invest figures.** The sample Dashboard XIRR
-  is the inline `XIRR` figure plus one Example chip. There is no
-  Portfolio XIRR card. On sample figures, Net Worth reads
+  `Your Portfolio (since first buy)`. An empty book stays
+  `Your Portfolio`. Example holdings stay `Your Portfolio` with an
+  Example label, and the hard-coded index returns keep the Example
+  chip. The sample Dashboard XIRR is the inline `XIRR` figure plus
+  one Example chip, and sample allocation has one Example chip. There
+  is no Portfolio XIRR card. On sample figures, Net Worth reads
   `Example equity and cash. Connect a broker to see yours.`; the
   allocation label is `Allocation` with the Example chip, and each
   `Live from broker` note on those figures is the Example chip. The
-  chip paints only on example data. A
-  connected book keeps the live equity sentence,
+  Dashboard, allocation, and Net Worth chips paint only on example
+  data. The Benchmark chip stays in Practice and Live. A connected
+  book keeps the live equity sentence,
   `Allocation (live assets only)`, and `Live from broker`. Mutual
-  Funds on example data reads `Example NAVs · as of 10-Sep-2026`.
-  Example order review confirms with **Continue**. Practice review
-  keeps **Confirm simulation**.
+  Funds on example data reads
+  `Example NAVs · as of 10-Sep-2026`. Example order review confirms
+  with **Continue**. Practice review keeps **Confirm simulation**.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
