@@ -433,6 +433,7 @@ describe("PositionsWidget", () => {
       price: 150,
       triggerPrice: 0,
       strategy: "FlintPositions",
+      rationale: "",
     }, {
       mode: "practice",
       scopeKey: "practice:sandbox:default",
