@@ -196,12 +196,16 @@ def test_app_startup_binds_safety_gate_secret(flask_app):
 
 
 # ---------------------------------------------------------------------------
-# 1. Mode enforcement — Explore mode blocks all orders
+# 1. Mode enforcement — the explore claim blocks all orders
 # ---------------------------------------------------------------------------
+
+_EXAMPLE_ORDERS_REFUSAL = (
+    "Orders are not available for Example. Switch to Practice or Live to trade."
+)
 
 
 class TestExploreModeBlocked:
-    """Explore mode must return 403 for every order endpoint."""
+    """The explore claim must return 403 for every order endpoint."""
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
     def test_explore_mode_returns_403(self, client, endpoint):
@@ -213,7 +217,7 @@ class TestExploreModeBlocked:
         assert resp.status_code == 403
         data = resp.get_json()
         assert data["status"] == "error"
-        assert "Example" in data["message"]
+        assert data["message"] == _EXAMPLE_ORDERS_REFUSAL
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
     def test_explore_mode_upper_case_jwt_normalised(self, client, endpoint):
@@ -260,7 +264,7 @@ class TestExploreModeBlocked:
         data = resp.get_json()
         assert data["status"] == "error"
         assert data["code"] == "mode_blocked"
-        assert "Example" in data["message"]
+        assert data["message"] == _EXAMPLE_ORDERS_REFUSAL
 
 
 # ---------------------------------------------------------------------------

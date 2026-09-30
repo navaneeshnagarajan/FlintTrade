@@ -107,6 +107,11 @@ _VALID_MODES = frozenset({_MODE_EXPLORE, _MODE_PRACTICE, _MODE_LIVE})
 # Other place-shaped routes delegate here. They do not call the sandbox or a broker.
 _PLACE_ROUTE_REQUIRED = "Orders are placed through /api/v1/orders/place."
 
+# Example (the explore claim) never places. Both order dispatchers share this refusal.
+_EXAMPLE_ORDERS_REFUSAL = (
+    "Orders are not available for Example. Switch to Practice or Live to trade."
+)
+
 # ---------------------------------------------------------------------------
 # OpenAlgo endpoint map — FlintTrade route suffix → OpenAlgo endpoint name
 # ---------------------------------------------------------------------------
@@ -2165,7 +2170,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     openalgo_endpoint = _ENDPOINT_MAP[ft_action]
 
     # ------------------------------------------------------------------
-    # Explore mode — orders never permitted
+    # Example (explore claim) — orders never permitted
     # ------------------------------------------------------------------
     if mode == _MODE_EXPLORE:
         logger.info(
@@ -2174,7 +2179,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         )
         return jsonify({
             "status": "error",
-            "message": "Orders are not available for Example. Switch to Practice or Live to trade.",
+            "message": _EXAMPLE_ORDERS_REFUSAL,
             "code": "mode_blocked",
         }), 403
 
@@ -2617,7 +2622,7 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
     if mode == _MODE_EXPLORE:
         return jsonify({
             "status": "error",
-            "message": "Orders are not available in Explore mode. Switch to Practice or Live to trade.",
+            "message": _EXAMPLE_ORDERS_REFUSAL,
             "code": "mode_blocked",
         }), 403
     if mode == _MODE_PRACTICE:
