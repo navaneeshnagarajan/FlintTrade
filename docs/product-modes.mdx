@@ -1,6 +1,6 @@
 ---
 title: Product Modes
-description: Practice, Connected (read), and Live are Modes. Example is sample data. Provenance stays separate. Home versus Trade ownership.
+description: Practice and Live are Modes. Connected (read) is a broker status. Example is sample data. Provenance stays separate. Home versus Trade ownership.
 ---
 
 # Product Modes
@@ -19,7 +19,8 @@ The Mode chip in the TopBar opens the Mode menu: **Practice**, **Connected (read
 
 Live stays locked while any of these reasons apply, in this order:
 
-- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no broker is connected. Either gap is enough.
+- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no broker is connected. Either gap is enough. When the authenticator is not enrolled, including after **Later** on **Two-factor authentication**, **Enrol authenticator in Settings** links to Settings → Security (`/settings#security`). The Live switch does not ask for an authenticator code.
+- `Create a PIN in Settings` — no PIN exists. Live stays locked, and those words link to Settings → Security (`/settings#security`).
 - `Not qualified for Live` — only when the place gate reports that this operator is not qualified. A missing report adds nothing. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
 
 ## Example data
@@ -28,15 +29,15 @@ Example is sample data, not a Mode. The chip reads **Example**. The Mode line re
 
 On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
 
-The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the single inline sample XIRR. There is no Portfolio XIRR card. On sample figures, Net Worth reads `Example equity and cash. Connect a broker to see yours.`; the allocation label is `Allocation` with the Example chip, and each `Live from broker` note on those figures is the Example chip. The Example chip paints only on example data. A connected book keeps `Allocation (live assets only)` and `Live from broker`. Mutual Funds on example data reads `Example NAVs · as of 10-Sep-2026`.
+The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the single inline sample XIRR. There is no Portfolio XIRR card. On sample figures, Net Worth reads `Example equity and cash. Connect a broker to see yours.`; the allocation label is `Allocation` with the Example chip, and each `Live from broker` note on those figures is the Example chip. On those Net Worth figures the Example chip paints only on example data. A connected book keeps `Allocation (live assets only)` and `Live from broker`. Mutual Funds on example data reads `Example NAVs · as of 10-Sep-2026`. Benchmark figures stay hard-coded in every Mode and keep the **Example** chip.
 
 ## Status homes
 
 Each status has one home.
 
-- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`. With no live feed, the Practice ticker also shows `Last close prices · Connect a broker for live prices →`, linking to `/settings#brokers`. The line hides once a live feed connects.
+- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`. The Practice ticker shows `Last close prices · Connect a broker for live prices →`, linking to `/settings#brokers`, only when the market session is not unavailable and neither the WebSocket nor a fresh REST fallback is producing quotes. An unavailable session is never labelled last close.
 - **Broker** — the desk-status broker chip (**Broker Connected**, **Broker Connected (read)**, or **Broker Unavailable**).
-- **Market** — the TopBar market-session chip. A closed or unavailable cash session reads `Market closed · opens 09:15`. That chip is not a Mode.
+- **Market** — the TopBar market-session chip. A confirmed closed cash session reads `Market closed · opens 09:15`. Unavailable timings read `Market unavailable`. That chip is not a Mode.
 
 ## Provenance labels
 

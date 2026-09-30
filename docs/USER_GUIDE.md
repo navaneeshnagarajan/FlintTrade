@@ -307,8 +307,9 @@ entered only through `POST /v1/auth/live`. `POST /v1/auth/mode` accepts
 only a switch to Practice.
 
 The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
-**Connected (read)**, and **Live**. Those three names are Modes. **Example** is
-sample data, not a Mode. The public web demo (`/demo-app`) is
+**Connected (read)**, and **Live**. Practice and Live are the session Modes.
+**Connected (read)** is a broker status on a Practice session, not a separate
+Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
 **Demo (example data)**.
 
 | Label | What it means |
@@ -332,7 +333,13 @@ Cancel leaves the current Mode.
 this order:
 
 - `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no
-  broker is connected. Either gap is enough for this one reason.
+  broker is connected. Either gap is enough for this one reason. When the
+  authenticator is not enrolled, including after **Later** on
+  **Two-factor authentication**, **Enrol authenticator in Settings** links
+  to Settings → Security (`/settings#security`). The Live switch does not
+  ask for an authenticator code.
+- `Create a PIN in Settings` — no PIN exists. Live stays locked, and those
+  words link to Settings → Security (`/settings#security`).
 - `Not qualified for Live` — only when the place gate reports that this
   operator is not qualified. If that report is absent, this reason is not
   shown. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
@@ -361,8 +368,8 @@ a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn → Practice Trading
 never offers Neo Practice — Kotak Neo has no sandbox. Operator copy is
 `Live read only until funded unlock.`
 
-**Mode, session, and sample data.** Practice, Connected (read), and Live name
-the active Mode. TopBar session chips (Continuous · CAS · Matching ·
+**Mode, session, and sample data.** Practice and Live name the session Mode.
+**Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
 Post-close · Closed) are market-session status, never Live mode. Example data
 uses **Example Buy** / **Example Sell** and records an example fill after
 review. Practice keeps **Practice Buy** / **Practice Sell**. Live uses
@@ -374,22 +381,25 @@ subsystem.
 - **Feed** lives once, at the start of the ticker. The chip is feed provenance,
   not a Mode. Example data always reads **Example**. Practice and Live may
   read **Live**, **Delayed**, **Stale ·** age, or **Unknown**. Practice with
-  no feed reads `No live feed (Practice)`. With no live feed, the Practice
-  ticker also shows `Last close prices · Connect a broker for live prices →`.
-  The link opens `/settings#brokers`. The line hides once a live feed connects.
+  no feed reads `No live feed (Practice)`. The Practice ticker shows
+  `Last close prices · Connect a broker for live prices →` only when the
+  market session is not unavailable and neither the WebSocket nor a fresh
+  REST fallback is producing quotes. The link opens `/settings#brokers`.
+  An unavailable session is never labelled last close.
 - **Broker** lives once, in the desk-status broker chip (**Broker Connected**,
   **Broker Connected (read)**, or **Broker Unavailable**, plus a plain failure
   when a money-path incident darkens the session). Account switching does not
   add a second broker chip.
-- **Market** lives once, in the TopBar market-session chip. A closed or
-  unavailable cash session reads `Market closed · opens 09:15`. That sentence
-  is not Live mode.
+- **Market** lives once, in the TopBar market-session chip. A confirmed
+  closed cash session reads `Market closed · opens 09:15`. Unavailable
+  timings read `Market unavailable`. Neither sentence is Live mode.
 
 
 **Market session.** The TopBar market chip shows the open phase
-(**Continuous**, **CAS**, **Matching**, or **Post-close**). A closed or
-unavailable cash session reads `Market closed · opens 09:15`, not the word
-Closed on its own. The chip tooltip/title is the window, for example
+(**Continuous**, **CAS**, **Matching**, or **Post-close**). A confirmed
+closed cash session reads `Market closed · opens 09:15`, not the word
+Closed on its own. Unavailable timings read `Market unavailable`, and
+are never labelled last close. The chip tooltip/title is the window, for example
 `CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
 after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
@@ -404,8 +414,8 @@ label. Example data reads `Example data. No broker is connected and no orders ar
 Practice reads `Practice — simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
 Widgets stay quiet: they do not repeat a second feed chip for the same fact.
-Mode is not provenance. A figure that stays fabricated in every Mode, such as
-benchmark returns, keeps its own illustrative note. The example-data banner
+Mode is not provenance. Benchmark figures stay hard-coded in every Mode
+and keep the **Example** chip. The example-data banner
 `Example data. Connect a broker to see your own.` never shows in Practice.
 On Invest, an Example chip on each view replaces that banner. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
@@ -550,11 +560,11 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
-2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
-   **Sample Buy** — sample review, then a local sample fill (no broker).
-   For the full native-sandbox path this walkthrough uses, click the
-   badge once to switch to Practice. There is no confirmation dialog.
-   The UI calls `POST /v1/auth/mode` so the JWT matches.
+2. A fresh desk is already in **Practice**. Open the Mode menu if the
+   chip says **Example** and choose **Practice** (a sample-data session is
+   sent to Setup). Practice does not ask for a PIN. The UI calls
+   `POST /v1/auth/mode` so the session matches. To look at sample data
+   instead, use **Try with example data** from Welcome or sign-in.
 3. Open **+ Widget** (the dialog title is **Add Widget**) and choose
    **Order Pad**, or pick a preset that contains it. If an Order Pad is
    already open, choosing it again focuses that pad. It does not add a
@@ -683,14 +693,17 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Broker or OpenAlgo session is current if you are intentionally testing a
       live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
-- [ ] The authenticator is enrolled, or you will confirm a one-time
-      authenticator code in the Live switch dialog (if you chose **Later**
-      on the **Two-factor authentication** card). Example and Practice stay
-      password-only until enrolment. First-run Setup does not unlock Live.
+- [ ] The authenticator is enrolled. After **Later** on the
+      **Two-factor authentication** card, the Live menu stays locked and
+      **Enrol authenticator in Settings** links to Settings → Security
+      (`/settings#security`). The Live switch does not ask for an
+      authenticator code. Example and Practice stay password-only until
+      enrolment. First-run Setup does not unlock Live.
 - [ ] An **exactly 6-digit** PIN is set under Settings → Security
-      (`/settings#security`). The Live switch asks for this PIN together
-      with authenticator enrolment. Quick Unlock uses the same PIN to
-      reopen the current Mode.
+      (`/settings#security`). With no PIN, Live stays locked and shows
+      `Create a PIN in Settings`, linking to that same page. Once Live is
+      eligible, the switch asks for this PIN. Quick Unlock uses the same
+      PIN to reopen the current Mode.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Laya is **Ready** or **Degraded** if you intend a place attempt.
@@ -708,13 +721,13 @@ See [Laya on place](#laya-on-place).
 
 ### Walkthrough
 
-1. Click the **PRACTICE** badge in the top bar, or select **Live** on
-   the welcome mode picker. The dialog warns that real orders will be
-   placed and asks for an **authenticator code** and your **exactly
-   6-digit PIN**. The Live switch requires both — a confirmed authenticator
-   enrolment plus the PIN. If you chose **Later** on the
-   **Two-factor authentication** card, enter a one-time authenticator code
-   in the dialog to enrol, then the PIN. `POST /v1/auth/live` refuses
+1. Open the Mode menu and choose **Live** when it is enabled. **Switch to
+   Live Trading?** warns that real orders will be placed and asks for your
+   **exactly 6-digit PIN** (`Enter your PIN to confirm`). It does not ask
+   for an authenticator code. After **Later** on the **Two-factor
+   authentication** card, Live stays locked and **Enrol authenticator in
+   Settings** links to Settings → Security. With no PIN, Live stays locked
+   on `Create a PIN in Settings`. `POST /v1/auth/live` refuses
    403 `totp_required` until the authenticator is enabled. Quick Unlock
    reopens the same Mode the session already had, with the correct PIN,
    and never changes the Mode. Set the PIN under Settings → Security
@@ -757,8 +770,8 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
-| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
 | `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
@@ -905,12 +918,14 @@ still runs after cash continuous ends, the TopBar may show `F&O open · till
 
 Feed provenance lives on the ticker chip. Example data reads **Example**.
 Practice and Live may read **Live**, **Delayed**, muted **Stale** or
-**Unknown** plus age when known, or `No live feed (Practice)`. With no
-live feed, the Practice ticker shows
+**Unknown** plus age when known, or `No live feed (Practice)`. The
+Practice ticker shows
 `Last close prices · Connect a broker for live prices →`, linking to
-`/settings#brokers`. That line hides once a live feed connects. Feed
-provenance is independent of Practice, Connected (read), and Live, so
-silent-stale is a fail.
+`/settings#brokers`, only when the market session is not unavailable and
+neither the WebSocket nor a fresh REST fallback is producing quotes.
+Unavailable timings read `Market unavailable` and are never labelled last
+close. Feed provenance is independent of Practice, Connected (read), and
+Live, so silent-stale is a fail.
 
 With example data, `/trade` Watchlist checked LTP and % change columns
 use the same sample quotes as the ticker tape.
