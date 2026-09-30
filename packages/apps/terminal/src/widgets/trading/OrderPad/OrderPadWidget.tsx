@@ -389,6 +389,16 @@ function prefillTargetKey(next: OrderPadPrefill): string {
   return `${next.symbol ?? ""}|${next.exchange ?? ""}|${next.action ?? ""}`;
 }
 
+/** Place-response fields the Practice fill sentence reads.
+ *  Kept outside the submit callback so a type member is not a hook dependency.
+ */
+type PracticeFillResult = {
+  message?: unknown;
+  price?: unknown;
+  price_source?: unknown;
+  price_age_s?: unknown;
+};
+
 function OrderPadWidget(props: WidgetProps) {
   // Optional prefill from a launcher (e.g. a CreateOrder intent or a
   // watchlist row-hover Buy/Sell). Only seeds the initial form; the user
@@ -855,7 +865,7 @@ function OrderPadWidget(props: WidgetProps) {
       const exitWhileDown = options?.exit === true
         && useOperatorSignalStore.getState().decisionStatus !== "ready";
       const practiceFill = placedMode === "practice"
-        ? visiblePracticeFill(result as { message?: unknown; price?: unknown; price_source?: unknown; price_age_s?: unknown })
+        ? visiblePracticeFill(result as PracticeFillResult)
         : "";
       const successText = exitWhileDown
         ? LAYA_EXIT_WHILE_DOWN
