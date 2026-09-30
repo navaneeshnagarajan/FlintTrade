@@ -25,7 +25,7 @@ Max options premium = Account Capital × 0.01
 ```
 
 ### Lot-Based Sizing (F&O)
-NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Sep/Oct expiry)
+NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)
 Lot-based simulations should use whole lots and round down when a model produces a fractional lot.
 
 ## Stop-Loss Placement

@@ -9,12 +9,21 @@ import type { Funds, Holding, Position } from "@/types/api";
 
 const fundsQuery = vi.hoisted(() => ({
   data: undefined as Funds | undefined,
+  isSuccess: true,
+  isError: false,
+  isLoading: false,
 }));
 const holdingsQuery = vi.hoisted(() => ({
   data: undefined as Holding[] | undefined,
+  isSuccess: true,
+  isError: false,
+  isLoading: false,
 }));
 const positionsQuery = vi.hoisted(() => ({
   data: undefined as Position[] | undefined,
+  isSuccess: true,
+  isError: false,
+  isLoading: false,
 }));
 
 vi.mock("@/hooks/useFunds", () => ({ useFunds: () => fundsQuery }));

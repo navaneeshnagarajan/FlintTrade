@@ -222,7 +222,7 @@ def test_index_lot_line_uses_the_scalper_rows_and_marks_gaps() -> None:
 def test_risk_skill_lot_line_matches_the_scalper_labels() -> None:
     """The skill states the same near-month labels the Scalper reads from the master."""
     line = index_lot_line()
-    assert line == "NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Sep/Oct expiry)"
+    assert line == "NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)"
     assert "—" not in line
     assert re.search(r"\bNIFTY\b", line) and re.search(r"\bBANKNIFTY\b", line) and re.search(r"\bSENSEX\b", line)
     skill = (_ROOT / "packages/services/ai/skills/risk_management.md").read_text(encoding="utf-8")

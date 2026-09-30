@@ -959,7 +959,7 @@ across Dhan and Neo. A later expiry with a different size is kept.
 `scalper_lot_label` returns `size · expiry` (for example `65 · Sep expiry`
 per the broker instrument master). When the next month’s size differs,
 both months are named. `index_lot_line` is the risk line, for example
-`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Sep/Oct expiry)` on the shipped
+`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)` on the shipped
 excerpt, with `—` for an underlying the master does not list.
 `missing_lot_refusal` is the order text:
 `Not placed. The lot size for <contract> isn't in the instrument master, so this order can't be sized.`
