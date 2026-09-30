@@ -98,16 +98,19 @@ def _laya_ready_for_open_place() -> None:
 def _reset_rate_limiter(flask_app):
     """Refill the order-route token buckets before each test.
 
-    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10).
-    ``flask_app`` is module-scoped, so its single RateLimiter accumulates state
-    across every test in this file — dozens of order POSTs share one bucket
-    keyed by the test client's remote_addr and would 429 after the 10-token
-    burst. Production keys per operator and never fires 10 orders/s from a UI;
-    tests just need a clean bucket per case.
+    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10)
+    and Flask-Limiter's default 50/s. ``flask_app`` is module-scoped, so both
+    limiters accumulate state across every test in this file — dozens of order
+    POSTs share one bucket keyed by the test client's remote_addr and would 429
+    after the burst. Production keys per operator and never fires that many
+    orders in one second; tests just need a clean bucket per case.
     """
     limiter = flask_app.config.get("RATE_LIMITER")
     if limiter is not None:
         limiter.reset()
+    flask_limiter = flask_app.config.get("LIMITER")
+    if flask_limiter is not None:
+        flask_limiter.reset()
     yield
 
 
@@ -492,6 +495,129 @@ class TestPracticeMode:
             "message": "A market order needs a live price (LTP) to fill",
         }
 
+    def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "",
+            "status": "REJECTED",
+            "message": "A market fill needs a positive live price; no LTP was available",
+        }
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == (
+            "No price for NIFTY right now. Practice needs a live price or a recent close."
+        )
+        assert "no LTP was available" not in resp.get_json()["message"]
+
+    def test_unmarked_practice_price_is_not_a_fill(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "price": 812.4},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert "No price for NIFTY" in resp.get_json()["message"]
+        mock_sandbox.place_order.assert_not_called()
+
+    def test_marked_live_price_is_the_practice_fill(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-LTP",
+            "status": "COMPLETE",
+            "message": "Paper order filled",
+        }
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "price": 812.4, "price_basis": "ltp"},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        mock_sandbox.place_order.assert_called_once()
+        assert mock_sandbox.place_order.call_args.kwargs["price"] == 812.4
+        assert mock_sandbox.place_order.call_args.kwargs["price_source"] == "ltp"
+
+    def test_last_stored_close_fills_and_is_labelled(self, flask_app, client, monkeypatch):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                assert symbol == "SBIN"
+                return [{
+                    "ts": now - timedelta(days=2),
+                    "prev_close": 812.40,
+                    "close": 810.0,
+                }]
+
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-CLOSE",
+            "status": "COMPLETE",
+            "message": "Paper order executed",
+        }
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "symbol": "SBIN", "price": 1.0},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["price"] == 812.40
+        assert body["price_source"] == "last_close"
+        assert body["message"] == "Simulated at last close ₹812.40 (2 days old)"
+        assert "0.00" not in body["message"]
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == 812.40
+        assert kwargs["price_source"] == "last_close"
+
+    def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
+        class Closed:
+            def is_market_open(self, exchange, symbol=None):
+                return False
+
+        monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Closed())
+        mock_sandbox = MagicMock()
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "NIFTY24APR25500CE",
+                "exchange": "NFO",
+                "price": 12.5,
+                "price_basis": "ltp",
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == (
+            "Option prices go stale outside market hours. Try again when the market opens."
+        )
+        mock_sandbox.place_order.assert_not_called()
+
     def test_pending_order_requires_a_running_tick_source(
         self, flask_app, client, monkeypatch
     ):
@@ -671,6 +797,7 @@ class TestPracticeMode:
                     "action": action,
                     "quantity": quantity,
                     "price": price,
+                    "price_basis": "ltp",
                     "product": "MIS",
                     "order_type": "MARKET",
                 },
