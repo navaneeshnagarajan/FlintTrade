@@ -109,62 +109,19 @@ LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
         sys.stderr.write("laya download pin is incomplete\\n")
         raise SystemExit(1)
     os.environ["HF_HUB_OFFLINE"] = "0"
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
     os.environ.pop("TRANSFORMERS_OFFLINE", None)
     os.environ.pop("HUGGINGFACE_HUB_CACHE", None)
     os.environ.pop("HF_HUB_CACHE", None)
-    os.environ.pop("HF_HOME", None)
+    os.environ.pop("HF_XET_CACHE", None)
+    hf_home = os.environ.get("HF_HOME", "").strip()
+    if not hf_home:
+        hf_home = os.path.join(os.path.dirname(dest), "hf-home")
+        os.environ["HF_HOME"] = hf_home
+    os.makedirs(hf_home, exist_ok=True)
     os.makedirs(dest, exist_ok=True)
     cache = os.path.join(dest, ".hf-cache")
     bars = []
-
-    class _Progress:
-        # huggingface_hub 1.33.0 keeps a transfer bar and a reconstruct bar
-        # for the same bytes, then calls set_description_str and
-        # set_postfix_str. A later hub method named set_* is ignored.
-        def __init__(self, *args, total=None, **kwargs):
-            self.n = 0
-            self.total = int(total or 0)
-            self.unit = kwargs.get("unit", "it")
-            bars.append(self)
-            _emit()
-
-        def update(self, n=1):
-            self.n += int(n)
-            _emit()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def close(self):
-            _emit()
-
-        def refresh(self):
-            _emit()
-
-        def reset(self, total=None):
-            self.n = 0
-            if total is not None:
-                self.total = int(total)
-            _emit()
-
-        def set_description(self, *args, **kwargs):
-            return None
-
-        def set_description_str(self, *args, **kwargs):
-            return None
-
-        def set_postfix_str(self, *args, **kwargs):
-            return None
-
-        def __getattr__(self, name):
-            if isinstance(name, str) and name.startswith("set_"):
-                def _ignored(*_args, **_kwargs):
-                    return None
-                return _ignored
-            raise AttributeError(name)
 
     def _emit():
         # Two byte bars describe one download. Summing them reports the
@@ -180,6 +137,86 @@ LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
             total = 0
         sys.stdout.write(f"laya download progress {done} {total}\\n")
         sys.stdout.flush()
+
+    try:
+        from tqdm.auto import tqdm as _TqdmBase
+    except ImportError:
+        _TqdmBase = None
+
+    if _TqdmBase is not None:
+        class _Progress(_TqdmBase):
+            # huggingface_hub 1.33.0 keeps a transfer bar and a reconstruct
+            # bar, then calls set_description_str and set_postfix_str. Those
+            # methods, and any later one, come from tqdm.
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                bars.append(self)
+                _emit()
+
+            def update(self, n=1):
+                if n is None:
+                    n = 1
+                result = super().update(n)
+                _emit()
+                return result
+
+            def refresh(self, *args, **kwargs):
+                result = super().refresh(*args, **kwargs)
+                _emit()
+                return result
+    else:
+        class _Progress:
+            # Used only when tqdm is not installed. The sidecar hub already
+            # depends on tqdm, so a download takes the subclass above.
+            def __init__(self, *args, total=None, **kwargs):
+                self.n = 0
+                self.total = int(total or 0)
+                self.unit = kwargs.get("unit", "it")
+                bars.append(self)
+                _emit()
+
+            def update(self, n=1):
+                if n is None:
+                    n = 1
+                self.n += int(n)
+                _emit()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def close(self):
+                _emit()
+
+            def refresh(self, *args, **kwargs):
+                _emit()
+
+            def reset(self, total=None):
+                self.n = 0
+                if total is not None:
+                    self.total = int(total)
+                _emit()
+
+            def set_description(self, *args, **kwargs):
+                return None
+
+            def set_description_str(self, *args, **kwargs):
+                return None
+
+            def set_postfix_str(self, *args, **kwargs):
+                return None
+
+            def set_postfix(self, *args, **kwargs):
+                return None
+
+            def __getattr__(self, name):
+                if isinstance(name, str) and name.startswith("set_"):
+                    def _ignored(*_args, **_kwargs):
+                        return None
+                    return _ignored
+                raise AttributeError(name)
 
     from huggingface_hub import snapshot_download
 
@@ -1719,10 +1756,18 @@ class LayaRuntime:
             "HUGGINGFACE_HUB_CACHE",
             "HF_HUB_CACHE",
             "HF_HOME",
+            "HF_XET_CACHE",
             "HF_TOKEN",
             "LAYA_WEIGHTS_PATH",
         ):
             env.pop(name, None)
+        # huggingface_hub 1.33.0 reads HF_HUB_DISABLE_XET. HF_HOME still
+        # owns any transfer log that is written, under this runtime folder
+        # rather than the shared user cache.
+        hf_home = self.runtime_root / "hf-home"
+        hf_home.mkdir(parents=True, exist_ok=True)
+        env["HF_HOME"] = str(hf_home)
+        env["HF_HUB_DISABLE_XET"] = "1"
         argv = [str(venv_python(self.venv_dir)), "-c", LAYA_DOWNLOAD_BOOTSTRAP]
         _LOG.info(LAYA_DOWNLOAD_LOG, policy.repo, revision)
         try:

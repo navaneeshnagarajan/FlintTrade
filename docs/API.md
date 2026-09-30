@@ -568,7 +568,9 @@ into `<workspace>/runtime/laya/staging` when the weights file or a
 manifest file is not on disk, and when the runtime checkpoint is on disk
 but its hashes are not the pin. The download asks for the commit in
 `[checkpoint] revision`, not the default branch, and it does not start
-the sidecar. While it runs, including a pin change, the reason is
+the sidecar. That download keeps Hugging Face's home at
+`<workspace>/runtime/laya/hf-home`, not the shared cache. While it runs,
+including a pin change, the reason is
 `downloading` ("Downloading the model · 1.2 of 3.4 GB"), the status word
 is Down, and there is no Updating label. When no checkpoint is already
 there, a full match renames staging onto `checkpoint`. When a checkpoint

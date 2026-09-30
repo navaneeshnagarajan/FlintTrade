@@ -185,7 +185,8 @@ downloads the commit in `[checkpoint] revision`, not the model repository's
 default branch, into `<workspace>/runtime/laya/staging` when the weights
 file or a manifest file is not on disk, and when the runtime checkpoint
 is on disk but its hashes are not the pin. The download does not start
-the sidecar. While it runs, including a pin change, the chip is
+the sidecar. Transfer logs stay in `<workspace>/runtime/laya/hf-home`,
+not in the shared cache. While it runs, including a pin change, the chip is
 Downloading the model · 1.2 of 3.4 GB and the status word is Down. There
 is no Updating label. When no checkpoint is already there, a full match
 renames staging onto `<workspace>/runtime/laya/checkpoint`. When a

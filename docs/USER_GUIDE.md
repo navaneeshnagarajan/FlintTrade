@@ -587,8 +587,9 @@ the weights file or any pinned manifest file is not already installed,
 `start` downloads the pinned commit from `[checkpoint] revision` first.
 That step does not start the sidecar, and it does not use the default
 branch. The files land in `<workspace>/runtime/laya/staging`, not in the
-launch directory and not in the shared Hugging Face cache. While that
-runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
+launch directory and not in the shared Hugging Face cache. Transfer
+logs stay in `<workspace>/runtime/laya/hf-home`, not in that shared cache.
+While that runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
 progress, one decimal, decimal GB). Orders are refused with **Laya is
 Down. Orders are paused until it's Ready.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. When no

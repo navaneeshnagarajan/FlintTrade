@@ -1990,6 +1990,12 @@ def _progress_lines(stdout: Any) -> list[tuple[int, int]]:
 def test_download_progress_accepts_hub_tqdm_methods() -> None:
     """huggingface_hub 1.33.0 calls set_description_str and set_postfix_str after the bytes land."""
     progress, stdout = _load_download_progress()
+    try:
+        from tqdm.auto import tqdm as tqdm_base
+    except ImportError:
+        tqdm_base = None
+    else:
+        assert issubclass(progress, tqdm_base)
     bar = progress(total=2_370_000_000, unit="B")
     bar.update(2_370_000_000)
     bar.set_description("Downloading bytes")
@@ -2023,6 +2029,42 @@ def test_download_progress_counts_coexisting_staged_and_final_files_once(tmp_pat
     done, total = _progress_lines(stdout)[-1]
     assert (done, total) == (staged_bytes, staged_bytes)
     assert total != staged_bytes + final_bytes
+
+
+def _default_huggingface_home() -> Path:
+    """The cache huggingface_hub uses when ``HF_HOME`` is unset."""
+    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
+    return (base / "huggingface").resolve()
+
+
+@pytest.mark.unit
+def test_download_env_keeps_huggingface_home_inside_flinttrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Transfer logs use the runtime folder, not the shared user cache."""
+    policy = load_policy()
+    shared = _default_huggingface_home()
+    monkeypatch.setenv("HF_HOME", str(shared))
+    monkeypatch.setenv("HF_XET_CACHE", str(shared / "xet"))
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    seen: dict[str, str] = {}
+
+    def download(_argv: list[str], env: dict[str, str]) -> int:
+        seen.update(env)
+        return 1
+
+    runtime = LayaRuntime(tmp_path, downloader=download, watch=False)
+    assert runtime._download_checkpoint(policy) is False  # noqa: SLF001
+    hf_home = Path(seen["HF_HOME"]).resolve()
+    assert hf_home.is_relative_to(runtime.runtime_root.resolve())
+    assert hf_home == (runtime.runtime_root / "hf-home").resolve()
+    assert hf_home != shared
+    assert shared not in hf_home.parents
+    assert "HF_XET_CACHE" not in seen
+    assert seen["HF_HUB_DISABLE_XET"] == "1"
+    assert "HUGGINGFACE_HUB_CACHE" not in seen
+    reset_process_laya_for_tests()
 
 
 class _PidProcess(_Process):

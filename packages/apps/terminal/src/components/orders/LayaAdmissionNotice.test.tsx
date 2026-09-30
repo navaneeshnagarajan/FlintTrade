@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { LayaAdmissionNotice } from "./LayaAdmissionNotice";
 
 describe("LayaAdmissionNotice", () => {
-  it("names the server reason for assistive tech", () => {
+  it("names the server reason once inside the denial alert", () => {
     render(
       <LayaAdmissionNotice
         notice={{
@@ -17,8 +17,11 @@ describe("LayaAdmissionNotice", () => {
         }}
       />,
     );
-    expect(screen.getByRole("status", { name: "Laya decision" })).toHaveTextContent(
-      "Laya is Down. Orders are paused until it's Ready.",
-    );
+    const reason = "Laya is Down. Orders are paused until it's Ready.";
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(reason);
+    expect(screen.queryByRole("status", { name: "Laya decision" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Laya decision")).toHaveTextContent(reason);
+    expect(alert).toContainElement(screen.getByLabelText("Laya decision"));
   });
 });

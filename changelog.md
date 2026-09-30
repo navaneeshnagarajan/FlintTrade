@@ -40,6 +40,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   It is not Ready by default. A first start with the checkpoint missing
   or incomplete downloads the commit named by `[checkpoint] revision`
   (not the model repository's default branch) into `runtime/laya/staging`,
+  with `HF_HOME` at `runtime/laya/hf-home` so transfer logs stay out of
+  the shared cache,
   hashes the files there against the `[checkpoint]` and
   `[checkpoint.manifest]` pins, and on a full match moves that directory
   onto `runtime/laya/checkpoint` before the offline launch. When a new

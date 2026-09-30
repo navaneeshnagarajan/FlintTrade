@@ -41,7 +41,7 @@ export function LayaAdmissionNotice({
     <div data-testid="laya-denied" role="alert" className="space-y-0.5">
       <p className="text-xs font-semibold text-text-primary">{notice.headline}</p>
       {notice.reason ? (
-        <p className="text-xs text-text-secondary" role="status" aria-label="Laya decision">
+        <p className="text-xs text-text-secondary" aria-label="Laya decision">
           {notice.reason}
         </p>
       ) : null}

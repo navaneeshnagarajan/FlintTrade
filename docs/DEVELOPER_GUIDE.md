@@ -543,7 +543,10 @@ on a start that fails after the key was written.
 default branch) into `<workspace>/runtime/laya/staging` when the weights
 file or any manifest file is not already installed, and when the runtime
 checkpoint is on disk but its hashes are not the pin. That directory is
-not the launch path and not the shared Hugging Face cache. The step does
+not the launch path and not the shared Hugging Face cache. The download
+sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
+`HF_HUB_DISABLE_XET=1` (read by `huggingface_hub` 1.33.0), so transfer
+logs stay in that folder. The step does
 not start the sidecar. While it runs, including a pin change, the reason
 is `downloading` and the popover is `Downloading the model · 1.2 of 3.4 GB`
 (live, one decimal, decimal GB), with no Next line and no Updating label.
@@ -634,8 +637,9 @@ not a status code. The desk shows Not started, Stopped,
 Can't download the model, Unreachable, Wrong model version, Can't verify
 the model, Can't reach Laya, and The Laya API key file is missing.
 `key_missing` stays until the next start or an explicit stop. A health
-check does not replace it with Not started. The download progress line
-counts the model once. `unverified` applies when this start did
+check does not replace it with Not started. The download progress class
+subclasses `tqdm.auto.tqdm` when that package is already installed with
+the hub, and the progress line counts the model once. `unverified` applies when this start did
 not download. A failed download, including one over an older unverified
 snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
 sidecar port. Tooltips for
