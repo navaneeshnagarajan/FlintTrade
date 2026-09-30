@@ -266,7 +266,7 @@ export function DashboardTab() {
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-available-funds">
-          {netWorthLabel(availableCash)}
+          {maskValue(formatAccountNetWorth(availableCash), valuesHidden)}
         </div>
         <p className="text-xs text-text-muted">Withdrawable cash</p>
       </GlassCard>
