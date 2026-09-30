@@ -655,7 +655,7 @@ def test_pristine_replacement_store_can_supersede_workspace_checkpoint_once(tmp_
 
 @pytest.mark.unit
 def test_pristine_replacement_authority_rejects_a_non_pristine_store(tmp_path) -> None:
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
     from flinttrade_data.orderflow_checkpoint import store_orderflow_checkpoint
@@ -668,7 +668,7 @@ def test_pristine_replacement_authority_rejects_a_non_pristine_store(tmp_path) -
     replacement = StorageManager(str(tmp_path / "replacement.duckdb"))
     replacement.initialise()
     replacement.insert_tick(
-        datetime(2026, 8, 12, 4, 0),
+        datetime(2026, 8, 12, 4, 0, tzinfo=UTC),
         "RELIANCE",
         "NSE",
         "quote",
@@ -691,7 +691,7 @@ def test_pristine_replacement_authority_rejects_a_non_pristine_store(tmp_path) -
 
 @pytest.mark.unit
 def test_missing_identity_with_unknown_prune_history_never_attests_complete_prefix(tmp_path) -> None:
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
     from flinttrade_data.orderflow_checkpoint import store_orderflow_checkpoint
@@ -703,7 +703,7 @@ def test_missing_identity_with_unknown_prune_history_never_attests_complete_pref
     old_cursor = original.get_tick_replay_cursor()
     store_orderflow_checkpoint(tmp_path, OrderFlowAggregator().export_state(), old_cursor)
     original.insert_tick(
-        datetime(2026, 8, 12, 4, 0),
+        datetime(2026, 8, 12, 4, 0, tzinfo=UTC),
         "RELIANCE",
         "NSE",
         "quote",

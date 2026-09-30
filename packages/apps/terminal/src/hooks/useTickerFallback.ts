@@ -243,13 +243,14 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
     // Honest initial report (stale until the first poll lands), then an
     // immediate poll so the UI gets data right away on disconnect.
     report();
-    void runPoll();
+    if (typeof document === "undefined" || !document.hidden) void runPoll();
 
     const timer = setInterval(() => {
       // Double-check inside the interval: if WS reconnected, bail early and let
       // the interval clear on the next effect run. This avoids a race where the
       // interval fires one extra time after WS comes back.
-      if (wsConnectedRef.current) return;
+      // A hidden tab does not keep polling quotes.
+      if (wsConnectedRef.current || document.hidden) return;
 
       void runPoll();
     }, POLL_INTERVAL_MS);
