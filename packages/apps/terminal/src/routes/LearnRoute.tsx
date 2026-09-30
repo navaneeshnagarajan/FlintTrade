@@ -786,14 +786,24 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
 // Main
 // ---------------------------------------------------------------------------
 
+function learnTabFromHash(hash: string): TabId | null {
+  const id = hash.replace(/^#/, "");
+  return TABS.some((tab) => tab.id === id) ? (id as TabId) : null;
+}
+
 export default function LearnRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("learn", "daysActive"); }, []);
 
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<TabId>("basics");
+  const [activeTab, setActiveTab] = useState<TabId>(() => learnTabFromHash(location.hash) ?? "basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const level = useSkillLevel("learn");
   const selectedDoc = useMemo(() => getSelectedDoc(location.state), [location.state]);
+
+  useEffect(() => {
+    const next = learnTabFromHash(location.hash);
+    if (next) setActiveTab(next);
+  }, [location.hash]);
 
   useEffect(() => {
     if (selectedDoc) setActiveTab("resources");

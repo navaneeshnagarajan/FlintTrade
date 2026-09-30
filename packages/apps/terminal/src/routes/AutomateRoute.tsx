@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useLocation } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Page, PageBody, PageHeader } from "@/components/layout/Page";
 import TabTransition from "@/components/motion/TabTransition";
@@ -19,26 +20,42 @@ import WebhooksSection    from "./automate/WebhooksSection";
 
 const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
+function sectionIdFromHash(hash: string): SectionId | null {
+  const id = hash.replace(/^#/, "");
+  return SECTIONS.some((section) => section.id === id) ? (id as SectionId) : null;
+}
+
 export default function AutomateRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("automate", "daysActive"); }, []);
 
+  const location = useLocation();
+  const hashedSection = sectionIdFromHash(location.hash);
   const level = useSkillLevel("automate");
 
   // Density adaptation:
   // Beginner: Alerts/Monitors + Settings only (hide Flows, Cron, Strategies)
   // Intermediate: Flows + Schedules + Monitors + Logs + emergency settings
   // Advanced: All sections
+  // A deep link such as /automate#schedules still opens that section.
   const visibleSectionIds: SectionId[] = (() => {
-    if (level === "beginner") return ["monitors", "settings"];
-    if (level === "intermediate") return ["flows", "schedules", "monitors", "webhooks", "logs", "settings"];
-    return ["flows", "schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
+    const base: SectionId[] = level === "beginner"
+      ? ["monitors", "settings"]
+      : level === "intermediate"
+        ? ["flows", "schedules", "monitors", "webhooks", "logs", "settings"]
+        : ["flows", "schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
+    if (hashedSection && !base.includes(hashedSection)) return [hashedSection, ...base];
+    return base;
   })();
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
 
-  // Default to the first visible section for the current skill level
-  const defaultSection = visibleSectionIds[0] ?? "monitors";
+  // Default to the hash target, otherwise the first visible section.
+  const defaultSection = hashedSection ?? visibleSectionIds[0] ?? "monitors";
   const [activeSection, setActiveSection] = useState<SectionId>(defaultSection);
+
+  useEffect(() => {
+    if (hashedSection) setActiveSection(hashedSection);
+  }, [hashedSection]);
 
   // Lightweight queries for rail status dots — same keys fetched by each section on mount,
   // so no extra network requests are made.
