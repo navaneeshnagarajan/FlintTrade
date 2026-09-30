@@ -22,6 +22,7 @@ import {
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import ProtectedRoute from "./routes/ProtectedRoute";
+import { LoadingState } from "./components/ui/states";
 import "./index.css";
 
 /**
@@ -79,6 +80,11 @@ const AdminRoute = lazy(() => import("./routes/AdminRoute"));
 const ObservabilityDashboard = lazy(() => import("./admin/observability"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
+/** In-shell fallback: fills the content area under the app chrome. */
+function RouteLoading() {
+  return <LoadingState fill label="Loading…" />;
+}
+
 function Loading() {
   return (
     <div className="flex items-center justify-center h-screen bg-surface-base" role="status">
@@ -129,20 +135,20 @@ const router = createBrowserRouter([
       {
         element: <ProtectedRoute><AppLayout /></ProtectedRoute>,
         children: [
-          { path: "home", element: <ProtectedRoute><RouteErrorBoundary routeName="Home"><Suspense fallback={<Loading />}><HomeRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "home", element: <ProtectedRoute><RouteErrorBoundary routeName="Home"><Suspense fallback={<RouteLoading />}><HomeRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<RouteLoading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "terminal", element: <Navigate to="/trade" replace /> },
-          { path: "invest", element: <ProtectedRoute><RouteErrorBoundary routeName="Invest"><Suspense fallback={<Loading />}><InvestRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "learn", element: <ProtectedRoute><RouteErrorBoundary routeName="Learn"><Suspense fallback={<Loading />}><LearnRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "lab", element: <ProtectedRoute><RouteErrorBoundary routeName="Lab"><Suspense fallback={<Loading />}><LabRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Account Manager"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "invest", element: <ProtectedRoute><RouteErrorBoundary routeName="Invest"><Suspense fallback={<RouteLoading />}><InvestRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "learn", element: <ProtectedRoute><RouteErrorBoundary routeName="Learn"><Suspense fallback={<RouteLoading />}><LearnRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "lab", element: <ProtectedRoute><RouteErrorBoundary routeName="Strategy Lab"><Suspense fallback={<RouteLoading />}><LabRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<RouteLoading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI Centre"><Suspense fallback={<RouteLoading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Accounts"><Suspense fallback={<RouteLoading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<RouteLoading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           ...(import.meta.env.DEV
             ? [
-                { path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<Loading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-                { path: "admin/observability", element: <ProtectedRoute><RouteErrorBoundary routeName="Observability"><Suspense fallback={<Loading />}><ObservabilityDashboard /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+                { path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<RouteLoading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+                { path: "admin/observability", element: <ProtectedRoute><RouteErrorBoundary routeName="Observability"><Suspense fallback={<RouteLoading />}><ObservabilityDashboard /></Suspense></RouteErrorBoundary></ProtectedRoute> },
               ]
             : []),
         ],

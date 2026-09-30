@@ -189,7 +189,7 @@ export default function LoginRoute({
   // AND their backup codes can still mint fresh ones with just their password.
   if (mode === "full" && recovering) {
     return (
-      <div className="flex min-h-screen flex-col bg-surface-base p-6">
+      <main aria-label="Recover two-factor access" className="flex min-h-screen flex-col bg-surface-base p-6">
         <div className="m-auto w-full max-w-sm space-y-6">
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
@@ -199,26 +199,29 @@ export default function LoginRoute({
             authenticatorEnrolled={totpEnabled}
           />
         </div>
-      </div>
+      </main>
     );
   }
 
   if (mode === "full" && resettingPassword) {
     return (
-      <div className="flex min-h-screen flex-col bg-surface-base p-6">
+      <main aria-label="Reset password" className="flex min-h-screen flex-col bg-surface-base p-6">
         <div className="m-auto w-full max-w-sm space-y-6">
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
           </div>
           <PasswordReset onBack={() => setResettingPassword(false)} />
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-base p-6">
-      <div className="m-auto w-full max-w-sm space-y-6">
+    <main
+      aria-label={mode === "pin" ? "Unlock FlintTrade" : "Welcome back"}
+      className="flex min-h-screen flex-col bg-surface-base p-6"
+    >
+      <div className="m-auto w-full max-w-sm space-y-6 rounded-2xl border border-border-default bg-surface-card p-7 shadow-floating">
         {/* Logo */}
         <div className="flex justify-center">
           <LogoIcon size={40} className="text-accent" />
@@ -245,7 +248,13 @@ export default function LoginRoute({
         )}
 
         {mode === "pin" ? (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (pin.length === 6 && !isLoading) void handlePinLogin();
+            }}
+          >
             <div>
               <label htmlFor="pin" className="text-xs text-text-muted font-medium block mb-1.5">
                 Quick Unlock
@@ -259,12 +268,12 @@ export default function LoginRoute({
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
                 placeholder="6-digit PIN"
                 className="text-center font-mono text-lg tracking-widest"
-                onKeyDown={(e) => e.key === "Enter" && handlePinLogin()}
+                autoComplete="off"
                 autoFocus
               />
             </div>
             <Button
-              onClick={handlePinLogin}
+              type="submit"
               disabled={pin.length !== 6 || isLoading}
               className="w-full"
             >
@@ -278,9 +287,16 @@ export default function LoginRoute({
             >
               Use password instead
             </button>
-          </div>
+          </form>
         ) : (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const ready = Boolean(password) && (!totpRequired || totpCode.length >= 6);
+              if (ready && !isLoading) void handlePasswordLogin();
+            }}
+          >
             <div>
               <label htmlFor="password" className="text-xs text-text-secondary font-medium block mb-1.5">
                 Password
@@ -292,6 +308,7 @@ export default function LoginRoute({
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
                 aria-label="Enter your password"
+                autoComplete="current-password"
                 autoFocus
               />
             </div>
@@ -313,12 +330,12 @@ export default function LoginRoute({
                 placeholder="6-digit code or backup code"
                 aria-label="Enter your 2FA code"
                 className="font-mono tracking-widest"
-                onKeyDown={(e) => e.key === "Enter" && handlePasswordLogin()}
+                autoComplete="one-time-code"
               />
             </div>
             )}
             <Button
-              onClick={handlePasswordLogin}
+              type="submit"
               disabled={!password || (totpRequired && totpCode.length < 6) || isLoading}
               className="w-full"
             >
@@ -361,10 +378,10 @@ export default function LoginRoute({
                 Unfinished setup — start over
               </button>
             )}
-          </div>
+          </form>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 

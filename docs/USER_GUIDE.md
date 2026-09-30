@@ -11,7 +11,7 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 
 > **Multiple workflows, one local app.** FlintTrade has route groups for order
 > workflow testing, portfolio-style records, and guided learning. Pick `/trade`,
-> `/invest`, or `/learn` from the top bar to switch workspaces without losing
+> `/invest`, or `/learn` from the sidebar to switch workspaces without losing
 > context.
 
 ---
@@ -430,8 +430,10 @@ rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
-The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
-separate labels. Broker is **Connected**, **Connected (read)**, or
+The TopBar **Status** menu shows **Broker**, **Laya**, and **LLM** as
+separate labels, each with a one-line description. Its dot shows the worst
+state: red when Laya is **Down** or the broker path is unavailable, amber when
+degraded, neutral with example data (nothing is connected by design). Broker is **Connected**, **Connected (read)**, or
 **Unavailable**. Laya is **Ready**, **Degraded**, or **Down**. It starts
 **Down**, including before a heartbeat and when the desk ping omits
 `laya`. Missing status is never painted **Ready**. The desk ping publishes
@@ -793,11 +795,29 @@ platform-specific workspace directory and sync across sessions:
 
 See [Settings reference](#11-settings-reference) for what else lives there.
 
+### Finding your way around
+
+- **Sidebar.** Home, Trade, Invest and Learn sit at the top; **Tools** holds
+  Strategy Lab, Automate and AI Centre; **Manage** holds Accounts; Settings is
+  pinned at the bottom. Each page opens with a header whose title matches its
+  sidebar label. Below 768px the sidebar becomes a drawer behind the menu
+  button at the top left.
+- **Top bar.** Search (symbols, pages and commands; also Ctrl+K or ⌘K), the
+  Mode menu, one market chip (NSE session and IST clock), the **Status**
+  menu (broker, Laya and LLM), **Ask AI**, **Tools** (Quick Settings and
+  Settings), full screen, notifications and your profile. The account
+  switcher appears once a broker account is connected. Feed provenance is
+  the chip at the start of the ticker.
+- **Trade desk toolbar.** The active workspace, **+ Widget** (opens **Add
+  Widget**), **Layouts** and, on a Compact desk, **Watchlist & tools**.
+- **Tips** appear under the page header and can be dismissed; Settings can
+  bring them back.
+
 ### The main routes
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
 | `/setup` | Required first-run path. The Practice desk is **Step 2 or 3**. With no operator yet, Setup starts at Create operator. When an operator already exists and Setup is unfinished, `/setup` resumes at **Step 2 or 3**. The count is fixed from the start, from whether this machine's vault is already secured: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"; an unfinished operator resumes on that Practice step). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk** (an unfinished operator resumes on the vault step, then the Practice desk). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Reloading `/setup` mid-flow resumes the unfinished setup and keeps the same step title (for example **Step 3 of 3 - Practice desk**). A fresh browser, or a reload on the vault step that needs a setup session, shows **Continue setup** and **This machine already has an operator. Sign in to finish setup.** **Start over (deletes this unfinished operator)** asks once (**Enter your password to delete this unfinished operator.**), then the red **Delete and start over** button or **Cancel**. A failed status check stays on **Retry** and does not open the fresh-install form: **FlintTrade is busy** on HTTP 429, **Can't check setup status** for any other HTTP error or an unreadable or incomplete response, and **FlintTrade backend unavailable** only when nothing answered. A second create while an operator already exists, including two creates that overlap, is refused: the account service raises `Account already set up`, and `POST /v1/auth/setup` answers HTTP 409 with `Request conflicts with the current state`. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
@@ -806,9 +826,9 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
-| `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
+| `/automate` | Automate — flows, schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Automate → Automation Settings. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
-| `/ditto` | Multi-account management — mirror, margin, risk. |
+| `/ditto` | Accounts — broker connections, Position Mirror, and the multi-account Risk Dashboard. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
 First-run Setup finishes on the Practice desk. That desk is **Step 2 or
@@ -1386,7 +1406,7 @@ two unlabelled ₹ on mixed bases.
 
 ---
 
-## 8. Automation Hub walkthrough
+## 8. Automate walkthrough
 
 Open `/automate`. Automate place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
@@ -1488,7 +1508,7 @@ to Chat after you save Settings → AI re-checks readiness (advisor and
 Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
-When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
+When Settings → AI shows Managed Ollama **Not installed**, AI Centre `/ai`
 Chat does not show a green **Connected (suggest only)** badge (FT-AI-004). The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
@@ -1715,7 +1735,7 @@ broken session; configure a provider in Live or Practice on this machine.
 Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
-shows **Not installed** — that is not a Connected advisor. AI Hub
+shows **Not installed** — that is not a Connected advisor. AI Centre
 `/ai` Chat follows that install state (FT-AI-004) and does not paint
 green **Connected (suggest only)** until the runtime is installed and configured.
 
@@ -1976,7 +1996,7 @@ provider in Live or Practice on this machine.
 On Live or Practice, "AI settings could not be loaded" disables editing
 to protect a saved configuration. Use **Retry**.
 
-On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
+On `/ai` Chat (AI Centre), an unconfigured LLM shows **LLM not configured**
 (badge **Not configured**) with **Open Settings → AI** and an outline
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
 Composer input and Send stay disabled. Example-data and Practice Chat both
@@ -1988,7 +2008,7 @@ The Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; they are aligned for readiness.
 
 When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
-AI Hub does not show a green **Connected (suggest only)** badge. The badge is
+AI Centre does not show a green **Connected (suggest only)** badge. The badge is
 **Not configured** / **Not installed**, the Settings CTA stays
 visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while

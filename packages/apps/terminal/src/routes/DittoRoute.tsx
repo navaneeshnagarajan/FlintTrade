@@ -53,7 +53,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Page, PageBody, PageHeader, PageTabs } from "@/components/layout/Page";
 import TabTransition from "@/components/motion/TabTransition";
 import { cn } from "@/lib/utils";
 import {
@@ -103,7 +103,7 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { id: "accounts", label: "Accounts", icon: Users },
+  { id: "accounts", label: "Connections", icon: Users },
   { id: "mirror", label: "Position Mirror", icon: Copy },
   { id: "risk", label: "Risk Dashboard", icon: ShieldAlert },
 ];
@@ -1191,69 +1191,27 @@ export default function DittoRoute() {
   const [activeTab, setActiveTab] = useState<TabId>("accounts");
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="border-b border-glass-chrome bg-glass-chrome backdrop-blur-md shrink-0">
-        {/* Title row */}
-        <div className="flex items-center justify-between px-6 pt-4 pb-3">
-          <div className="flex items-center gap-3">
-            <Users className="w-5 h-5 text-accent" />
-            <div>
-              <h1 className="font-heading font-bold text-base text-text-primary">
-                Account Manager
-              </h1>
-              <p className="text-xxs text-text-muted">
-                Manage connected accounts, mirror positions, and monitor risk across accounts
-              </p>
-            </div>
-          </div>
-        </div>
+    <Page>
+      <PageHeader
+        title="Accounts"
+        description="Connected broker accounts, position mirroring and risk across all of them."
+      >
+        <PageTabs<TabId>
+          tabs={TABS}
+          value={activeTab}
+          onChange={setActiveTab}
+          label="Accounts sections"
+          idPrefix="ditto"
+        />
+      </PageHeader>
 
-        {/* Tab bar */}
-        <div
-          role="tablist"
-          aria-label="Account Manager sections"
-          className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
-        >
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                role="tab"
-                aria-selected={isActive}
-                aria-controls={`ditto-tabpanel-${tab.id}`}
-                id={`ditto-tab-${tab.id}`}
-                onClick={() => setActiveTab(tab.id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-2 text-xs font-sans font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",
-                  isActive
-                    ? "text-accent border-accent"
-                    : "text-text-secondary hover:text-text-primary border-transparent hover:border-border-default",
-                )}
-              >
-                <Icon className="w-3.5 h-3.5 shrink-0" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div
+      <PageBody
         role="tabpanel"
         id={`ditto-tabpanel-${activeTab}`}
         aria-labelledby={`ditto-tab-${activeTab}`}
-        className="flex-1"
       >
-        <ScrollArea className="h-full">
-          <TabTransition tabKey={activeTab}>
-            <div className="p-6 max-w-5xl mx-auto">{TAB_CONTENT[activeTab]}</div>
-          </TabTransition>
-        </ScrollArea>
-      </div>
-    </div>
+        <TabTransition tabKey={activeTab}>{TAB_CONTENT[activeTab]}</TabTransition>
+      </PageBody>
+    </Page>
   );
 }

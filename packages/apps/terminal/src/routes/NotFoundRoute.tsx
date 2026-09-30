@@ -2,7 +2,7 @@
  * NotFoundRoute — 404 catch-all page at path "*".
  *
  * Shown when the user navigates to a route that does not exist.
- * Provides two escape hatches: Go Home (/) and Explore (/explore).
+ * Offers Home, back to where they were, and the example-data demo.
  */
 
 import { useNavigate } from "react-router";
@@ -22,14 +22,14 @@ export default function NotFoundRoute() {
 
           {/* Status code */}
           <div className="space-y-2">
-              <p className="font-heading font-bold text-text-disabled text-7xl tracking-tight select-none">
+              <p className="font-heading font-bold text-text-muted text-6xl tracking-tight select-none" aria-hidden="true">
                 404
               </p>
-              <h1 className="font-heading font-bold text-text-primary text-xl">
+              <h1 className="font-heading font-semibold text-text-primary text-xl">
                 Page not found
               </h1>
-              <p className="text-text-muted text-sm leading-relaxed">
-                The page you&apos;re looking for doesn&apos;t exist.
+              <p className="text-text-secondary text-sm leading-relaxed">
+                This address does not match any page in FlintTrade. It may have moved, or the link may be mistyped.
               </p>
           </div>
 
@@ -38,7 +38,10 @@ export default function NotFoundRoute() {
               <Button onClick={() => navigate("/")} className="w-full sm:w-auto">
                 Go Home
               </Button>
-              <Button variant="outline" onClick={() => navigate("/explore")} className="w-full sm:w-auto">
+              <Button variant="outline" onClick={() => navigate(-1)} className="w-full sm:w-auto">
+                Go back
+              </Button>
+              <Button variant="ghost" onClick={() => navigate("/explore")} className="w-full sm:w-auto">
                 Demo (example data)
               </Button>
           </div>
