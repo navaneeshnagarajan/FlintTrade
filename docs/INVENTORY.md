@@ -86,7 +86,7 @@ no-funds verification does not prove funded live order execution.
 | Preset layouts (17) | ✅ | FlexLayout workspace presets |
 | Options-scalper 4-chart layout | ✅ | Index+Futures (centre) / CE+PE (sides) / option chain — per-panel pinned charts; tested |
 | Trading + dashboard widgets (71 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
-| Operating modes: Practice, Connected (read), Live | ✅ | Example is sample data, not a Mode. The public web demo is Demo (example data). Practice places a simulated order. Widget catalogue count remains 71. The old sample-data URL is not a first-class installed screen. |
+| Operating modes: Practice and Live | ✅ | Connected (read) is a broker status, not a Mode. Example is sample data, not a Mode. The public web demo is Demo (example data). Practice places a simulated order. Widget catalogue count remains 71. The old sample-data URL is not a first-class installed screen. |
 | Professional charts + indicators | ✅ | `widgets/analysis/Chart/` on the lightweight-charts library |
 | Practice mode | ✅ | Practice controls (capital + place simulated order) |
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |

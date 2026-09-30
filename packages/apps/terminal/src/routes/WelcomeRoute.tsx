@@ -5,7 +5,7 @@
  * logo, particles, meteors, shimmer CTA, and a calm glassy control layer.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
@@ -22,6 +22,8 @@ import type { ColorMode } from "@/lib/cinematicThemes";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import LoginRoute from "@/routes/LoginRoute";
+import TwoOperatorUpdateScreen from "@/routes/TwoOperatorUpdateScreen";
+import { migrationBlockedFromStatus } from "@/lib/twoOperatorGuide";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -275,6 +277,10 @@ export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [flowStep, setFlowStep] = useState<FlowStep>("cinematic");
+  const [migrationBlocked, setMigrationBlocked] = useState(false);
+  const migrationBlockedRef = useRef(migrationBlocked);
+  migrationBlockedRef.current = migrationBlocked;
+  const [statusAttempt, setStatusAttempt] = useState(0);
   const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
   const authStatus = useAuthStore((s) => s.status);
@@ -301,22 +307,14 @@ export default function WelcomeRoute() {
   useEffect(() => {
     if (authStatus !== "unknown" && authStatus !== "logged-out") return;
 
-    // Explore-first / Try with sample data persist a demo session. Restore it
-    // before the public auth probe, or is_setup=true logs the operator out
-    // onto the daily login wall and /home bounces back here.
-    const persisted = readPersistedAuthSession();
-    if (persisted) {
-      useAuthStore.getState().setLoggedIn(
-        persisted.token,
-        persisted.username,
-        persisted.expiresAt,
-      );
-      return;
-    }
+    // Sample-data Explore is not an operator database. Restore it without a
+    // status probe so a paused update cannot drop the hatch session.
     if (isDemoSessionActive()) {
       useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
       return;
     }
+
+    const persisted = readPersistedAuthSession();
 
     // Time-box the probe so a hung backend can't strand the user on
     // "Checking workspace…" forever.
@@ -332,6 +330,21 @@ export default function WelcomeRoute() {
           useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
           return;
         }
+        if (migrationBlockedFromStatus(data)) {
+          setMigrationBlocked(true);
+          return;
+        }
+        setMigrationBlocked(false);
+        // A signed-in tab is restored only after the probe says the update
+        // is not paused. is_setup=true must not log that tab out.
+        if (persisted) {
+          useAuthStore.getState().setLoggedIn(
+            persisted.token,
+            persisted.username,
+            persisted.expiresAt,
+          );
+          return;
+        }
         if (!data.data?.is_setup) {
           useAuthStore.getState().setSetupRequired();
         } else {
@@ -343,6 +356,18 @@ export default function WelcomeRoute() {
         // effects in development. That cleanup abort is not a failed backend
         // probe and must not overwrite a valid returning-user state.
         if (cancelled) return;
+        // A paused update stays on screen until a later status check
+        // succeeds and reports that nothing is pending. A failed retry must
+        // not restore a persisted session and open the desk.
+        if (migrationBlockedRef.current) return;
+        if (persisted && useAuthStore.getState().status === "unknown") {
+          useAuthStore.getState().setLoggedIn(
+            persisted.token,
+            persisted.username,
+            persisted.expiresAt,
+          );
+          return;
+        }
         // Backend unreachable, errored, or timed out. Degrade gracefully in
         // every build (not just DEV) so the welcome screen always offers a way
         // forward — "Get Started" once the backend is up, and "Explore
@@ -359,7 +384,7 @@ export default function WelcomeRoute() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [authStatus]);
+  }, [authStatus, statusAttempt]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -396,11 +421,12 @@ export default function WelcomeRoute() {
   }, []);
 
   useEffect(() => {
+    if (migrationBlocked) return;
     if (authStatus === "logged-in") {
       const persona = useSettingsStore.getState().persona;
       navigate(personaDefaultRoute(persona), { replace: true });
     }
-  }, [authStatus, navigate]);
+  }, [authStatus, migrationBlocked, navigate]);
 
   useEffect(() => {
     if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
@@ -432,6 +458,16 @@ export default function WelcomeRoute() {
     markDemoSessionActive();
     useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
     navigate("/home");
+  }
+
+  if (migrationBlocked) {
+    return (
+      <TwoOperatorUpdateScreen
+        onRetry={() => {
+          setStatusAttempt((attempt) => attempt + 1);
+        }}
+      />
+    );
   }
 
   if (authStatus === "logged-out" && flowStep === "greeting") {

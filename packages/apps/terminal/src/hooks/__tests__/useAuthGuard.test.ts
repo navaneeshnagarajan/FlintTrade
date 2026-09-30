@@ -16,6 +16,7 @@ const mockNavigate = vi.fn();
 
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: "/home", state: null }),
 }));
 
 const {
@@ -138,6 +139,7 @@ describe("useAuthGuard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
     setAuthState({ status: "unknown", username: null, sessionGeneration: 0 });
     mockNavigate.mockReset();
     vi.clearAllMocks();
@@ -150,14 +152,22 @@ describe("useAuthGuard", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/welcome", { replace: true });
   });
 
-  it("restores a tab-scoped signed-in session on /home and skips the Welcome Back gate", async () => {
+  it("restores a tab-scoped signed-in session on /home when the update is not paused", async () => {
     authState.status = "unknown";
     writePersistedAuthSession({
       token: "jwt-alice",
       username: "alice",
       expiresAt: "2099-01-01T02:30:00Z",
     });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { is_setup: true, is_locked: false, migration_blocked: null },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
 
     const { result } = renderHook(() => useAuthGuard());
 
@@ -170,10 +180,35 @@ describe("useAuthGuard", () => {
       );
     });
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalled();
     expect(result.current.isLoading).toBe(false);
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
+  });
+
+  it("does not start the desk when two operator accounts pause the update", async () => {
+    authState.status = "unknown";
+    writePersistedAuthSession({
+      token: "jwt-alice",
+      username: "alice",
+      expiresAt: "2099-01-01T02:30:00Z",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { is_setup: true, is_locked: false, migration_blocked: "two_operators" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    renderHook(() => useAuthGuard());
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/welcome", { replace: true });
+    });
+    expect(mockSetLoggedInIfCurrent).not.toHaveBeenCalled();
   });
 
   it("still sends a visitor with no tab session to the Welcome Back gate", () => {

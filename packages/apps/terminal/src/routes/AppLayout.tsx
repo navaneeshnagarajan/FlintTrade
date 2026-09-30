@@ -370,7 +370,12 @@ export default function AppLayout() {
         ? (detail as { path?: unknown }).path
         : null;
       if (typeof path === "string") {
-        navigate("/learn", { state: { selectedDocPath: path } });
+        const anchor = (detail as { anchor?: unknown }).anchor;
+        navigate("/learn", {
+          state: typeof anchor === "string" && anchor
+            ? { selectedDocPath: path, docAnchor: anchor }
+            : { selectedDocPath: path },
+        });
       }
     }
 

@@ -21,6 +21,9 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     ("POST", "/v1/auth/login"),
     # First-run account creation, before any session exists.
     ("POST", "/v1/auth/setup"),
+    # Reload mid-setup. The account-create JWT lived only in the browser tab,
+    # so the password (and the authenticator code once enrolled) is the proof.
+    ("POST", "/v1/auth/setup/resume"),
     # Vault open during first-run. The handler requires a setup-session JWT,
     # not the daily API key, so the global check must let the request through.
     ("POST", "/v1/auth/setup/vault"),

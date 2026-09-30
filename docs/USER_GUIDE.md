@@ -799,7 +799,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
-| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
+| `/setup` | Required first-run path. The Practice desk is **Step 2 or 3**. With no operator yet, Setup starts at Create operator. When an operator already exists and Setup is unfinished, `/setup` resumes at **Step 2 or 3**. The count is fixed from the start, from whether this machine's vault is already secured: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"; an unfinished operator resumes on that Practice step). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk** (an unfinished operator resumes on the vault step, then the Practice desk). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Reloading `/setup` mid-flow resumes the unfinished setup and keeps the same step title (for example **Step 3 of 3 - Practice desk**). A fresh browser, or a reload on the vault step that needs a setup session, shows **Continue setup** and **This machine already has an operator. Sign in to finish setup.** **Start over (deletes this unfinished operator)** asks once (**Enter your password to delete this unfinished operator.**), then the red **Delete and start over** button or **Cancel**. A failed status check stays on **Retry** and does not open the fresh-install form: **FlintTrade is busy** on HTTP 429, **Can't check setup status** for any other HTTP error or an unreadable or incomplete response, and **FlintTrade backend unavailable** only when nothing answered. A second create while an operator already exists, including two creates that overlap, is refused: the account service raises `Account already set up`, and `POST /v1/auth/setup` answers HTTP 409 with `Request conflicts with the current state`. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -811,9 +811,92 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
-First-run Setup finishes on the Practice desk. Step N of 3 counts only
-Create operator, Vault, and Practice desk. After the affirm, the desk
-shows a one-line strip. With nothing skipped it reads
+First-run Setup finishes on the Practice desk. That desk is **Step 2 or
+3**. With no operator yet, Setup starts at Create operator. When an
+operator already exists and Setup is unfinished, `/setup` resumes at
+**Step 2 or 3**. The step total is fixed before step 1, from whether
+this machine's vault is already secured.
+
+When the backend has already secured the vault, Setup skips the vault
+step. The titles stay **Step 1 of 2 - Create operator**, then **Step 2 of
+2 - Practice desk**. That path never shows "of 3". An unfinished
+operator on that path resumes on **Step 2 of 2 - Practice desk**. On that
+Practice step only, **Your vault is set up and secured on this machine.**
+appears above **Open Practice desk**. The line under the title on that
+last step is **1 of 2 completed - last step**.
+
+When the vault is not yet secured, Setup keeps three steps: **Step 1 of
+3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 -
+Practice desk**. An unfinished operator resumes on **Step 2 of 3 -
+Vault** until the vault opens, then on **Step 3 of 3 - Practice desk**.
+The vault step asks for a master password and **Open vault**. The secured-vault line above **Open Practice desk** stays on
+the two-step path only. The last-step line is **2 of 3 completed - last
+step**.
+
+Before the create-operator form is shown, and again if a later status
+read fails, a failed setup-status check stays on that failure. **Retry**
+is the button. The fresh-install form does not open.
+
+- HTTP 429: **FlintTrade is busy**. **FlintTrade is busy right now. Wait a
+  moment, then retry.**
+- Any other HTTP error, or a response that cannot be read or is
+  incomplete: **Can't check setup status**. **FlintTrade answered, but
+  setup status couldn't be read. Retry in a moment.**
+- Only when nothing answered: **FlintTrade backend unavailable**, with
+  **Retry**. On the screen before Setup fields mount, the detail is
+  **Start or restart the local FlintTrade backend, then retry. Setup
+  has not advanced and no account, broker, or credential details were
+  submitted from this screen.** **Return to welcome** sits beside
+  **Retry**. If that same network failure is the later status read, the
+  detail is **The FlintTrade backend did not answer. Start or restart
+  the local FlintTrade backend, then retry.** and the only button is
+  **Retry**.
+
+A second create while an operator already exists, including two creates
+that overlap, is refused. The account service raises `Account already
+set up`. `POST /v1/auth/setup` answers HTTP 409 with code `operator_exists`
+and message `Request conflicts with the current state`. Setup shows
+**This machine already has an operator. Sign in to finish setup.** A
+conflict that is not `operator_exists` still shows `Request conflicts
+with the current state`.
+
+Reloading `/setup` mid-flow resumes the unfinished setup in this browser
+and keeps the same step title. A run whose vault was not secured at the
+start still shows **Step 3 of 3 - Practice desk** and **2 of 3 completed
+- last step** after the vault opens and after a reload. That title does
+not become "of 2". The same tab restores the setup session and continues
+the current step.
+
+A fresh browser, or a reload on the vault step that needs a setup
+session, shows **Continue setup** and **This machine already has an
+operator. Sign in to finish setup.** Enter the password and choose
+**Continue setup** to carry on. That screen does not open the
+create-operator form. On a vault-step reload the step title stays put
+(for example **Step 2 of 3 - Vault**).
+
+**Start over (deletes this unfinished operator)** asks once: **Enter
+your password to delete this unfinished operator.** Confirm with the red
+**Delete and start over** button, or choose **Cancel**. That deletes the
+unfinished operator and restarts at step 1. That is the start-over
+control on the vault step. A workspace data wipe is not required.
+
+After Setup completes, opening `/setup` does not restart step 1. A
+signed-in operator is sent to the desk at `/trade`. A signed-out operator
+sees **Setup is complete. Sign in to open the desk.** **Sign in** is the
+primary button and opens `/welcome`. **Open Settings** is the secondary
+button.
+
+An operator database that already existed before setup completion was
+recorded is marked setup-complete the next time FlintTrade opens it.
+That mark covers only the operator rows already in the database. An
+operator created after that change starts unfinished and still walks
+through Setup. For an operator marked complete, `/setup` does not
+restart step 1. A signed-in operator is sent to `/trade`. A signed-out
+operator sees **Setup is complete. Sign in to open the desk.**
+
+**Open Practice desk** affirms Practice and lands on `/trade`. After the
+affirm, the desk shows a one-line strip. The step total fixed above does
+not change. With nothing skipped the strip reads
 `Optional setup · N of 4 done`. N counts finished cards only. Skipping
 a card does not increase N. When at least one card is skipped, the strip
 adds the skipped count:
@@ -844,14 +927,14 @@ does not change. The authenticator panel's actions are **Enrol** and
 
 Monitoring and risk limits stay in Settings. They are not cards on this
 strip. The cards never appear before the affirm, never block Practice,
-and never change Step N of 3. On the broker panel,
+and never change the step total fixed above. On the broker panel,
 **Continue without a broker** stays the first control, above
 **FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
 **Broker connect** **Skipped**, the same as on the card. A successful
-native or OpenAlgo connection still marks the card **Done**. Persona is not a required
-first-run gate and is not part of that count. First run has no Live
-unlock. Live place stays fail-closed. A later Live unlock, outside this
-path, still needs the authenticator and PIN.
+native or OpenAlgo connection still marks the card **Done**. Persona is
+not a required first-run gate and is not part of that count. First run
+has no Live unlock. Live place stays fail-closed. A later Live unlock,
+outside this path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
@@ -1731,6 +1814,123 @@ files under `<workspace>/secrets/`. They are never written to
 ---
 
 ## 12. Troubleshooting
+
+### Two operator accounts
+
+FlintTrade keeps one operator account on this machine. When the database
+has more than one, startup pauses and leaves every row in place. Nothing
+is deleted automatically.
+
+The screen heading is **FlintTrade couldn't finish updating**. The body
+reads: "This machine has two operator accounts, and FlintTrade supports one. Your data hasn't been changed. See Troubleshooting → Two operator accounts to choose which one to keep."
+
+**Open troubleshooting** opens this section (`USER_GUIDE.md#two-operator-accounts`;
+on the public site, `/docs/user-guide#two-operator-accounts`). **Retry**
+checks status again. On Welcome, **FlintTrade couldn't finish updating**
+stays on screen until that check succeeds and reports that nothing is
+pending (`migration_blocked` null). A failed check, or a check that still
+returns `two_operators`, leaves the screen up. A saved sign-in is
+restored only after that successful check. A failed check does not
+open the desk.
+Sign-in does not create a session while the update is paused:
+`POST /v1/auth/login` returns HTTP 409 with message
+`FlintTrade couldn't finish updating.` and does not issue a token.
+`GET /v1/auth/status` returns `migration_blocked` set to `two_operators`
+(null when the desk may open).
+
+When two accounts are present, the log line is `Update paused: this database has 2 operator accounts; FlintTrade supports one. No data was changed.`
+The number in that line is the operator count.
+
+List the accounts. Each row shows the id, username, and created time:
+
+```bash
+flinttrade operators list
+```
+
+The columns are `id`, `username`, and `created`.
+
+Keep one account:
+
+```bash
+flinttrade operators keep <id>
+```
+
+The command prints `Keeping <id> <username>`, then one
+`Removing <id> <username>` line for each other account, then asks
+`Remove N other operator account(s)? [y/N]`. Only `y` or `yes`
+continues. Any other answer, including Enter, prints
+`No data was changed.` and writes no backup.
+
+`--yes` skips that prompt, including for scripts:
+
+```bash
+flinttrade operators keep <id> --yes
+```
+
+With no terminal and no `--yes`, the command prints
+`No data was changed. A terminal is required, or pass --yes.` and writes
+no backup.
+
+On yes, it writes an owner-only backup beside the database, named
+`auth.db.bak-YYYYMMDDTHHMMSSZ`. If that name is already present, the
+stamp includes the fractional seconds
+(`auth.db.bak-YYYYMMDDTHHMMSSFFFFFFZ`). The file is in the workspace
+directory, next to `auth.db`:
+
+| Platform | Workspace directory |
+|---|---|
+| Linux | `~/.flinttrade/` |
+| macOS | `~/Library/Application Support/flinttrade/` |
+| Windows | `%APPDATA%\flinttrade\` |
+| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` |
+
+On Windows, if `%APPDATA%` is unset, the directory is
+`%USERPROFILE%\AppData\Roaming\flinttrade\`.
+
+It then removes the other operator accounts and the rows in `auth.db`
+that name them, renumbers the kept account to id 1, and rewrites rows
+that named that account (`account_id`, `operator_id`, or `user_id`) to
+id 1, in one transaction. A failure rolls that transaction back, so the
+accounts are unchanged. Keeping the stored id 1 again leaves that
+account's sessions, settings, and data in place. The single-operator
+update continues. The success lines name the id you passed. They do not
+print the stored id:
+
+`Kept operator <id>.`
+
+`Backup: <workspace>/auth.db.bak-YYYYMMDDTHHMMSSZ`
+
+`One operator account remains. Open FlintTrade and choose Retry.`
+
+`This backup contains login secrets. Keep it private and delete it once FlintTrade works again.`
+
+`<id>` in `Kept operator <id>.` is the id you passed. The kept account
+is stored as id 1, so that stored id can differ from the id you passed.
+A later `flinttrade operators list` shows the kept account as id `1`.
+
+Passing `2` prints `Keeping 2 <username>`, then one
+`Removing <id> <username>` line for each other account, then
+`Remove N other operator account(s)? [y/N]`. After the transaction
+commits it prints `Kept operator 2.`, then
+`Backup: <workspace>/auth.db.bak-YYYYMMDDTHHMMSSZ`, then
+`One operator account remains. Open FlintTrade and choose Retry.`, then
+`This backup contains login secrets. Keep it private and delete it once FlintTrade works again.`
+The next `flinttrade operators list` shows that account as id `1`, not
+`2`.
+
+If that transaction does not commit, the backup file is removed and the
+command prints `The operator update could not be finished. No data was changed.`
+
+The command edits `auth.db` only. In that transaction it removes the
+other operator rows and rows in the same file that name those operators
+through `account_id`, `operator_id`, or `user_id`, then stores the kept
+operator as id 1 and points that operator's rows at id 1. Login-attempt
+rows are not stored against an operator, so they stay. It does not open
+`workspace.json` or any other database.
+
+Open FlintTrade and choose **Retry**. On Welcome, **FlintTrade couldn't
+finish updating** stays up until the status check succeeds and reports
+that nothing is pending.
 
 ### "Connection refused" on the OpenAlgo port
 

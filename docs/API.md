@@ -518,12 +518,14 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
-| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`) with `mode` `practice`. That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
+| `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. `data.migration_blocked` is `two_operators` when more than one operator account is present, and null otherwise. |
+| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`) with `mode` `practice`. That token is a Practice session. It is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. A second create, including one that overlaps the first, raises `Account already set up` in the account service. The route answers HTTP 409 with `code: "operator_exists"` and message `Request conflicts with the current state`. The setup screen maps that code to **This machine already has an operator. Sign in to finish setup.** A 409 without `operator_exists` keeps the generic message. |
+| `POST auth/setup/resume` | Public. A reload mid-setup drops the setup-session JWT that lived only in the browser tab, so this proves the password and mints a setup-session JWT again. Body `{ "password", "totp_code"? }`. Once an authenticator is enrolled, that code is required as well. No operator yet is HTTP 409 `Create an operator before continuing setup.` A finished setup is HTTP 409 `Setup is already complete. Sign in.` A wrong password is HTTP 401 `Invalid credentials.` It does not require a session that is already in the browser. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
+| `POST auth/setup/complete` | Session-bound. Records that first-run setup has finished. Requires the operator's session JWT; the setup-session JWT qualifies, and an API key does not. The operator must already exist and the vault must be open. Success is `{ "setup_finished": true }` under `data`. A missing session is HTTP 401 `Sign in to continue setup.` |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires an active session, the password, and the current authenticator code (`totp_code`). An API key is not a session. A signed-out request on a finished account changes nothing. When an authenticator is enrolled the response is HTTP 403 `Sign in to reset this account. You'll need your password and authenticator code.` Otherwise it is HTTP 401 `Sign in to reset this account. You'll need your password.` The body includes `authenticator_enrolled`. A successful wipe bumps the account epoch, so other session tokens stop working. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Before enrolment, a session and the password are enough. Once an authenticator is enrolled, the current authenticator code is required as well. A signed-out request on a finished account returns the same sign-in message as reset and changes nothing. |
-| `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a Practice JWT (`mode` `practice`). A fresh login opens Practice. |
+| `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a Practice JWT (`mode` `practice`). A fresh login opens Practice. When `migration_blocked` is `two_operators`, this returns HTTP 409 with message `FlintTrade couldn't finish updating.` and does not issue a token. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
 | `POST auth/pin` | Quick Unlock with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin" }`. Reopens the Mode already on that session and never changes it. Practice stays Practice. An Example (sample-data) session stays that session. A session that is already Live stays Live and keeps the authenticator enrolment check (403 `totp_required` until enrolled). Connected (read) is a broker status, not a session Mode. A successful unlock revokes the presented session and returns a new token. The previous token stops working. There is no `/auth/me`. |
 | `POST auth/live` | Explicit Live switch, and the only route that enters Live. Requires an existing session JWT. Body `{ "pin" }`. Requires authenticator enrolment and mints a Live JWT with `live_mode_unlocked=true`, after revoking the presented session. Refuses 403 `totp_required` until the authenticator is enabled. |
@@ -699,6 +701,7 @@ The public allowlist, method and rule, is exactly:
 | GET | `/v1/auth/status` |
 | POST | `/v1/auth/login` |
 | POST | `/v1/auth/setup` |
+| POST | `/v1/auth/setup/resume` |
 | POST | `/v1/auth/setup/vault` |
 | POST | `/v1/auth/setup/reset` |
 | POST | `/v1/auth/setup/regenerate-2fa` |
@@ -722,9 +725,13 @@ The public allowlist, method and rule, is exactly:
 | GET | `/api/v1/native/oauth/callback` |
 | POST | `/api/v1/native/postbacks/<adapter_id>` |
 
-`POST /v1/auth/setup/vault` is on that list so the setup wizard can reach
-it, and the handler still requires the setup-session JWT and rejects a
-daily-login token. `POST /v1/auth/setup/reset` and `POST
+`POST /v1/auth/setup/resume` is on that list. A reload mid-setup proves
+the password (and the authenticator code once one is enrolled) and
+receives a setup-session JWT. It does not require a session that is
+already in the browser. `POST /v1/auth/setup/complete` is not on the
+list: it needs the operator's session JWT. `POST /v1/auth/setup/vault`
+is on that list so the setup wizard can reach it, and the handler still
+requires the setup-session JWT and rejects a daily-login token. `POST /v1/auth/setup/reset` and `POST
 /v1/auth/setup/regenerate-2fa` stay reachable during first-run. Once an
 authenticator is enrolled, account recovery requires an active session,
 the password, and the current authenticator code (`totp_code`). A

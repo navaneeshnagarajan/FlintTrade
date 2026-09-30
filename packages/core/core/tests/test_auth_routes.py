@@ -76,6 +76,9 @@ class TestSetupEndpoint:
             "password": "StrongP@ss123!", "pin": "654321",
         }, headers={"Content-Type": "application/json"})
         assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["code"] == "operator_exists"
+        assert body["message"] == "Request conflicts with the current state"
 
 
 class TestSetupVault:
@@ -308,6 +311,7 @@ class TestStatusEndpoint:
         resp = c.get("/v1/auth/status")
         data = resp.get_json()
         assert data["data"]["is_setup"] is False
+        assert data["data"]["migration_blocked"] is None
 
     def test_status_after_setup(self, client):
         c, svc = client
@@ -329,6 +333,162 @@ class TestStatusEndpoint:
         _enable_totp(svc)
         data = c.get("/v1/auth/status").get_json()["data"]
         assert data["totp_enabled"] is True
+
+    def test_status_reports_vault_and_unfinished_setup(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        before = c.get("/v1/auth/status").get_json()["data"]
+        assert before["is_setup"] is False
+        assert before["vault_open"] is False
+        assert before["setup_finished"] is False
+        assert "master_password" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+        (vault / "master_password").write_text("already-open-secret", encoding="utf-8")
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        mid = c.get("/v1/auth/status").get_json()["data"]
+        assert mid["is_setup"] is True
+        assert mid["vault_open"] is True
+        assert mid["setup_finished"] is False
+        assert mid["vault_presecured"] is True
+        assert "already-open-secret" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+    def test_opening_the_vault_later_does_not_change_the_step_total(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        before = c.get("/v1/auth/status").get_json()["data"]
+        assert before["vault_presecured"] is None
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        created = c.get("/v1/auth/status").get_json()["data"]
+        assert created["is_setup"] is True
+        assert created["vault_open"] is False
+        assert created["vault_presecured"] is False
+        (vault / "master_password").write_text("opened-during-setup", encoding="utf-8")
+        after = c.get("/v1/auth/status").get_json()["data"]
+        assert after["vault_open"] is True
+        assert after["vault_presecured"] is False
+        assert "opened-during-setup" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+
+class TestSetupResumeAndComplete:
+    """Reload mid-setup and re-entry after Setup is finished."""
+
+    def _create_operator(self, c):
+        resp = c.post("/v1/auth/setup", json={
+            "username": "operator",
+            "email": "operator@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 201
+        return resp.get_json()["data"]["token"]
+
+    def test_resume_remints_a_setup_session_while_setup_is_unfinished(self, client, tmp_path, monkeypatch):
+        from flinttrade_core.auth_routes import decode_token
+
+        c, svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        self._create_operator(c)
+        denied = c.post("/v1/auth/setup/resume", json={"password": "wrong-password"},
+                        headers={"Content-Type": "application/json"})
+        assert denied.status_code == 401
+
+        resumed = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                         headers={"Content-Type": "application/json"})
+        assert resumed.status_code == 200
+        body = resumed.get_json()["data"]
+        assert body["username"] == "operator"
+        assert "StrongP@ss123!" not in resumed.get_data(as_text=True)
+        payload = decode_token(body["token"])
+        assert payload["setup_session"] is True
+        assert payload["setup_bound"] == svc.get_created_at()
+        assert payload["sub"] == "operator"
+
+        missing = c.post("/v1/auth/setup/complete", json={},
+                         headers={"Authorization": f"Bearer {body['token']}",
+                                  "Content-Type": "application/json"})
+        assert missing.status_code == 409
+        assert svc.is_setup_finished() is False
+
+        (vault / "master_password").write_text("already-open-secret", encoding="utf-8")
+        done = c.post("/v1/auth/setup/complete", json={},
+                      headers={"Authorization": f"Bearer {body['token']}",
+                               "Content-Type": "application/json"})
+        assert done.status_code == 200
+        assert done.get_json()["data"]["setup_finished"] is True
+        assert svc.is_setup_finished() is True
+        status = c.get("/v1/auth/status").get_json()["data"]
+        assert status["setup_finished"] is True
+        assert "already-open-secret" not in done.get_data(as_text=True)
+
+        again = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                       headers={"Content-Type": "application/json"})
+        assert again.status_code == 409
+
+    def test_resume_mints_the_same_practice_session_as_setup(self, client):
+        """A password-proven resume carries the Practice mode setup minted."""
+        from flinttrade_core.auth_routes import decode_token
+
+        c, _svc = client
+        created = c.post("/v1/auth/setup", json={
+            "username": "operator",
+            "email": "operator@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        assert created.status_code == 201
+        setup_payload = decode_token(created.get_json()["data"]["token"])
+        assert setup_payload["mode"] == "practice"
+
+        resumed = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                         headers={"Content-Type": "application/json"})
+        assert resumed.status_code == 200
+        resume_payload = decode_token(resumed.get_json()["data"]["token"])
+        assert resume_payload["mode"] == "practice"
+        assert resume_payload["mode"] == setup_payload["mode"]
+        assert resume_payload["setup_session"] is True
+        assert resume_payload["live_mode_unlocked"] is False
+
+    def test_resume_requires_authenticator_once_enrolled(self, client):
+        c, svc = client
+        self._create_operator(c)
+        _enable_totp(svc)
+        refused = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                         headers={"Content-Type": "application/json"})
+        assert refused.status_code == 401
+        import pyotp
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        resumed = c.post("/v1/auth/setup/resume", json={
+            "password": "StrongP@ss123!",
+            "totp_code": code,
+        }, headers={"Content-Type": "application/json"})
+        assert resumed.status_code == 200
+        from flinttrade_core.auth_routes import decode_token
+        assert decode_token(resumed.get_json()["data"]["token"])["setup_session"] is True
+
+    def test_daily_login_cannot_open_the_vault(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        self._create_operator(c)
+        denied = c.post(
+            "/v1/auth/setup/vault",
+            json={"master_password": "VaultKey123!"},
+            headers=_session_headers(),
+        )
+        assert denied.status_code == 401
+        assert not (vault / "master_password").exists()
 
 
 class TestPinEndpoint:
@@ -1357,6 +1517,91 @@ def test_verified_operator_session_rejects_non_full_or_invalid_identity(monkeypa
     verify = getattr(auth_routes, "verify_operator_session_token", lambda token: None)
     with pytest.raises(Exception):
         verify("signed.jwt.value")
+
+
+def _seed_two_operators(db_path) -> None:
+    """An older account table with two rows and no single-operator constraint."""
+    import sqlite3
+    from datetime import UTC, datetime
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE account (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                pin_hash TEXT NOT NULL,
+                totp_secret_encrypted BLOB NOT NULL,
+                totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        created = datetime.now(UTC).isoformat()
+        for operator_id, username in ((1, "alice"), (2, "bob")):
+            conn.execute(
+                """INSERT INTO account (
+                       id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at
+                   ) VALUES (?, ?, ?, 'hash', '', ?, ?, 0, ?)""",
+                (operator_id, username, f"{username}@example.com", b"secret", b"salt", created),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_status_pauses_when_two_operators_exist_and_login_does_not_start(tmp_path, monkeypatch):
+    """Two operator rows set migration_blocked and do not mint a desk session."""
+    import sqlite3
+
+    from flinttrade_core.auth_service import AuthService
+
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    db_path = tmp_path / "auth.db"
+    _seed_two_operators(db_path)
+    before = sqlite3.connect(db_path)
+    try:
+        before_rows = before.execute(
+            "SELECT id, username, email, created_at FROM account ORDER BY id"
+        ).fetchall()
+    finally:
+        before.close()
+
+    svc = AuthService(db_path=db_path)
+    with patch("flinttrade_core.auth_routes._get_auth_service", return_value=svc):
+        app = create_flask_app()
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            status = c.get("/v1/auth/status")
+            data = status.get_json()["data"]
+            assert status.status_code == 200
+            assert data["migration_blocked"] == "two_operators"
+            login = c.post(
+                "/v1/auth/login",
+                json={"password": "StrongP@ss123!", "totp_code": ""},
+                headers={"Content-Type": "application/json"},
+            )
+            body = login.get_json()
+            assert login.status_code == 409
+            assert body["migration_blocked"] == "two_operators"
+            assert "token" not in body.get("data", {})
+            assert "alice" not in login.get_data(as_text=True)
+            assert "bob" not in login.get_data(as_text=True)
+
+    after = sqlite3.connect(db_path)
+    try:
+        after_rows = after.execute(
+            "SELECT id, username, email, created_at FROM account ORDER BY id"
+        ).fetchall()
+    finally:
+        after.close()
+    assert after_rows == before_rows
+    assert len(after_rows) == 2
 
 
 class TestEnrolledAccountRecovery:

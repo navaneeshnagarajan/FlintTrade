@@ -6,6 +6,7 @@ Public endpoints (no session or API key required; see public_routes.py):
   - GET  /v1/auth/status   — check if setup complete
   - POST /v1/auth/setup    — one-time account creation
   - POST /v1/auth/login    — daily password login (TOTP only once enrolled)
+  - POST /v1/auth/setup/resume — re-mint the setup session after a reload
 Session-bound endpoints (valid session JWT required):
   - POST /v1/auth/pin      — PIN quick-unlock (restores the session Mode)
   - POST /v1/auth/live     — explicit Live switch (PIN + authenticator enrolment)
@@ -14,6 +15,7 @@ Session-bound endpoints (valid session JWT required):
   - POST /v1/auth/logout   — invalidate the current session
   - POST /v1/auth/setup/vault — open the credential vault during first-run setup
     (the handler accepts a setup-session JWT, not the daily API key)
+  - POST /v1/auth/setup/complete — record that first-run setup has finished
 """
 
 from __future__ import annotations
@@ -359,6 +361,20 @@ def _create_token(
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
+def _mint_setup_session(username: str, *, setup_bound: str) -> str:
+    """Mint the first-run setup session.
+
+    Account create and a mid-setup resume share this call. The mode is
+    ``_create_token``'s Practice default. Example data is reserved for the
+    web demo and is not minted here.
+    """
+    return _create_token(
+        username,
+        setup_session=True,
+        setup_bound=setup_bound,
+    )
+
+
 def _session_binding_claims() -> dict[str, Any]:
     """Stamp the current operator id and account epoch, when one exists.
 
@@ -538,6 +554,22 @@ def require_operator_session() -> tuple[Any, int] | None:
     return None
 
 
+def _migration_paused_response(svc: Any) -> tuple[Any, int] | None:
+    """Refuse to mint a session while the single-operator update is paused.
+
+    Status still reports the state. Login and setup resume must not start
+    the desk by issuing a token.
+    """
+    blocked = svc.migration_blocked()
+    if not blocked:
+        return None
+    return jsonify({
+        "status": "error",
+        "message": "FlintTrade couldn't finish updating.",
+        "migration_blocked": blocked,
+    }), 409
+
+
 @auth_bp.route("/status", methods=["GET"])
 @_rate_limit("30 per minute")
 def auth_status() -> tuple[Any, int]:
@@ -558,6 +590,19 @@ def auth_status() -> tuple[Any, int]:
             "is_locked": svc.is_locked(),
             "has_pin": svc.has_pin(),
             "totp_enabled": svc.is_totp_enabled(),
+            # Non-secret first-run facts. ``vault_open`` is true when this
+            # machine already has a hardened master password (the backend
+            # provisions one at startup). ``setup_finished`` is true only
+            # after the operator has finished Setup, not merely created
+            # the account.
+            "vault_open": _vault_is_open(),
+            "setup_finished": svc.is_setup_finished(),
+            # Frozen at operator creation. Live ``vault_open`` can become
+            # true later without changing the step total.
+            "vault_presecured": svc.setup_vault_presecured(),
+            # ``two_operators`` pauses startup. Null when the desk may open.
+            # The field is a state name, not an account list.
+            "migration_blocked": svc.migration_blocked(),
         },
     }), 200
 
@@ -583,23 +628,36 @@ def auth_setup() -> tuple[Any, int]:
         backup_codes = svc.setup_account(username, email, password, pin)
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
-    except RuntimeError:
+    except RuntimeError as exc:
+        # A lost race and a second create are the same refusal. The code lets
+        # Setup show the existing-operator sign-in. Other conflicts stay a
+        # plain 409 with the generic message.
+        if str(exc) == "Account already set up":
+            return jsonify({
+                "status": "error",
+                "code": "operator_exists",
+                "message": "Request conflicts with the current state",
+            }), 409
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
+
+    # Snapshot the vault before this request can open it. A missing or
+    # unreadable secret stays "not presecured" so Setup keeps three steps.
+    try:
+        presecured = _vault_is_open()
+    except OSError:
+        presecured = False
+    svc.record_setup_vault_presecured(presecured)
 
     # Mint a practice session so the rest of the setup wizard is
     # authenticated (broker connection + mode selection are behind the G9
     # write guard / D6 session-bound PIN). Legitimate: the operator is
     # physically creating the account right now, so this first session needs no
-    # separate TOTP step. It is non-live (mode=practice, live_mode_unlocked
+    # separate TOTP step. It is non-live (Practice, live_mode_unlocked
     # false). Authenticator enrolment is optional for Practice;
     # arming Live still requires PIN and a confirmed authenticator.
     # Example data is reserved for the web demo and is not minted here.
-    token = _create_token(
-        username,
-        mode="practice",
-        setup_session=True,
-        setup_bound=svc.get_created_at(),
-    )
+    # Resume uses the same helper, so a reload stays on that Practice session.
+    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
     return jsonify({
         "status": "success",
         "data": {
@@ -828,6 +886,23 @@ _VAULT_PASSWORD_MIN_CHARS = 8
 _VAULT_PASSWORD_MAX_BYTES = 4 * 1024
 
 
+def _vault_is_open() -> bool:
+    """Return whether this machine already has a credential-vault secret.
+
+    The boolean is safe to publish on the public status route. The secret
+    itself is never returned or logged. A missing or unreadable file is
+    treated as closed so Setup still asks the operator to open the vault.
+    """
+    from .workspace import workspace_dir  # noqa: PLC0415
+
+    password_file = workspace_dir() / "master_password"
+    try:
+        return _read_existing_vault_secret(password_file) is not None
+    except OSError:
+        logger.warning("Could not read the credential vault")
+        return False
+
+
 def _read_existing_vault_secret(path: Any) -> str | None:
     """Return the hardened master password, or None when the file is absent.
 
@@ -913,6 +988,125 @@ def auth_setup_vault() -> tuple[Any, int]:
     }), 200
 
 
+def _verify_operator_session() -> dict[str, Any] | tuple[Any, int]:
+    """Accept a full operator session JWT, setup or daily.
+
+    Returns the payload, or a Flask error response when the caller is not
+    signed in as the account on this machine.
+    """
+    token = _session_token_from_request()
+    if not token:
+        return jsonify({"status": "error", "message": "Sign in to continue setup."}), 401
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — sign in again.",
+        }), 401
+    if payload.get("type") != "session":
+        return jsonify({"status": "error", "message": "Sign in to continue setup."}), 401
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    profile = svc.get_profile()
+    subject = str(payload.get("sub") or "")
+    expected_user = str(profile.get("username") or "")
+    if (
+        not subject
+        or not expected_user
+        or not hmac.compare_digest(subject, expected_user)
+    ):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — sign in again.",
+        }), 401
+    return payload
+
+
+@auth_bp.route("/setup/resume", methods=["POST"])
+@_rate_limit("5 per minute")
+def auth_setup_resume() -> tuple[Any, int]:
+    """Re-mint the first-run setup session after a reload.
+
+    The account-create JWT lives in the browser tab. Reloading ``/setup``
+    drops it, and the vault and Start over routes then refuse the operator.
+    Password proof (and the authenticator, once enrolled) mints the same
+    Practice setup session the account-create response minted. A finished
+    install uses daily sign-in instead.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    paused = _migration_paused_response(svc)
+    if paused is not None:
+        return paused
+    if svc.is_locked():
+        return jsonify({
+            "status": "error",
+            "message": "Account locked after too many failed attempts. Reset via email.",
+        }), 423
+    if not svc.is_setup():
+        return jsonify({
+            "status": "error",
+            "message": "Create an operator before continuing setup.",
+        }), 409
+    if svc.is_setup_finished():
+        return jsonify({
+            "status": "error",
+            "message": "Setup is already complete. Sign in.",
+        }), 409
+
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password", ""))
+    totp_code = str(body.get("totp_code", ""))
+    if not svc.verify_password(password):
+        return jsonify({"status": "error", "message": "Invalid credentials."}), 401
+    if svc.is_totp_enabled():
+        if not totp_code or not (svc.verify_totp(totp_code) or svc.verify_backup_code(totp_code)):
+            return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
+
+    profile = svc.get_profile()
+    username = str(profile.get("username") or "")
+    if not username:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
+    return jsonify({
+        "status": "success",
+        "data": {"token": token, "username": username},
+    }), 200
+
+
+@auth_bp.route("/setup/complete", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_setup_complete() -> tuple[Any, int]:
+    """Record that first-run setup has finished.
+
+    Requires a signed-in operator and an open vault. Idempotent once set.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    verified = _verify_operator_session()
+    if not isinstance(verified, dict):
+        return verified
+    if not svc.is_setup():
+        return jsonify({
+            "status": "error",
+            "message": "Create an operator before finishing setup.",
+        }), 409
+    if not _vault_is_open():
+        return jsonify({
+            "status": "error",
+            "message": "Open the vault before finishing setup.",
+        }), 409
+    svc.mark_setup_finished()
+    return jsonify({
+        "status": "success",
+        "data": {"setup_finished": True},
+    }), 200
+
+
 def _tofu_authorise_login_actor(actor_id: str) -> None:
     """Authorise a freshly authenticated operator for the default execution account.
 
@@ -946,6 +1140,10 @@ def auth_login() -> tuple[Any, int]:
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    paused = _migration_paused_response(svc)
+    if paused is not None:
+        return paused
 
     if svc.is_locked():
         return jsonify({
