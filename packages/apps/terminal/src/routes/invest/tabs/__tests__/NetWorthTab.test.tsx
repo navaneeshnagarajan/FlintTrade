@@ -62,6 +62,8 @@ const investState = vi.hoisted(() => ({
     netWorth: 176000,
     approximateNetWorth: false,
     fallbackSymbols: [] as string[],
+    missingAverageSymbols: [] as string[],
+    openLegSymbols: [] as string[],
     sectorCount: 1,
     holdingCount: 1,
   },
@@ -125,10 +127,12 @@ describe("NetWorthTab", () => {
     investState.summary.netWorth = 452_300;
     investState.summary.approximateNetWorth = true;
     investState.summary.fallbackSymbols = ["NIFTY25JUNFUT"];
+    investState.summary.openLegSymbols = ["NIFTY25JUNFUT"];
+    investState.summary.missingAverageSymbols = [];
 
     render(<NetWorthTab />);
 
-    const tooltip = "Approximate. Your broker didn't send an average price for NIFTY25JUNFUT, so profit or loss from earlier days may be counted twice.";
+    const tooltip = "Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.";
     expect(screen.getByText("Known Total (Cash + Holdings + Positions)").closest("div")).toHaveAttribute("title", tooltip);
     expect(screen.getByTestId("net-worth-known-total")).toHaveTextContent(formatAccountNetWorth(452_300, true));
     expect(screen.getByTestId("net-worth-open-positions")).toHaveTextContent(formatAccountNetWorth(2_500, true));

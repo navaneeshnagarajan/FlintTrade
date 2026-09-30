@@ -30,7 +30,7 @@ import {
   accountNetWorth,
   accountNetWorthAccessibleName,
   formatAccountNetWorth,
-  netWorthFigureTitle,
+  netWorthFigureTitleForBook,
 } from "@/lib/accountNetWorth";
 import { formatINRCompact, formatPercent } from "../formatters";
 import { maskValue } from "@/lib/formatters";
@@ -75,7 +75,12 @@ export function NetWorthTab() {
   const ledgerCash = summary.ledgerCash ?? availableCash;
   const positionValue = summary.positionValue ?? 0;
   const approximate = summary.approximateNetWorth === true;
-  const figureTitle = netWorthFigureTitle(approximate, summary.fallbackSymbols ?? []);
+  const figureTitle = netWorthFigureTitleForBook({
+    approximate,
+    missingAverageSymbols: summary.missingAverageSymbols,
+    openLegSymbols: summary.openLegSymbols,
+    fallbackSymbols: summary.fallbackSymbols,
+  });
   const sourceNote = isPractice ? "Practice account" : "Live from broker";
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
 

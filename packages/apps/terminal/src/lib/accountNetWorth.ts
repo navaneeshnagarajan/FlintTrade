@@ -21,8 +21,11 @@
  * has no settlement or previous close: the documented fallback is the
  * open-leg average, which can recount carry-forward MTM already in cash.
  * That fallback is marked `markSource: "fallback"` and the figure is
- * approximate. Carried value divided by quantity, and Neo `upldPrc`, stay
- * unused until a funded overnight position confirms they match settlement.
+ * approximate. Dhan's tooltip says the average price was missing. Neo's
+ * says the price is estimated from the open position's average, because
+ * Neo always uses that average. Carried value divided by quantity, and
+ * Neo `upldPrc`, stay unused until a funded overnight position confirms
+ * they match settlement.
  */
 
 /** Invest Dashboard total. Home uses the shorter "Net Worth" label. */
@@ -67,22 +70,56 @@ export function accountNetWorthAccessibleName(value: number): string {
   return `Net Worth, approximately ${formatAccountNetWorth(value)}`;
 }
 
+function futuresSubject(symbols: readonly string[]): string {
+  return symbols.length === 1 ? (symbols[0] ?? "") : `${symbols.length} futures positions`;
+}
+
 /**
  * Tooltip while any open future uses the fallback mark.
+ * Dhan names a missing average. Neo names an estimate from the open leg.
  * One position names the symbol. Several name the count.
  */
-export function approximateNetWorthTooltip(symbols: readonly string[]): string | null {
-  if (symbols.length === 0) return null;
-  const subject = symbols.length === 1
-    ? symbols[0]
-    : `${symbols.length} futures positions`;
-  return `Approximate. Your broker didn't send an average price for ${subject}, so profit or loss from earlier days may be counted twice.`;
+export function approximateNetWorthTooltip(
+  missingAverageSymbols: readonly string[],
+  openLegSymbols: readonly string[] = [],
+): string | null {
+  if (missingAverageSymbols.length === 0 && openLegSymbols.length === 0) return null;
+  const countedTwice = "so profit or loss from earlier days may be counted twice.";
+  if (openLegSymbols.length === 0) {
+    return `Approximate. Your broker didn't send an average price for ${futuresSubject(missingAverageSymbols)}, ${countedTwice}`;
+  }
+  const estimated = `the price for ${futuresSubject(openLegSymbols)} is estimated from the open position's average`;
+  if (missingAverageSymbols.length === 0) {
+    return `Approximate. The price for ${futuresSubject(openLegSymbols)} is estimated from the open position's average, ${countedTwice}`;
+  }
+  return `Approximate. Your broker didn't send an average price for ${futuresSubject(missingAverageSymbols)}, and ${estimated}, ${countedTwice}`;
 }
 
 /** Positions note, or the approximate tooltip when a fallback mark is in use. */
-export function netWorthFigureTitle(approximate: boolean, symbols: readonly string[]): string {
+export function netWorthFigureTitle(
+  approximate: boolean,
+  missingAverageSymbols: readonly string[],
+  openLegSymbols: readonly string[] = [],
+): string {
   if (!approximate) return NET_WORTH_POSITIONS_NOTE;
-  return approximateNetWorthTooltip(symbols) ?? NET_WORTH_POSITIONS_NOTE;
+  return approximateNetWorthTooltip(missingAverageSymbols, openLegSymbols) ?? NET_WORTH_POSITIONS_NOTE;
+}
+
+/**
+ * Tooltip for a published summary.
+ * Older snapshots carry only `fallbackSymbols`. Those are Dhan-style
+ * missing averages unless `openLegSymbols` says otherwise.
+ */
+export function netWorthFigureTitleForBook(book: {
+  approximate?: boolean;
+  missingAverageSymbols?: readonly string[];
+  openLegSymbols?: readonly string[];
+  fallbackSymbols?: readonly string[];
+}): string {
+  const openLegSymbols = book.openLegSymbols ?? [];
+  const missingAverageSymbols = book.missingAverageSymbols
+    ?? (openLegSymbols.length > 0 ? [] : (book.fallbackSymbols ?? []));
+  return netWorthFigureTitle(book.approximate === true, missingAverageSymbols, openLegSymbols);
 }
 
 /** Mark of a holdings book. Quantity is absolute so a long and a listed holding agree. */
@@ -270,7 +307,12 @@ function positionUsesFallbackMark(position: PositionLine, futuresMtmInLedger: bo
 
 export interface NetWorthApproximation {
   approximate: boolean;
+  /** Every fallback future, Dhan and Neo together. */
   fallbackSymbols: string[];
+  /** Dhan futures whose mark is `costPrice` because the average was absent. */
+  missingAverageSymbols: string[];
+  /** Kotak Neo futures whose mark is the open-leg average. */
+  openLegSymbols: string[];
 }
 
 /**
@@ -281,12 +323,23 @@ export function netWorthApproximation(
   positions: readonly PositionLine[],
   futuresMtmInLedger = false,
 ): NetWorthApproximation {
-  const fallbackSymbols: string[] = [];
+  const missingAverageSymbols: string[] = [];
+  const openLegSymbols: string[] = [];
   for (const position of positions) {
     if (!positionUsesFallbackMark(position, futuresMtmInLedger)) continue;
-    fallbackSymbols.push(String(position.symbol ?? "").trim());
+    const symbol = String(position.symbol ?? "").trim();
+    // Dhan stores the missing average's stand-in on settlement_price.
+    // Neo has no settlement price; the same flag means the open-leg average.
+    const settlement = lineNumber(position, "settlementPrice", "settlement_price");
+    if (settlement > 0) missingAverageSymbols.push(symbol);
+    else openLegSymbols.push(symbol);
   }
-  return { approximate: fallbackSymbols.length > 0, fallbackSymbols };
+  return {
+    approximate: missingAverageSymbols.length + openLegSymbols.length > 0,
+    fallbackSymbols: [...missingAverageSymbols, ...openLegSymbols],
+    missingAverageSymbols,
+    openLegSymbols,
+  };
 }
 
 /** Sum of open positions' net-worth contributions. */

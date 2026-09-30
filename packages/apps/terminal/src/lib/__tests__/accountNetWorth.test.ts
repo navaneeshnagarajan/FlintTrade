@@ -219,7 +219,12 @@ describe("fallback futures marks are approximate", () => {
     const marked = netWorthApproximation([dhanFallback], true);
     const exact = netWorthApproximation([withAverage], true);
 
-    expect(marked).toEqual({ approximate: true, fallbackSymbols: ["NIFTY-JUN2026-FUT"] });
+    expect(marked).toEqual({
+      approximate: true,
+      fallbackSymbols: ["NIFTY-JUN2026-FUT"],
+      missingAverageSymbols: ["NIFTY-JUN2026-FUT"],
+      openLegSymbols: [],
+    });
     expect(exact.approximate).toBe(false);
     expect(positionNetWorthContribution(dhanFallback, [], true)).toBe(
       positionNetWorthContribution({ ...dhanFallback, markSource: undefined }, [], true),
@@ -237,8 +242,9 @@ describe("fallback futures marks are approximate", () => {
     const second: PositionLine = { ...dhanFallback, symbol: "BANKNIFTY-JUN2026-FUT", mark_source: "fallback", markSource: undefined };
     const marked = netWorthApproximation([dhanFallback, second], true);
 
-    expect(marked.fallbackSymbols).toEqual(["NIFTY-JUN2026-FUT", "BANKNIFTY-JUN2026-FUT"]);
-    expect(approximateNetWorthTooltip(marked.fallbackSymbols)).toBe(
+    expect(marked.missingAverageSymbols).toEqual(["NIFTY-JUN2026-FUT", "BANKNIFTY-JUN2026-FUT"]);
+    expect(marked.openLegSymbols).toEqual([]);
+    expect(approximateNetWorthTooltip(marked.missingAverageSymbols, marked.openLegSymbols)).toBe(
       "Approximate. Your broker didn't send an average price for 2 futures positions, so profit or loss from earlier days may be counted twice.",
     );
   });
@@ -253,7 +259,17 @@ describe("fallback futures marks are approximate", () => {
       mark_source: "fallback",
     };
 
-    expect(netWorthApproximation([neo], true).approximate).toBe(true);
+    const marked = netWorthApproximation([neo], true);
+    expect(marked.approximate).toBe(true);
+    expect(marked.openLegSymbols).toEqual(["NIFTY25JUNFUT"]);
+    expect(marked.missingAverageSymbols).toEqual([]);
+    expect(approximateNetWorthTooltip(marked.missingAverageSymbols, marked.openLegSymbols)).toBe(
+      "Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.",
+    );
+    const second: PositionLine = { ...neo, symbol: "BANKNIFTY25JUNFUT" };
+    expect(approximateNetWorthTooltip([], netWorthApproximation([neo, second], true).openLegSymbols)).toBe(
+      "Approximate. The price for 2 futures positions is estimated from the open position's average, so profit or loss from earlier days may be counted twice.",
+    );
     expect(netWorthApproximation([{ ...neo, mark_source: "avg" }], true).approximate).toBe(false);
   });
 
@@ -272,7 +288,12 @@ describe("fallback futures marks are approximate", () => {
       averagePrice: 1_000,
     };
 
-    expect(netWorthApproximation([practice], false)).toEqual({ approximate: false, fallbackSymbols: [] });
+    expect(netWorthApproximation([practice], false)).toEqual({
+      approximate: false,
+      fallbackSymbols: [],
+      missingAverageSymbols: [],
+      openLegSymbols: [],
+    });
     expect(netWorthApproximation([{ ...practice, markSource: "fallback" }], false).approximate).toBe(false);
   });
 });

@@ -238,7 +238,7 @@ describe("PortfolioCard approximate net worth", () => {
     expect(screen.getByTestId("portfolio-net-worth")).toHaveTextContent("≈");
     expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute(
       "title",
-      approximateNetWorthTooltip(["NIFTY25JUNFUT"]) ?? "",
+      approximateNetWorthTooltip([], ["NIFTY25JUNFUT"]) ?? "",
     );
   });
 
@@ -309,6 +309,94 @@ function allocationCases(): { funds: BookStatus; holdings: BookStatus; positions
   }
   return cases;
 }
+
+describe("PortfolioCard net worth waits for the position book", () => {
+  const cashFunds = {
+    ...BROKER_FUNDS,
+    availableCash: 1_000_000,
+    usedMargin: 0,
+    ledgerBalance: 1_000_000,
+  };
+
+  it("shows a dash while positions are pending, then the approximate figure", () => {
+    setBook(fundsQuery, "success", cashFunds);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "loading", undefined);
+    useModeStore.setState({ mode: "live" });
+    const view = render(<PortfolioCard />);
+
+    const pending = screen.getByTestId("portfolio-net-worth");
+    expect(pending).toHaveTextContent("—");
+    expect(pending.textContent).not.toContain("10,00,000");
+    expect(pending).not.toHaveAttribute("data-value");
+
+    const positions = [futurePosition()];
+    setBook(positionsQuery, "success", positions);
+    const expected = accountNetWorth(
+      [],
+      accountLedgerCash(cashFunds),
+      positions,
+      accountCharges(cashFunds),
+      cashFunds.futuresMtmInLedger,
+    );
+    view.rerender(<PortfolioCard />);
+
+    const loaded = screen.getByTestId("portfolio-net-worth");
+    expect(loaded).toHaveTextContent(formatAccountNetWorth(expected, true));
+    expect(loaded.textContent).toContain("≈");
+    expect(loaded.textContent).not.toContain("10,00,000");
+  });
+
+  it("shows a dash when the position book has failed", () => {
+    setBook(fundsQuery, "success", cashFunds);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "error", undefined);
+    positionsQuery.data = [futurePosition()];
+    useModeStore.setState({ mode: "live" });
+    render(<PortfolioCard />);
+
+    const figure = screen.getByTestId("portfolio-net-worth");
+    expect(figure).toHaveTextContent("—");
+    expect(figure.textContent).not.toContain("10,00,000");
+    expect(figure.textContent).not.toContain("≈");
+    expect(figure).not.toHaveAttribute("data-value");
+  });
+
+  it("draws a negative net worth the same way Invest does", () => {
+    const funds = {
+      ...PRACTICE_FUNDS,
+      availableCash: -50_000,
+      usedMargin: 0,
+      totalBalance: -50_000,
+      ledgerBalance: -50_000,
+    };
+    setBook(fundsQuery, "success", funds);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", []);
+    useModeStore.setState({ mode: "practice" });
+    render(<PortfolioCard />);
+
+    const figure = screen.getByTestId("portfolio-net-worth");
+    expect(figure).toHaveTextContent("-₹50,000");
+    expect(figure).not.toHaveAttribute("aria-label");
+    expect(figure).toHaveAttribute("title", NET_WORTH_POSITIONS_NOTE);
+  });
+
+  it("keeps the approximate accessible name when net worth is negative", () => {
+    const funds = { ...BROKER_FUNDS, ledgerBalance: -50_000, availableCash: -50_000 };
+    const positions = [futurePosition({ ltp: 22_000, settlementPrice: 22_000 })];
+    setBook(fundsQuery, "success", funds);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "live" });
+    render(<PortfolioCard />);
+
+    const figure = screen.getByTestId("portfolio-net-worth");
+    expect(figure).toHaveTextContent(`≈ ${formatAccountNetWorth(-50_000)}`);
+    expect(figure).toHaveTextContent("-₹50,000");
+    expect(figure).toHaveAccessibleName(accountNetWorthAccessibleName(-50_000));
+  });
+});
 
 describe("PortfolioCard allocation stays provisional", () => {
   it.each(allocationCases())(

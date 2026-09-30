@@ -53,6 +53,10 @@ export interface PortfolioSummary {
   approximateNetWorth?: boolean;
   /** Symbols of those fallback futures, one entry per open position. */
   fallbackSymbols?: readonly string[];
+  /** Dhan futures whose average price was missing. */
+  missingAverageSymbols?: readonly string[];
+  /** Kotak Neo futures marked from the open-leg average. */
+  openLegSymbols?: readonly string[];
   sectorCount: number;
   holdingCount: number;
 }
@@ -195,10 +199,12 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   );
 
   const netWorth = accountNetWorth(holdings, ledgerCash, positions, charges, futuresMtmInLedger);
-  const { approximate: approximateNetWorth, fallbackSymbols } = netWorthApproximation(
-    positions,
-    futuresMtmInLedger,
-  );
+  const {
+    approximate: approximateNetWorth,
+    fallbackSymbols,
+    missingAverageSymbols,
+    openLegSymbols,
+  } = netWorthApproximation(positions, futuresMtmInLedger);
 
   const summary: PortfolioSummary = useMemo(
     () => ({
@@ -212,6 +218,8 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       netWorth,
       approximateNetWorth,
       fallbackSymbols,
+      missingAverageSymbols,
+      openLegSymbols,
       sectorCount,
       holdingCount: holdings.length,
     }),
@@ -226,6 +234,8 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       netWorth,
       approximateNetWorth,
       fallbackSymbols,
+      missingAverageSymbols,
+      openLegSymbols,
       sectorCount,
       holdings.length,
     ],

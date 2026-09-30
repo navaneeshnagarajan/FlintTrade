@@ -64,9 +64,13 @@ export function PortfolioCard() {
 
   const funds = isExplore ? getDemoFunds() : fundsQuery.data;
   const holdings = isExplore ? getDemoHoldings() : holdingsQuery.data;
-  const positions = isExplore ? [] : (positionsQuery.data ?? []);
   const bookReady = (query: { isSuccess: boolean; isError: boolean; isLoading: boolean }) =>
     query.isSuccess && !query.isError && !query.isLoading;
+  // Same rule as Invest: a pending or failed position book is not an empty
+  // one. Publishing early would show cash alone, then jump when the book lands.
+  const expectsPositionBook = accountReadsEnabled && !isExplore;
+  const positionBookReady = !expectsPositionBook || bookReady(positionsQuery);
+  const positions = isExplore || !positionBookReady ? [] : (positionsQuery.data ?? []);
   // Example allocation stays until funds, holdings, and positions have all
   // loaded. Any one of them still loading or failed keeps the split provisional.
   const allocationIsAccount = !isExplore
@@ -80,8 +84,15 @@ export function PortfolioCard() {
   );
   const futuresMtmInLedger = fundsFuturesMtmInLedger(funds);
   const positionValue = positionsNetWorthContribution(positions, holdings ?? [], futuresMtmInLedger);
-  const { approximate, fallbackSymbols } = netWorthApproximation(positions, futuresMtmInLedger);
-  const figureTitle = netWorthFigureTitle(approximate, fallbackSymbols);
+  const { approximate, missingAverageSymbols, openLegSymbols } = netWorthApproximation(
+    positions,
+    futuresMtmInLedger,
+  );
+  const showConnect = !isExplore && !accountReadsEnabled;
+  const netWorthPublished = !showConnect && positionBookReady;
+  const figureTitle = netWorthPublished
+    ? netWorthFigureTitle(approximate, missingAverageSymbols, openLegSymbols)
+    : undefined;
   const cash = accountLedgerCash(funds);
   const netWorth = accountNetWorth(
     holdings ?? [],
@@ -114,13 +125,15 @@ export function PortfolioCard() {
           <p
             className="font-mono text-xl font-semibold text-text-primary"
             data-testid="portfolio-net-worth"
-            data-value={netWorth}
-            title={figureTitle}
-            aria-label={approximate && netWorth > 0 ? accountNetWorthAccessibleName(netWorth) : undefined}
+            {...(figureTitle ? { title: figureTitle } : {})}
+            {...(netWorthPublished ? { "data-value": netWorth } : {})}
+            aria-label={netWorthPublished && approximate ? accountNetWorthAccessibleName(netWorth) : undefined}
           >
-            {netWorth > 0
-              ? formatAccountNetWorth(netWorth, approximate)
-              : isExplore || accountReadsEnabled ? "—" : "Connect broker"}
+            {showConnect
+              ? "Connect broker"
+              : netWorthPublished
+                ? formatAccountNetWorth(netWorth, approximate)
+                : "—"}
           </p>
         </div>
 

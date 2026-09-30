@@ -33,7 +33,7 @@ import {
   accountNetWorthAccessibleName,
   formatAccountNetWorth,
   NET_WORTH_LABEL,
-  netWorthFigureTitle,
+  netWorthFigureTitleForBook,
 } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
@@ -104,8 +104,12 @@ export function DashboardTab() {
   // is passed to a counter/list without changing each call site's shape.
   const money = (v: number) => maskValue(formatINRCompact(v), valuesHidden);
   const approximate = liveSummary.approximateNetWorth === true;
-  const fallbackSymbols = liveSummary.fallbackSymbols ?? [];
-  const figureTitle = netWorthFigureTitle(approximate, fallbackSymbols);
+  const figureTitle = netWorthFigureTitleForBook({
+    approximate,
+    missingAverageSymbols: liveSummary.missingAverageSymbols,
+    openLegSymbols: liveSummary.openLegSymbols,
+    fallbackSymbols: liveSummary.fallbackSymbols,
+  });
   const netWorthLabel = (v: number) => maskValue(formatAccountNetWorth(v, approximate), valuesHidden);
 
   const positionValue = liveSummary.positionValue ?? 0;

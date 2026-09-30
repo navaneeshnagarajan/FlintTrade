@@ -16,6 +16,61 @@ import { DemoBadge } from "./DemoBadge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { Loader2 } from "lucide-react";
 
+/** Adapter rows send numbers as strings and omit a percent the broker never calculated. */
+function finiteAmount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function formatPositionPnl(value: unknown): string {
+  const amount = finiteAmount(value);
+  if (amount == null) return "—";
+  const text = amount.toLocaleString("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  });
+  return amount >= 0 ? `+${text}` : text;
+}
+
+type PositionPercentRow = {
+  pnl?: unknown;
+  quantity?: unknown;
+  averagePrice?: unknown;
+  average_price?: unknown;
+  avgPrice?: unknown;
+  avg_price?: unknown;
+};
+
+/** Cost basis is the absolute average price times quantity. Adapters use either spelling. */
+function positionCostBasis(position: PositionPercentRow): number | null {
+  const quantity = finiteAmount(position.quantity);
+  const average = finiteAmount(
+    position.averagePrice ?? position.average_price ?? position.avgPrice ?? position.avg_price,
+  );
+  if (quantity == null || average == null) return null;
+  const cost = Math.abs(average * quantity);
+  return Number.isFinite(cost) ? cost : null;
+}
+
+/**
+ * P&L percent from cost when the cost basis is above zero.
+ * Dhan and Neo never send pnlPercent. A missing profit figure, or a cost
+ * basis that is not above zero, is a dash. `.toFixed` runs only on a finite percent.
+ */
+function formatPositionPnlPercent(position: PositionPercentRow): string {
+  const cost = positionCostBasis(position);
+  const pnl = finiteAmount(position.pnl);
+  if (cost == null || !(cost > 0) || pnl == null) return "—";
+  const percent = (pnl / cost) * 100;
+  if (!Number.isFinite(percent)) return "—";
+  return `${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%`;
+}
+
 export function PositionsCard() {
   const isExplore = useModeStore((s) => s.mode === "explore");
   const accountReadsEnabled = useAccountReadsEnabled();
@@ -110,7 +165,13 @@ export function PositionsCard() {
         ) : openPositions.length > 0 ? (
           <div className="flex-1 overflow-y-auto space-y-1" style={{ scrollbarWidth: "none" }}>
             {openPositions.map((pos) => {
-              const pnlPositive = pos.pnl >= 0;
+              const pnlAmount = finiteAmount(pos.pnl);
+              const pnlPositive = (pnlAmount ?? 0) >= 0;
+              const tone = pnlAmount == null
+                ? "var(--color-text-muted)"
+                : pnlPositive
+                  ? "var(--color-bullish-text)"
+                  : "var(--color-bearish-text)";
               return (
                 <div
                   key={`${pos.symbol}-${pos.exchange}`}
@@ -126,20 +187,16 @@ export function PositionsCard() {
                   <div className="text-right shrink-0 ml-2">
                     <p
                       className="font-mono text-xs font-semibold"
-                      style={{ color: pnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
+                      style={{ color: tone }}
                     >
-                      {pnlPositive ? "+" : ""}
-                      {pos.pnl.toLocaleString("en-IN", {
-                        style: "currency",
-                        currency: "INR",
-                        maximumFractionDigits: 0,
-                      })}
+                      {formatPositionPnl(pos.pnl)}
                     </p>
                     <p
                       className="font-mono text-[10px]"
-                      style={{ color: pnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
+                      data-testid={`position-pnl-percent-${pos.symbol}`}
+                      style={{ color: tone }}
                     >
-                      {pnlPositive ? "+" : ""}{pos.pnlPercent.toFixed(2)}%
+                      {formatPositionPnlPercent(pos)}
                     </p>
                   </div>
                 </div>
