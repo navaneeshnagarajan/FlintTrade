@@ -5651,6 +5651,7 @@ class OllamaRuntime:
             if self._runtime_state_error:
                 raise OllamaRuntimeError(self._runtime_state_error)
             if self._active_version == self.target_version:
+                self._prune_superseded_rollback_if_idle()
                 raise OllamaRuntimeError("managed Ollama runtime is already on the preferred release")
             self._require_stopped_runtime_mutation("runtime update")
             self._ensure_runtime_state_committed()
@@ -5662,9 +5663,58 @@ class OllamaRuntime:
                 self._raise_if_cancelled()
                 self._mark_operation_mutation_started()
                 self._write_runtime_state(self.target_version, previous)
+            self._prune_unreferenced_releases()
             self._phase = "installed"
             self._error = ""
             return self._status_snapshot()
+
+    def _prune_superseded_rollback_if_idle(self) -> None:
+        """Finish a prune that failed after a previous update already switched.
+
+        ``update`` raises once the preferred release is active. That retry is
+        the only way to remove a rollback generation the failed prune left
+        behind, and only when the runtime is stopped.
+        """
+        if self._runtime_state_error or not self._unreferenced_release_dirs():
+            return
+        self._require_stopped_runtime_mutation("runtime update")
+        self._prune_unreferenced_releases()
+
+    def _unreferenced_release_dirs(self) -> list[Path]:
+        """Return installed version directories that are neither active nor previous."""
+        retain = {version for version in (self._active_version, self._previous_version) if version}
+        try:
+            root = self._ensure_managed_directory(self.runtime_root, create=False)
+        except FileNotFoundError:
+            return []
+        unreferenced: list[Path] = []
+        for path in self._bounded_children(root):
+            if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", path.name) is None or path.name in retain:
+                continue
+            unreferenced.append(path)
+        return unreferenced
+
+    def _prune_unreferenced_releases(self) -> None:
+        """Delete the rollback generation this update no longer names.
+
+        One previous release is enough to roll back. Keeping the generation
+        before that permanently retains several gigabytes, and uninstall later
+        fails once a build no longer recognises that version.
+        """
+        for path in self._unreferenced_release_dirs():
+            try:
+                path_stat = path.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise OllamaRuntimeError("managed Ollama superseded rollback could not be inspected") from exc
+            if (
+                stat.S_ISLNK(path_stat.st_mode)
+                or self._path_is_reparse(path_stat)
+                or not stat.S_ISDIR(path_stat.st_mode)
+            ):
+                raise OllamaRuntimeError("managed Ollama superseded rollback path is unsafe")
+            _remove_path_without_following_root(path)
 
     def rollback(self) -> dict[str, Any]:
         """Switch to the one retained, fully rehashed release."""

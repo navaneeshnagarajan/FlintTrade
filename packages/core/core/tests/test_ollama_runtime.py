@@ -6476,6 +6476,37 @@ def test_update_stages_target_then_retains_one_verified_rollback(tmp_path: Path)
     assert (workspace / "runtime" / "ollama" / "v0.32.0" / "bin" / "ollama.exe").read_bytes() == b"new"
 
 
+def test_second_update_prunes_the_superseded_rollback(tmp_path: Path) -> None:
+    archives = {}
+    for version, payload in (("v0.31.2", b"old"), ("v0.32.0", b"mid"), ("v0.35.0", b"new")):
+        archive = tmp_path / f"ollama-{version}.zip"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("bin/ollama.exe", payload)
+        archives[version] = archive
+    workspace = tmp_path / "workspace"
+    root = workspace / "runtime" / "ollama"
+    _versioned_runtime(workspace, archives, target_version="v0.31.2").install()
+    _versioned_runtime(workspace, archives, target_version="v0.32.0").update()
+    assert (root / "v0.31.2").is_dir()
+
+    result = _versioned_runtime(workspace, archives, target_version="v0.35.0").update()
+
+    assert result["active_version"] == "v0.35.0"
+    assert result["previous_version"] == "v0.32.0"
+    assert result["rollback_available"] is True
+    assert (root / "v0.32.0").is_dir()
+    assert (root / "v0.35.0" / "bin" / "ollama.exe").read_bytes() == b"new"
+    assert not (root / "v0.31.2").exists()
+
+    (root / "v0.31.2").mkdir()
+    (root / "v0.31.2" / "bin").mkdir()
+    (root / "v0.31.2" / "bin" / "ollama.exe").write_bytes(b"orphan")
+    with pytest.raises(OllamaRuntimeError, match="already on the preferred release"):
+        _versioned_runtime(workspace, archives, target_version="v0.35.0").update()
+    assert not (root / "v0.31.2").exists()
+    assert (root / "v0.32.0").is_dir()
+
+
 def test_failed_update_leaves_the_known_good_release_active(tmp_path: Path) -> None:
     old_archive = tmp_path / "ollama-v0.31.2.zip"
     new_archive = tmp_path / "ollama-v0.32.0.zip"
