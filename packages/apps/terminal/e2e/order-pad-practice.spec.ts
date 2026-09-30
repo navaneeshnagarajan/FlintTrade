@@ -315,6 +315,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
         price: 123.45,
         triggerPrice: 0,
         strategy: "FlintOrderPad",
+        rationale: "",
         order_type: "LIMIT",
         trigger_price: 0,
       });

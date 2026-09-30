@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -126,12 +127,13 @@ class WebhookOrderDispatcher:
                     payload,
                     "Validated order safety configuration is unavailable; no order was sent.",
                 )
-            laya_block = _laya_automate_block(body)
+            laya_block = await asyncio.to_thread(_laya_automate_block, body)
             if laya_block is not None:
                 refused = _error("place_order", payload, str(laya_block["message"]))
                 refused["code"] = laya_block["code"]
                 refused["reason"] = laya_block["reason"]
-                refused["limits"] = laya_block["limits"]
+                if "limits" in laya_block:
+                    refused["limits"] = laya_block["limits"]
                 if "applied_quantity" in laya_block:
                     refused["applied_quantity"] = laya_block["applied_quantity"]
                 return refused
@@ -545,6 +547,9 @@ def _payload_to_order_body(payload: WebhookPayload) -> tuple[dict[str, Any], str
         return {}, "Webhook order requires side/action BUY or SELL."
 
     body = {key: payload.data[key] for key in _ORDER_FIELDS if key in payload.data}
+    for key in ("rationale", "note"):
+        if key in payload.data:
+            body[key] = payload.data[key]
     body.update({
         "symbol": payload.symbol,
         "exchange": payload.exchange or payload.data.get("exchange") or "NSE",

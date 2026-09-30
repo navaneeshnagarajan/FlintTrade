@@ -624,10 +624,12 @@ export function registerOperatorStatusProbes(
   registry: SyntheticFixtureRegistry,
   options: {
     expectedCalls?: SyntheticHandlerRegistration["expectedCalls"];
+    pingCalls?: SyntheticHandlerRegistration["expectedCalls"];
     includeLlmConfig?: boolean;
   } = {},
 ): void {
   const expectedCalls = options.expectedCalls ?? OPERATOR_PROBE_CALLS;
+  const pingCalls = options.pingCalls ?? expectedCalls;
   const allowedHosts = new Set([
     ...EDGE_PROBE_URLS.map((url) => probeHost(url)),
     probeHost(PUBLIC_INTERNET_PROBE_URL),
@@ -637,7 +639,7 @@ export function registerOperatorStatusProbes(
     name: "operator desk ping",
     method: "GET",
     path: "/ft-api/api/v1/ping",
-    expectedCalls,
+    expectedCalls: pingCalls,
     handler: (request) => {
       assertReadOnlyProbe(request);
       expect(request.headers()["authorization"]).toBeUndefined();

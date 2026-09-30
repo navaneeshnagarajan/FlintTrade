@@ -496,7 +496,7 @@ Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Example-data
 placement is refused by the backend (HTTP 403 `mode_blocked`,
 `Orders are not available for Example. Switch to Practice or Live to trade.`);
-Order Pad Example Buy is a local example fill (no HTTP order route, no Laya admit, no
+Order Pad Example Buy is a local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no Laya admit, no
 SafetySystem). Other Live write verbs still reach SafetySystem without
 this place admission. The global auth check covers both a session JWT
 and `FLINTTRADE_API_KEY`. The session JWT is read from
@@ -521,6 +521,240 @@ order):
 Do not bypass Laya or SafetySystem on those place paths. If you need a
 fast-path for high-frequency orders, add the path inside the layers, not
 around them.
+
+### Laya decision sidecar
+
+Operator steps, the chip, and the reason codes are in
+[Start Laya](USER_GUIDE.md#start-laya). Desk place surfaces go through
+this admission. Place admission asks the Laya model only after Down and
+the hard rules.
+The host is opt-in. Install and supervise it with the FlintTrade
+environment (the project `.venv` after `uv sync`, or `uv run python`),
+so `flinttrade_core` and `flinttrade_engine` import. Do not run these
+commands with the sidecar interpreter.
+
+```text
+python -m flinttrade_core.laya_runtime install
+python -m flinttrade_core.laya_runtime start
+python -m flinttrade_core.laya_runtime status
+python -m flinttrade_core.laya_runtime stop
+```
+
+`install` creates `<workspace>/runtime/laya/venv`. On Linux the default
+workspace is `~/.flinttrade`. `FLINTTRADE_WORKSPACE_DIR` overrides it.
+The sidecar environment can share the base interpreter with FlintTrade:
+its `python` is often a symlink to the same executable, and the prefix
+compared at install time is the environment directory, not that symlink.
+The install refuses a command whose prefix is the FlintTrade environment.
+The default install puts CPU torch in the sidecar environment from
+`https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
+the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`,
+`laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
+(`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`).
+The `serve` extra stays on the install requirement. The CPU install applies
+that file to both pip commands, and installs torch first. The install size
+is roughly 1.2 GB. CUDA and ROCm
+installs do not use the CPU pin. `install --accelerator cuda` opts into the
+PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
+set to an https PyTorch ROCm wheel index. `start` still uses CPU
+(`LAYA_DEVICE=cpu`). The host stays `127.0.0.1`. `LAYA_PORT` chooses the
+port and defaults to 8000. A clash on that port is Down with
+`port_in_use`. A fresh API key is
+written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
+on a start that fails after the key was written. When `LAYA_API_KEY_FILE`
+points at that same path, `start` replaces the file and does not treat
+it as missing. A different path that is not there still refuses with
+"The Laya API key file is missing."
+
+`start` downloads the pinned commit (`[checkpoint] revision`, never the
+default branch) into `<workspace>/runtime/laya/staging` when the weights
+file or any manifest file is not already installed, and when the runtime
+checkpoint is on disk but its hashes are not the pin. That directory is
+not the launch path and not the shared Hugging Face cache. The download
+sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
+`HF_HUB_DISABLE_XET=1` (read by `huggingface_hub` 1.33.0), so transfer
+logs stay in that folder. The step does
+not start the sidecar. While it runs, including a pin change, the reason
+is `downloading` and the popover is `Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`)
+(live, one decimal, decimal GB), with no Next line and no Updating label.
+Orders stay on the Down refusal. It then hashes `model.safetensors` and
+every manifest file in that staging directory. When no checkpoint is
+already there, a full match renames staging onto
+`<workspace>/runtime/laya/checkpoint` and launches the offline verified
+boot, with hub access off. When a checkpoint is already there, a full
+match renames it aside to `checkpoint.old-<random>` in the same runtime
+directory, renames staging onto `checkpoint`, then deletes the old copy.
+The current copy stays in place until that match. If the second rename
+fails, the old checkpoint is renamed back and the reason is
+`download_failed`, not `wrong_revision`. A complete download whose files
+do not match the pin is `wrong_revision`; staging is deleted and a
+checkpoint already on disk is left in place. An extra loadable file in a
+complete download is `unverified`. A dropped connection, a partial or
+missing file, or a read error is `download_failed` ("Can't download the
+model"; tooltip "Check your connection, then Start Laya again."). The
+status word for `downloading` and `download_failed` is Down, not Still
+loading, and orders use "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
+model cache alone. The sidecar does not start on files that do not match
+the pin. If the download does not finish, the reason is `download_failed`, not
+`wrong_revision` and not `unverified`, whatever older snapshot is on
+disk. An empty cache is `download_failed`. `unverified` stays when this
+start did not download. A snapshot already on disk is `wrong_revision`
+only when this start did not download. Leftover staging
+directories and `checkpoint.old-*` copies are removed at the start of
+`start` once a checkpoint is in place, with no chip change and no
+message. If `checkpoint` is missing and one or more `checkpoint.old-*`
+copies remain, the last `checkpoint.old-*` name is restored onto
+`checkpoint` and any other aside copies are removed. If that restore fails, the aside copy stays
+where it is and that cleanup is skipped. A copy that was restored is then
+checked against the pin. If it does not match, the sidecar does not start
+on it; the pinned download runs instead, and a failed download leaves
+`download_failed` with that copy still on disk. The download log line is
+`laya download repo=<repo> revision=<revision>`.
+The pins live in `laya_policy.toml`:
+`[checkpoint]` names `revision` beside `sha256`, the weights file `model.safetensors`, and
+`[checkpoint.manifest]` pins `rl_agent_config.json`,
+`encoder/config.json`, `tokenizer/tokenizer_config.json`, and
+`tokenizer/tokenizer.json` by sha256.
+
+A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
+the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
+attaches on its health probe. The host must stay loopback. The attached
+client uses the same revision and digest checks. On each sidecar start
+FlintTrade hashes `model.safetensors` and each file in
+`[checkpoint.manifest]` before launch. The runtime record holds the
+sha256, pid, and start token, and each file's inode, size, and
+modification time in nanoseconds
+(`<workspace>/runtime/laya/verification.json`, with the token and pid
+also in `run.json`). When the files are already on disk and this start is not replacing them,
+a missing pinned file, a shard index, or any extra weights file or other
+file the launcher could read is `unverified` ("Can't verify the model")
+and the sidecar does not start. A changed byte in a snapshot that this
+start is not replacing is `wrong_revision` ("Wrong model version") and the
+sidecar does not start. A changed byte in the runtime checkpoint is the
+download above; the sidecar does not start on that tree. Laya does not
+reach Ready in these cases. A verified boot sets
+`LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in the
+standard Hugging Face cache is accepted. When that file is the cache
+symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), it is
+passed as the snapshot file, not the blob. A blob path is still refused.
+The boot runs offline
+(`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
+id or a revision. When that sidecar's health document leaves the revision
+null, FlintTrade fills the pinned revision from the verified manifest, so
+the chip leaves Still loading and can reach Ready without a download in
+this process. The launch log line is
+`laya weights path=<path> sha256=<digest>`. Those identity values are
+rechecked, without hashing again, when Laya reports Ready and on each
+watch tick, about every 1.5 seconds. A mismatch is `unverified`
+("Can't verify the model"). The log line is
+`laya weights path=<path> changed=<field>` where `<field>` is `inode`,
+`size`, `mtime`, or a comma-separated list of those, and `<path>` is the
+file that changed. The same watch reads the pid file
+(`runtime/laya/sidecar.pid`), the key file (`runtime/laya/api.key`), and
+the runtime record, so a command-line stop or start, or a key rotation,
+is reconciled by that watch. The desk polls `GET /api/v1/ping` every
+1.5 seconds. That ping reconciles the pid, the key, and the runtime
+record the same way an order does, so the chip and the order gate read
+the same state. A stop or a start shows on the chip by the next 1.5-second check.
+After Start Laya, until the ping confirms the new state, the chip says
+Checking in the neutral colour and the popover says Checking Laya…. It
+does not show a stale Ready during that wait. An admitted place while
+the chip is not Ready or Degraded also shows Checking until the next
+ping. A confirmed first load
+still says Still loading. A place refused with exactly "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to Down on that
+response. The refusal line is unchanged. Every `stop` deletes the runtime
+record, as does a start that fails after it was written. A record from
+an earlier run is rejected. A health document without the weight digest
+is Ready when that record matches the pin. If the record cannot be
+checked, the reason is `unverified` ("Can't verify the model"). The
+tooltip is "The installed model couldn't be checked against the pinned
+version. Restart Laya. If it keeps happening, reinstall it."
+
+`status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
+`still_loading`, `downloading`, `download_failed`, `unreachable`,
+`wrong_revision`, `unverified`, `key_rejected`, or `key_missing`. `identity_absent` is
+not a status code. The desk shows Not started, Stopped,
+`Port <n> in use`, Still loading, `Downloading the model · X of Y GB`,
+Can't download the model, Unreachable, Wrong model version, Can't verify
+the model, Can't reach Laya, and The Laya API key file is missing.
+`key_missing` stays until a later start finds the file, or an explicit
+stop. When `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`,
+that next `start` replaces the file and does not treat it as missing. A
+different path that is not there still refuses with "The Laya API key
+file is missing." A health
+check does not replace it with Not started. The download progress class
+subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`). The model is
+about 2.37 GB, and the progress line reports that size once. `unverified` applies when this start did
+not download. A failed download, including one over an older unverified
+snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
+sidecar port. Tooltips for
+`not_started`, `stopped`, `port_in_use`, `still_loading`, and
+`unreachable` are the label followed by
+`. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
+has no tooltip. The `download_failed` tooltip is "Check your connection,
+then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than
+FlintTrade expects." That code is only a real mismatch: a complete
+download whose files do not match the pin, a snapshot already on disk
+that this start is not replacing, or a running sidecar that reports
+another revision or digest. A dropped connection, a partial download, or
+a failed download or swap, including one that puts the previous
+checkpoint back, is `download_failed`, not this code. The `key_rejected`
+tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
+Down and orders are refused. When a place is refused because Laya cannot
+be reached, or because it rejects the key, the chip updates on that same
+order: Unreachable, or Can't reach Laya. Every chip-Down refusal reads
+"Laya is Down. New orders are paused until it's Ready. You can still close positions." A
+dead child is reaped on the health probe and on interpreter exit, and
+the probe records Down with Stopped. `POST /api/v1/laya/start` starts or
+restarts the managed sidecar for a signed-in operator session. A
+port that another process holds, including one that is not Laya, is Down
+with `Port <n> in use`. The first load, before health is usable, is Still
+loading. Orders stay refused with the Down sentence while that load
+runs. After a successful load, a later miss is Unreachable.
+
+`GET /health` then records Practice Ready or Degraded from the sidecar.
+Live stays Down until a `LayaQualification` record uses
+`EvidenceUseScope.LIVE_DECISION` for that exact revision, digest, and
+policy version. A base checkpoint is not that record. An unreachable
+host, a timeout, a malformed response, or a revision or digest mismatch
+is Down, and Practice refuses too. A decision without `revision` or
+`sha256` is checked against this run's verified record for both admitted
+and clamped orders. The decision log is
+`<workspace>/runtime/laya/decisions.jsonl`. It stores `proof=decision`
+or `proof=runtime`. An admitted Practice place with an empty note skips
+the model and writes one line, `effect=clamp` with `failure=note_absent`
+and no proof, including when the quantity already fits. When this run's
+record stood in, each model allow keeps its own `effect=allow`
+`proof=runtime` line. There is no dedupe. When the chip is Ready and a model decision
+carries no proof, the refusal code is `laya_unverified` and the decision log records
+`identity_absent` with no proof. The refusal reads "Not placed. Laya's
+decision couldn't be verified. Try again." Stopping the sidecar records
+Down before an in-flight probe can publish Ready. An empty note is
+uncertain and is not a hard reject:
+Practice clamps and Live denies. The Practice server reason is "Laya is
+uncertain. Quantity stays inside the tighter limit." The Live server
+reason is "Laya is uncertain. Live stays closed." On a denial, Order Pad
+and Quick Trade show that server reason inside one alert (`role="alert"`),
+the only live region. The reason line is named "Laya decision" and is not
+its own status.
+A clamp is only when the requested quantity is greater than the allowed one. The desk clamp
+sentence is "Not placed. Laya allows up to N." Place N sends that
+quantity. On Order Pad, "Review Practice order" then shows the placed
+quantity. Place 1 on "Not placed. Laya allows up to 1." places. Nothing
+is placed until Place N.
+Order Pad sends that note as `rationale`, including when the field is
+empty. The collapsed control is "Add a reason (optional)". Once open, the
+field's accessible name is the same. Quick Trade, Positions square-off,
+Order Ladder, Scalper, and Option Chain use that accessible name too.
+
+The same client speaks `POST /v1/systemone`. An operator may point it at
+another loopback host, including one on port 8888, without adding that
+host's software as a dependency. Do not vendor Unsloth Studio. Chat
+profiles stay separate from the `decision` service kind. Catalogue ids
+under that kind are `decision:laya-managed` and
+`decision:systemone-endpoint`; they are not chat profiles, their default
+evidence scope is offline qualification until a Live qualification record
+exists, and listing them does not start the host.
 
 ### Vite dev proxy paths
 

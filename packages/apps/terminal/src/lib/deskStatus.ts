@@ -57,7 +57,7 @@ export type DeskStatusTone = "ok" | "warn" | "down" | "neutral";
 export function summariseDeskStatus(input: {
   mode: "explore" | "practice" | "live";
   broker: string;
-  decision: "Ready" | "Degraded" | "Down";
+  decision: "Ready" | "Degraded" | "Down" | "Still loading" | "Checking";
   chat: string;
 }): { tone: DeskStatusTone; label: string } {
   if (input.mode === "explore") return { tone: "neutral", label: "Example data only" };
@@ -71,5 +71,7 @@ export function summariseDeskStatus(input: {
   if (input.chat === "Error" || input.chat === "Disconnected") {
     return { tone: "warn", label: "AI model offline" };
   }
+  if (input.decision === "Checking") return { tone: "neutral", label: "Checking Laya" };
+  if (input.decision === "Still loading") return { tone: "neutral", label: "Laya still loading" };
   return { tone: "ok", label: "All systems ready" };
 }

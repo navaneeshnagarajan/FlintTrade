@@ -156,7 +156,17 @@ class TestPublicEndpointBypass:
         resp = client.get("/api/v1/ping")
         assert resp.status_code == 200
         body = resp.get_json()
-        assert set(body) == {"status", "timestamp", "laya"}
+        assert set(body) == {
+            "status",
+            "timestamp",
+            "laya",
+            "laya_practice",
+            "laya_live_qualified",
+            "laya_reason",
+            "laya_port",
+            "laya_download_bytes",
+            "laya_download_total",
+        }
         assert body["status"] == "ok"
         assert body["laya"] in {"ready", "degraded", "down"}
         text = resp.get_data(as_text=True).lower()
