@@ -80,8 +80,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   renamed onto `checkpoint`, and the old copy is deleted. If that second
   rename fails, the old checkpoint is renamed back, the chip is
   `download_failed`, and the sidecar does not start. While the download
-  runs, including a pin change, the status word is Down, not Still
-  loading, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
+  runs, including a pin change, the status word is Downloading (neutral
+  colour), not Still loading or Down, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
   The model is about 2.37 GB, and that size is reported once.
   There is no separate Updating label. Orders are refused with
   "Laya is Down. New orders are paused until it's Ready. You can still close positions." A dropped
