@@ -521,7 +521,7 @@ and `laya_download_total` are the live byte counts; otherwise both are
 `null`. Chip labels are Not started, Stopped, `Port <n> in use`,
 Still loading, Downloading the model · 1.2 of 3.4 GB, Can't download the
 model, Unreachable, Can't verify the model, Wrong model version,
-Can't reach Laya, and The Laya API key file is missing. `<n>` is `laya_port`. Tooltips for `not_started`,
+Can't reach Laya, and The Laya API key file is missing. A health check does not replace `key_missing` with Not started. `<n>` is `laya_port`. Tooltips for `not_started`,
 `stopped`, `port_in_use`, `still_loading`, and `unreachable` are the label
 followed by `. Next: python -m flinttrade_core.laya_runtime start`.
 `downloading` has no tooltip and no Next line. Its status word is Down,
@@ -568,8 +568,10 @@ into `<workspace>/runtime/laya/staging` when the weights file or a
 manifest file is not on disk, and when the runtime checkpoint is on disk
 but its hashes are not the pin. The download asks for the commit in
 `[checkpoint] revision`, not the default branch, and it does not start
-the sidecar. That download keeps Hugging Face's home at
-`<workspace>/runtime/laya/hf-home`, not the shared cache. While it runs,
+the sidecar. That download sets `HF_HOME` to
+`<workspace>/runtime/laya/hf-home` and `HF_HUB_DISABLE_XET=1`, so transfer
+logs stay out of the shared cache. The model is about 2.37 GB, and that
+size is reported once. While it runs,
 including a pin change, the reason is
 `downloading` ("Downloading the model · 1.2 of 3.4 GB"), the status word
 is Down, and there is no Updating label. When no checkpoint is already
@@ -605,7 +607,9 @@ The download log line is `laya download repo=<repo> revision=<revision>`.
 A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo id
-or a revision. The launch log line is
+or a revision. When the sidecar health document leaves the revision empty,
+FlintTrade fills the pinned revision from the verified manifest, so the
+chip leaves Still loading. The launch log line is
 `laya weights path=<path> sha256=<digest>`. Those identity values are
 rechecked, without hashing again, when Laya reports Ready and on each
 watch tick, about every 1.5 seconds. A mismatch is `unverified`
@@ -1070,7 +1074,7 @@ Not every endpoint emits `code`:
 | Code or status | Meaning |
 |---|---|
 | `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
-| `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text). The desk shows that `reason` under the denial as a status named Laya decision. Down is "Laya is Down. Orders are paused until it's Ready." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Laya isn't qualified for Live yet. Practice orders are available." An empty Live note is "Laya is uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |
+| `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text). The desk shows that `reason` under the denial on a line named Laya decision, inside one alert (`role="alert"`), the only live region. That line is not its own status. Down is "Laya is Down. Orders are paused until it's Ready." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Laya isn't qualified for Live yet. Practice orders are available." An empty Live note is "Laya is uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |
 | `laya_unverified` | One decision carried no proof. The chip can stay Ready. This is not a chip reason — HTTP 409. Body: `status: "error"`, `code: "laya_unverified"`, `message` and `reason` both "Not placed. Laya's decision couldn't be verified. Try again." The decision log records `identity_absent` and does not store `proof`. There is no `limits` field. |
 | `laya_clamp` | Operator place was not placed — HTTP 409. The requested quantity is greater than the allowed quantity. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Not placed. Laya allows up to <applied_quantity>.`), `reason`, `limits.max_quantity`, and `applied_quantity`. An empty Practice note that reduces the quantity sets `reason` to "Laya is uncertain. Quantity stays inside the tighter limit." A ceiling clamp can leave `reason` empty. Nothing is placed until the desk sends that quantity through admit again. Place 1 on "Not placed. Laya allows up to 1." is admitted, because that request is already at the allowed quantity. An allow then continues into SafetySystem and gate_order. A request already at the allowed quantity is an allow, including when an uncertain note tightened the ceiling without shrinking the number. Live uncertain, including an empty note, is `laya_denied`, not this code. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |

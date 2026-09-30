@@ -106,8 +106,9 @@ available." An uncertain answer, including an empty note, clamps in
 Practice and denies in Live. It is not a hard reject. The Practice server
 reason is "Laya is uncertain. Quantity stays inside the tighter limit."
 The Live server reason is "Laya is uncertain. Live stays closed." On a
-denial, Order Pad and Quick Trade show that server reason as a status
-named "Laya decision". The desk
+denial, Order Pad and Quick Trade show that server reason inside one
+alert (`role="alert"`), the only live region. The reason line is named
+"Laya decision" and is not its own status. The desk
 does not auto-place. A clamp is only when the requested quantity is
 greater than the allowed one. Order Pad and Quick Trade show "Not placed.
 Laya allows up to N." with Place N and Cancel. Place N sends that
@@ -119,8 +120,8 @@ Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `port_in_use` (`Port <n> in use`), `still_loading` (Still loading),
 `downloading` (Downloading the model · 1.2 of 3.4 GB), `download_failed`
 (Can't download the model), `unreachable` (Unreachable), `unverified`
-(Can't verify the model), `wrong_revision` (Wrong model version), and
-`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). `<n>` is the sidecar port. For
+(Can't verify the model), `wrong_revision` (Wrong model version),
+`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). A health check does not replace `key_missing` with Not started. `<n>` is the sidecar port. For
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable`, the tooltip is the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
@@ -185,8 +186,10 @@ downloads the commit in `[checkpoint] revision`, not the model repository's
 default branch, into `<workspace>/runtime/laya/staging` when the weights
 file or a manifest file is not on disk, and when the runtime checkpoint
 is on disk but its hashes are not the pin. The download does not start
-the sidecar. Transfer logs stay in `<workspace>/runtime/laya/hf-home`,
-not in the shared cache. While it runs, including a pin change, the chip is
+the sidecar. That download sets `HF_HOME` to
+`<workspace>/runtime/laya/hf-home` and `HF_HUB_DISABLE_XET=1`, so transfer
+logs stay out of the shared cache. The model is about 2.37 GB, and that
+size is reported once. While it runs, including a pin change, the chip is
 Downloading the model · 1.2 of 3.4 GB and the status word is Down. There
 is no Updating label. When no checkpoint is already there, a full match
 renames staging onto `<workspace>/runtime/laya/checkpoint`. When a
@@ -219,7 +222,9 @@ still on disk.
 A verified boot
 sets `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. The launch log line is
+id or a revision. When the sidecar health document leaves the revision
+empty, FlintTrade fills the pinned revision from the verified manifest, so
+the chip leaves Still loading. The launch log line is
 `laya weights path=<path> sha256=<digest>`. The recorded inode, size,
 and modification time are rechecked, without hashing again, when Laya
 reports Ready and on each watch tick, about every 1.5 seconds. If one

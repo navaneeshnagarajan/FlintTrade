@@ -611,7 +611,8 @@ reach Ready in these cases. A verified boot sets
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. When that sidecar's health document leaves the revision
 null, FlintTrade fills the pinned revision from the verified manifest, so
-the chip can reach Ready without a download in this process. The launch log line is
+the chip leaves Still loading and can reach Ready without a download in
+this process. The launch log line is
 `laya weights path=<path> sha256=<digest>`. Those identity values are
 rechecked, without hashing again, when Laya reports Ready and on each
 watch tick, about every 1.5 seconds. A mismatch is `unverified`
@@ -638,8 +639,8 @@ Can't download the model, Unreachable, Wrong model version, Can't verify
 the model, Can't reach Laya, and The Laya API key file is missing.
 `key_missing` stays until the next start or an explicit stop. A health
 check does not replace it with Not started. The download progress class
-subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`), and the progress
-line counts the model once. `unverified` applies when this start did
+subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`). The model is
+about 2.37 GB, and the progress line reports that size once. `unverified` applies when this start did
 not download. A failed download, including one over an older unverified
 snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
 sidecar port. Tooltips for
@@ -685,7 +686,9 @@ uncertain and is not a hard reject:
 Practice clamps and Live denies. The Practice server reason is "Laya is
 uncertain. Quantity stays inside the tighter limit." The Live server
 reason is "Laya is uncertain. Live stays closed." On a denial, Order Pad
-and Quick Trade show that server reason as a status named "Laya decision".
+and Quick Trade show that server reason inside one alert (`role="alert"`),
+the only live region. The reason line is named "Laya decision" and is not
+its own status.
 A clamp is only when the requested quantity is greater than the allowed one. The desk clamp
 sentence is "Not placed. Laya allows up to N." Place N sends that
 quantity. On Order Pad, "Review Practice order" then shows the placed

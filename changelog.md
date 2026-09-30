@@ -34,15 +34,16 @@ changelog rebuilds itself from the first release cut after this baseline.
   The CPU install pins `torch==2.14.0+cpu`, `laya==0.3.21`,
   `huggingface_hub==1.33.0`, and `tqdm==4.70.1`
   in `laya_sidecar_constraints.txt` (no extras; the install requirement
-  is still `laya[serve]==0.3.21`), installs torch first from the CPU
-  index, and can share the base interpreter with FlintTrade.
+  is still `laya[serve]==0.3.21`). The download progress class subclasses
+  that pinned `tqdm.auto.tqdm`. Torch is installed first from the CPU
+  index, and the sidecar can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
   It is not Ready by default. A first start with the checkpoint missing
   or incomplete downloads the commit named by `[checkpoint] revision`
-  (not the model repository's default branch) into `runtime/laya/staging`,
-  with `HF_HOME` at `runtime/laya/hf-home` so transfer logs stay out of
-  the shared cache,
-  hashes the files there against the `[checkpoint]` and
+  (not the model repository's default branch) into `runtime/laya/staging`.
+  That download sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
+  `HF_HUB_DISABLE_XET=1`, so transfer logs stay out of the shared cache.
+  FlintTrade hashes the files there against the `[checkpoint]` and
   `[checkpoint.manifest]` pins, and on a full match moves that directory
   onto `runtime/laya/checkpoint` before the offline launch. When a new
   pin replaces a checkpoint already on disk, the next start downloads it
@@ -54,6 +55,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   `download_failed`, and the sidecar does not start. While the download
   runs, including a pin change, the status word is Down, not Still
   loading, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
+  The model is about 2.37 GB, and that size is reported once.
   There is no separate Updating label. Orders are refused with
   "Laya is Down. Orders are paused until it's Ready." A dropped
   connection, a partial download, or a failed swap is `download_failed`
@@ -71,7 +73,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   renames, the last `checkpoint.old-*` name is restored and checked
   against the pin.
   The sidecar does not start on files that do not match the pin, including
-  that restored copy. The sidecar always runs offline.
+  that restored copy. The sidecar always runs offline. When its health
+  document leaves the revision empty, FlintTrade fills the pinned
+  revision from the verified manifest, so the chip leaves Still loading.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when
@@ -131,7 +135,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   `download_failed` (Can't download the model),
   `unreachable` (Unreachable), `wrong_revision` (Wrong model version),
   `unverified` (Can't verify the model), `key_rejected` (Can't reach
-  Laya), and `key_missing` (The Laya API key file is missing.). `downloading` has no Next line. The `download_failed` tooltip is
+  Laya), and `key_missing` (The Laya API key file is missing.). A health
+  check does not replace `key_missing` with Not started. `downloading` has no Next line. The `download_failed` tooltip is
   "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
   (`POST /api/v1/laya/start`); the chip then says Still loading until
   Laya is Ready or a failure reason arrives. A dead sidecar is reaped
@@ -147,8 +152,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   is not qualified says "Laya isn't qualified for Live yet. Practice
   orders are available." The Order Pad note is the collapsed line "Add a
   reason (optional)" under Quantity. Once open, the field's accessible
-  name is the same. Under a denial, the server reason is a status named
-  "Laya decision". A place with no note still gets
+  name is the same. Under a denial, the server reason is named
+  "Laya decision" inside one alert (`role="alert"`). That alert is the
+  only live region. The reason line is not its own status. A place with
+  no note still gets
   Laya's policy decision: Practice clamps and Live denies. It is not a
   hard reject. Desk place surfaces go through this admission.
 

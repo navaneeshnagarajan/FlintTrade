@@ -542,7 +542,9 @@ starts the download below; the sidecar does not start on that tree.
 Laya does not reach **Ready** in these cases. A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. The launch log line is
+id or a revision. When the sidecar health document leaves the revision
+empty, FlintTrade fills the pinned revision from the verified manifest,
+so the chip leaves **Still loading**. The launch log line is
 `laya weights path=<path> sha256=<digest>`. The recorded inode, size,
 and modification time are rechecked, without hashing again, when Laya
 reports Ready and on each watch tick, about every 1.5 seconds. If one
@@ -570,9 +572,11 @@ base interpreter with FlintTrade: its `python` is often a symlink to the
 same executable, and the packages stay in the sidecar environment. The
 install refuses to put them in the FlintTrade environment. The default
 install is CPU-only torch from `https://download.pytorch.org/whl/cpu`,
-then `laya[serve]==0.3.21`. The constraints file pins `laya==0.3.21`
-with no extras (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`,
-`torch==2.14.0+cpu`, `laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1`). The `serve` extra stays on the
+then `laya[serve]==0.3.21`. The constraints file pins `torch==2.14.0+cpu`,
+`laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
+(`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`).
+The download progress class subclasses that pinned `tqdm.auto.tqdm`.
+The `serve` extra stays on the
 install requirement, because a constraints file cannot name extras. Torch is installed
 first. The install size is roughly 1.2 GB. `install --accelerator cuda` and `install --accelerator rocm` are
 opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
@@ -587,9 +591,11 @@ the weights file or any pinned manifest file is not already installed,
 `start` downloads the pinned commit from `[checkpoint] revision` first.
 That step does not start the sidecar, and it does not use the default
 branch. The files land in `<workspace>/runtime/laya/staging`, not in the
-launch directory and not in the shared Hugging Face cache. Transfer
-logs stay in `<workspace>/runtime/laya/hf-home`, not in that shared cache.
-While that runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
+launch directory and not in the shared Hugging Face cache. The download
+sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
+`HF_HUB_DISABLE_XET=1`, so transfer logs stay in that folder and not in
+the shared cache. The model is about 2.37 GB, and that size is reported
+once. While that runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
 progress, one decimal, decimal GB). Orders are refused with **Laya is
 Down. Orders are paused until it's Ready.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. When no
@@ -674,7 +680,8 @@ requested quantity is greater than the allowed one, the Order Pad
 clamp notice shows the clamp sentence below, not the Practice reason line.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
-reason. That reason is a status named **Laya decision**. When the server
+reason. The denial is one alert (`role="alert"`), the only live region.
+The reason line is named **Laya decision** and is not its own status. When the server
 sent a quantity ceiling, the next line is
 **Max quantity N.** A Down refusal does not show that line. The reason
 is **Laya is Down. Orders are paused until it's Ready.** Place controls
@@ -1755,8 +1762,9 @@ Order Pad and Quick Trade show this under the place controls. Scalper,
 Positions, Order Ladder, and Option Chain may still show a place error
 as a toast.
 
-1. **Laya denied** — read the server reason under the headline. That
-   reason is a status named **Laya decision**. Place
+1. **Laya denied** — read the server reason under the headline. The
+   denial is one alert (`role="alert"`), the only live region. The reason
+   line is named **Laya decision** and is not its own status. Place
    controls stay off until Laya or the mode changes. **Max quantity N.**
    is the ceiling the server sent.
    The strip **Laya is Down — Live orders paused.** follows Live-facing
