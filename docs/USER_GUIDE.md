@@ -489,7 +489,9 @@ SafetySystem, and any broker call, on place, routed place, exit-all, and a brack
 Laya does not place the order and does not replace those layers. A
 refusal or a quantity clamp stops before SafetySystem. Practice place
 is admitted before the sandbox and does not enter SafetySystem. Example data
-stays a refusal before admission. Chat is not an admission source.
+is HTTP 403 `mode_blocked` before admission:
+`Orders are not available for Example. Switch to Practice or Live to trade.`
+Chat is not an admission source.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
@@ -529,8 +531,6 @@ show a place error as a toast. An automate clamp is a dispatcher error,
 not a desk confirm. Modify, cancel, smart, multi, and other non-place
 write verbs are not on this admission. `POST /api/v1/orders/forever`
 does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.`
-A GTT body is refused on place, routed place,
-exit-all, and a bracket before admission, with `Not placed. GTT orders aren't supported right now.`
 No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
 with the tooltip `GTT orders aren't supported right now.`
 

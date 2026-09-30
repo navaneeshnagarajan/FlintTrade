@@ -494,8 +494,9 @@ broker forever or super-order endpoint. The Kotak Neo adapter refuses a
 place.
 Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Example-data
-placement is refused by the backend (`mode_blocked`); Order Pad Example
-Buy is a local example fill (no HTTP order route, no Laya admit, no
+placement is refused by the backend (HTTP 403 `mode_blocked`,
+`Orders are not available for Example. Switch to Practice or Live to trade.`);
+Order Pad Example Buy is a local example fill (no HTTP order route, no Laya admit, no
 SafetySystem). Other Live write verbs still reach SafetySystem without
 this place admission. The global auth check covers both a session JWT
 and `FLINTTRADE_API_KEY`. The session JWT is read from

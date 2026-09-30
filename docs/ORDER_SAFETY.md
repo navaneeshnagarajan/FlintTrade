@@ -31,8 +31,9 @@ the admission below. `place-smart`, `open-position`, and `close-position`
 are not mounted. The Practice sandbox has no place or square-off route.
 Settings → Practice does not place.
 
-1. The mode guard runs first. Example data stays `mode_blocked` and does not
-   enter `Laya.admit`.
+1. The mode guard runs first. Example data stays HTTP 403 `mode_blocked`
+   (`Orders are not available for Example. Switch to Practice or Live to trade.`)
+   and does not enter `Laya.admit`.
 2. `Laya.admit` then admits or refuses the proposal. A refusal
    (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
    SafetySystem on Live and before the native sandbox on Practice.

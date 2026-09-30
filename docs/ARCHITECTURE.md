@@ -388,7 +388,10 @@ through SafetySystem. Practice on that route is HTTP 403
 `practice_unsupported`. GTT, a broker-held variety, a stop-loss and a
 target together, and a trailing stop are refused before that admission.
 Example-data placement is refused by the backend
-(`mode_blocked`); Order Pad Example Buy is a local client fill (no HTTP
+(HTTP 403 `mode_blocked`,
+`Orders are not available for Example. Switch to Practice or Live to trade.`)
+and does not enter `Laya.admit`.
+Order Pad Example Buy is a local client fill (no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
 **place** run the mode guard, then `Laya.admit`. Live place is checked
 by Laya admission and then SafetySystem L1–L5, `gate_order`, and
@@ -398,8 +401,7 @@ exit-all, and a bracket. A refusal or a quantity clamp stops before SafetySystem
 Practice place is admitted before the Practice fill path and does not enter
 those Live layers. Practice square-off is place. That book
 cancels and modifies; it does not place. `cancel-all` only cancels.
-Example data remains `mode_blocked` and does not enter `Laya.admit`. Other
-Live write verbs still reach SafetySystem without this admission. See
+Other Live write verbs still reach SafetySystem without this admission. See
 [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 `_check_order_locked` fail-fasts in this runtime order (not L1–L5
@@ -685,7 +687,9 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 ### Server-side mode enforcement
 
 The core `/api/v1/orders/*` proxy fans out by JWT mode: example data is
-HTTP 403 `mode_blocked`, Practice routes to the Practice fill path, and
+HTTP 403 `mode_blocked`
+(`Orders are not available for Example. Switch to Practice or Live to trade.`),
+Practice routes to the Practice fill path, and
 Live requires `live_mode_unlocked` plus the gated `BrokerRouter`.
 Executor-direct engine routes (basket, split, bracket, options-strategy)
 use `mode_guard.require_live_unlocked`: example data is `mode_blocked`,
