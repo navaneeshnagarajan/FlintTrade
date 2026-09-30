@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildHeaders } from "@/services/ftApi.helpers";
 import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
