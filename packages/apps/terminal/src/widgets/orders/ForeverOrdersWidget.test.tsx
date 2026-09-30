@@ -265,7 +265,7 @@ describe("ForeverOrdersWidget", () => {
 
     await waitFor(() => expect(callsByMethod("POST").length).toBe(1));
     const [url, init] = callsByMethod("POST")[0];
-    expect(url).toContain("/api/v1/orders/forever");
+    expect(url).toContain("/api/v1/orders/place");
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.variety).toBe("gtt");
     expect(body.symbol).toBe("RELIANCE");

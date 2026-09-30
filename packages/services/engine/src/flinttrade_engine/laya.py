@@ -2,8 +2,9 @@
 
 Laya allows, clamps, or refuses a proposal before SafetySystem runs. It does not place
 an order, and it does not mint a write ticket. The only write ticket
-remains the existing order gate. A Down status refuses every proposal:
-there is no path that treats a chat model as a substitute verdict.
+remains the existing order gate. A full admit while Down refuses the proposal.
+A server-proven reduce-only exit is recorded and is not refused or clamped.
+There is no path that treats a chat model as a substitute verdict.
 
 A quantity above the active ceiling is a clamp: the verdict names the smaller
 quantity and does not authorise the original size. The caller must show that
@@ -17,15 +18,15 @@ Overlap — what already exists, and what this admission still leaves open:
 * SafetySystem L1 checks the order fields and the price band. L2 checks
   position and margin limits. L3 checks portfolio Greeks. L4 checks daily
   loss. L5 is the kill switch. Laya does not replace any of those layers.
-* Client ``orderGuards`` refuse Explore, an unverified lot size, a lot
+* Client ``orderGuards`` refuse Example, an unverified lot size, a lot
   multiple, and a missing limit or trigger price. They are a courtesy on
   the ticket. They are not the reason an order is safe.
 
 Laya owns the typed allow or deny, the quantity ceiling (tighter while
-Degraded), and the mode rule: Explore is refused, and a Down engine refuses
-Live and Practice proposals. Chat is suggest and explain only, so a chat
-source is refused here. Lot size, price band, margin, Greeks, daily loss,
-and the kill switch stay outside this module.
+Degraded), and the mode rule: Example is refused, and a Down engine refuses
+Live and Practice proposals that are not a proven reduce-only exit. Chat is
+suggest and explain only, so a chat source is refused here. Lot size, price
+band, margin, Greeks, daily loss, and the kill switch stay outside this module.
 
 When a decision host is configured, free-text questions run after the floor.
 The host may deny or clamp. It cannot raise a quantity or overturn a floor
@@ -54,6 +55,10 @@ _PRODUCTS = frozenset({"MIS", "CNC", "NRML"})
 _PRICE_REQUIRED = frozenset({"LIMIT", "SL"})
 _TRIGGER_REQUIRED = frozenset({"SL", "SL-M"})
 _ADMITTED_SOURCES = frozenset({"operator", "automate"})
+
+LAYA_DOWN_REASON = (
+    "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+)
 
 
 class DecisionStatus(StrEnum):
@@ -208,6 +213,31 @@ class VerdictLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class DecisionRecord:
+    """One row in the decision log.
+
+    Attributes:
+        proof_kind: ``admit`` for a full admit, ``reduce_only`` for a proven exit.
+        symbol: Instrument symbol.
+        exchange: Exchange code.
+        action: BUY or SELL.
+        quantity: Quantity the caller asked for.
+        applied_quantity: Quantity the verdict accepted.
+        status: Decision status at the time of the record.
+        allow: Whether the verdict let the quantity continue.
+    """
+
+    proof_kind: str
+    symbol: str
+    exchange: str
+    action: str
+    quantity: int
+    applied_quantity: int
+    status: str
+    allow: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Verdict:
     """Admission result. ``allow`` is the only proceed signal.
 
@@ -262,6 +292,8 @@ class Laya:
         self._decision_client: Any = None
         self._qualification: Any = None
         self._lock = threading.Lock()
+        self._log: list[DecisionRecord] = []
+        self._log_lock = threading.Lock()
 
     @property
     def status(self) -> DecisionStatus:
@@ -403,12 +435,35 @@ class Laya:
         live = runtime if qualified else DecisionStatus.DOWN
         return runtime, live, qualified
 
+    def decision_log(self) -> tuple[DecisionRecord, ...]:
+        """Return the decision log, oldest first."""
+        with self._log_lock:
+            return tuple(self._log)
+
+    def admit_reduce_only(self, proposal: Proposal) -> Verdict:
+        """Record a server-proven reduce-only exit.
+
+        Down, Degraded, and an unheard status cannot refuse or clamp this
+        verdict. The place pipeline decides the proof. This method does not
+        read a client flag, and it does not place the order.
+        """
+        limits = VerdictLimits(max_quantity=max(proposal.quantity, self._active_ceiling()))
+        verdict = Verdict(
+            allow=True,
+            reason="",
+            limits=limits,
+            applied_quantity=proposal.quantity,
+        )
+        self._record("reduce_only", proposal, verdict)
+        return verdict
+
     def admit(self, proposal: Proposal) -> Verdict:
         """Return a verdict for ``proposal``.
 
         Order: Down, then the deterministic floor, then free-text questions
         when a host is configured. Down refuses before any other rule. A
-        floor refusal is final. The host cannot raise a quantity.
+        floor refusal is final. The host cannot raise a quantity. A proven
+        reduce-only exit uses :meth:`admit_reduce_only` instead.
         """
         self._watch_sidecar()
         status = self.effective_status(proposal.mode)
@@ -530,6 +585,25 @@ class Laya:
             return self._degraded_max_quantity
         return self._max_quantity
 
+    def _record(self, proof_kind: str, proposal: Proposal, verdict: Verdict) -> None:
+        record = DecisionRecord(
+            proof_kind=proof_kind,
+            symbol=proposal.symbol,
+            exchange=proposal.exchange,
+            action=proposal.action,
+            quantity=proposal.quantity,
+            applied_quantity=verdict.applied_quantity,
+            status=self._status.value,
+            allow=verdict.allow,
+        )
+        with self._log_lock:
+            self._log.append(record)
+
+    def _active_ceiling(self) -> int:
+        if self._status is DecisionStatus.DEGRADED:
+            return self._degraded_max_quantity
+        return self._max_quantity
+
     @staticmethod
     def _schema_reason(proposal: Proposal) -> str:
         source = proposal.source.strip().lower()
@@ -539,7 +613,7 @@ class Laya:
         if mode not in _MODES:
             return "Mode is not recognised. Nothing was admitted."
         if mode == "explore":
-            return "Explore cannot place orders."
+            return "Example cannot place orders."
         if not proposal.symbol.strip() or not proposal.exchange.strip():
             return "Symbol and exchange are required."
         action = proposal.action.strip().upper()
@@ -562,7 +636,7 @@ class Laya:
         return ""
 
 
-_DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready."
+_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions."
 
 LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again."
 

@@ -24,6 +24,17 @@ from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _laya_ready() -> None:
+    """Single-exit brackets admit through Laya before the service places them."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya, reset_process_laya_for_tests
+
+    reset_process_laya_for_tests()
+    process_laya().set_status(DecisionStatus.READY)
+    yield
+    reset_process_laya_for_tests()
+
 _JWT_SECRET = "test-secret-for-bracket-routes-hs256"
 
 
@@ -164,28 +175,54 @@ def guarded_client(service, pinned_jwt_secret):
 
 
 class TestPlaceBracket:
-    def test_place_success_returns_201(self, client) -> None:
-        """Valid single-exit bracket payload returns 201 with bracket details.
+    def test_place_success_returns_201(self, client, service) -> None:
+        """A valid stop-loss bracket is admitted and placed.
 
         Args:
             client: Flask test client.
+            service: Mock service backing the client.
         """
         resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
         assert resp.status_code == 201
         data = resp.get_json()
         assert data["status"] == "success"
         assert "bracket_id" in data["data"]
+        service.place_bracket.assert_called_once()
 
-    def test_place_with_target_only_returns_201(self, client) -> None:
+    def test_place_with_target_only_returns_201(self, client, service) -> None:
         """A target-only exit leg is the other supported bracket shape.
 
         Args:
             client: Flask test client.
+            service: Mock service backing the client.
         """
         resp = client.post(
             "/api/v1/orders/bracket", json={"entry": _ENTRY, "target": 22500.0}
         )
         assert resp.status_code == 201
+        service.place_bracket.assert_called_once()
+        assert service.place_bracket.call_args.kwargs["target"] == 22500.0
+
+    def test_gtt_variety_is_refused_before_the_service(self, client, service) -> None:
+        """GTT is refused before Laya admission reaches the bracket service."""
+        resp = client.post(
+            "/api/v1/orders/bracket",
+            json={**_BRACKET_BODY, "variety": "G.T.T"},
+        )
+        assert resp.status_code == 422
+        assert resp.get_json()["code"] == "gtt_unsupported"
+        assert resp.get_json()["message"] == "Not placed. GTT orders aren't supported right now."
+        service.place_bracket.assert_not_called()
+
+    def test_broker_held_variety_is_refused(self, client, service) -> None:
+        """A broker-held super or forever variety does not place legs."""
+        resp = client.post(
+            "/api/v1/orders/bracket",
+            json={**_BRACKET_BODY, "entry": {**_ENTRY, "variety": "super"}},
+        )
+        assert resp.status_code == 422
+        assert resp.get_json()["code"] == "broker_held_unsupported"
+        service.place_bracket.assert_not_called()
 
     def test_place_missing_entry_returns_400(self, client) -> None:
         """Missing entry field returns HTTP 400.
@@ -266,10 +303,12 @@ class TestPlaceBracket:
 
     def test_place_service_rejection_returns_422(self) -> None:
         """Service-level rejection surfaces as HTTP 422."""
-        with _make_app(_make_service(success=False)).test_client() as c:
+        service = _make_service(success=False)
+        with _make_app(service).test_client() as c:
             resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
         assert resp.status_code == 422
         assert resp.get_json()["status"] == "error"
+        service.place_bracket.assert_called_once()
 
     def test_place_partial_bracket_surfaces_data(self) -> None:
         """A partial bracket (entry live, exit failed) is included in the 422 body."""
@@ -316,7 +355,7 @@ class TestPrincipalDerivation:
             json={**_BRACKET_BODY, "broker": "DHAN", "account_id": "acct-7"},
         )
         principal = self._placed_principal(service)
-        assert principal.adapter_id == "dhan"  # normalised to lower case
+        assert principal.adapter_id == "dhan"
         assert principal.account_id == "acct-7"
 
     def test_account_only_defaults_adapter(self, client, service) -> None:
@@ -367,7 +406,7 @@ class TestPrincipalDerivation:
         client.post("/api/v1/orders/bracket", json=_BRACKET_BODY, headers=_bearer(tok))
         principal = self._placed_principal(service)
         assert principal.actor_id == "alice"
-        assert principal.jti  # non-empty jti from the token
+        assert principal.jti
 
     def test_missing_token_yields_unknown_actor(self, client, service) -> None:
         """Without a decodable JWT (TESTING bypass) the actor is 'unknown'.

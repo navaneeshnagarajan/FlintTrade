@@ -1,5 +1,7 @@
 /**
- * SandboxControls.test.tsx — Renders sandbox settings panel + paper-order flow.
+ * SandboxControls.test.tsx — Renders the Practice capital and policy panel.
+ *
+ * Orders are placed through POST /api/v1/orders/place, not this panel.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -19,11 +21,10 @@ vi.mock("@/services/ftApi.helpers", () => ({
 import SandboxControls from "../SandboxControls";
 
 // ---------------------------------------------------------------------------
-// fetch stub — routes by URL suffix. Tests override the /order handler.
+// fetch stub — routes by URL suffix.
 // ---------------------------------------------------------------------------
 
 type JsonResp = { ok: boolean; json: () => Promise<unknown> };
-let orderResponder: (body: unknown) => JsonResp;
 
 function statusResp(): JsonResp {
   return {
@@ -58,9 +59,6 @@ function configResp(overrides: Record<string, unknown> = {}): JsonResp {
 
 const fetchMock = vi.fn(async (url: unknown, opts?: { body?: string }) => {
   const u = String(url);
-  if (u.endsWith("/order")) {
-    return orderResponder(opts?.body ? JSON.parse(opts.body) : {});
-  }
   if (u.endsWith("/config")) {
     return configResp(opts?.body ? JSON.parse(opts.body) : {});
   }
@@ -69,13 +67,6 @@ const fetchMock = vi.fn(async (url: unknown, opts?: { body?: string }) => {
 });
 
 beforeEach(() => {
-  orderResponder = () => ({
-    ok: true,
-    json: async () => ({
-      status: "success",
-      data: { order: { order_id: "OID1", status: "COMPLETE", message: "Filled 50 @ 100" } },
-    }),
-  });
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockClear();
   buildHeadersMock.mockClear();
@@ -96,19 +87,12 @@ function renderWithProviders() {
   );
 }
 
-async function fillOrder() {
-  fireEvent.change(screen.getByLabelText("Order symbol"), { target: { value: "nifty" } });
-  fireEvent.change(screen.getByLabelText("Order quantity"), { target: { value: "50" } });
-  fireEvent.change(screen.getByLabelText("Order price"), { target: { value: "100" } });
-  fireEvent.click(screen.getByRole("button", { name: /^place$/i }));
-}
-
 describe("SandboxControls", () => {
-  it("renders the Virtual Capital and Place Practice Order sections", () => {
+  it("renders the Virtual Capital and Practice policy sections", () => {
     renderWithProviders();
     expect(screen.getByText("Virtual Capital")).toBeInTheDocument();
-    expect(screen.getByText("Place Practice Order")).toBeInTheDocument();
-    expect(screen.getByLabelText(/Place Practice Order/i)).toBeInTheDocument();
+    expect(screen.queryByText("Place Practice Order")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Place Practice Order/i)).not.toBeInTheDocument();
     expect(screen.getByText("Practice Policy")).toBeInTheDocument();
     expect(screen.getByText("Adjust Capital")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export data/i })).toBeInTheDocument();
@@ -128,49 +112,10 @@ describe("SandboxControls", () => {
     }
   });
 
-  it("places a Practice order against virtual capital and shows it filled", async () => {
+  it("does not post a sandbox order from this panel", async () => {
     renderWithProviders();
-    await fillOrder();
-
-    expect(await screen.findByText(/Order filled/i)).toBeInTheDocument();
-    expect(screen.getByText(/Filled 50 @ 100/i)).toBeInTheDocument();
-
-    // Posted to the sandbox order endpoint with the normalised payload.
-    const orderCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/order"));
-    expect(orderCall).toBeTruthy();
-    const body = JSON.parse((orderCall![1] as { body: string }).body);
-    expect(body).toMatchObject({ symbol: "NIFTY", exchange: "NSE", action: "BUY", quantity: 50, price: 100 });
-  });
-
-  it("surfaces a rejected order's reason (HTTP 400 with a populated order)", async () => {
-    orderResponder = () => ({
-      ok: false, // backend returns 400 for a rejected order
-      json: async () => ({
-        status: "success",
-        data: { order: { order_id: "", status: "REJECTED", message: "Insufficient capital" } },
-      }),
-    });
-    renderWithProviders();
-    await fillOrder();
-
-    expect(await screen.findByText(/Order rejected/i)).toBeInTheDocument();
-    expect(screen.getByText(/Insufficient capital/i)).toBeInTheDocument();
-  });
-
-  it("shows a resting Practice order as pending rather than rejected", async () => {
-    orderResponder = () => ({
-      ok: true,
-      json: async () => ({
-        status: "success",
-        data: { order: { order_id: "OID2", status: "PENDING", message: "Waiting for a matching tick" } },
-      }),
-    });
-    renderWithProviders();
-    await fillOrder();
-
-    expect(await screen.findByText(/Order pending/i)).toBeInTheDocument();
-    expect(screen.getByText(/Waiting for a matching tick/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Order rejected/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/order"))).toBe(false);
   });
 
   it("persists the complete Practice policy through the canonical config route", async () => {
@@ -200,16 +145,4 @@ describe("SandboxControls", () => {
     });
   });
 
-  it("validates the order form before posting", async () => {
-    renderWithProviders();
-    // Submit with an empty symbol.
-    fireEvent.change(screen.getByLabelText("Order quantity"), { target: { value: "50" } });
-    fireEvent.change(screen.getByLabelText("Order price"), { target: { value: "100" } });
-    fireEvent.click(screen.getByRole("button", { name: /^place$/i }));
-
-    expect(await screen.findByText(/Symbol is required/i)).toBeInTheDocument();
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/order"))).toBe(false),
-    );
-  });
 });

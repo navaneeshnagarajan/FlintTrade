@@ -126,12 +126,13 @@ def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
 @require_live_unlocked
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_bracket() -> Response:
-    """Place a bracket order — entry plus ONE protective exit leg.
+    """Place a bracket: entry plus exactly one protective exit leg.
 
-    Every leg traverses the gated live chain (SafetySystem L1–L5 →
-    ``gate_order`` one-shot HMAC ``SafetyContext`` → ``BrokerRouter``).
-    Practice-mode JWTs are refused with 403 ``practice_unsupported`` by the
-    route guard — the sandbox cannot execute multi-leg brackets.
+    Each leg is admitted through Laya, then placed by the bracket service
+    through SafetySystem, ``gate_order``, and ``BrokerRouter``. Practice-mode
+    JWTs are refused with 403 ``practice_unsupported`` by the route guard.
+    GTT and broker-held varieties are refused before that admission. An OCO
+    pair and a trailing stop stay refused.
 
     Supported today: entry + EXACTLY ONE of ``stoploss`` (stop-loss exit leg)
     or ``target`` (limit exit leg). Refused honestly with HTTP 422:
@@ -166,10 +167,8 @@ def place_bracket() -> Response:
 
     Returns:
         201 with bracket details on success; 400 on bad input; 401/403 from
-        the mode guard; 422 for unsupported/failed placement — a bracket with
-        ``status="partial"`` in ``data`` means the entry leg is live but
-        UNPROTECTED (the exit leg failed) and needs operator action; 503 when
-        the service or broker routing is unavailable.
+        the mode guard; 422 for an OCO pair, a trailing stop, GTT, or a
+        broker-held variety; 503 when the bracket service is not configured.
     """
     svc, err = _service_required()
     if err:
@@ -250,6 +249,51 @@ def place_bracket() -> Response:
             400,
         )
 
+    from flinttrade_core.order_routes import (  # noqa: PLC0415
+        _gtt_contract_refusal,
+        _gtt_variety_token,
+        _laya_place_response,
+    )
+
+    variety = body.get("variety") if body.get("variety") is not None else entry.get("variety")
+    gtt_refusal = _gtt_contract_refusal({"variety": variety})
+    if gtt_refusal is not None:
+        return gtt_refusal
+    if _gtt_variety_token(variety) in {"super", "forever"}:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "broker_held_unsupported",
+                    "message": (
+                        "Not placed. Broker-held bracket legs aren't supported. "
+                        "Use one stop-loss or one target."
+                    ),
+                }
+            ),
+            422,
+        )
+
+    entry_action = str(entry.get("action") or "").strip().upper()
+    exit_action = "SELL" if entry_action == "BUY" else "BUY"
+    exit_price = stoploss if stoploss is not None else target
+    exit_body = {
+        "symbol": entry.get("symbol"),
+        "exchange": entry.get("exchange"),
+        "action": exit_action,
+        "quantity": entry.get("quantity"),
+        "product": entry.get("product") or "MIS",
+        "price": exit_price,
+        "trigger_price": exit_price if stoploss is not None else 0,
+        "pricetype": "SL" if stoploss is not None else "LIMIT",
+    }
+    entry_block = _laya_place_response(dict(entry), mode="live", source="operator")
+    if entry_block is not None:
+        return entry_block
+    exit_block = _laya_place_response(exit_body, mode="live", source="operator")
+    if exit_block is not None:
+        return exit_block
+
     principal = _request_principal(body)
     result = svc.place_bracket(
         entry,
@@ -265,8 +309,6 @@ def place_bracket() -> Response:
             "message": result.message,
             "error": result.error,
         }
-        # A "partial" bracket (entry live, exit leg failed) MUST reach the
-        # caller so the unprotected position is visible and actionable.
         if result.bracket is not None:
             payload["data"] = result.bracket.to_dict()
         return jsonify(payload), 422

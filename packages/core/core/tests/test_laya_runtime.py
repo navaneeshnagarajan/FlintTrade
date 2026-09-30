@@ -553,7 +553,7 @@ def test_first_load_stays_down_for_admission_and_reports_still_loading(tmp_path:
         Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice", rationale="because")
     )
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert "Live" not in verdict.reason
     payload = _healthy()
     runtime.publish_status()
@@ -567,7 +567,7 @@ def test_first_load_stays_down_for_admission_and_reports_still_loading(tmp_path:
         Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice", rationale="because")
     )
     assert later.allow is False
-    assert later.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert later.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     runtime.stop()
     reset_process_laya_for_tests()
 
@@ -1621,7 +1621,7 @@ def test_download_progress_updates_the_chip_text(tmp_path: Path, monkeypatch: py
         verdict = process_laya().admit(
             Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice")
         )
-        assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+        assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
         _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
         return 0
 
@@ -2321,6 +2321,6 @@ def test_ping_and_the_order_gate_share_a_cli_stop(tmp_path: Path) -> None:
     )
     blocked = place_block(verdict, 1)
     assert blocked is not None
-    assert blocked["message"] == "Laya is Down. Orders are paused until it's Ready."
+    assert blocked["message"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     runtime.stop()
     reset_process_laya_for_tests()

@@ -22,7 +22,7 @@ const featureCards = [
   {
     icon: ShieldCheck,
     title: 'Safety before automation',
-    copy: 'Explore, Practice, and Live modes keep learning, testing, and broker-connected workflows separated.',
+    copy: 'Practice, Connected (read), and Live keep simulated fills, broker reads, and live orders apart. Example data is not a Mode.',
   },
   {
     icon: Bot,
@@ -37,7 +37,7 @@ const docsCards = [
     label: 'Install',
     copy: 'Install the self-hosted web app in one line. Electron installers stay withheld until a checksummed release exists.',
   },
-  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect the OpenAlgo-compatible bridge, explore Practice mode, and learn the workspace.' },
+  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect the OpenAlgo-compatible bridge, open Practice, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
   { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and OpenAlgo bridge routes.' },
@@ -55,7 +55,7 @@ const sloganWords = BRAND_SLOGAN_WORDS;
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
   'OpenAlgo-compatible bridge is the working broker path',
-  'Explore, Practice, and Live safety modes',
+  'Practice, Connected (read), and Live',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
 ] as const;
@@ -115,7 +115,7 @@ export default async function HomePage() {
             Electron release.
           </p>
           <p className="hero-disclaimer">
-            v0.0.1 is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
+            v0.0.1 is not production ready. Use Practice and example data first; Live mode remains your own risk.
           </p>
           <div className="hero-feature-grid">
             {welcomeFeatures.map((item) => (
@@ -149,9 +149,9 @@ export default async function HomePage() {
               href="/demo-app/welcome"
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Start exploring the FlintTrade marketing demo in a new window"
+              aria-label="Open Demo (example data) in a new window"
             >
-              Explore demo <ExternalLink aria-hidden="true" size={17} />
+              Demo (example data) <ExternalLink aria-hidden="true" size={17} />
             </Link>
           </div>
           <p className="hero-electron-note">

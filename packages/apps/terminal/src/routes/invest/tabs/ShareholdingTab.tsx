@@ -33,7 +33,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import {
   getShareholding,
@@ -361,7 +361,7 @@ export function ShareholdingTab() {
         </div>
       )}
 
-      {isDemo && !isError && <DemoBanner />}
+      {isDemo && !isError && <ExampleChip />}
 
       {/* Symbol + quarter badge */}
       <div className="flex items-center gap-2">

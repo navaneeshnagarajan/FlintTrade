@@ -14,7 +14,6 @@ import { usePrevClose } from "@/hooks/usePrevClose";
 import { useOpenAlgoConfigHydration } from "@/hooks/useOpenAlgoConfigHydration";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { useNotificationFeed } from "@/components/NotificationCentre/useNotificationFeed";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
@@ -224,10 +223,6 @@ export default function AppLayout() {
     };
   }, []);
 
-  const [showWelcome, setShowWelcome] = useState(() => {
-    return sessionStorage.getItem("flinttrade:dailyWelcomeDismissed") !== "true";
-  });
-
   const [showSmallScreenWarning, setShowSmallScreenWarning] = useState(() => {
     if (typeof window === "undefined") return false;
     if (sessionStorage.getItem(SMALL_SCREEN_DISMISSED_KEY) === "true") return false;
@@ -375,7 +370,12 @@ export default function AppLayout() {
         ? (detail as { path?: unknown }).path
         : null;
       if (typeof path === "string") {
-        navigate("/learn", { state: { selectedDocPath: path } });
+        const anchor = (detail as { anchor?: unknown }).anchor;
+        navigate("/learn", {
+          state: typeof anchor === "string" && anchor
+            ? { selectedDocPath: path, docAnchor: anchor }
+            : { selectedDocPath: path },
+        });
       }
     }
 
@@ -442,12 +442,13 @@ export default function AppLayout() {
     setShowSmallScreenWarning(false);
   }
 
-  const handleDismissWelcome = useCallback(() => {
-    sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
-    setShowWelcome(false);
-  }, []);
-
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
+
+  // The locked session leaves the desk. Panels and their data are not kept
+  // rendered behind the lock.
+  if (authStatus === "pin-required") {
+    return <LockScreen />;
+  }
 
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
@@ -525,11 +526,7 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
-      {showWelcome && mode !== "explore" && (
-        <DailyWelcome onDismiss={handleDismissWelcome} />
-      )}
       <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
-      {authStatus === "pin-required" && <LockScreen />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}
         onClose={handleCloseShortcuts}

@@ -463,3 +463,42 @@ class TestImportData:
 
         assert data1["capital"]["current"] == pytest.approx(data2["capital"]["current"])
         assert data1["capital"]["initial"] == pytest.approx(data2["capital"]["initial"])
+
+
+class TestNetWorthLedger:
+    """Practice funds expose ledger cash and do not settle futures MTM."""
+
+    def test_long_option_premium_is_in_the_ledger_and_margin_stays_inside_current(self, engine: SandboxEngine) -> None:
+        engine.place_order("NIFTY24APR25500CE", "NFO", "BUY", 10, 20.0)
+        capital = engine.get_capital()
+        funds = engine.get_funds()
+
+        assert capital["current"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert capital["used_margin"] == pytest.approx(200.0)
+        assert funds["available_balance"] == pytest.approx(_DEFAULT_CAPITAL - 200.0)
+        assert funds["futures_mtm_in_ledger"] is False
+        assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL - 200.0)
+        assert "settlement_price" not in engine.get_positions()[0]
+
+    def test_future_margin_does_not_leave_the_ledger_and_mtm_is_not_settled(self, engine: SandboxEngine) -> None:
+        engine.place_order("NIFTY24APRFUT", "NFO", "BUY", 1, 1_000.0)
+        engine.process_tick("NFO", "NIFTY24APRFUT", 1_100.0)
+        capital = engine.get_capital()
+        funds = engine.get_funds()
+        position = engine.get_positions()[0]
+
+        assert capital["current"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert capital["used_margin"] == pytest.approx(1_000.0)
+        assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert funds["futures_mtm_in_ledger"] is False
+        assert position["unrealised_pnl"] == pytest.approx(100.0)
+        assert "settlement_price" not in position
+        assert "mark_source" not in position
+
+    def test_equity_notional_is_booked_into_the_ledger_without_removing_margin_twice(self, engine: SandboxEngine) -> None:
+        engine.place_order("SBIN", "NSE", "BUY", 1, 800.0)
+        funds = engine.get_funds()
+
+        assert engine.get_capital()["current"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert engine.get_capital()["used_margin"] == pytest.approx(800.0)
+        assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL - 800.0)

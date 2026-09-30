@@ -3,7 +3,10 @@
  *
  * Layout (left → right):
  *   [FlintLogo] | [SearchBtn Ctrl+K] [Tools overflow] [Bell] [Account]
- *   [Workspace] [ModeIndicator] [FeedFreshness] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
+ *   [Workspace] [ModeIndicator] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
+ *
+ * Feed provenance lives once, at the start of the ticker. Broker status
+ * lives once, in the desk-status broker chip.
  *
  * FT-UX-002: TopBar is not a quote rail. The dedicated scrolling ticker
  * lives under this bar (TickerBar / TickerStrip). There is no Settings gear.
@@ -44,18 +47,14 @@ import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { brokerSessionDarkened } from "@/lib/operatorIncident";
 import { useSkillContent } from "@/hooks/useSkillContent";
-import {
-  MARKET_TIMINGS_MAX_AGE_MS,
-  useTimings,
-} from "@/hooks/useMarketStatus";
+import { useOperatorMarketSession } from "@/hooks/useOperatorMarketSession";
 import { ping } from "@/services/api";
 import {
-  getNseCashSessionStatus,
+  operatorMarketLabel,
   type MarketSessionInfo,
 } from "@/lib/market";
 import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
-import FeedFreshnessChip from "@/components/FeedFreshnessChip";
 import AccountSwitcher from "./AccountSwitcher";
 import ModeIndicator from "./ModeIndicator";
 import type { TickerMode } from "./TickerMarquee";
@@ -103,39 +102,15 @@ function ISTClock() {
 // MarketStatus — explicit NSE session state, separate from Live execution mode
 // ---------------------------------------------------------------------------
 
-function compactSessionLabel(info: MarketSessionInfo): string {
-  if (info.status === "unavailable") return "N/A";
-  return info.label;
-}
-
 function sessionChipTone(info: MarketSessionInfo): "green" | "amber" | "muted" {
   if (info.isGreenOpen) return "green";
-  if (info.status === "unavailable") return "amber";
-  if (info.status === "closed") return "muted";
+  if (info.status === "unavailable" || info.status === "closed") return "muted";
   return "amber";
 }
 
-function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
-  const { data: timings, dataUpdatedAt, isError, isLoading } = useTimings();
-  const currentStatus = useCallback(() => {
-    const timingIsTrustworthy =
-      !isError &&
-      !isLoading &&
-      dataUpdatedAt > 0 &&
-      Date.now() - dataUpdatedAt <= MARKET_TIMINGS_MAX_AGE_MS;
-    return getNseCashSessionStatus(timingIsTrustworthy ? timings : undefined);
-  }, [dataUpdatedAt, isError, isLoading, timings]);
-  const [statusInfo, setStatusInfo] = useState<MarketSessionInfo>(() =>
-    currentStatus(),
-  );
-
-  useEffect(() => {
-    const update = () => setStatusInfo(currentStatus());
-    update();
-    const id = setInterval(update, 30_000);
-    return () => clearInterval(id);
-  }, [currentStatus]);
-
+function MarketSessionStatus() {
+  const statusInfo = useOperatorMarketSession();
+  const label = operatorMarketLabel(statusInfo);
   const tone = sessionChipTone(statusInfo);
 
   return (
@@ -148,8 +123,12 @@ function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
             ? "1px solid var(--color-bullish-border)"
             : "1px solid var(--glass-l2-border)",
         }}
-        aria-label={`Market status: ${statusInfo.label}`}
-        title={statusInfo.title}
+        aria-label={`Market status: ${label}`}
+        title={
+          statusInfo.status === "closed" || statusInfo.status === "unavailable"
+            ? label
+            : statusInfo.title
+        }
         data-testid="market-session-status"
       >
         <div
@@ -173,7 +152,7 @@ function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
                   : "text-text-muted"
           }`}
         >
-          {compact ? compactSessionLabel(statusInfo) : statusInfo.label}
+          {label}
         </span>
       </div>
       {statusInfo.foSecondary ? (
@@ -188,7 +167,7 @@ function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
           data-testid="fo-session-status"
         >
           <span className="text-xs font-medium tabular-nums whitespace-nowrap text-text-secondary">
-            {compact ? "F&O 15:40" : statusInfo.foSecondary}
+            {statusInfo.foSecondary}
           </span>
         </div>
       ) : null}
@@ -429,8 +408,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         {collapseOverflow ? (
           <>
             <ModeIndicator />
-            <FeedFreshnessChip />
-            <MarketSessionStatus compact />
+            <MarketSessionStatus />
             <Button
               variant="ghost"
               size="sm"
@@ -511,7 +489,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
             <AccountSwitcher />
             {!hideDeskRibbon && <WorkspaceSwitcher />}
             <ModeIndicator />
-            <FeedFreshnessChip />
             <Divider />
             {!hideDeskRibbon && <FullscreenButton />}
             <div className={hideDeskRibbon ? undefined : "hidden lg:block"}>

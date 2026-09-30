@@ -32,7 +32,8 @@ pytestmark = pytest.mark.skipif(
 
 BatchInput = tuple[str, list[int], list[list[float]], list[bool], list[bool]]
 BatchRunner = Callable[[list[BatchInput]], list[object]]
-ConfiguredBatchRunner = Callable[[SpreadConfig, list[list[float]]], list[object]]
+# Quoted so collection still skips when the optional extension is not built.
+ConfiguredBatchRunner = Callable[["SpreadConfig", list[list[float]]], list[object]]
 
 
 def _config() -> SpreadConfig:

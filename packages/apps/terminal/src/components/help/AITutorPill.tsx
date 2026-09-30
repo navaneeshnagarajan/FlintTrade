@@ -51,6 +51,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { motionConfig, EASE_ENTER, EASE_EXIT, DURATION } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { getAdvisorBase } from "@/services/advisorApi";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { requestAdvisorReply } from "@/services/advisorChat";
 
 // ---------------------------------------------------------------------------
@@ -76,7 +77,9 @@ interface AdvisorStatusResponse {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
-    const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`);
+    const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`, {
+      headers: buildHeaders(false),
+    });
     if (!resp.ok) return;
     const json = (await resp.json()) as AdvisorStatusResponse;
     if (json.status === "success" && json.data) {
@@ -99,7 +102,7 @@ function routeLabel(pathname: string): string {
   const labels: Record<string, string> = {
     "": "Home",
     welcome: "Welcome",
-    explore: "Explore",
+    explore: "Demo (example data)",
     setup: "Setup",
     settings: "Settings",
     trade: "Trade",

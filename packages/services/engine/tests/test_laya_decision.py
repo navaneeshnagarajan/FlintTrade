@@ -262,7 +262,7 @@ def test_http_failures_are_down(laya_host: FakeLayaHost, code: int, body: bytes,
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal(mode="practice"))
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert engine.status is DecisionStatus.DOWN
     assert ("failure", failure) in verdict.evidence
 
@@ -306,7 +306,7 @@ def test_revision_mismatch_is_down(laya_host: FakeLayaHost) -> None:
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal(mode="live"))
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert ("failure", "revision_mismatch") in verdict.evidence
 
 
@@ -565,7 +565,7 @@ def test_key_rejection_sets_down_in_the_same_request(laya_host: FakeLayaHost, co
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert engine.status is DecisionStatus.DOWN
     assert engine.runtime_reason()[0] == "key_rejected"
     assert laya_reason_detail("key_rejected", 0) == "Can't reach Laya"

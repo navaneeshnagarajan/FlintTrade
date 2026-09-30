@@ -767,7 +767,7 @@ describe("OrderLadderWidget explore sample book", () => {
   it("uses the sample book in explore mode without enabling the depth query", () => {
     render(<OrderLadderWidget />);
 
-    expect(screen.getByLabelText("Showing sample data")).toHaveTextContent("Sample data");
+    expect(screen.getByLabelText("Showing Example")).toHaveTextContent("Example");
     expect(mockDepthQuery).toHaveBeenCalledWith("NIFTY", "NSE", false);
     expect(screen.queryByText("Explore · sample")).toBeNull();
   });

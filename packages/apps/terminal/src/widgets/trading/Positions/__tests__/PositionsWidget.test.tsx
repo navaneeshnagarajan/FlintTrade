@@ -72,6 +72,11 @@ vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
 }));
 
+const mockUseOrders = vi.fn();
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: (...args: unknown[]) => mockUseOrders(...args),
+}));
+
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
 }));
@@ -163,9 +168,22 @@ vi.mock("@/services/ftApi.data", () => ({
 // Square-off goes through the existing gated placeOrder path (services/api →
 // /ft-api/api/v1/orders/place → SafetySystem → gate_order → BrokerRouter).
 const mockPlaceOrder = vi.fn();
-vi.mock("@/services/api", () => ({
-  placeOrder: (...args: unknown[]) => mockPlaceOrder(...args),
-}));
+vi.mock("@/services/api", () => {
+  class OrderApiError extends Error {
+    readonly status: number;
+    readonly body: unknown;
+    constructor(message: string, status: number, body: unknown) {
+      super(message);
+      this.name = "OrderApiError";
+      this.status = status;
+      this.body = body;
+    }
+  }
+  return {
+    placeOrder: (...args: unknown[]) => mockPlaceOrder(...args),
+    OrderApiError,
+  };
+});
 
 const mockEmitNotification = vi.fn();
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
@@ -198,6 +216,8 @@ vi.mock("@/stores/brokerStore", () => ({
 // ---------------------------------------------------------------------------
 
 import PositionsWidget from "../PositionsWidget";
+import { OrderApiError } from "@/services/api";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import {
   netPositions,
   normalisePositions,
@@ -284,6 +304,8 @@ describe("PositionsWidget", () => {
     mockBrokerState.activeAccountId = null;
     mockReadState.identity = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    mockUseOrders.mockReturnValue({ data: [] });
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
   });
 
   it("renders without crashing", () => {
@@ -378,8 +400,9 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("-₹810")).toBeInTheDocument();
   });
 
-  it("shows connected practice positions read-only without broker write controls", () => {
+  it("squares off a Practice position through place with the opposite side and quantity", async () => {
     mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ1" });
     mockUsePositions.mockReturnValue(
       queryResult({
         data: [
@@ -390,13 +413,64 @@ describe("PositionsWidget", () => {
     render(<PositionsWidget {...defaultProps} />);
 
     expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
-    expect(screen.getByText("Read-only")).toBeInTheDocument();
-    // Provenance is labelled separately from capability: sandbox book, no writes.
+    expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
     expect(screen.getByText("Practice")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith({
+      symbol: "NIFTY24APR24000CE",
+      exchange: "NFO",
+      action: "SELL",
+      product: "NRML",
+      orderType: "MARKET",
+      quantity: 75,
+      price: 150,
+      triggerPrice: 0,
+      strategy: "FlintPositions",
+    }, {
+      mode: "practice",
+      scopeKey: "practice:sandbox:default",
+      brokerType: "sandbox",
+      accountId: "default",
+    }, { exit: true });
+  });
+
+  it("squares off a Practice position while Laya is Down without an extra confirmation", async () => {
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-DOWN" });
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const squareOff = screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" });
+    expect(squareOff).toBeEnabled();
+    fireEvent.click(squareOff);
+    expect(screen.queryByRole("button", { name: /laya/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 75 }),
+      expect.objectContaining({ mode: "practice" }),
+      { exit: true },
+    );
+    await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Closed. Exits are allowed while Laya is Down.",
+      }),
+    ));
   });
 
   it("shows the header with position count", () => {
@@ -961,7 +1035,7 @@ describe("PositionsWidget", () => {
         scopeKey: "live:native:dhan:POSITIONS-A",
         brokerType: "dhan",
         accountId: "POSITIONS-A",
-      });
+      }, { exit: true });
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "order", title: "Square-off submitted" }),
@@ -987,9 +1061,134 @@ describe("PositionsWidget", () => {
           rationale: "Flatten the open risk",
         }),
         expect.anything(),
+        { exit: true },
       );
     });
 
+    it("tags a pending exit and refuses a second square-off", () => {
+      mockModeState.mode = "practice";
+      mockUseOrders.mockReturnValue({
+        data: [{
+          orderId: "E1",
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "SELL",
+          quantity: 4,
+          price: 100,
+          orderType: "LIMIT",
+          status: "OPEN",
+          product: "MIS",
+          strategy: "",
+          timestamp: "",
+        }],
+      });
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{
+          symbol: "INFY",
+          exchange: "NSE",
+          product: "MIS",
+          quantity: 10,
+          average_price: 100,
+          ltp: 101,
+          pnl: 10,
+        }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      expect(screen.getByText("INFY")).toBeInTheDocument();
+      expect(screen.getByText("Exit pending")).toBeInTheDocument();
+      const squareOff = screen.getByRole("button", { name: "Square off INFY" });
+      expect(squareOff).toBeDisabled();
+      fireEvent.click(squareOff);
+      expect(screen.queryByText("Square off position?")).not.toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {
+        target: { value: "EXIT" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+      expect(screen.getByText(
+        "Not placed. An exit for INFY is already pending. Wait for it to fill, or cancel it and try again.",
+      )).toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
+
+    it("tags a position restored from backup", () => {
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{
+          symbol: "INFY",
+          exchange: "NSE",
+          product: "MIS",
+          quantity: 10,
+          average_price: 100,
+          ltp: 101,
+          pnl: 10,
+          restored: true,
+        }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+      const tag = screen.getByText("Restored");
+      expect(tag).toHaveAttribute(
+        "title",
+        "Restored from backup. Not sent to a broker or checked by Laya.",
+      );
+    });
+
+    it("shows a flipped position on its own row until the toast is dismissed", async () => {
+      const held = {
+        symbol: "INFY",
+        exchange: "NSE",
+        product: "MIS",
+        quantity: 10,
+        average_price: 100,
+        ltp: 110,
+        pnl: 100,
+      };
+      mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+      expect(screen.queryByText("Unexpected")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{ ...held, quantity: -3, pnl: -30 }],
+      }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 1 }} />);
+
+      expect(screen.getByText("INFY")).toBeInTheDocument();
+      expect(screen.getByText("Unexpected")).toBeInTheDocument();
+      expect(screen.getByTestId("position-flip-toast")).toHaveTextContent(
+        "Position changed after your broker's orders loaded. You're now short 3 INFY. Close it if that wasn't intended.",
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      expect(screen.getByTestId("position-flip-toast")).toBeInTheDocument();
+
+      useOperatorSignalStore.setState({ decisionStatus: "down" });
+      mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE1" });
+      fireEvent.click(screen.getByRole("button", { name: "Close INFY" }));
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "BUY",
+          product: "MIS",
+          quantity: 3,
+        }),
+        expect.objectContaining({
+          mode: "live",
+          brokerType: "dhan",
+          accountId: "POSITIONS-A",
+        }),
+        { exit: true },
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+      expect(screen.getByText("Unexpected")).toBeInTheDocument();
+    });
     it("squares off a short position with a BUY market order for the absolute quantity", async () => {
       mockPlaceOrder.mockResolvedValue({ orderId: "SQ2" });
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
@@ -1013,7 +1212,84 @@ describe("PositionsWidget", () => {
           brokerType: "dhan",
           accountId: "POSITIONS-A",
         }),
+        { exit: true },
       );
+    });
+
+    it("keeps the square-off control and shows Laya's refusal when a close is denied", async () => {
+      mockModeState.mode = "practice";
+      mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya denied this order.", 403, {
+        code: "laya_denied",
+        reason: "Quantity is above the practice limit.",
+        message: "Laya denied this order.",
+        limits: { max_quantity: 4 },
+      }));
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+      const denied = await screen.findByTestId("laya-denied");
+      expect(denied).toHaveTextContent("Laya denied");
+      expect(denied).toHaveTextContent("Quantity is above the practice limit.");
+      expect(screen.getByText("Max quantity 4.")).toBeInTheDocument();
+      expect(screen.getByText("Square off position?")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE", hidden: true })).toBeInTheDocument();
+    });
+
+    it("squares off each Practice position through place and reports a partial failure", async () => {
+      mockModeState.mode = "practice";
+      mockPlaceOrder
+        .mockResolvedValueOnce({ orderId: "PQ-OK" })
+        .mockRejectedValueOnce(new OrderApiError("Laya denied this order.", 403, {
+          code: "laya_denied",
+          reason: "Practice book is closed.",
+          message: "Laya denied this order.",
+        }));
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "INFY", pnl: 100, quantity: 10, ltp: 100, average_price: 90, exchange: "NSE", product: "CNC" },
+          { symbol: "TCS", pnl: -50, quantity: -4, ltp: 200, average_price: 210, exchange: "NSE", product: "MIS" },
+        ],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {
+        target: { value: "EXIT" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        symbol: "INFY",
+        action: "SELL",
+        quantity: 10,
+        orderType: "MARKET",
+        product: "CNC",
+        price: 100,
+      }), expect.objectContaining({ mode: "practice" }), { exit: true });
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        symbol: "TCS",
+        action: "BUY",
+        quantity: 4,
+        orderType: "MARKET",
+        product: "MIS",
+        price: 200,
+      }), expect.objectContaining({ mode: "practice" }), { exit: true });
+      expect(await screen.findByText("Squared off: INFY.")).toBeInTheDocument();
+      expect(screen.getAllByText("TCS").length).toBeGreaterThan(0);
+      expect(screen.getByTestId("laya-denied")).toHaveTextContent("Laya denied");
+      expect(screen.getByTestId("laya-denied")).toHaveTextContent("Practice book is closed.");
+      expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm exit all positions" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Exit all positions", hidden: true })).toBeInTheDocument();
     });
 
     it("surfaces the backend rejection honestly inside the square-off dialog", async () => {
@@ -1222,6 +1498,7 @@ describe("PositionsWidget", () => {
           brokerType: "upstox",
           accountId: "ACCOUNT-A",
         },
+        { exit: true },
       );
     });
 

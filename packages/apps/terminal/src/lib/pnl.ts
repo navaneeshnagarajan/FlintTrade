@@ -7,6 +7,7 @@
  */
 
 import type { Position, Trade } from "@/types/api";
+import { isRestoredFromBackup } from "@/lib/restoredFills";
 
 /**
  * Booked realised P&L from a set of trades, pairing BUY↔SELL legs per symbol in
@@ -85,6 +86,8 @@ export interface RoundTrip {
   entryTime: string;
   exitTime: string;
   holdMinutes: number;
+  /** True when every fill in the trip carries the restore marker. */
+  restored: boolean;
 }
 
 function timeLabel(iso: string): string {
@@ -155,6 +158,7 @@ export function roundTripsFromTrades(trades: Trade[]): RoundTrip[] {
         entryTime: timeLabel(entryTs),
         exitTime: timeLabel(exitTs),
         holdMinutes: minutesBetween(entryTs, exitTs),
+        restored: sorted.length > 0 && sorted.every((leg) => isRestoredFromBackup(leg.strategy)),
       });
     }
   }

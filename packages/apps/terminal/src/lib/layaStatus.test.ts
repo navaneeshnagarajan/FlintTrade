@@ -81,7 +81,7 @@ describe("Laya chip status", () => {
   it("says Checking instead of Ready while a stop or start is unconfirmed", () => {
     expect(LAYA_STATUS_POLL_MS).toBe(1_500);
     expect(LAYA_CHECKING_DETAIL).toBe("Checking Laya…");
-    expect(LAYA_DOWN_PAUSE).toBe("Laya is Down. Orders are paused until it's Ready.");
+    expect(LAYA_DOWN_PAUSE).toBe("Laya is Down. New orders are paused until it's Ready. You can still close positions.");
     const checking = layaChipLabel({
       mode: "practice",
       practice: "ready",

@@ -86,9 +86,9 @@ no-funds verification does not prove funded live order execution.
 | Preset layouts (17) | ✅ | FlexLayout workspace presets |
 | Options-scalper 4-chart layout | ✅ | Index+Futures (centre) / CE+PE (sides) / option chain — per-panel pinned charts; tested |
 | Trading + dashboard widgets (71 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
-| Operating modes: Explore / Practice / Live | ✅ | Website sample opens ordinary Home in Explore mode; installed app has no first-class Demo mode. Practice places a simulated order, never a “paper order”. Widget catalogue count remains 71. `/explore` is not a first-class installed screen. |
+| Operating modes: Practice and Live | ✅ | Connected (read) is a broker status, not a Mode. Example is sample data, not a Mode. The public web demo is Demo (example data). Practice places a simulated order. Widget catalogue count remains 71. The old sample-data URL is not a first-class installed screen. |
 | Professional charts + indicators | ✅ | `widgets/analysis/Chart/` on the lightweight-charts library |
-| Practice mode (Explore/Practice/Live boundary) | ✅ | `SandboxControls` (capital + place simulated order) |
+| Practice mode | ✅ | Practice controls (capital + place simulated order) |
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains use strict exchange, expiry, row, Greek and lot-size provenance through the configured broker path; incomplete or contradictory inputs fail closed to a labelled sample/unavailable state |

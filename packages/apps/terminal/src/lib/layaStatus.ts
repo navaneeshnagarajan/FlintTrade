@@ -57,7 +57,7 @@ export const LAYA_CHECKING_LABEL = "Checking";
 export const LAYA_CHECKING_DETAIL = "Checking Laya…";
 
 /** Exact order refusal when the gate says Laya is Down. */
-export const LAYA_DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready.";
+export const LAYA_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
 
 /** True when a failed place is the Down pause. Other denials leave the chip alone. */
 export function layaOrderRefused(body: unknown): boolean {

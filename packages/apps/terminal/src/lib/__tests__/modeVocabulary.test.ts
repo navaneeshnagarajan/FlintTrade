@@ -14,8 +14,8 @@ import {
 
 describe("FT-UX-001 mode vocabulary", () => {
   it("Explore order CTA uses sample wording, not Practice or Live", () => {
-    expect(orderPadCtaLabel("explore", "BUY")).toBe("Sample Buy");
-    expect(orderPadCtaLabel("explore", "SELL")).toBe("Sample Sell");
+    expect(orderPadCtaLabel("explore", "BUY")).toBe("Example Buy");
+    expect(orderPadCtaLabel("explore", "SELL")).toBe("Example Sell");
     expect(orderPadCtaLabel("explore", "BUY")).not.toMatch(/Practice|Live/i);
   });
 
@@ -31,16 +31,22 @@ describe("FT-UX-001 mode vocabulary", () => {
   });
 
   it("Explore review and success copy stay sample-labelled", () => {
-    expect(orderReviewTitle("explore")).toBe("Review sample order");
-    expect(orderReviewDetailsLabel("explore")).toBe("Sample order details");
-    expect(orderReviewConfirmAria("explore")).toBe("Confirm sample order");
-    expect(orderReviewDescription("explore")).toMatch(/sample/i);
-    expect(orderReviewDescription("explore")).not.toMatch(/Practice Buy|Live/i);
-    expect(orderSuccessToast("explore", "ABC")).toBe("Sample order placed · ID: ABC");
-    expect(orderSuccessNotificationTitle("explore", "BUY", 1, "NIFTY")).toBe(
-      "Sample order placed: BUY 1 NIFTY",
+    expect(orderReviewTitle("explore")).toBe("Review Example order");
+    expect(orderReviewDetailsLabel("explore")).toBe("Example order details");
+    expect(orderReviewConfirmAria("explore")).toBe("Confirm Example order");
+    expect(orderReviewDescription("explore")).toBe(
+      "Example only. Nothing is sent to a broker and no order is placed.",
     );
-    expect(orderSuccessNotificationBody("explore")).toMatch(/sample fill/i);
+    expect(orderReviewDescription("explore")).not.toMatch(/Explore records a sample fill/i);
+    expect(orderReviewDescription("practice")).toBe("Confirm places this simulated order.");
+    expect(orderReviewDescription("practice")).not.toMatch(/Explore records a sample fill|Example|sample fill/i);
+    expect(orderReviewDescription("explore")).not.toMatch(/Confirm places this simulated order/);
+    expect(orderReviewDescription("explore")).not.toMatch(/Practice Buy|Live/i);
+    expect(orderSuccessToast("explore", "ABC")).toBe("Example order placed · ID: ABC");
+    expect(orderSuccessNotificationTitle("explore", "BUY", 1, "NIFTY")).toBe(
+      "Example order placed: BUY 1 NIFTY",
+    );
+    expect(orderSuccessNotificationBody("explore")).toMatch(/example fill/i);
   });
 
   it("session-open chip is session status, not Live mode", () => {
@@ -49,9 +55,9 @@ describe("FT-UX-001 mode vocabulary", () => {
   });
 
   it("Explore option premium is labelled sample, not Live", () => {
-    expect(optionPremiumHint("explore", 623.45)).toMatch(/Sample premium ₹623.45/);
+    expect(optionPremiumHint("explore", 623.45)).toMatch(/Example premium ₹623.45/);
     expect(optionPremiumHint("explore", 623.45)).not.toMatch(/Live|Practice/i);
-    expect(optionPremiumHint("explore", 0)).toMatch(/Sample premium unavailable/);
+    expect(optionPremiumHint("explore", 0)).toMatch(/Example premium unavailable/);
     expect(optionPremiumHint("practice", 623.45)).toMatch(/Sandbox premium/);
     expect(optionPremiumHint("live", 623.45)).toMatch(/Live premium ₹623.45/);
   });

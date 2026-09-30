@@ -30,7 +30,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   place while the chip is not Ready or Degraded also shows Checking
   until the next ping. A confirmed
   first load still says Still loading. A place refused with exactly
-  "Laya is Down. Orders are paused until it's Ready." sets the chip to
+  "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to
   Down on that response. The refusal line is unchanged. When
   `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`, `start`
   replaces that file and does not treat it as missing. A different path
@@ -53,7 +53,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Live stays fail-closed until a qualification record uses
   LIVE_DECISION evidence for the exact model revision, weight digest,
   and policy version. When Laya is actually Down, every mode is refused
-  with "Laya is Down. Orders are paused until it's Ready." A Practice
+  with "Laya is Down. New orders are paused until it's Ready. You can still close positions." A Practice
   refusal never says Live. A Live place without that qualification,
   while Ready or Degraded, says "Laya isn't qualified for Live yet.
   Practice orders are available." Opt in with
@@ -84,7 +84,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   loading, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
   The model is about 2.37 GB, and that size is reported once.
   There is no separate Updating label. Orders are refused with
-  "Laya is Down. Orders are paused until it's Ready." A dropped
+  "Laya is Down. New orders are paused until it's Ready. You can still close positions." A dropped
   connection, a partial download, or a failed swap is `download_failed`
   ("Can't download the model"; tooltip "Check your connection, then
   Start Laya again.") and deletes only the staging directory. That chip
@@ -173,18 +173,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   neutral colour, and the popover says Checking Laya…, until the ping
   confirms Ready, Degraded, or a reason other than `not_started`. A
   confirmed first load still says Still loading. A dead sidecar is reaped
-  and reported Stopped. The desk polls `GET /api/v1/ping` every 1.5
-  seconds. That ping reconciles the pid file, the key file, and the
-  runtime record the same way an order does, so the chip and the order
-  gate read the same state. A command-line stop or start, or a key
-  rotation, shows on the chip by the next 1.5-second check. When a place is refused
-  because Laya cannot be reached, or because it rejects the key, the
-  chip updates on that same order. A place refused with exactly
-  "Laya is Down. Orders are paused until it's Ready." sets the chip to
-  Down on that response. The refusal line is unchanged. A clamp says "Not placed. Laya allows
+  and reported Stopped. A clamp says "Not placed. Laya allows
   up to N." with Place N and Cancel, and never auto-places. Place N
   sends that quantity, and the Practice review panel shows it. A Down
-  refusal is "Laya is Down. Orders are paused until it's Ready." and
+  refusal is "Laya is Down. New orders are paused until it's Ready. You can still close positions." and
   does not show a quantity ceiling. A Live place that
   is not qualified says "Laya isn't qualified for Live yet. Practice
   orders are available." The Order Pad note is the collapsed line "Add a
@@ -194,15 +186,112 @@ changelog rebuilds itself from the first release cut after this baseline.
   only live region. The reason line is not its own status. A place with
   no note still gets
   Laya's policy decision: Practice clamps and Live denies. It is not a
-  hard reject. An admitted Practice place skips the model and writes one
-  decision-log line, `effect=clamp` with `failure=note_absent` and no
-  proof. When this run's record stood in, each model allow keeps its own
-  `effect=allow` `proof=runtime` line. Desk place
+  hard reject. Desk place
   surfaces go through this admission.
 
+- **GTT is refused on every submit route.** `"variety": "gtt"`, in any
+  case or separator spelling, is HTTP 422 `gtt_unsupported` on place,
+  routed place, exit-all, and a bracket, before Laya, SafetySystem, and
+  any broker call. The message is `Not placed. GTT orders aren't supported right now.`
+  No submit route reaches a broker forever or super-order endpoint. The
+  Kotak Neo adapter refuses a `gtt` place. Order Pad keeps GTT visible and
+  disabled, with the tooltip `GTT orders aren't supported right now.`
+  `POST /api/v1/orders/forever` does not place: a valid body is HTTP 501
+  `Orders are placed through /api/v1/orders/place.` A Live bracket with
+  exactly one stop-loss or one target submits on
+  `POST /api/v1/orders/bracket` after admission. Practice on that route is
+  HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and
+  a target together, and a trailing stop are refused before admission. A
+  second exit on the same broker account, while this desk's exit on that
+  contract is unfilled, is HTTP 409 `exit_pending`: `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.`
+  The row keeps **Exit pending**. The Live hold is
+  for that broker account. When the broker
+  order book cannot be read, that refusal is HTTP 409
+  `exit_orders_unreadable`: `Not placed. One exit at a time for <symbol> until your broker's orders load.`
+  A signed-out reset with no
+  authenticator enrolled reads `Sign in to reset this account. You'll
+  need your password.` With an authenticator enrolled it reads `Sign in
+  to reset this account. You'll need your password and authenticator
+  code.` Recovery asks for an authenticator code only once one is
+  enrolled.
+
+- **Session auth and probes.** A session JWT on
+  `Authorization: Bearer` or `X-FlintTrade-Token` passes the global check.
+  An API key on `X-FlintTrade-Token` does not. A reduce-only close can be admitted while
+  new orders are paused. PIN unlock replaces the session token. Reset of
+  a finished account needs a session and the password. A wipe ends other sessions. Practice restore marks fills and leaves them out
+  of the Laya, strategy, benchmark, and training readers. `GET /healthz`
+  and `GET /readyz` are public and return status only.
+
+- **Home and Invest net worth, greeting, benchmark legend, and Example markers.**
+  Home and Invest share one total: ledger cash, including blocked
+  margin, plus holdings at market value, plus open positions. Opening
+  an F&O position does not reduce the total by its margin. A Practice
+  round trip at an unchanged price leaves it at the starting cash, for
+  example ₹10,00,000. Options add signed market value. Futures add
+  unrealised P&L. Dhan marks from the mark-to-market average, or from
+  `costPrice` when that average is absent. Kotak Neo marks an open
+  future from the open-leg average. Practice marks a future from the
+  entry price. An estimated futures mark shows `≈`. Dhan does this for
+  `costPrice`. Kotak Neo does this for an open future. Practice never
+  does. The mark clears when that position is flat or the average
+  arrives. The tooltip and `≈` sit on the Home Net Worth amount, the
+  Known Total amount, and the Open Positions value. The Invest
+  Dashboard label `Net Worth (Cash + Holdings + Positions)` carries
+  the tooltip, and `≈` sits on the amount under it. Available Funds
+  shows that `≈` with no tooltip. Dhan's tooltip, when the average was
+  missing, is
+  `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+  Neo's is
+  `Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+  Several positions of one kind say `N futures positions` instead of
+  the symbol. The screen-reader name is `Net Worth, approximately …`.
+  Allocation percentages are not marked. Home allocation stays on the
+  Example split until funds, holdings, and positions have all loaded.
+  Home and Invest both wait for the position book before they publish
+  the total. The sample book does not. While that book is pending or
+  has failed, Home shows `—` and does not draw cash alone. A negative
+  total is the number, for example `-₹50,000`, or `≈ -₹50,000` when
+  the mark is approximate. Home derives each open position's P&L
+  percent from cost, and shows `—` when cost is missing or not above
+  zero.
+  The greeting uses the saved display name, then the username, and
+  stays plain `Good morning` (or afternoon or evening) until a name
+  is known. It never uses `Trader`. On Benchmark, real holdings use
+  `Your holdings (unrealised)` instead of
+  `Your Portfolio (since first buy)`. An empty book stays
+  `Your Portfolio`. Example holdings stay `Your Portfolio` with an
+  Example label, and the hard-coded index returns keep the Example
+  chip. Dashboard Net Worth, Available Funds, Invested Value, and Day P&L
+  show the final formatted value on the first frame in every mode, with
+  no count-up from zero, including `≈`, `-₹50,000`, and `—`.
+  The sample Dashboard XIRR is the inline `XIRR` figure plus
+  one Example chip. Portfolio Allocation on that sample dashboard omits
+  its broker sentence and does not carry its own Example chip. There
+  is no Portfolio XIRR card. On sample figures, Net Worth reads
+  `Example equity and cash. Connect a broker to see yours.`; the
+  allocation label is `Allocation` with the Example chip. Equity
+  Holdings and Cash leave their notes blank, and those rows do not
+  carry their own Example chip. In Example, Baskets show one Example
+  chip while quotes are loading and after they have loaded. ETFs show
+  one Example chip and `Example prices. Connect a broker for live quotes.`;
+  Practice and Live keep the live quote wording. Sector's header reads
+  `Example sector split. Connect a broker to see yours.` and the footer
+  reads `Example data. Not from your holdings.` Social shows exactly one
+  Example chip. The sample XIRR chip and the Net Worth allocation chip
+  paint only on example data. The Benchmark chip stays in Practice and
+  Live. A connected
+  book keeps the live equity sentence,
+  `Allocation (live assets only)`, and `Live from broker`. Mutual
+  Funds on example data reads
+  `Example NAVs · as of 10-Sep-2026`. Example order review confirms
+  with **Continue**. Practice review keeps **Confirm simulation**.
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
-  The required path is Create operator, then Vault, then the Practice
-  desk (Step N of 3). Affirming Practice lands on `/trade`.
+  When the vault is not yet secured, the required path is Create
+  operator, then Vault, then the Practice desk (Step 3 of 3). When the
+  vault is already secured, that vault step is skipped and the Practice
+  desk is Step 2 of 2. The Practice desk is Step 2 or 3; see the
+  step-count note below. Affirming Practice lands on `/trade`.
   Authenticator, broker connect, LLM, Monitoring, trading defaults,
   and risk are Later or Skip on that desk. They do not change the
   step count and do not block Practice. On the broker Later path,
@@ -211,6 +300,23 @@ changelog rebuilds itself from the first release cut after this baseline.
   unlock. Live place stays fail-closed. Live still needs the
   authenticator and PIN later. Persona is not a required first-run
   gate. Refs #282.
+
+- **First-run Setup resume, Start over, and a fixed vault step count
+  (FT-SETUP-HARDEN-001).** Reloading `/setup` mid-flow resumes the
+  unfinished setup session. **Start over (deletes this unfinished
+  operator)** deletes that unfinished operator and restarts at step 1.
+  A workspace data wipe is not required for either path. When the vault
+  is already secured on this machine, the vault step is skipped and the
+  count is fixed from the start: **Step 1 of 2 - Create operator**, then
+  **Step 2 of 2 - Practice desk**. That path never shows "of 3". On that
+  Practice step only, **Your vault is set up and secured on this
+  machine.** appears above **Open Practice desk**. When the vault is not
+  yet secured, Setup still shows **Step 1 of 3 - Create operator**,
+  **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk**. After
+  Setup completes, `/setup` does not restart step 1. A signed-in
+  operator is sent to `/trade`. A signed-out operator sees **Setup is
+  complete. Sign in to open the desk.** with **Sign in** as the primary
+  button. Refs #297.
 
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
   The path is native Dhan + Neo on the MSI
@@ -320,8 +426,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   `USER_GUIDE` Practice walkthrough no longer treats Explore
   Sample Buy as a sandbox Positions/Orders fill.
   `API.md` no longer claims `/orders/gtt-*` is gated like
-  regular Live place — those verbs 501 after unlock; gated
-  GTT is `/orders/forever`. `API.md` documents
+  regular Live place — those verbs return HTTP 501 after unlock
+  and do not place. `POST /api/v1/orders/forever` does not place.
+  `API.md` documents
   `GET /api/v1/advisor/status` `source` (`env` / `stored` /
   `default`). `ARCHITECTURE.md` mode-guards Practice to
   `SandboxEngine` and runs L1–L5 only on Live.
@@ -448,7 +555,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Dashboard and "N stocks" use the same N. Practice waits
   until the holdings query has settled empty before the
   sample fallback, so a cold load does not flash the
-  wrong N. Dashboard `Net Worth (Equity + Cash)` uses the
+  wrong N. Dashboard `Net Worth (Cash + Holdings + Positions)` uses the
   same shared demo book as Holdings. There is no Sample
   chip on the Holdings table or header. When the sample
   book is shown — Explore always, and Practice after that
@@ -636,8 +743,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   stays leaf-only, with no group chrome.
 
 - **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
-  Explore `/invest#mutual-funds` now labels the fixture
-  `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily
+  Example data on `/invest#mutual-funds` labels the fixture
+  `Example NAVs · as of 10-Sep-2026` and drops “Updated daily
   after market close.” The sample date was refreshed once so
   the as-of is not months stale; it does not auto-update.
   Practice and Live keep the daily-update sentence when the
@@ -832,7 +939,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   are unchanged.
 
 - **Unfinished Setup recovery without the authenticator (FT-SETUP-001).**
-  **Try with sample data** marks a durable demo session so `/home`
+  **Try with example data** marks a durable Example session so `/home`
   survives a refresh. **Start over** wipes the unfinished account via
   the account-create setup JWT, so a lost QR seed is recoverable
   without the TOTP secret. Daily-login session tokens cannot wipe the

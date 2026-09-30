@@ -24,7 +24,7 @@ from flinttrade_gateway.log_safety import account_ref, log_ref
 from flinttrade_gateway.routing_config import RoutingHint
 from flinttrade_webhooks.webhook_receiver import WebhookPayload
 
-from .order_routes import _body_to_order, _record_trade_journal
+from .order_routes import _body_to_order, _gtt_contract_refusal, _record_trade_journal
 from .safety_config import SafetyRuntimeUnavailable, require_ready_safety
 
 logger = logging.getLogger("flinttrade.core.webhook_dispatch")
@@ -78,7 +78,7 @@ class WebhookOrderDispatcher:
         self._authority_provider = authority_provider
 
     async def place_order(self, payload: WebhookPayload) -> dict[str, Any]:
-        """Place a webhook-derived order through the gated broker router."""
+        """Place a signed webhook order through Laya, then Safety, then the router."""
         authority, authority_error = self._require_authority(payload, "place_order")
         if authority_error:
             return _error("place_order", payload, authority_error)
@@ -101,7 +101,21 @@ class WebhookOrderDispatcher:
             return _error("place_order", payload, body_error)
 
         safe_account = account_ref(account_id)
+        with self._app.app_context():
+            gtt_refusal = _gtt_contract_refusal({**body, "variety": payload.data.get("variety")})
+            if gtt_refusal is not None:
+                response, _status = gtt_refusal
+                refused_body = response.get_json(silent=True) or {}
+                refused = _error(
+                    "place_order",
+                    payload,
+                    str(refused_body.get("message") or "Not placed. GTT orders aren't supported right now."),
+                )
+                refused["code"] = refused_body.get("code") or "gtt_unsupported"
+                return refused
         acknowledgement_failed = False
+        result: Any = None
+        typed_order: Any = None
         try:
             typed_order = _body_to_order(body, variety=_variety_from_payload(payload))
             try:

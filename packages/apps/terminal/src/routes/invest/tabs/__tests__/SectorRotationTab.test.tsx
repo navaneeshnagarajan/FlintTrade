@@ -37,10 +37,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
-}));
-
 // Mock TanStack Query — data=undefined, isError=false → isDemo path (uses DEMO_SECTORS)
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
@@ -60,6 +56,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { SectorRotationTab } from "../SectorRotationTab";
+import { useModeStore } from "@/stores/modeStore";
 import { useQuery } from "@tanstack/react-query";
 
 const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
@@ -86,6 +83,7 @@ const LIVE_SECTOR = {
 
 describe("SectorRotationTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
     mockUseQuery.mockReturnValue(NO_DATA);
   });
 
@@ -93,13 +91,13 @@ describe("SectorRotationTab", () => {
     // Provenance fails closed — an absent flag is sample, never live.
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { sectors: [LIVE_SECTOR] } });
     render(<SectorRotationTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("drops the demo banner only on an explicit is_sample_data: false", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, sectors: [LIVE_SECTOR] } });
     render(<SectorRotationTab />);
-    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
   });
 
   it("renders the section heading", () => {
@@ -109,7 +107,7 @@ describe("SectorRotationTab", () => {
 
   it("shows demo banner when API is unavailable", () => {
     render(<SectorRotationTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("renders heatmap and momentum sub-tabs", () => {

@@ -18,6 +18,7 @@ const {
   modeState,
   mockCaptureAuthSessionFence,
   mockSetLoggedInIfCurrent,
+  mockSetLoggedOut,
   mockSetMode,
   mockUpdateToken,
 } = vi.hoisted(() => {
@@ -72,7 +73,8 @@ const {
     authState.sessionGeneration += 1;
     return true;
   });
-  const modeState = { mode: "explore" as "explore" | "practice" | "live" };
+  const mockSetLoggedOut = vi.fn();
+  const modeState = { mode: "explore" as "explore" | "practice" | "live" | null };
   const mockSetMode = vi.fn((mode: "explore" | "practice" | "live") => {
     modeState.mode = mode;
   });
@@ -81,6 +83,7 @@ const {
     modeState,
     mockCaptureAuthSessionFence,
     mockSetLoggedInIfCurrent,
+    mockSetLoggedOut,
     mockSetMode,
     mockUpdateToken,
     fenceIsCurrent,
@@ -103,7 +106,7 @@ vi.mock("@/stores/authStore", () => ({
       ...authState,
       setLoggedInIfCurrent: mockSetLoggedInIfCurrent,
       updateToken: mockUpdateToken,
-      setLoggedOut: vi.fn(),
+      setLoggedOut: mockSetLoggedOut,
     }),
     setState: vi.fn(),
   }),
@@ -129,7 +132,7 @@ vi.mock("@/components/brand/Logo", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import LoginRoute, { isTotpEnabledFlag } from "../LoginRoute";
+import LoginRoute, { isTotpEnabledFlag, signedOutResetCopy } from "../LoginRoute";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -225,7 +228,7 @@ describe("LoginRoute", () => {
     const onExplore = vi.fn();
     render(<LoginRoute onSuccess={vi.fn()} onExplore={onExplore} mode="full" />);
 
-    fireEvent.click(screen.getByLabelText("Try with sample data without signing in"));
+    fireEvent.click(screen.getByLabelText("Try with example data without signing in"));
     expect(onExplore).toHaveBeenCalledOnce();
   });
 
@@ -265,6 +268,12 @@ describe("LoginRoute", () => {
             data: { token: "explore-session", username: "alice", expires_at: "" },
           });
         }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
       },
     });
@@ -299,6 +308,12 @@ describe("LoginRoute", () => {
             data: { token: "explore-session", username: "testuser", expires_at: "2026-07-02T08:00:00+05:30" },
           });
         }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
       },
     });
@@ -311,18 +326,177 @@ describe("LoginRoute", () => {
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
     expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
-      "explore-session",
+      "practice-session",
       "testuser",
       "2026-07-02T08:00:00+05:30",
       { status: "logged-out", principal: null, generation: 7 },
     );
-    expect(mockSetMode).toHaveBeenCalledWith("explore");
+    expect(mockUpdateToken).not.toHaveBeenCalled();
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
   });
 
-  it("upgrades the explore login JWT to practice when the UI was in Practice", async () => {
-    // Phase 1 G1 (login half): password login always mints an explore JWT.
-    // If the persisted UI mode is Practice, LoginRoute must call /auth/mode to
-    // sync the token to practice — otherwise sandbox orders 403 mode_blocked.
+  it("opens a fresh-browser sign-in in Practice even when Explore is stored", async () => {
+    modeState.mode = "explore";
+    localStorage.removeItem("flinttrade:mode");
+    const onSuccess = vi.fn();
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "testuser", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/mode",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "practice" }) }),
+    );
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "testuser",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+    expect(mockUpdateToken).not.toHaveBeenCalled();
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Explore — sample data only/)).not.toBeInTheDocument();
+  });
+
+  it("stays on Sign In when Practice cannot be opened for this session", async () => {
+    modeState.mode = "explore";
+    const onSuccess = vi.fn();
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "testuser", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({ status: "error", message: "mode unavailable" }, 503);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not open Practice. Try again."));
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
+  });
+
+  it("installs a practice login token without another mode request", async () => {
+    modeState.mode = "explore";
+    const onSuccess = vi.fn();
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: {
+              token: "practice-session",
+              username: "testuser",
+              expires_at: "",
+              mode: "practice",
+            },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    const urls = fetchSpy.mock.calls.map((call) => String(call[0]));
+    expect(urls.some((url) => url.includes("/v1/auth/mode"))).toBe(false);
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "testuser",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("live");
+  });
+
+  it("a new session with no stored Mode lands in Practice after password login", async () => {
+    modeState.mode = null;
+    const onSuccess = vi.fn();
+    mockAuthFetch({
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "fresh-practice", username: "alice", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your password")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "alice",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+  });
+
+  it("upgrades a missing login mode to practice when the UI was in Practice", async () => {
+    // A login response with no mode claim is still upgraded to Practice
+    // before the desk opens. A stored Practice UI must not keep an explore token.
     modeState.mode = "practice";
     const onSuccess = vi.fn();
     const fetchSpy = mockAuthFetch({
@@ -356,8 +530,14 @@ describe("LoginRoute", () => {
       "/ft-api/v1/auth/mode",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "practice" }) }),
     );
-    expect(mockUpdateToken).toHaveBeenCalledWith("practice-session", 8);
-    // Mode stays practice — it must NOT have been dropped to explore.
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "testuser",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+    expect(mockUpdateToken).not.toHaveBeenCalled();
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
     expect(mockSetMode).not.toHaveBeenCalledWith("explore");
   });
 
@@ -369,6 +549,12 @@ describe("LoginRoute", () => {
         if (url.includes("/v1/auth/login")) {
           return new Promise<Response>((resolve) => {
             finishLogin = resolve;
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
           });
         }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
@@ -394,13 +580,172 @@ describe("LoginRoute", () => {
         status: "success",
         data: { token: "late-token", username: "alice", expires_at: "" },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
-      await Promise.resolve();
     });
 
+    await waitFor(() => expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "alice",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    ));
     expect(mockSetLoggedInIfCurrent).toHaveReturnedWith(false);
     expect(authState).toMatchObject({ token: "newer-token", username: "bob", sessionGeneration: 8 });
     expect(mockSetMode).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  function sessionJwt(mode: string): string {
+    const payload = btoa(JSON.stringify({ mode, type: "session" }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return `header.${payload}.sig`;
+  }
+
+  it("names the unlock button from the session Mode", () => {
+    modeState.mode = "practice";
+    const named = [
+      ["practice", "Unlock Practice desk"],
+      ["live", "Unlock Live desk"],
+    ] as const;
+
+    for (const [mode, label] of named) {
+      Object.assign(authState, {
+        status: "pin-required",
+        token: null,
+        reauthToken: sessionJwt(mode),
+        username: "testuser",
+      });
+      const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+      const heading = mode === "practice" ? "Practice desk locked" : "Live desk locked";
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Quick Unlock")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      view.unmount();
+    }
+
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
+  });
+
+  it("keeps the plain Unlock button for an example-data session", () => {
+    modeState.mode = "live";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("explore"),
+      username: "testuser",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Quick Unlock")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
+    expect(mockSetMode).not.toHaveBeenCalled();
+  });
+
+  it("keeps a plain Unlock button for Explore, Connected (read), and an unknown Mode", () => {
+    // Connected (read) is a broker status. The button reads the session
+    // mode claim, the same source as the lock-screen heading, so that
+    // status never becomes a desk name.
+    modeState.mode = "live";
+    const claims = ["explore", "Connected (read)", "not-a-mode"];
+    for (const claim of claims) {
+      Object.assign(authState, {
+        status: "pin-required",
+        token: null,
+        reauthToken: sessionJwt(claim),
+        username: "testuser",
+      });
+      const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+      const button = screen.getByRole("button", { name: "Unlock" });
+      expect(button).toBeInTheDocument();
+      expect(button).not.toHaveAttribute("aria-label");
+      expect(button).not.toHaveAttribute("title");
+      expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+      expect(screen.getByText("Quick Unlock")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+      view.unmount();
+    }
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("live");
+  });
+
+  it("keeps the plain Unlock button for an unknown session value", () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("not-a-mode"),
+      username: "testuser",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Quick Unlock")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+  });
+
+  it("restores the session after Quick Unlock and leaves Mode unchanged", async () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: "practice-session",
+      username: "testuser",
+      sessionGeneration: 4,
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { token: "restored-token", mode: "live", live_mode_unlocked: true },
+      }),
+    );
+    const onSuccess = vi.fn();
+    render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
+
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/pin",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ pin: "123456" }),
+      }),
+    );
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "restored-token",
+      "testuser",
+      "",
+      expect.objectContaining({ principal: "testuser", generation: 4 }),
+    );
+  });
+
+  it("Use password instead leaves Quick Unlock without changing Mode", () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      username: "testuser",
+      reauthToken: "practice-session",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /use password instead/i }));
+
+    expect(mockSetLoggedOut).toHaveBeenCalledOnce();
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
   });
 
   it("does not install a PIN response after the locked session is terminated", async () => {
@@ -419,7 +764,7 @@ describe("LoginRoute", () => {
     );
     const onSuccess = vi.fn();
     render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
-    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
       target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
@@ -638,6 +983,64 @@ describe("LoginRoute", () => {
 
     await waitFor(() => expect(screen.getByText("Invalid password.")).toBeInTheDocument());
     // Stays on the confirm view — no QR minted.
+    expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
+  });
+
+  it("reset copy follows authenticator enrolment", () => {
+    expect(signedOutResetCopy(false)).toBe(
+      "Sign in to reset this account. You'll need your password.",
+    );
+    expect(signedOutResetCopy(true)).toBe(
+      "Sign in to reset this account. You'll need your password and authenticator code.",
+    );
+  });
+
+  it("shows the password-only reset line when no authenticator is enrolled", async () => {
+    mockAuthFetch({
+      totpEnabled: false,
+      onOther: (url) => {
+        if (url.includes("regenerate-2fa") || url.includes("setup/reset")) {
+          return jsonResponse({
+            status: "error",
+            message: signedOutResetCopy(false),
+            authenticator_enrolled: false,
+          }, 401);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /lost your authenticator/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/authenticator code/i)).not.toBeInTheDocument();
+    expect(signedOutResetCopy(false)).not.toMatch(/authenticator code/);
+  });
+
+  it("shows the sign-in message when a finished account is reset while signed out", async () => {
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("regenerate-2fa")) {
+          return jsonResponse({
+            status: "error",
+            message: "Sign in to reset this account. You'll need your password and authenticator code.",
+          }, 403);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /lost your authenticator/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
+    expect(screen.getByText(signedOutResetCopy(true))).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Confirm your password to reset 2FA"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset 2fa$/i }));
+
+    expect(await screen.findByText(
+      "Sign in to reset this account. You'll need your password and authenticator code.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("Authentication required.")).not.toBeInTheDocument();
     expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
   });
 });

@@ -25,7 +25,7 @@ function readMaxQuantity(body: Record<string, unknown>): number | null {
   return typeof max === "number" && Number.isInteger(max) && max >= 1 ? max : null;
 }
 
-const LAYA_DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready.";
+const LAYA_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
 
 const LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again.";
 

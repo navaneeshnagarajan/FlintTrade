@@ -305,9 +305,11 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     app = _app(router, backend_lease_factory=backend_lease_factory)
-    app.config["SAFETY"] = SafetySystem(
+    safety = SafetySystem(
         SafetyConfig(qty_limits={"NSE": 1}, check_market_hours=False),
     )
+    safety.check_order = MagicMock(return_value=[SimpleNamespace(passed=True)])
+    app.config["SAFETY"] = safety
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
         source="custom",
@@ -329,7 +331,9 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["status"] == "error"
-    assert "Second-leg quantity 2 exceeds NSE limit of 1" in result["message"]
+    assert result["code"] == "gtt_unsupported"
+    assert result["message"] == "Not placed. GTT orders aren't supported right now."
+    app.config["SAFETY"].check_order.assert_not_called()
     router.place_order.assert_not_called()
 
 

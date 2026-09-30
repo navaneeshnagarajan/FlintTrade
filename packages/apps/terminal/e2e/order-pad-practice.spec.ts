@@ -205,6 +205,17 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { status: "success", data: { positions: [] } } };
     },
   });
+  syntheticApi.register({
+    name: "read empty Practice sandbox orders",
+    method: "GET",
+    path: "/ft-api/v1/sandbox/orders",
+    // The paused Order Pad mount reads the book three times.
+    expectedCalls: 3,
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return { json: { status: "success", data: { orders: [] } } };
+    },
+  });
   // The desk mounts Chat readiness beside the tutor pill. Strict Mode can
   // invoke each read twice; the place handler below stays the JWT check.
   registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 6 } });

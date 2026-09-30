@@ -11,13 +11,13 @@ describe("LayaAdmissionNotice", () => {
         notice={{
           kind: "deny",
           headline: "Laya denied",
-          reason: "Laya is Down. Orders are paused until it's Ready.",
+          reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
           limitsLine: null,
           appliedQuantity: null,
         }}
       />,
     );
-    const reason = "Laya is Down. Orders are paused until it's Ready.";
+    const reason = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(reason);
     expect(screen.queryByRole("status", { name: "Laya decision" })).not.toBeInTheDocument();

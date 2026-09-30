@@ -53,12 +53,12 @@ test.describe('Explore mode', () => {
     await expect(positions.getByLabel('Loading positions')).toHaveCount(0);
   });
 
-  test('TickerBar shows broker-connect prompt when disconnected', async ({ page }) => {
+  test('TickerBar does not repeat broker status', async ({ page }) => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
-    // When no live data: TickerBar renders a button to navigate to settings
-    const prompt = page.getByText('Connect broker for live prices', { exact: false });
-    await expect(prompt).toBeVisible({ timeout: 10_000 });
+    const ticker = page.getByRole('region', { name: 'Market indices' });
+    await expect(ticker).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Connect broker for live prices', { exact: false })).toHaveCount(0);
   });
 
   test('/trade renders the FlexLayout workspace shell', async ({ page }) => {
@@ -74,9 +74,9 @@ test.describe('Explore mode', () => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
 
-    await expect(page.getByText('EXPLORE', { exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('No broker connected', { exact: true })).toBeVisible();
-    await expect(page.getByTestId('market-session-status')).toHaveText(/^Market (open|closed|unavailable)$/);
+    await expect(page.getByTestId('execution-mode')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('EXPLORE', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('No broker connected', { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('market-session-status')).not.toContainText('Live');
   });
 });

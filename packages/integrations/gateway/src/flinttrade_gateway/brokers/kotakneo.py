@@ -699,6 +699,14 @@ class KotakNeoAdapter(BrokerAdapter):
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         """Place one exact v3 regular/AMO order through the gated path."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        variety = "".join(
+            ch for ch in str(getattr(order, "variety", "") or "").casefold() if ch.isalnum()
+        )
+        if variety == "gtt":
+            raise UnsupportedCapabilityError(
+                "Not placed. GTT orders aren't supported right now.",
+                broker_id="kotakneo",
+            )
         try:
             M.validate_v3_order(order)
         except M.KotakNeoMappingError as exc:

@@ -1,15 +1,21 @@
 /**
  * SetupAccountRoute — the authoritative /setup wizard.
  *
- * Required steps (Step N of 3 only):
+ * Required steps (Step N of M counts only these):
  *   0: Create operator — username, email, password, optional PIN
  *   1: Vault — open the credential vault with a master password
  *   2: Practice desk — affirm Practice and land on the desk
  *
+ * When this machine already has a vault secret, that fact is fixed before
+ * step 1. The flow is then "Step 1 of 2 - Create operator" and
+ * "Step 2 of 2 - Practice desk". It does not start at 3 and drop to 2.
+ * The secret is the one the backend wrote at startup. Setup does not replace it.
+ *
  * Later / Skip (never counted, never shown before the affirm, never
- * block Practice): authenticator, broker connect, LLM, Monitoring,
- * trading defaults, and risk limits. They open on the Practice desk
- * after landing. Persona is not a first-run gate.
+ * block Practice): authenticator, broker connect, LLM, and trading
+ * defaults. They open on the Practice desk after landing, as a one-line
+ * reminder. Monitoring and risk limits stay in Settings. Persona is not
+ * a first-run gate.
  * First run has no Live unlock.
  *
  * Non-secret progress is persisted to localStorage under
@@ -22,10 +28,11 @@
  *   (c) deleting the account from the vault or authenticator recovery
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { safeParse } from "@/lib/safeParse";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { readPersistedAuthSession } from "@/lib/homeEntry";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -40,10 +47,12 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import PublicRouteShell from "@/components/layout/PublicRouteShell";
+import TwoOperatorUpdateScreen from "@/routes/TwoOperatorUpdateScreen";
 import { StepIndicator } from "@/routes/setup/StepIndicator";
 import type { Persona } from "@/routes/setup/PersonaStep";
 import { ConnectionStep } from "@/routes/setup/ConnectionStep";
@@ -53,7 +62,6 @@ import type { RiskFormValues } from "@/routes/setup/RiskStep";
 import { LlmStep, type LlmFormValues } from "@/routes/setup/LlmStep";
 import { normaliseLlmHost, providerSelection } from "@/lib/llmProviders";
 import { TradingStep } from "@/routes/setup/TradingStep";
-import { RiskStep } from "@/routes/setup/RiskStep";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { downgradeMode } from "@/lib/modeAuth";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
@@ -64,16 +72,43 @@ import {
 } from "@/stores/authStore";
 import {
   AccountSetupError,
+  completeFlintTradeSetup,
   enableFlintTradeTotp,
+  fetchSetupServerState,
   openFlintTradeVault,
+  resumeFlintTradeSetup,
+  OPERATOR_EXISTS_CODE,
   setupFlintTradeAccount,
+  type SetupServerState,
 } from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
+import { setupProgressCounts, setupStepDetail, setupStepTitle } from "@/routes/setup/setupProgress";
 import {
-  REQUIRED_SETUP_STEP_COUNT,
-  REQUIRED_SETUP_STEP_LABELS,
   type OptionalSetupPanel,
 } from "@/routes/setupRouting";
+import {
+  OPTIONAL_SETUP_CARDS,
+  clearOptionalSetupState,
+  clearPracticeLaterPending,
+  loadOptionalSetupState,
+  markPracticeLaterPending,
+  optionalSetupDoneCount,
+  optionalSetupSkippedCount,
+  optionalSetupStripLabel,
+  practiceLaterPending,
+  saveOptionalSetupState,
+  type OptionalSetupCardId,
+  type OptionalSetupTrayState,
+} from "@/routes/optionalSetupTray";
+
+export {
+  OPTIONAL_SETUP_STATE_KEY,
+  PRACTICE_LATER_KEY,
+  clearOptionalSetupState,
+  clearPracticeLaterPending,
+  markPracticeLaterPending,
+  optionalSetupStripLabel,
+} from "@/routes/optionalSetupTray";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -164,7 +199,7 @@ function requiredStepFor(progress: { accountCreated: boolean; vaultOpened: boole
 // Module-scoped, in-memory-only cache of the step-2 recovery material (TOTP
 // URI + backup codes). Recovery material is deliberately NEVER written to
 // browser storage, but the wizard's component state is lost when the route
-// remounts — and installing the explore-mode session token right after
+// remounts — and installing the setup-session token right after
 // account creation flips the auth store and remounts the tree. Without this
 // cache a brand-new account landed on step 2 with the QR button disabled and
 // a misleading "closed or refreshed" recovery message. Module scope survives
@@ -246,31 +281,22 @@ function clearProgress(): void {
   }
 }
 
-/** Set once the operator opens the Practice desk. Not a required step. */
-export const PRACTICE_LATER_KEY = "flinttrade:setup-later";
-
-export function markPracticeLaterPending(): void {
-  try {
-    localStorage.setItem(PRACTICE_LATER_KEY, "1");
-  } catch {
-    // Storage quota or privacy mode — the desk still opens.
-  }
+function isSetupSessionError(error: unknown): boolean {
+  if (error instanceof AccountSetupError && error.status === 401) return true;
+  return error instanceof Error && /setup session/i.test(error.message);
 }
 
-export function clearPracticeLaterPending(): void {
-  try {
-    localStorage.removeItem(PRACTICE_LATER_KEY);
-  } catch {
-    // Non-critical.
-  }
-}
-
-function practiceLaterPending(): boolean {
-  try {
-    return localStorage.getItem(PRACTICE_LATER_KEY) === "1";
-  } catch {
-    return false;
-  }
+/**
+ * A same-tab reload keeps the setup JWT in sessionStorage, but this route
+ * sits outside the auth guard that restores it. Put the token back before
+ * the vault probe runs, or the vault and Start over both refuse the operator.
+ */
+function restoreSetupSessionFromTab(): void {
+  const state = useAuthStore.getState();
+  if (state.token || state.status !== "unknown") return;
+  const persisted = readPersistedAuthSession();
+  if (!persisted) return;
+  useAuthStore.getState().setLoggedIn(persisted.token, persisted.username, persisted.expiresAt);
 }
 
 // ---------------------------------------------------------------------------
@@ -365,7 +391,7 @@ function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: Acc
         password: values.password,
         pin: values.pin || "",
       });
-      // /auth/setup mints an explore-mode session so the rest of the wizard
+      // /auth/setup mints a practice session so the rest of the wizard
       // (broker connection behind the G9 write guard, mode selection behind the
       // D6 session-bound PIN) is authenticated. Without it those steps 401.
       // Fall back to logged-out only if an older backend returned no token.
@@ -378,9 +404,8 @@ function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: Acc
       onComplete(values, result.totpUri, result.backupCodes);
     } catch (error) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
-      if (error instanceof AccountSetupError && error.kind === "account-exists") {
-        // Unfinished first-run: open the 2FA step so Delete / Start over
-        // can wipe the account instead of a dead-end 409.
+      if (error instanceof AccountSetupError && error.code === OPERATOR_EXISTS_CODE) {
+        // The other create won. Sign in, instead of the generic conflict line.
         onAccountAlreadyExists();
         return;
       }
@@ -676,84 +701,16 @@ function TotpDisplay({
     setDownloaded(true);
   }
 
-  // Shared escape-hatch block (rendered on both warning and qr phases).
-  // Gives the user two explicit exits: "Reset 2FA" (keep account, new QR)
-  // and "Delete account & start over" (wipe and re-run step 0).
-  function EscapeHatches() {
-    if (escapeAction) {
-      const title =
-        escapeAction === "reset-2fa"
-          ? "Reset 2FA — confirm with your password"
-          : "Delete account — confirm with your password";
-      const confirmLabel =
-        escapeAction === "reset-2fa" ? "Reset 2FA" : "Delete account";
-      return (
-        <div className="mt-4 rounded-lg border border-loss/30 bg-loss/5 p-3 space-y-2">
-          <p className="text-xs text-text-primary font-medium">{title}</p>
-          <p className="text-[11px] text-text-muted">
-            {escapeAction === "reset-2fa"
-              ? "Your old QR and backup codes will be invalidated. You'll scan a fresh QR on the next screen."
-              : "The account will be wiped from this machine. You can re-create it with a different username or email."}
-          </p>
-          <Input
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            placeholder="Your password"
-            value={escapePassword}
-            onChange={(e) => setEscapePassword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void submitEscape(); }}
-            aria-label="Confirm password"
-          />
-          {escapeError && (
-            <p role="alert" className="text-xs text-loss">{escapeError}</p>
-          )}
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={cancelEscape}
-              disabled={escapeLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void submitEscape()}
-              disabled={escapeLoading || !escapePassword}
-              className={escapeAction === "delete-account" ? "bg-loss hover:bg-loss/90" : ""}
-            >
-              {escapeLoading ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
-              {confirmLabel}
-            </Button>
-          </div>
-        </div>
-      );
+  function beginEnrol() {
+    if (hasRecoveryMaterial) {
+      setPhase("qr");
+      return;
     }
-    return (
-      <div className="mt-4 pt-3 border-t border-border-default flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted/80">
-        <span className="text-text-muted/60">Need to change something?</span>
-        <button
-          type="button"
-          onClick={() => setEscapeAction("reset-2fa")}
-          className="underline decoration-dotted underline-offset-4 hover:text-text-primary"
-        >
-          Reset 2FA
-        </button>
-        <button
-          type="button"
-          onClick={() => setEscapeAction("delete-account")}
-          className="underline decoration-dotted underline-offset-4 hover:text-loss"
-        >
-          Delete account &amp; start over
-        </button>
-      </div>
-    );
+    setEscapeAction("reset-2fa");
   }
 
-  // Phase 1: Warning — explain what 2FA is, what's locked in, and the exits.
+  // Phase 1: Warning — enrol or leave it for later. Account deletion lives
+  // in Settings → Security, not on this card.
   if (phase === "warning") {
     return (
       <div className="space-y-5">
@@ -764,8 +721,8 @@ function TotpDisplay({
 
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
-            An authenticator is optional for Explore and Practice. Enrol it now, or choose
-            Set up later and use your password. Live unlock still requires the authenticator
+            An authenticator is optional for Example and Practice. Enrol it now, or choose
+            Later and use your password. Live unlock still requires the authenticator
             and your PIN.
           </p>
           <ul className="space-y-2 text-xs text-text-secondary">
@@ -792,10 +749,8 @@ function TotpDisplay({
           <p className="text-[11px] text-text-secondary leading-relaxed">
             Your account is already created on this machine. Once you continue
             and scan the QR, you cannot come back to change your username,
-            email, or password without signing in first. If you need to change
-            any of those, use <strong>Delete account &amp; start over</strong>{" "}
-            below. If you only need a new QR (wrong device scanned, lost
-            phone), use <strong>Reset 2FA</strong>.
+            email, or password without signing in first. To delete the account,
+            open Settings → Security.
           </p>
         </div>
 
@@ -805,29 +760,58 @@ function TotpDisplay({
             className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-text-secondary"
           >
             For security, the QR seed and backup codes were not retained after the page was
-            closed or refreshed. Use <strong className="text-text-primary">Reset 2FA</strong>{" "}
-            below and confirm your password to generate fresh recovery material.
+            closed or refreshed. Enrol asks for your password and then shows a fresh QR.
           </div>
         )}
 
-        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-6">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onSetUpLater}
-          >
-            Set up later
-          </Button>
-          <Button onClick={() => setPhase("qr")} disabled={!hasRecoveryMaterial}>
-            I&apos;m ready — show QR code
-          </Button>
-        </div>
+        {escapeAction === "reset-2fa" ? (
+          <div className="rounded-lg border border-border-default p-3 space-y-2">
+            <p className="text-xs text-text-primary font-medium">Enrol — confirm with your password</p>
+            <p className="text-[11px] text-text-muted">
+              A fresh QR replaces any previous authenticator seed.
+            </p>
+            <Input
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              placeholder="Your password"
+              value={escapePassword}
+              onChange={(e) => setEscapePassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void submitEscape(); }}
+              aria-label="Confirm password"
+            />
+            {escapeError && (
+              <p role="alert" className="text-xs text-loss">{escapeError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={cancelEscape} disabled={escapeLoading}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void submitEscape()}
+                disabled={escapeLoading || !escapePassword}
+              >
+                {escapeLoading ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+                Enrol
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-6">
+            <Button type="button" variant="outline" onClick={onSetUpLater}>
+              Later
+            </Button>
+            <Button type="button" onClick={beginEnrol}>
+              Enrol
+            </Button>
+          </div>
+        )}
         <p className="text-[11px] text-text-muted text-right">
-          Explore and Practice work with your password only. Enrol the
+          Example and Practice work with your password only. Enrol the
           authenticator before unlocking Live.
         </p>
-
-        <EscapeHatches />
       </div>
     );
   }
@@ -957,7 +941,7 @@ function TotpDisplay({
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           <Button type="button" variant="outline" onClick={onSetUpLater}>
-            Set up later
+            Later
           </Button>
           <Button
             onClick={() => {
@@ -988,7 +972,6 @@ function TotpDisplay({
         </div>
       </div>
 
-      <EscapeHatches />
     </div>
   );
 }
@@ -1009,18 +992,15 @@ type VaultFormValues = z.infer<typeof vaultSchema>;
 
 interface VaultStepProps {
   onOpened: () => void;
-  onAccountDeleted: () => void;
+  /** The probe or submit was refused because the setup JWT is gone. */
+  onSessionRequired: () => void;
 }
 
-function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
-  const [phase, setPhase] = useState<"checking" | "form" | "ready">("checking");
+function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
-  const [resetOpen, setResetOpen] = useState(false);
-  const [resetPassword, setResetPassword] = useState("");
-  const [resetError, setResetError] = useState("");
-  const [resetLoading, setResetLoading] = useState(false);
+  const submitInFlight = useRef(false);
 
   const {
     register,
@@ -1028,57 +1008,25 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
     formState: { errors },
   } = useForm<VaultFormValues>({ resolver: zodResolver(vaultSchema) });
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await openFlintTradeVault("");
-        if (cancelled) return;
-        setPhase(result.alreadyPresent ? "ready" : "form");
-      } catch {
-        if (!cancelled) setPhase("form");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   async function onSubmit(values: VaultFormValues) {
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     setIsLoading(true);
     setServerError("");
     try {
       await openFlintTradeVault(values.masterPassword);
       onOpened();
     } catch (error) {
+      if (isSetupSessionError(error)) {
+        onSessionRequired();
+        return;
+      }
       setServerError(
         error instanceof Error ? error.message : "The vault could not be opened.",
       );
     } finally {
+      submitInFlight.current = false;
       setIsLoading(false);
-    }
-  }
-
-  async function submitReset() {
-    if (!resetPassword) return;
-    setResetLoading(true);
-    setResetError("");
-    try {
-      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
-        method: "POST",
-        headers: buildHeaders(true),
-        body: JSON.stringify({ password: resetPassword }),
-      });
-      const data = await resp.json() as { message?: string };
-      if (!resp.ok) {
-        setResetError(data?.message ?? `Request failed (HTTP ${resp.status}).`);
-        return;
-      }
-      onAccountDeleted();
-    } catch {
-      setResetError("Cannot reach the server to delete the account.");
-    } finally {
-      setResetLoading(false);
     }
   }
 
@@ -1094,25 +1042,7 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
         after you save it.
       </p>
 
-      {phase === "checking" && (
-        <p className="text-xs text-text-muted">Checking the vault…</p>
-      )}
-
-      {phase === "ready" && (
-        <div className="space-y-4">
-          <p className="text-sm text-text-primary">
-            The vault is already open on this machine.
-          </p>
-          <div className="flex justify-end">
-            <Button type="button" onClick={onOpened}>
-              Continue
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {phase === "form" && (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           {serverError && (
             <div role="alert" className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss">
               <AlertTriangle className="size-4 shrink-0 mt-0.5" />
@@ -1169,44 +1099,7 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
             </Button>
           </div>
         </form>
-      )}
 
-      <div className="pt-3 border-t border-border-default">
-        {resetOpen ? (
-          <div className="space-y-2">
-            <Input
-              type="password"
-              value={resetPassword}
-              onChange={(event) => setResetPassword(event.target.value)}
-              aria-label="Confirm password to delete the account"
-            />
-            {resetError && <p role="alert" className="text-xs text-loss">{resetError}</p>}
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setResetOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => void submitReset()}
-                disabled={resetLoading || !resetPassword}
-              >
-                Delete account
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setResetOpen(true)}
-            className="text-[11px] text-text-muted hover:text-loss"
-          >
-            Delete account &amp; start over
-          </Button>
-        )}
-      </div>
     </div>
   );
 }
@@ -1223,81 +1116,209 @@ function PracticeDeskStep() {
   );
 }
 
-type LaterPanel = OptionalSetupPanel | "trading" | "risk";
+type SetupStatusFailure =
+  | { reason: "network" }
+  | { reason: "busy" }
+  | { reason: "http" };
 
-const LATER_ACTIONS: ReadonlyArray<{
-  id: LaterPanel;
-  title: string;
-  detail: string;
-}> = [
-  {
-    id: "totp",
-    title: "Two-factor authentication",
-    detail: "Optional. Practice does not need an authenticator.",
-  },
-  {
-    id: "broker",
-    title: "Broker connect",
-    detail: "Optional. Practice does not need a broker.",
-  },
-  {
-    id: "llm",
-    title: "LLM",
-    detail: "Optional. You can choose a model later.",
-  },
-  {
-    id: "monitoring",
-    title: "Monitoring",
-    detail: "Optional. System health stays in Settings.",
-  },
-  {
-    id: "trading",
-    title: "Trading defaults",
-    detail: "Optional. Defaults stay in Settings until you set them.",
-  },
-  {
-    id: "risk",
-    title: "Risk",
-    detail: "Optional. Limits stay in Settings until you set them.",
-  },
-];
+function statusFailureFrom(error: unknown): SetupStatusFailure {
+  if (!(error instanceof AccountSetupError) || error.kind === "network") {
+    return { reason: "network" };
+  }
+  if (error.status === 429) return { reason: "busy" };
+  return { reason: "http" };
+}
+
+function SetupStatusError({
+  failure,
+  onRetry,
+}: {
+  failure: SetupStatusFailure;
+  onRetry: () => void;
+}) {
+  const unavailable = failure.reason === "network";
+  const title = unavailable
+    ? "FlintTrade backend unavailable"
+    : failure.reason === "busy"
+      ? "FlintTrade is busy"
+      : "Can't check setup status";
+  const detail = unavailable
+    ? "The FlintTrade backend did not answer. Start or restart the local FlintTrade backend, then retry."
+    : failure.reason === "busy"
+      ? "FlintTrade is busy right now. Wait a moment, then retry."
+      : "FlintTrade answered, but setup status couldn't be read. Retry in a moment.";
+  return (
+    <div role="alert" aria-labelledby="setup-status-error-title" className="space-y-4">
+      <h3 id="setup-status-error-title" className="text-sm font-semibold text-text-primary">{title}</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">{detail}</p>
+      <div className="flex justify-end">
+        <Button type="button" onClick={onRetry}>Retry</Button>
+      </div>
+    </div>
+  );
+}
+
+function securedBeforeSetup(state: SetupServerState): boolean {
+  if (state.isSetup) return state.vaultPresecured === true;
+  return state.vaultOpen === true;
+}
+
+function SetupResumeSignIn({
+  onResumed,
+}: {
+  onResumed: (token: string, username: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!password || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await resumeFlintTradeSetup(password);
+      onResumed(result.token, result.username);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(event) => void onSubmit(event)} className="space-y-4" noValidate>
+      <h3 className="text-sm font-semibold text-text-primary">Continue setup</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        This machine already has an operator. Sign in to finish setup.
+      </p>
+      {error && (
+        <div role="alert" className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss">
+          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-resume-password" className="text-xs text-text-secondary uppercase tracking-wider">
+          Password
+        </Label>
+        <Input
+          id="sa-resume-password"
+          type="password"
+          autoComplete="current-password"
+          aria-label="Operator password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={loading || !password}>
+          {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+          Continue setup
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function SetupComplete({ signedIn }: { signedIn: boolean }) {
+  if (!signedIn) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-text-primary">
+          Setup is complete. Sign in to open the desk.
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild variant="outline">
+            <Link to="/settings">Open Settings</Link>
+          </Button>
+          <Button asChild>
+            <Link to="/welcome">Sign in</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-sm font-semibold text-text-primary">Setup is complete</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        Opening the desk. Optional items live in Settings.
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button asChild variant="outline">
+          <Link to="/settings">Open Settings</Link>
+        </Button>
+        <Button asChild>
+          <Link to="/trade">Open the desk</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /**
- * Later/Skip tray on the Practice desk. Renders nothing until the operator
- * has affirmed Practice. Skipping a panel does not leave the desk, and the
- * tray never shows Step N of M.
+ * Later/Skip tray on the Practice desk. Collapsed to one line until Show.
+ * Dismiss moves the reminder into Settings. Skipping a card does not leave
+ * the desk, and the tray never shows Step N of M.
  */
-export function PracticeLaterSetup() {
+export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "settings" } = {}) {
   const [pending, setPending] = useState(practiceLaterPending);
-  const [panel, setPanel] = useState<LaterPanel | null>(null);
-  const [skipped, setSkipped] = useState<ReadonlySet<LaterPanel>>(() => new Set());
+  const [tray, setTray] = useState<OptionalSetupTrayState>(loadOptionalSetupState);
+  const [expanded, setExpanded] = useState(false);
+  const [panel, setPanel] = useState<OptionalSetupCardId | null>(null);
   const [totpUri, setTotpUri] = useState(sessionRecoveryMaterial?.totpUri ?? "");
   const [backupCodes, setBackupCodes] = useState<string[]>(
     sessionRecoveryMaterial?.backupCodes ?? [],
   );
 
-  if (!pending) return null;
+  const visible = surface === "settings" ? tray.dismissed : pending && !tray.dismissed;
+  if (!visible) return null;
 
-  function skip(id: LaterPanel) {
-    setSkipped((current) => {
-      const next = new Set(current);
-      next.add(id);
+  function updateTray(updater: (current: OptionalSetupTrayState) => OptionalSetupTrayState) {
+    setTray((current) => {
+      const next = updater(current);
+      saveOptionalSetupState(next);
       return next;
     });
+  }
+
+  function markDone(id: OptionalSetupCardId, kind: "skipped" | "completed") {
+    updateTray((current) => {
+      const skipped = kind === "skipped"
+        ? [...new Set([...current.skipped, id])]
+        : current.skipped.filter((entry) => entry !== id);
+      const completed = kind === "completed"
+        ? [...new Set([...current.completed, id])]
+        : current.completed.filter((entry) => entry !== id);
+      return { ...current, skipped, completed };
+    });
+  }
+
+  function skip(id: OptionalSetupCardId) {
     if (id === "totp") sessionRecoveryMaterial = null;
+    markDone(id, "skipped");
+    setPanel(null);
+  }
+
+  function complete(id: OptionalSetupCardId) {
+    markDone(id, "completed");
     setPanel(null);
   }
 
   function dismiss() {
     clearPracticeLaterPending();
     sessionRecoveryMaterial = null;
+    updateTray((current) => ({ ...current, dismissed: true }));
     setPending(false);
     setPanel(null);
+    setExpanded(false);
   }
 
   function rememberChoices(patch: {
     tradingDefaults?: TradingDefaultsFormValues | null;
-    riskLimits?: RiskFormValues | null;
     llm?: LlmFormValues | null;
   }) {
     const settings = useSettingsStore.getState();
@@ -1307,8 +1328,8 @@ export function PracticeLaterSetup() {
         defaultProduct: patch.tradingDefaults.defaultProduct,
         defaultQty: patch.tradingDefaults.defaultQty,
       });
+      complete("trading");
     }
-    if (patch.riskLimits) settings.setRiskLimits(patch.riskLimits);
     if (patch.llm) {
       const { provider, authMode } = providerSelection(patch.llm.provider);
       settings.setLLMSetupDraft({
@@ -1317,154 +1338,160 @@ export function PracticeLaterSetup() {
         model: patch.llm.model.trim(),
         host: normaliseLlmHost(provider, (patch.llm.host ?? "").trim()),
       });
+      complete("llm");
     }
-    setPanel(null);
   }
+
+  const strip = optionalSetupStripLabel(
+    optionalSetupDoneCount(tray),
+    optionalSetupSkippedCount(tray),
+  );
 
   return (
     <section
       aria-label="Optional setup"
-      className="shrink-0 border-b border-border-default bg-surface-card/80 px-3 py-3"
+      className={`shrink-0 border-b border-border-default bg-surface-card/80${
+        surface === "settings" ? " mb-4" : ""
+      }`}
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-text-primary">Optional</p>
-            <p className="text-xs text-text-muted">
-              You can skip this. Practice is already open.
-            </p>
-          </div>
-          <Button type="button" variant="ghost" size="sm" onClick={dismiss}>
-            Close
+      <div className="flex h-9 items-center gap-2 px-3">
+        <p className="min-w-0 flex-1 truncate text-sm text-text-primary">{strip}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 w-16 shrink-0 px-2 text-xs text-text-primary hover:bg-surface-hover hover:text-text-primary"
+          aria-expanded={expanded}
+          onClick={() => {
+            setExpanded((open) => !open);
+            if (expanded) setPanel(null);
+          }}
+        >
+          {expanded ? "Hide" : "Show"}
+        </Button>
+        {surface === "desk" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-xs text-text-primary hover:bg-surface-hover hover:text-text-primary"
+            onClick={dismiss}
+          >
+            Dismiss
           </Button>
-        </div>
-
-        {panel === null && (
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {LATER_ACTIONS.map((item) => (
-              <li
-                key={item.id}
-                className="rounded-lg border border-border-default p-3 space-y-2"
-              >
-                <div>
-                  <p className="text-sm text-text-primary">
-                    {item.title}
-                    {skipped.has(item.id) ? <span className="text-text-muted"> — later</span> : null}
-                  </p>
-                  <p className="text-xs text-text-muted">{item.detail}</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {item.id === "broker" && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => skip("broker")}
-                    >
-                      Continue without a broker
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Set up ${item.title}`}
-                    onClick={() => setPanel(item.id)}
-                  >
-                    Set up
-                  </Button>
-                  {item.id !== "broker" && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Skip ${item.title}`}
-                      onClick={() => skip(item.id)}
-                    >
-                      Later
-                    </Button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {panel === "totp" && (
-          <TotpDisplay
-            totpUri={totpUri}
-            backupCodes={backupCodes}
-            onConfirmed={() => setPanel(null)}
-            onTotpRegenerated={(uri, codes) => {
-              sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
-              setTotpUri(uri);
-              setBackupCodes(codes);
-            }}
-            onAccountDeleted={() => {
-              clearPracticeLaterPending();
-              sessionRecoveryMaterial = null;
-              setPending(false);
-            }}
-            onSetUpLater={() => skip("totp")}
-          />
-        )}
-
-        {panel === "broker" && (
-          <ConnectionStep onComplete={() => setPanel(null)} />
-        )}
-
-        {panel === "llm" && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" aria-label="Skip LLM" onClick={() => skip("llm")}>
-                Later
-              </Button>
-            </div>
-            <LlmStep onComplete={(values) => rememberChoices({ llm: values })} />
-          </div>
-        )}
-
-        {panel === "monitoring" && (
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-text-primary">Monitoring</h3>
-            <p className="text-xs text-text-secondary leading-relaxed">
-              Monitoring is optional. Practice does not need it. You can open
-              system health later in Settings.
-            </p>
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" aria-label="Skip Monitoring" onClick={() => skip("monitoring")}>
-                Later
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {panel === "trading" && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                aria-label="Skip Trading defaults"
-                onClick={() => skip("trading")}
-              >
-                Later
-              </Button>
-            </div>
-            <TradingStep onComplete={(values) => rememberChoices({ tradingDefaults: values })} />
-          </div>
-        )}
-
-        {panel === "risk" && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" aria-label="Skip Risk" onClick={() => skip("risk")}>
-                Later
-              </Button>
-            </div>
-            <RiskStep onComplete={(values) => rememberChoices({ riskLimits: values })} />
-          </div>
         )}
       </div>
+
+      {expanded && (
+        <div className="mx-auto flex max-w-3xl flex-col gap-3 px-3 pb-3">
+          {panel === null && (
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {OPTIONAL_SETUP_CARDS.map((item) => (
+                <li
+                  key={item.id}
+                  className="space-y-2 rounded-lg border border-border-default p-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-text-primary">{item.title}</p>
+                      {tray.skipped.includes(item.id) ? (
+                        <Badge variant="outline" className="px-1.5 py-0 text-xxs text-text-primary">
+                          Skipped
+                        </Badge>
+                      ) : tray.completed.includes(item.id) ? (
+                        <Badge variant="outline" className="px-1.5 py-0 text-xxs text-text-primary">
+                          Done
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-text-muted">{item.detail}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {!tray.skipped.includes(item.id) && !tray.completed.includes(item.id) && item.id === "broker" && (
+                      <Button type="button" size="sm" onClick={() => skip("broker")}>
+                        Continue without a broker
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Set up ${item.title}`}
+                      onClick={() => setPanel(item.id)}
+                    >
+                      Set up
+                    </Button>
+                    {!tray.skipped.includes(item.id) && !tray.completed.includes(item.id) && item.id !== "broker" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Later ${item.title}`}
+                        onClick={() => skip(item.id)}
+                      >
+                        Later
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {panel === "totp" && (
+            <TotpDisplay
+              totpUri={totpUri}
+              backupCodes={backupCodes}
+              onConfirmed={() => complete("totp")}
+              onTotpRegenerated={(uri, codes) => {
+                sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
+                setTotpUri(uri);
+                setBackupCodes(codes);
+              }}
+              onAccountDeleted={() => {
+                clearOptionalSetupState();
+                sessionRecoveryMaterial = null;
+                setPending(false);
+              }}
+              onSetUpLater={() => setPanel(null)}
+            />
+          )}
+
+          {panel === "broker" && (
+            <ConnectionStep
+              onComplete={() => complete("broker")}
+              onContinueWithoutBroker={() => skip("broker")}
+            />
+          )}
+
+          {panel === "llm" && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" aria-label="Later LLM" onClick={() => setPanel(null)}>
+                  Later
+                </Button>
+              </div>
+              <LlmStep onComplete={(values) => rememberChoices({ llm: values })} />
+            </div>
+          )}
+
+          {panel === "trading" && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  aria-label="Later Trading defaults"
+                  onClick={() => setPanel(null)}
+                >
+                  Later
+                </Button>
+              </div>
+              <TradingStep onComplete={(values) => rememberChoices({ tradingDefaults: values })} />
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -1496,6 +1523,8 @@ export default function SetupAccountRoute({
 }: SetupAccountRouteProps = {}) {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
+  const token = useAuthStore((s) => s.token);
+  const authStatus = useAuthStore((s) => s.status);
 
   // Load persisted progress. localStorage is the source of truth for where
   // the operator stopped. It is cleared only by opening the Practice desk,
@@ -1530,6 +1559,42 @@ export default function SetupAccountRoute({
   // Shown when the server refuses to mint a Practice session, so setup
   // never finishes on a badge the JWT does not back.
   const [modeSyncError, setModeSyncError] = useState("");
+  const [serverSetup, setServerSetup] = useState<SetupServerState | null>(null);
+  // Fixed from GET /v1/auth/status before step 1 is shown. For an existing
+  // operator this is vault_presecured, not the live vault file, so opening
+  // the vault cannot change "of 3" into "of 2".
+  const [vaultAlreadySecured, setVaultAlreadySecured] = useState<boolean | null>(null);
+  const [statusError, setStatusError] = useState<SetupStatusFailure | null>(null);
+  const [statusAttempt, setStatusAttempt] = useState(0);
+  const [sessionRestored, setSessionRestored] = useState(false);
+  const [sessionRejected, setSessionRejected] = useState(false);
+  const [startOverNeedsPassword, setStartOverNeedsPassword] = useState(false);
+  const [startOverPassword, setStartOverPassword] = useState("");
+  const [startOverError, setStartOverError] = useState("");
+  const [startOverLoading, setStartOverLoading] = useState(false);
+
+  useEffect(() => {
+    restoreSetupSessionFromTab();
+    setSessionRestored(true);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSetupServerState()
+      .then((state) => {
+        if (cancelled) return;
+        setStatusError(null);
+        setServerSetup(state);
+        setVaultAlreadySecured((current) => current ?? securedBeforeSetup(state));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setStatusError(statusFailureFrom(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [statusAttempt]);
 
   useEffect(() => {
     if (!accountCreated) return;
@@ -1548,29 +1613,9 @@ export default function SetupAccountRoute({
     });
   }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, displayName, accountCreated, vaultOpened]);
 
-  // No auto-wipe based on authStatus. Progress is cleared only by an explicit
-  // user action: "Finish setup" on the final step or the "Start over" button
-  // on the account form. The 409 branch in AccountSecurityStep also clears
-  // because at that point the user has confirmed the account already exists
-  // server-side and wants to sign in instead.
-  async function handleStartOver() {
-    try {
-      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
-        method: "POST",
-        headers: buildHeaders(true),
-        body: JSON.stringify({}),
-      });
-      if (!resp.ok) {
-        window.alert(
-          "Could not wipe the unfinished account. Use Delete account and start over and confirm your password.",
-        );
-        return;
-      }
-    } catch {
-      window.alert("Cannot reach the server to wipe the unfinished account.");
-      return;
-    }
+  function resetLocalSetup(): void {
     clearProgress();
+    clearOptionalSetupState();
     sessionRecoveryMaterial = null;
     setAccountCreated(false);
     setVaultOpened(false);
@@ -1583,7 +1628,62 @@ export default function SetupAccountRoute({
     setRisk(null);
     setLlm(null);
     setDisplayName("");
+    setSessionRejected(false);
+    setStartOverNeedsPassword(false);
+    setStartOverPassword("");
+    setStartOverError("");
     useAuthStore.getState().setSetupRequired();
+  }
+
+  // No auto-wipe based on authStatus. Progress is cleared only by an explicit
+  // user action: opening the Practice desk, or confirming Start over with
+  // the account password. The confirmation is that password panel, once.
+  async function wipeUnfinishedAccount(password: string): Promise<boolean> {
+    setStartOverLoading(true);
+    setStartOverError("");
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify(password ? { password } : {}),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => null) as { message?: string } | null;
+        const message = data?.message?.trim() ?? "";
+        setStartOverNeedsPassword(true);
+        // The prompt under the button is the one copy of that sentence.
+        // A session-required reply is that prompt, not a second error.
+        setStartOverError(
+          message && !/setup session/i.test(message) ? message : "",
+        );
+        return false;
+      }
+    } catch {
+      setStartOverError("Cannot reach the server to wipe the unfinished account.");
+      return false;
+    } finally {
+      setStartOverLoading(false);
+    }
+    resetLocalSetup();
+    return true;
+  }
+
+  function handleStartOver() {
+    setStartOverNeedsPassword(true);
+    setStartOverPassword("");
+    setStartOverError("");
+  }
+
+  function cancelStartOver() {
+    if (startOverLoading) return;
+    setStartOverNeedsPassword(false);
+    setStartOverPassword("");
+    setStartOverError("");
+  }
+
+  async function submitStartOverPassword() {
+    if (!startOverPassword) return;
+    await wipeUnfinishedAccount(startOverPassword);
   }
 
   // ---------------------------------------------------------------------------
@@ -1632,27 +1732,6 @@ export default function SetupAccountRoute({
     setCurrentStep(1);
   }
 
-  function handleAccountDeleted() {
-    // Server wiped the account. Authoritatively reset everything: clear
-    // localStorage, flip the auth store back to setup-required, bounce to
-    // /welcome which will render the "Get Started" CTA again.
-    clearProgress();
-    sessionRecoveryMaterial = null;
-    setAccountCreated(false);
-    setVaultOpened(false);
-    setTotpUri("");
-    setBackupCodes([]);
-    setPersona(null);
-    setConnection(null);
-    setTrading(null);
-    setRisk(null);
-    setLlm(null);
-    setDisplayName("");
-    setCurrentStep(0);
-    useAuthStore.getState().setSetupRequired();
-    navigate("/welcome", { replace: true });
-  }
-
   function handleVaultOpened() {
     saveProgress({
       accountCreated: true,
@@ -1671,11 +1750,20 @@ export default function SetupAccountRoute({
     setCurrentStep(2);
   }
 
+  const planReady = vaultAlreadySecured !== null;
+  const vaultAlreadyOpen = vaultAlreadySecured === true;
+
+  useEffect(() => {
+    if (!vaultAlreadyOpen || !accountCreated || vaultOpened) return;
+    setVaultOpened(true);
+    setCurrentStep(2);
+  }, [vaultAlreadyOpen, accountCreated, vaultOpened]);
+
   async function handleOpenPractice() {
     setModeSyncError("");
-    // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
-    // the JWT claim, so the Practice desk needs a Practice session before
-    // the first sandbox order.
+    // /auth/setup mints a practice JWT. Confirm that claim before the desk
+    // opens, including when an older token is still example data. The server
+    // reads the mode from the JWT, so the first sandbox order needs Practice.
     try {
       const authState = useAuthStore.getState();
       const practiceToken = await downgradeMode(
@@ -1689,6 +1777,14 @@ export default function SetupAccountRoute({
     } catch {
       setModeSyncError(
         "Practice mode could not be enabled (the server did not issue a Practice session). Retry opening the Practice desk.",
+      );
+      return;
+    }
+    try {
+      await completeFlintTradeSetup();
+    } catch {
+      setModeSyncError(
+        "Setup could not be saved on this machine. Retry opening the Practice desk.",
       );
       return;
     }
@@ -1715,10 +1811,70 @@ export default function SetupAccountRoute({
     setCurrentStep(1);
   }
 
-  const label = REQUIRED_SETUP_STEP_LABELS[currentStep] ?? REQUIRED_SETUP_STEP_LABELS[0];
-  const progressLabel = `Step ${currentStep + 1} of ${REQUIRED_SETUP_STEP_COUNT} - ${label}`;
-  const completedCount = currentStep;
-  const remaining = REQUIRED_SETUP_STEP_COUNT - currentStep - 1;
+  const progressLabel = setupStepTitle(currentStep, vaultAlreadyOpen);
+  const progressDetail = setupStepDetail(currentStep, vaultAlreadyOpen);
+  const progressCounts = setupProgressCounts(currentStep, vaultAlreadyOpen);
+  const hasSetupSession = Boolean(token) && !sessionRejected;
+  const setupFinished = serverSetup?.setupFinished === true;
+  const operatorExists = serverSetup?.isSetup === true && !setupFinished;
+  // The server is authoritative for a fresh browser. A reload that only has
+  // local progress (the status mock, or a status read that has not yet said
+  // the operator exists) still has to sign in before the vault form.
+  // A 401 from the vault step is the same screen, even if this render has
+  // not yet reconciled local progress with the server.
+  const localResume = accountCreated && currentStep > 0;
+  const needsResume = !hasSetupSession && (sessionRejected || operatorExists || localResume);
+  const gateOpen = sessionRestored && (statusError !== null || planReady);
+
+  useEffect(() => {
+    if (!serverSetup || !planReady || statusError) return;
+    if (!serverSetup.isSetup || serverSetup.setupFinished) return;
+    if (!token || sessionRejected) return;
+    if (accountCreated && currentStep > 0) return;
+    const opened = vaultAlreadyOpen || serverSetup.vaultOpen;
+    setAccountCreated(true);
+    setVaultOpened(opened);
+    setCurrentStep(opened ? 2 : 1);
+  }, [
+    serverSetup,
+    planReady,
+    statusError,
+    token,
+    sessionRejected,
+    accountCreated,
+    currentStep,
+    vaultAlreadyOpen,
+  ]);
+
+  useEffect(() => {
+    if (serverSetup?.migrationBlocked === "two_operators") return;
+    if (!setupFinished || authStatus !== "logged-in") return;
+    navigate("/trade", { replace: true });
+  }, [serverSetup, setupFinished, authStatus, navigate]);
+
+  function handleResumed(nextToken: string, username: string) {
+    useAuthStore.getState().setLoggedIn(nextToken, username, "");
+    setSessionRejected(false);
+    if (serverSetup?.migrationBlocked === "two_operators") return;
+    if (serverSetup?.setupFinished) {
+      navigate("/trade", { replace: true });
+    }
+  }
+
+  function handleSessionRequired() {
+    setSessionRejected(true);
+  }
+
+  if (serverSetup?.migrationBlocked === "two_operators") {
+    return (
+      <TwoOperatorUpdateScreen
+        onRetry={() => {
+          setServerSetup(null);
+          setStatusAttempt((attempt) => attempt + 1);
+        }}
+      />
+    );
+  }
 
   return (
     <PublicRouteShell
@@ -1727,41 +1883,100 @@ export default function SetupAccountRoute({
       contentClassName="py-4 sm:py-5"
       eyebrow="Account Setup"
       title="Set up FlintTrade"
-      subtitle={progressLabel}
+      subtitle={
+        !gateOpen || statusError
+          ? undefined
+          : setupFinished
+            ? "Setup is complete"
+            : needsResume && currentStep === 0
+              ? "Continue setup"
+              : progressLabel
+      }
     >
       <div className="space-y-4">
-        {currentStep > 0 && (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
-            <p className="text-xs text-text-muted">
-              {`${completedCount} of ${REQUIRED_SETUP_STEP_COUNT} completed${remaining > 0 ? ` - ${remaining} remaining` : " - last step"}`}
-            </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="text-text-muted hover:text-text-primary"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again.",
-                  )
-                ) {
-                  void handleStartOver();
-                }
+        {!gateOpen ? null : statusError ? (
+          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <SetupStatusError
+              failure={statusError}
+              onRetry={() => {
+                setStatusError(null);
+                setStatusAttempt((attempt) => attempt + 1);
               }}
-            >
-              Start over
-            </Button>
+            />
+          </div>
+        ) : setupFinished ? (
+          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <SetupComplete signedIn={authStatus === "logged-in"} />
+          </div>
+        ) : (
+        <>
+        {(currentStep > 0 || operatorExists) && (
+          <div className="flex flex-col gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3">
+              {currentStep > 0 ? (
+                <p className="text-xs text-text-muted">
+                  {progressDetail}
+                </p>
+              ) : <span />}
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="text-text-muted hover:text-text-primary"
+                onClick={handleStartOver}
+              >
+                Start over (deletes this unfinished operator)
+              </Button>
+            </div>
+            {startOverNeedsPassword && (
+              <div className="space-y-2">
+                <p className="text-xs text-text-secondary">
+                  Enter your password to delete this unfinished operator.
+                </p>
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  aria-label="Password to start over"
+                  value={startOverPassword}
+                  onChange={(event) => setStartOverPassword(event.target.value)}
+                />
+                {startOverError && (
+                  <p role="alert" className="text-xs text-loss">{startOverError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={cancelStartOver}
+                    disabled={startOverLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => void submitStartOverPassword()}
+                    disabled={startOverLoading || !startOverPassword}
+                  >
+                    Delete and start over
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        <StepIndicator
-          total={REQUIRED_SETUP_STEP_COUNT}
-          current={currentStep}
-          onStepClick={(index) => {
-            if (index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
-          }}
-        />
+        {!needsResume && (
+          <StepIndicator
+            total={progressCounts.total}
+            current={progressCounts.displayIndex}
+            onStepClick={(index) => {
+              if (!vaultAlreadyOpen && index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
+            }}
+          />
+        )}
 
         <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
           {modeSyncError && currentStep === 2 && (
@@ -1774,7 +1989,11 @@ export default function SetupAccountRoute({
             </div>
           )}
 
-          {currentStep === 0 && (
+          {needsResume && (
+            <SetupResumeSignIn onResumed={handleResumed} />
+          )}
+
+          {!needsResume && currentStep === 0 && !operatorExists && (
             <AccountSecurityStep
               onComplete={handleAccountComplete}
               onBack={handleBack}
@@ -1782,23 +2001,36 @@ export default function SetupAccountRoute({
             />
           )}
 
-          {currentStep === 1 && (
+          {!needsResume && currentStep === 1 && hasSetupSession && !vaultAlreadyOpen && (
             <VaultStep
               onOpened={handleVaultOpened}
-              onAccountDeleted={handleAccountDeleted}
+              onSessionRequired={handleSessionRequired}
             />
           )}
 
-          {currentStep === 2 && <PracticeDeskStep />}
+          {!needsResume && currentStep === 1 && hasSetupSession && vaultAlreadyOpen && (
+            <p className="text-xs text-text-muted">The vault is already secured. Continuing…</p>
+          )}
 
-          {currentStep === 2 && (
-            <div className="flex justify-end mt-6">
+          {!needsResume && currentStep === 2 && hasSetupSession && (
+            <PracticeDeskStep />
+          )}
+
+          {!needsResume && currentStep === 2 && hasSetupSession && (
+            <div className="mt-6 flex flex-col items-end gap-2">
+              {vaultAlreadyOpen && (
+                <p className="text-xs text-text-muted">
+                  Your vault is set up and secured on this machine.
+                </p>
+              )}
               <Button type="button" onClick={() => void handleOpenPractice()}>
                 Open Practice desk
               </Button>
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
     </PublicRouteShell>
   );

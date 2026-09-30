@@ -58,27 +58,29 @@ describe("layaNoticeFromOrderError", () => {
 
   it("hides a quantity ceiling when Laya is Down", () => {
     const notice = layaNoticeFromOrderError(new OrderApiError(
-      "Laya is Down. Orders are paused until it's Ready.",
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
       403,
       {
         code: "laya_denied",
-        reason: "Laya is Down. Orders are paused until it's Ready.",
-        message: "Laya is Down. Orders are paused until it's Ready.",
+        reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+        message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
         limits: { max_quantity: 100 },
       },
     ));
     expect(notice?.limitsLine).toBeNull();
-    expect(notice?.reason).toBe("Laya is Down. Orders are paused until it's Ready.");
+    expect(notice?.reason).toBe("Laya is Down. New orders are paused until it's Ready. You can still close positions.");
     expect(notice?.reason).not.toContain("Practice orders are blocked");
   });
 
   it("does not turn a Live Down mute into a deny", () => {
-    const muted = new Error("Laya is Down — Live orders paused.");
+    const muted = new Error(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
     expect(layaNoticeFromOrderError(muted)).toBeNull();
-    const denied = new OrderApiError("Laya is Down. Orders are paused until it's Ready.", 403, {
+    const downReason = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    const denied = new OrderApiError(downReason, 403, {
       code: "laya_denied",
-      reason: "Laya is Down. Orders are paused until it's Ready.",
-      limits: { max_quantity: 100 },
+      reason: downReason,      limits: { max_quantity: 100 },
     });
     expect(layaNoticeFromOrderError(denied, { suppressDeny: true })).toBeNull();
   });

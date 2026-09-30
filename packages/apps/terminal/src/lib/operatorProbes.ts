@@ -1,17 +1,19 @@
 /**
  * Thin probes for the operator incident model.
  *
- * Local ping and `/health` are the desk. `/health` is the HealthMonitor
- * one-liner (`status`: healthy, degraded, unhealthy). A 401 or 403 is not
- * a host fault — the probe falls back to the auth-exempt `/api/v1/health`
- * aggregator. The edge/CDN probe fetches the public site and the install
- * script. A throw on either, while `/api/v1/ping` is ok, is edge/CDN — not
- * a vendor outage and not a broker outage. A separate neutral fetch is the
- * public-internet probe for network_local. Chat uses the advisor chrome,
- * not a background LLM test.
+ * Signed-out liveness is `GET /api/v1/ping`. That answer is status, a
+ * timestamp, and the Laya heartbeat — no component, version, or path
+ * detail. `/health` is the HealthMonitor one-liner and is read only when a
+ * session token is already in memory. A 401 or 403 on that read is not a
+ * host fault; the probe falls back to ping. The edge/CDN probe fetches the
+ * public site and the install script. A throw on either, while
+ * `/api/v1/ping` is ok, is edge/CDN — not a vendor outage and not a broker
+ * outage. A separate neutral fetch is the public-internet probe for
+ * network_local. Chat uses the advisor chrome, not a background LLM test.
  */
 
 import { getBase } from "@/services/ftApi.helpers";
+import { useAuthStore } from "@/stores/authStore";
 import { transportReasonFromError } from "@/lib/operatorTransport";
 import type { TransportReason } from "@/lib/operatorIncident";
 import {
@@ -162,21 +164,36 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
 
 export type DeskHealth = "healthy" | "degraded" | "unhealthy" | "unknown";
 
+function sessionBearer(): string | null {
+  const token = useAuthStore.getState().token;
+  if (!token || token === "demo-user" || token === "dev-bypass") return null;
+  return token;
+}
+
 export async function probeDeskHealth(
   fetchImpl: typeof fetch = fetch,
 ): Promise<DeskHealth> {
-  const primary = await readDeskHealth(`${getBase()}/health`, fetchImpl);
-  if (primary !== "unauthorised") return primary;
-  const fallback = await readDeskHealth(`${getBase()}/api/v1/health`, fetchImpl);
-  return fallback === "unauthorised" ? "unknown" : fallback;
+  const token = sessionBearer();
+  if (token) {
+    const primary = await readDeskHealth(`${getBase()}/health`, fetchImpl, token);
+    if (primary !== "unauthorised") return primary;
+  }
+  const ping = await probeLocalPing(fetchImpl);
+  if (ping.localPing === "ok") return "healthy";
+  if (ping.localPing === "http_error") return "unhealthy";
+  return "unknown";
 }
 
 async function readDeskHealth(
   url: string,
   fetchImpl: typeof fetch,
+  token: string,
 ): Promise<DeskHealth | "unauthorised"> {
   try {
-    const resp = await fetchImpl(url, { cache: "no-store" });
+    const resp = await fetchImpl(url, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (resp.status === 401 || resp.status === 403) return "unauthorised";
     const body: unknown = await resp.json().catch(() => null);
     const status = healthStatusField(body);

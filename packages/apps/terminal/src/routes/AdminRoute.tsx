@@ -14,6 +14,7 @@ import { useNavigate } from "react-router";
 import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { useAuthStore } from "@/stores/authStore";
+import { buildHeaders } from "@/services/ftApi.helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -141,7 +142,7 @@ function useIntrospect(): { data: IntrospectData | null; loading: boolean; error
       return;
     }
 
-    fetch("/ft-api/v1/admin/introspect")
+    fetch("/ft-api/v1/admin/introspect", { headers: buildHeaders(false) })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<IntrospectResponse>;
@@ -497,7 +498,7 @@ function AbsorptionPanel(): JSX.Element {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/ft-api/v1/admin/repos")
+    fetch("/ft-api/v1/admin/repos", { headers: buildHeaders(false) })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<AbsorptionData>;
@@ -682,7 +683,7 @@ function LogsPanel(): JSX.Element {
 
     async function poll(): Promise<void> {
       try {
-        const res = await fetch("/ft-api/v1/logs/recent");
+        const res = await fetch("/ft-api/v1/logs/recent", { headers: buildHeaders(false) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as RecentLogsResponse;
         if (!cancelled) {

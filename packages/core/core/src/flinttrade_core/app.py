@@ -5012,8 +5012,9 @@ def create_flask_app(
     #   health_bp                 — /health, /health/detail, /healthz, /readyz,
     #                               /api/v1/ping, /api/v1/health (K8s + LB probes
     #                               + aggregated subsystem health; canonical health
-    #                               surface; /api/v1/ping is already in
-    #                               `_PUBLIC_V1_PREFIXES`)
+    #                               surface; /healthz, /readyz, and /api/v1/ping are
+    #                               public and status-only. /health, /health/detail,
+    #                               and /api/v1/health stay behind a session.)
     #   optimiser_bp              — /v1/portfolio/{optimise,frontier}
     #   permutation_bp            — /v1/backtest/{permutation,walkforward}
     #   admin_action_center_bp    — /admin/action-center/{pending,approve,reject,history}
@@ -5121,35 +5122,8 @@ def create_flask_app(
     except Exception as exc:
         logger.error("Account reconnection failed (%s)", type(exc).__name__)
 
-    # Paths that are legitimately public (no API key needed):
-    # - Health check endpoint (also exempted by endpoint name in require_auth)
-    # - Admin introspect (already gated by FLINTTRADE_DEV in admin_routes)
-    # - OAuth callbacks (browser redirect — no API key in URL)
-    # - Frontend error reporting (/api/v1/errors — must be reachable before auth)
-    # - Signed external webhook POSTs (/v1/webhook/*) — HMAC/replay/endpoint
-    #   state is enforced inside webhook_routes before dispatch.
-    _PUBLIC_V1_PREFIXES = (
-        "/v1/admin/health",
-        "/v1/admin/introspect",
-        "/v1/auth/",  # Auth endpoints are public (login, setup, status)
-        "/v1/auth/callback",
-        "/v1/errors",  # Frontend error reporting — public, rate-limited.
-        # Blueprint mounted at /v1/errors (see
-        # frontend_error_routes.py:Blueprint(..., url_prefix="/v1")).
-        # Persists to ErrorLog (DuckDB) for post-mortem.
-        "/api/v1/errors",  # Same purpose, different sink: this path is
-        # handled by `operations_bp.receive_frontend_error`
-        # which forwards to structlog + Sentry/Glitchtip
-        # instead of DuckDB. Kept public so the React app
-        # and external automation can fire-and-forget
-        # error reports without an API key — neither sink
-        # leaks sensitive data
-        # back to the caller.
-        "/v1/changelog",  # Frontend changelog viewer — public, paired with /v1/errors.
-        "/api/v1/ping",  # Liveness probe — no auth required
-        "/v1/config/openalgo",  # Localhost-only; self-authenticates after setup
-        "/v1/test-connection",  # Setup wizard — public, localhost-only
-    )
+    # Public routes live in public_routes.PUBLIC_ROUTES. Everything else,
+    # including routes added later, requires a session JWT or API key.
 
     @app.after_request
     def _log_request(response: Any) -> Any:
@@ -5194,25 +5168,16 @@ def create_flask_app(
 
     @app.before_request
     def require_auth() -> Any:
-        """Require API key authentication on all endpoints.
+        """Require a session JWT or API key on every route that is not public.
 
-        Only specific public paths are exempted:
-        - Health check and admin introspect (dev-gated)
-        - OAuth callback (browser redirect, no API key in URL)
-        - Static files and SPA HTML fallback (React bundle)
-        All other /v1/ endpoints require the same API key auth.
+        The allowlist is :data:`flinttrade_core.public_routes.PUBLIC_ROUTES`.
+        New routes are protected by this hook; they do not opt in per endpoint.
+        Operator and role checks registered later still apply after this one.
         """
-        # Allow health checks, static files, and non-API SPA fallback routes
-        # without auth.  The catch-all SPA endpoint also matches unknown API
-        # paths when a frontend build is present; those paths must retain the
-        # same authentication boundary as API-only deployments.
-        if request.endpoint in ("health_detail.health_aggregated", "static") or (
-            request.endpoint == "_spa_fallback"
-            and not any(request.path.startswith(prefix) for prefix in spa_api_prefixes)
-        ):
-            return None
-        # Allow OPTIONS for CORS preflight
-        if request.method == "OPTIONS":
+        from .public_routes import is_public_route  # noqa: PLC0415
+
+        # Static files, when Flask is serving them, are the shell — not the API.
+        if request.endpoint == "static":
             return None
         # The complete service-connection family is already covered by the
         # earlier, stronger loopback/proof/scope guard (including unmatched
@@ -5221,53 +5186,48 @@ def create_flask_app(
             return None
         if getattr(_flask_g, "credential_quarantine_guard_complete", False):
             return None
-        # External signal providers cannot send the FlintTrade API key. Keep
-        # only POST intake public; the route itself enforces HMAC signatures,
-        # replay defence, endpoint enabled-state, and fail-closed dispatch.
-        if request.method == "POST" and request.path.startswith("/v1/webhook/"):
-            return None
-        # Allow specific public /v1/ paths only
-        if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):
+        rule = request.url_rule.rule if request.url_rule is not None else request.path
+        # The catch-all SPA endpoint also matches unknown API paths when a
+        # frontend build is present; those paths keep the API auth boundary.
+        if is_public_route(request.method, rule, path=request.path):
             return None
 
         auth_header = request.headers.get("Authorization", "")
         bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
-        if bearer:
+        header_token = request.headers.get("X-FlintTrade-Token", "").strip()
+
+        def _is_session_token(token: str) -> bool:
+            if not token:
+                return False
             try:
                 from .auth_routes import decode_token  # noqa: PLC0415
 
-                payload = decode_token(bearer)
-                if payload.get("type") == "session":
-                    return None
+                payload = decode_token(token)
             except Exception:
-                # Preserve the legacy ``Authorization: Bearer <api-key>`` path
-                # below when the bearer is not a FlintTrade session JWT.
-                pass
+                return False
+            return payload.get("type") == "session"
+
+        # A session may arrive as Authorization or as the fallback header
+        # existing clients already send. The fallback is a session JWT only.
+        if _is_session_token(bearer) or _is_session_token(header_token):
+            return None
 
         api_key = request.headers.get("X-API-Key") or bearer
-
         expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
-        if not expected_key:
-            remote = request.remote_addr or ""
-            if remote in ("127.0.0.1", "::1", "localhost"):
-                logger.debug(
-                    "FLINTTRADE_API_KEY/OPENALGO_API_KEY not set — allowing loopback local request",
-                )
-                return None
-            logger.warning("FLINTTRADE_API_KEY/OPENALGO_API_KEY not set — remote requests will be rejected")
-            return jsonify({"status": "error", "message": "Backend API key not configured"}), 503
+        if expected_key and api_key and hmac.compare_digest(api_key, expected_key):
+            return None
 
-        if not api_key or not hmac.compare_digest(api_key, expected_key):
-            # Record auth failure for brute-force detection
+        if expected_key:
+            # Record a presented-credential failure for brute-force detection.
+            # A missing session when no API key is configured is a 401, not a
+            # ban event: the desktop app polls before the operator signs in.
             try:
                 sec = app.config.get("SECURITY_MONITOR")
                 if sec:
                     sec.record_auth_failure(request.remote_addr or "unknown")
             except Exception as _exc:
                 logger.debug("suppressed: %s", _exc)
-            return jsonify({"status": "error", "message": "Unauthorized"}), 401
-
-        return None
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     @app.before_request
     def _require_json_content_type() -> Any:
@@ -5286,7 +5246,16 @@ def create_flask_app(
             ):
                 return None
             content_type = request.content_type or ""
-            if "json" not in content_type and "text/event-stream" not in content_type:
+            # Browsers post CSP reports without a session and without a JSON
+            # content type. The report endpoint stays status-only.
+            csp_report = request.path == "/csp-report" and (
+                "application/csp-report" in content_type or "application/reports+json" in content_type
+            )
+            if (
+                not csp_report
+                and "json" not in content_type
+                and "text/event-stream" not in content_type
+            ):
                 return jsonify(
                     {
                         "status": "error",
@@ -5392,18 +5361,28 @@ def create_flask_app(
 
         return serialised
 
-    def _openalgo_config_request_authenticated() -> bool:
+    def _openalgo_config_bearer() -> str:
         auth_header = request.headers.get("Authorization", "")
-        bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
-        if bearer:
-            try:
-                from .auth_routes import decode_token  # noqa: PLC0415
+        if not auth_header.startswith("Bearer "):
+            return ""
+        return auth_header.removeprefix("Bearer ").strip()
 
-                if decode_token(bearer).get("type") == "session":
-                    return True
-            except Exception:
-                pass
+    def _openalgo_config_session_authenticated() -> bool:
+        """True for a session or setup-session JWT. An API key is not a session."""
+        bearer = _openalgo_config_bearer()
+        if not bearer:
+            return False
+        try:
+            from .auth_routes import decode_token  # noqa: PLC0415
 
+            return decode_token(bearer).get("type") == "session"
+        except Exception:
+            return False
+
+    def _openalgo_config_request_authenticated() -> bool:
+        if _openalgo_config_session_authenticated():
+            return True
+        bearer = _openalgo_config_bearer()
         expected = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
         supplied = request.headers.get("X-API-Key") or bearer
         return bool(expected and supplied and secrets.compare_digest(str(supplied), expected))
@@ -5417,10 +5396,11 @@ def create_flask_app(
         Security: writes and unauthenticated status probes are loopback-only.
         Before the operator account exists, GET returns redacted metadata and
         POST must carry an explicit OpenAlgo API key. After setup, both
-        methods require a session JWT or the configured backend/OpenAlgo API
-        key. An authenticated GET may cross the network so a remote web
-        terminal (e.g. over Tailscale) can rehydrate its OpenAlgo connection;
-        it is the only shape that returns the raw key.
+        methods require a session or setup-session JWT. An API key alone does
+        not read or change the saved connection. An authenticated GET may
+        cross the network so a remote web terminal (e.g. over Tailscale) can
+        rehydrate its OpenAlgo connection; it is the only shape that returns
+        the raw key.
 
         Request JSON: ``{"api_key": "...", "host": "...", "port": 5000, "ws_port": 8765}``
         """
@@ -5436,8 +5416,17 @@ def create_flask_app(
 
         remote = request.remote_addr or ""
         remote_is_loopback = remote in ("127.0.0.1", "::1", "localhost")
+        session_authenticated = _openalgo_config_session_authenticated()
         authenticated = _openalgo_config_request_authenticated()
-        if not remote_is_loopback and (request.method != "GET" or not authenticated):
+        # A presented bearer that is not a current session is refused, including
+        # after reset has removed the account. Unsigned first-run calls have no
+        # bearer and stay available. An API key is not a session.
+        presented_bearer = _openalgo_config_bearer()
+        if presented_bearer and not session_authenticated:
+            expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
+            if not (expected_key and secrets.compare_digest(presented_bearer, expected_key)):
+                return jsonify({"status": "error", "message": "Authentication required"}), 401
+        if not remote_is_loopback and (request.method != "GET" or not session_authenticated):
             return jsonify(
                 {
                     "status": "error",
@@ -5450,7 +5439,7 @@ def create_flask_app(
             operator_is_setup = bool(auth_service is None or auth_service.is_setup())
         except Exception:
             operator_is_setup = True
-        if operator_is_setup and not authenticated:
+        if operator_is_setup and not session_authenticated:
             return jsonify({"status": "error", "message": "Authentication required"}), 401
 
         if request.method == "GET":
@@ -5474,9 +5463,10 @@ def create_flask_app(
                     "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
                 }
                 # The terminal needs the bridge key in memory for its direct
-                # OpenAlgo WebSocket. Only an authenticated operator session (or
-                # explicit backend API key) may rehydrate it; pre-setup status
-                # probes receive redacted metadata only.
+                # OpenAlgo WebSocket. After the account exists only a session
+                # or setup-session JWT may rehydrate it. Before that, a
+                # configured API key may; unsigned pre-setup probes receive
+                # redacted metadata only.
                 if authenticated:
                     data["api_key"] = api_key
                 return jsonify(

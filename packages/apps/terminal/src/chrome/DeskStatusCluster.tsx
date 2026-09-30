@@ -8,7 +8,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
-import { mondayReadChrome } from "@/lib/mondayReadChrome";
+import { mondayReadChrome } from "@/lib/connectedReadChrome";
 import { LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";

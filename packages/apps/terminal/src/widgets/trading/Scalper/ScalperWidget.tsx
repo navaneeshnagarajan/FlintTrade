@@ -1,5 +1,5 @@
 // Migrated to TSX — Phase 4 Batch 1
-// Direct API calls (placeOrder, cancelAllOrders, closePosition, getExpiry, getQuotes)
+// Direct API calls (placeOrder, cancelAllOrders, exitAllPositions, getExpiry, getQuotes)
 // are intentional here: Scalper requires interactive one-click orders, not cached REST data.
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";

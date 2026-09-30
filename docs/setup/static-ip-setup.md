@@ -11,7 +11,7 @@ it directly in your broker's developer console.
 2. Confirm the IP from the exact machine or network that will run FlintTrade.
 3. Add that IP in the broker developer console.
 4. Wait for the broker's activation window to complete.
-5. Test in Explore and Practice first, then unlock Live only after the broker
+5. Test with example data and Practice first, then unlock Live only after the broker
    dashboard shows the IP as active.
 
 ## Broker Notes

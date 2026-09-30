@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
@@ -68,6 +69,7 @@ interface SelectedDoc {
   path: string;
   title: string;
   snippet?: string;
+  anchor?: string;
 }
 
 interface BasicsSection {
@@ -274,8 +276,22 @@ function titleFromDocPath(path: string): string {
     .join(" ");
 }
 
+function headingAnchor(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function docAnchorFromState(state: object): string | undefined {
+  const anchor = (state as { docAnchor?: unknown }).docAnchor;
+  return typeof anchor === "string" && anchor ? anchor : undefined;
+}
+
 function getSelectedDoc(state: unknown): SelectedDoc | null {
   if (!state || typeof state !== "object") return null;
+  const anchor = docAnchorFromState(state);
   const maybeDoc = (state as { selectedDoc?: unknown }).selectedDoc;
   if (maybeDoc && typeof maybeDoc === "object") {
     const doc = maybeDoc as { path?: unknown; title?: unknown; snippet?: unknown };
@@ -284,13 +300,14 @@ function getSelectedDoc(state: unknown): SelectedDoc | null {
         path: doc.path,
         title: typeof doc.title === "string" ? doc.title : titleFromDocPath(doc.path),
         snippet: typeof doc.snippet === "string" ? doc.snippet : undefined,
+        anchor,
       };
     }
   }
 
   const path = (state as { selectedDocPath?: unknown }).selectedDocPath;
   if (typeof path === "string") {
-    return { path, title: titleFromDocPath(path) };
+    return { path, title: titleFromDocPath(path), anchor };
   }
 
   return null;
@@ -298,7 +315,10 @@ function getSelectedDoc(state: unknown): SelectedDoc | null {
 
 async function fetchDocsDocument(path: string, signal?: AbortSignal): Promise<{ title: string; content: string }> {
   const params = new URLSearchParams({ path });
-  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, { signal });
+  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, {
+    signal,
+    headers: buildHeaders(false),
+  });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = (await response.json()) as { title?: unknown; content?: unknown };
   if (typeof body.title !== "string" || typeof body.content !== "string") {
@@ -309,15 +329,18 @@ async function fetchDocsDocument(path: string, signal?: AbortSignal): Promise<{ 
 
 function renderDocLine(line: string, key: number) {
   if (/^#\s/.test(line)) {
-    return <h2 key={key} className="text-base font-semibold text-text-primary mt-3">{line.replace(/^#\s+/, "")}</h2>;
+    const text = line.replace(/^#\s+/, "");
+    return <h2 key={key} id={headingAnchor(text)} className="text-base font-semibold text-text-primary mt-3">{text}</h2>;
   }
   if (/^##\s/.test(line)) {
-    return <h3 key={key} className="text-sm font-semibold text-text-primary mt-3">{line.replace(/^##\s+/, "")}</h3>;
+    const text = line.replace(/^##\s+/, "");
+    return <h3 key={key} id={headingAnchor(text)} className="text-sm font-semibold text-text-primary mt-3">{text}</h3>;
   }
   if (/^###\s/.test(line)) {
+    const text = line.replace(/^###\s+/, "");
     return (
-      <h4 key={key} className="text-xs font-semibold text-text-secondary uppercase tracking-wider mt-3">
-        {line.replace(/^###\s+/, "")}
+      <h4 key={key} id={headingAnchor(text)} className="text-xs font-semibold text-text-secondary uppercase tracking-wider mt-3">
+        {text}
       </h4>
     );
   }
@@ -631,6 +654,7 @@ function PaperTradingTab() {
 
 function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
   const [activeDoc, setActiveDoc] = useState<SelectedDoc | null>(selectedDoc);
+  const docArticleRef = useRef<HTMLElement>(null);
   const [docContent, setDocContent] = useState<{ title: string; content: string } | null>(null);
   const [docStatus, setDocStatus] = useState<DocLoadStatus>("idle");
   const [loadGeneration, setLoadGeneration] = useState(0);
@@ -683,6 +707,16 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
 
   const retryDoc = () => setLoadGeneration((generation) => generation + 1);
 
+  useEffect(() => {
+    if (docStatus !== "ready" || !activeDoc?.anchor) return;
+    const root = docArticleRef.current;
+    if (!root) return;
+    const target = root.querySelector(`#${CSS.escape(activeDoc.anchor)}`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: "start" });
+    }
+  }, [activeDoc, docStatus]);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
       {activeDoc && (
@@ -721,7 +755,7 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
             </div>
           )}
           {docStatus === "ready" && docContent && (
-            <article className="max-h-[38rem] overflow-y-auto rounded-md border border-border-default bg-surface-base/70 p-4">
+            <article ref={docArticleRef} className="max-h-[38rem] overflow-y-auto rounded-md border border-border-default bg-surface-base/70 p-4">
               <DocMarkdown content={docContent.content} />
             </article>
           )}

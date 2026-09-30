@@ -7,7 +7,11 @@ import { getBase } from "@/services/ftApi.helpers";
 
 const BACKEND_PROBE_TIMEOUT_MS = 6_000;
 
-type BackendState = "checking" | "available" | "unavailable";
+type BackendState = "checking" | "available" | "unavailable" | "busy" | "error";
+
+interface ProbeFailure {
+  reason: "network" | "busy" | "http";
+}
 
 interface SetupBackendGateProps {
   children: ReactNode;
@@ -21,16 +25,29 @@ function isSetupStatusPayload(value: unknown): boolean {
     && typeof (data as { is_setup?: unknown }).is_setup === "boolean";
 }
 
-async function probeSetupBackend(signal: AbortSignal): Promise<void> {
-  const response = await fetch(`${getBase()}/v1/auth/status`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-    signal,
-  });
-  if (!response.ok) throw new Error("backend status request failed");
-  const payload: unknown = await response.json();
-  if (!isSetupStatusPayload(payload)) throw new Error("backend status response was invalid");
+async function probeSetupBackend(signal: AbortSignal): Promise<ProbeFailure | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/status`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal,
+    });
+  } catch {
+    return { reason: "network" };
+  }
+  if (response.status === 429) return { reason: "busy" };
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok || !isSetupStatusPayload(payload)) {
+    return { reason: "http" };
+  }
+  return null;
 }
 
 /**
@@ -51,11 +68,15 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
 
     setBackendState("checking");
     void probeSetupBackend(controller.signal)
-      .then(() => {
-        if (active) setBackendState("available");
-      })
-      .catch(() => {
-        if (active) setBackendState("unavailable");
+      .then((failure) => {
+        if (!active) return;
+        if (!failure) {
+          setBackendState("available");
+          return;
+        }
+        if (failure.reason === "network") setBackendState("unavailable");
+        else if (failure.reason === "busy") setBackendState("busy");
+        else setBackendState("error");
       })
       .finally(() => window.clearTimeout(timeout));
 
@@ -67,10 +88,54 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
   }, [attempt]);
 
   useEffect(() => {
-    if (backendState === "unavailable") alertRef.current?.focus();
+    if (backendState === "unavailable" || backendState === "busy" || backendState === "error") {
+      alertRef.current?.focus();
+    }
   }, [backendState]);
 
   if (backendState === "available") return <>{children}</>;
+
+  if (backendState === "busy" || backendState === "error") {
+    const busy = backendState === "busy";
+    const title = busy ? "FlintTrade is busy" : "Can't check setup status";
+    const detail = busy
+      ? "FlintTrade is busy right now. Wait a moment, then retry."
+      : "FlintTrade answered, but setup status couldn't be read. Retry in a moment.";
+    return (
+      <main
+        aria-label="Account setup"
+        className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-text-primary"
+      >
+        <section
+          ref={alertRef}
+          role="alert"
+          aria-live="assertive"
+          aria-labelledby="setup-status-error-title"
+          tabIndex={-1}
+          className="w-full max-w-lg rounded-xl border border-amber-500/30 bg-surface-card p-6 text-left shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-400" aria-hidden="true" />
+            <div className="space-y-2">
+              <h1 id="setup-status-error-title" className="font-heading text-xl font-bold">
+                {title}
+              </h1>
+              <p className="text-sm leading-relaxed text-text-secondary">{detail}</p>
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button type="button" onClick={() => setAttempt((value) => value + 1)}>
+              <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+              Retry
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/welcome">Return to welcome</Link>
+            </Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   if (backendState === "checking") {
     return (
@@ -114,7 +179,7 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
         <div className="mt-5 flex flex-wrap gap-3">
           <Button type="button" onClick={() => setAttempt((value) => value + 1)}>
             <RefreshCw className="mr-2 size-4" aria-hidden="true" />
-            Retry connection
+            Retry
           </Button>
           <Button asChild variant="outline">
             <Link to="/welcome">Return to welcome</Link>

@@ -125,7 +125,7 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     assert live.allow is False
     assert practice.allow is False
     assert live.applied_quantity == 0
-    assert live.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert live.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert practice.reason == live.reason
     assert "Live" not in practice.reason
 
@@ -145,6 +145,22 @@ def test_unqualified_live_names_practice_and_practice_refusal_omits_live(status:
 
 
 @pytest.mark.unit
+def test_reduce_only_is_recorded_and_not_refused_or_clamped() -> None:
+    down = Laya(status=DecisionStatus.DOWN, max_quantity=2)
+    degraded = Laya(status=DecisionStatus.DEGRADED, max_quantity=10, degraded_max_quantity=1)
+    for engine in (down, degraded):
+        verdict = engine.admit_reduce_only(_proposal(quantity=8, action="SELL", mode="practice"))
+        assert verdict.allow is True
+        assert verdict.reason == ""
+        assert verdict.applied_quantity == 8
+        assert engine.decision_log()[-1].proof_kind == "reduce_only"
+        assert engine.decision_log()[-1].allow is True
+    refused = down.admit(_proposal(quantity=8))
+    assert refused.allow is False
+    assert refused.applied_quantity == 0
+
+
+@pytest.mark.unit
 def test_explore_and_chat_sources_are_refused() -> None:
     from flinttrade_engine.laya import admission_kind, proposal_from_place_fields
 
@@ -152,7 +168,7 @@ def test_explore_and_chat_sources_are_refused() -> None:
     explore = engine.admit(_proposal(mode="explore"))
     chat = engine.admit(_proposal(source="chat"))
     assert explore.allow is False
-    assert "Explore" in explore.reason
+    assert "Example" in explore.reason
     assert chat.allow is False
     assert chat.reason
     assert admission_kind(chat, 1) == "deny"

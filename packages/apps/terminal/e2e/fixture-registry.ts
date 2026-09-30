@@ -324,12 +324,13 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       if (
         !Number.isInteger(minimumCalls)
         || !Number.isInteger(maximumCalls)
-        || minimumCalls < 1
+        || minimumCalls < 0
+        || maximumCalls < 1
         || maximumCalls < minimumCalls
       ) {
         throw new Error(
           `[fail-closed registry "${this.name}"] handler "${name}" expectedCalls range requires ` +
-            "positive integer minimum/maximum with minimum <= maximum",
+            "a non-negative integer minimum, a positive integer maximum, and minimum <= maximum",
         );
       }
     }
@@ -561,10 +562,11 @@ export const ADVISOR_STATUS_PATH = "/ft-api/api/v1/advisor/status";
 /**
  * Register the Explore ``GET /ft-api/api/v1/advisor/status`` probe.
  *
- * FT-AI-001 chats (and the floating tutor) probe this endpoint after a
- * logged-in Explore session. Product journeys that used to claim "no
- * /ft-api traffic" must register this handler or the fail-closed registry
- * records an unexpected request.
+ * The status route is a read. A signed-out page sends no ``Authorization``
+ * header; a logged-in desk attaches its session JWT. Both receive the same
+ * unconfigured body. Product journeys that mount Chat or the tutor must
+ * register this handler or the fail-closed registry records an unexpected
+ * request.
  */
 export function registerExploreAdvisorStatusProbe(
   registry: SyntheticFixtureRegistry,
@@ -579,12 +581,20 @@ export function registerExploreAdvisorStatusProbe(
     path: ADVISOR_STATUS_PATH,
     expectedCalls: options.expectedCalls ?? 1,
     handler: (request) => {
-      expect(request.headers()["authorization"]).toBeUndefined();
-      expect(request.postData()).toBeNull();
+      assertReadOnlyProbe(request);
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization.startsWith("Bearer ")).toBe(true);
+      }
       return {
         json: {
           status: "success",
-          data: { configured: false, provider: "none", model: "none" },
+          data: {
+            configured: false,
+            provider: "",
+            model: "",
+            source: "default",
+          },
         },
       };
     },
@@ -605,8 +615,9 @@ function assertReadOnlyProbe(request: Request): void {
 /**
  * Register the operator-status probes mounted with the desk.
  *
- * These are reads: desk ping, desk health, Chat config, and the public
- * site/install plus neutral internet checks. They are not Live order paths.
+ * These are reads: public desk ping, authenticated desk health, Chat
+ * config, and the public site/install plus neutral internet checks. They
+ * are not Live order paths. Signed-out liveness uses the ping handler.
  * The Practice place handler stays the JWT authority check.
  */
 export function registerOperatorStatusProbes(
@@ -633,14 +644,20 @@ export function registerOperatorStatusProbes(
       return { json: { status: "ok" } };
     },
   });
+  const healthCalls = typeof expectedCalls === "number"
+    ? { minimum: 0, maximum: expectedCalls }
+    : { minimum: 0, maximum: expectedCalls.maximum };
   registry.register({
     name: "operator desk health",
     method: "GET",
     path: "/ft-api/health",
-    expectedCalls,
+    expectedCalls: healthCalls,
     handler: (request) => {
       assertReadOnlyProbe(request);
-      expect(request.headers()["authorization"]).toBeUndefined();
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization.startsWith("Bearer ")).toBe(true);
+      }
       return { json: { status: "healthy" } };
     },
   });

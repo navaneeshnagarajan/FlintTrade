@@ -32,7 +32,8 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { downgradeMode } from "@/lib/modeAuth";
+import { downgradeMode, modeAfterPasswordSignIn, unlockWithPin } from "@/lib/modeAuth";
+import { lockedDeskHeading, unlockDeskLabel } from "@/lib/unlockDeskLabel";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
@@ -78,6 +79,9 @@ export default function LoginRoute({
   // Welcome's fail-closed default — that is the Sign Out remount bug.
   const [totpEnabled, setTotpEnabled] = useState(false);
   const totpRequired = totpEnabled;
+  const sessionToken = useAuthStore.getState().reauthToken ?? useAuthStore.getState().token;
+  const deskLabel = mode === "pin" ? unlockDeskLabel(sessionToken) : null;
+  const pinHeading = lockedDeskHeading(sessionToken);
 
   useEffect(() => {
     if (mode !== "full") return;
@@ -119,33 +123,29 @@ export default function LoginRoute({
       });
       const data = await resp.json();
       if (resp.ok && data.data?.token) {
+        // A finished Setup opens in Practice. Password login mints a
+        // practice JWT. A missing claim, a legacy explore claim, or a Live
+        // claim is upgraded before the desk opens, so sign-in never stays
+        // on example data and never arms Live.
+        const reportedMode = data.data.mode;
+        const deskMode = modeAfterPasswordSignIn(reportedMode);
+        let practiceToken = data.data.token as string;
+        if (reportedMode !== "practice") {
+          try {
+            practiceToken = await downgradeMode(deskMode, data.data.token);
+          } catch {
+            if (!isAuthSessionFenceCurrent(requestFence)) return;
+            setError("Could not open Practice. Try again.");
+            return;
+          }
+        }
         if (!useAuthStore.getState().setLoggedInIfCurrent(
-          data.data.token,
+          practiceToken,
           data.data.username,
           data.data.expires_at,
           requestFence,
         )) return;
-        const loginFence = captureAuthSessionFence();
-        // Reconcile the persisted UI mode with the freshly-minted JWT.
-        // Password login always mints an `explore` JWT. If the UI was last
-        // in Live, drop to Explore (never silently re-arm real money — Live
-        // requires the explicit PIN dialog). If the UI was in Practice,
-        // upgrade the JWT to practice so sandbox orders aren't rejected 403
-        // `mode_blocked` (Phase 1 G1: the login-time half of the divergence).
-        const uiMode = useModeStore.getState().mode;
-        if (uiMode === "live") {
-          useModeStore.getState().setMode("explore");
-        } else if (uiMode === "practice") {
-          try {
-            const practiceToken = await downgradeMode("practice", data.data.token);
-            if (!useAuthStore.getState().updateToken(practiceToken, loginFence.generation)) return;
-          } catch {
-            if (!isAuthSessionFenceCurrent(loginFence)) return;
-            // Couldn't sync — fall back to Explore rather than leave the UI
-            // in a Practice state the JWT doesn't back.
-            useModeStore.getState().setMode("explore");
-          }
-        }
+        useModeStore.getState().setMode(deskMode);
         onSuccess();
       } else if (isAuthSessionFenceCurrent(requestFence)) {
         setError(data.message || "Invalid credentials.");
@@ -162,34 +162,24 @@ export default function LoginRoute({
     setIsLoading(true);
     setError("");
     try {
-      // Session-bound PIN unlock (policy D6): the backend requires the current
-      // session JWT alongside the PIN. With no (or an expired) token the 401's
-      // message tells the operator to do the full password+TOTP login — which
-      // is exactly the daily re-auth requirement.
-      const headers = buildHeaders(true);
-      const authState = useAuthStore.getState();
-      const sessionToken = authState.token ?? authState.reauthToken;
-      if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-      const resp = await fetch(`${getBase()}/v1/auth/pin`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ pin }),
-      });
-      const data = await resp.json();
-      if (resp.ok && data.data?.token) {
-        if (!useAuthStore.getState().setLoggedInIfCurrent(
-          data.data.token,
-          requestFence.principal || "user",
-          "",
-          requestFence,
-        )) return;
-        useModeStore.getState().setMode("live");
-        onSuccess();
-      } else if (isAuthSessionFenceCurrent(requestFence)) {
-        setError(data.message || "Invalid PIN.");
+      // Unlock restores the existing session. Do not send a mode, and do not
+      // set Mode from the response — the Mode store stays as it was.
+      const { token } = await unlockWithPin(pin);
+      if (!useAuthStore.getState().setLoggedInIfCurrent(
+        token,
+        requestFence.principal || "user",
+        "",
+        requestFence,
+      )) return;
+      onSuccess();
+    } catch (err) {
+      if (!isAuthSessionFenceCurrent(requestFence)) return;
+      if (err instanceof TypeError) {
+        setError("Cannot reach server.");
+        return;
       }
-    } catch {
-      if (isAuthSessionFenceCurrent(requestFence)) setError("Cannot reach server.");
+      const message = err instanceof Error ? err.message.trim() : "";
+      setError(message || "Invalid PIN.");
     } finally {
       setIsLoading(false);
     }
@@ -204,7 +194,10 @@ export default function LoginRoute({
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
           </div>
-          <TwoFactorRecovery onBack={() => setRecovering(false)} />
+          <TwoFactorRecovery
+            onBack={() => setRecovering(false)}
+            authenticatorEnrolled={totpEnabled}
+          />
         </div>
       </div>
     );
@@ -233,7 +226,7 @@ export default function LoginRoute({
 
         <div className="text-center space-y-1">
           <h1 className="font-heading font-bold text-xl text-text-primary">
-            {mode === "pin" ? "Quick Unlock" : "Welcome Back"}
+            {mode === "pin" ? pinHeading : "Welcome Back"}
           </h1>
           <p className="text-sm text-text-muted">
             {mode === "pin"
@@ -254,8 +247,8 @@ export default function LoginRoute({
         {mode === "pin" ? (
           <div className="space-y-4">
             <div>
-              <label htmlFor="pin" className="text-xs text-text-secondary font-medium block mb-1.5">
-                PIN
+              <label htmlFor="pin" className="text-xs text-text-muted font-medium block mb-1.5">
+                Quick Unlock
               </label>
               <Input
                 id="pin"
@@ -265,7 +258,6 @@ export default function LoginRoute({
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
                 placeholder="6-digit PIN"
-                aria-label="Enter your 6-digit PIN"
                 className="text-center font-mono text-lg tracking-widest"
                 onKeyDown={(e) => e.key === "Enter" && handlePinLogin()}
                 autoFocus
@@ -277,7 +269,7 @@ export default function LoginRoute({
               className="w-full"
             >
               <KeyRound className="size-4" />
-              {isLoading ? "Verifying..." : "Unlock"}
+              {isLoading ? "Verifying..." : (deskLabel ?? "Unlock")}
             </Button>
             <button
               type="button"
@@ -354,9 +346,9 @@ export default function LoginRoute({
                 type="button"
                 onClick={onExplore}
                 className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
-                aria-label="Try with sample data without signing in"
+                aria-label="Try with example data without signing in"
               >
-                Try with sample data →
+                Try with example data →
               </button>
             )}
             {onUnfinishedSetup && (
@@ -586,10 +578,22 @@ function PasswordReset({ onBack }: { onBack: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// 2FA recovery — password → fresh TOTP QR + backup codes (no session needed)
+// 2FA recovery — a finished account must already be signed in.
 // ---------------------------------------------------------------------------
 
-function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
+export function signedOutResetCopy(authenticatorEnrolled: boolean): string {
+  return authenticatorEnrolled
+    ? "Sign in to reset this account. You'll need your password and authenticator code."
+    : "Sign in to reset this account. You'll need your password.";
+}
+
+function TwoFactorRecovery({
+  onBack,
+  authenticatorEnrolled,
+}: {
+  onBack: () => void;
+  authenticatorEnrolled: boolean;
+}) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -601,9 +605,9 @@ function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
     setLoading(true);
     setError("");
     try {
-      // Password-only reset (no session) — the backend guards this route with
-      // the account password and a 3/hour rate limit, so a shoulder-surfer can
-      // neither trigger it nor learn the new secret without the password.
+      // buildHeaders attaches a session when one is already in memory.
+      // Once an account exists the backend also requires that session or a
+      // setup-session JWT; a password on its own does not re-key the account.
       const resp = await fetch(`${getBase()}/v1/auth/setup/regenerate-2fa`, {
         method: "POST",
         headers: buildHeaders(true),
@@ -694,7 +698,7 @@ function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
       <div className="text-center space-y-1">
         <h1 className="font-heading font-bold text-xl text-text-primary">Reset your 2FA</h1>
         <p className="text-sm text-text-muted">
-          Lost your authenticator? Confirm your password to get a fresh QR and backup codes.
+          {signedOutResetCopy(authenticatorEnrolled)}
         </p>
       </div>
 

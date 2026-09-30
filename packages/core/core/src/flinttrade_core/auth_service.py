@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import logging
@@ -32,6 +33,8 @@ import re
 import secrets
 import sqlite3
 import time
+import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -48,6 +51,10 @@ from .workspace import workspace_dir as _workspace_dir
 
 logger = logging.getLogger("flinttrade.auth")
 
+# Status value when an existing database already has more than one operator.
+# The migration does not delete those rows.
+MIGRATION_BLOCKED_TWO_OPERATORS = "two_operators"
+
 # Evaluated at import time — set FLINTTRADE_WORKSPACE_DIR *before* importing
 # this module (pytest fixtures that use monkeypatch.setenv should scope at
 # session level, or pass db_path explicitly to AuthService).
@@ -60,6 +67,18 @@ _KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
 # ASCII [0-9] only. Python ``\\d`` matches Unicode Nd (fullwidth digits
 # would otherwise pass); JS ``^\\d{6}$`` is [0-9]{6}.
 _PIN_RE = re.compile(r"^[0-9]{6}$")
+
+
+def migration_update_paused_line(count: int) -> str:
+    """One log line for a refused single-operator migration.
+
+    The count is the only variable. Usernames, paths, and other personal
+    data stay out of the line.
+    """
+    return (
+        f"Update paused: this database has {count} operator accounts; "
+        "FlintTrade supports one. No data was changed."
+    )
 
 
 def _is_six_digit_pin(pin: str) -> bool:
@@ -101,11 +120,12 @@ def _derive_fernet_key(master: str, salt: bytes) -> Fernet:
 class AuthService:
     """Single-user authentication service.
 
-    Thread-safety: the SQLite connection is opened with
-    ``check_same_thread=False`` and every write goes through a single
-    :class:`threading.Lock` (``self._write_lock``). Reads are safe in
-    WAL mode without the lock; writes must hold it so concurrent Flask
-    request threads do not interleave statements mid-transaction.
+    Each thread uses its own SQLite connection. Sharing one connection
+    across Flask request threads made status reads return a missing
+    operator, a null vault fact, or an exception. Connections open in
+    WAL mode with a busy timeout (via :func:`open_sqlite`). Writes take
+    ``self._write_lock`` and, for operator creation, a reserved
+    transaction so the existence check and the insert commit together.
     """
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -116,18 +136,52 @@ class AuthService:
         self._hasher = argon2.PasswordHasher(
             time_cost=3, memory_cost=65536, parallelism=4,
         )
-        self._conn: sqlite3.Connection | None = None
+        self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._connections_lock = threading.Lock()
+        self._connection_generation = 0
         self._write_lock: threading.Lock = threading.Lock()
         self._init_db()
 
     @property
     def _db(self) -> sqlite3.Connection:
-        if self._conn is None:
-            # check_same_thread=False + per-write Lock — reads safe via WAL,
-            # writes serialised so interleaving cannot corrupt transactions.
-            self._conn = open_sqlite(str(self._db_path), durability="full")
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+        """Return this thread's connection, opening it on first use."""
+        generation = self._connection_generation
+        conn = getattr(self._local, "conn", None)
+        if conn is None or getattr(self._local, "generation", -1) != generation:
+            conn = open_sqlite(str(self._db_path), durability="full")
+            conn.row_factory = sqlite3.Row
+            # open_sqlite already sets WAL and a 5s busy timeout. Repeat
+            # them here so a status read does not depend on that helper
+            # staying unchanged.
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            self._local.conn = conn
+            self._local.generation = generation
+            with self._connections_lock:
+                self._connections.append(conn)
+        return conn
+
+    @contextlib.contextmanager
+    def _immediate_write(self) -> Iterator[sqlite3.Connection]:
+        """Run one reserved write transaction on this thread's connection.
+
+        ``BEGIN IMMEDIATE`` takes the write lock before the body reads, so
+        a stale "no operator" answer cannot insert a second account.
+        ``busy_timeout`` makes a concurrent creator wait for that lock and
+        then see the committed operator, instead of failing as busy.
+        """
+        with self._write_lock:
+            db = self._db
+            db.execute("PRAGMA busy_timeout = 5000")
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+                db.commit()
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    db.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Write helpers — always acquire the write lock so concurrent Flask
@@ -169,6 +223,11 @@ class AuthService:
                 timestamp REAL NOT NULL,
                 success INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS account_session (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                operator_id TEXT NOT NULL,
+                epoch INTEGER NOT NULL
+            );
         """)
         # Idempotent migration — older DBs predate the password_changed_at
         # column. ADD COLUMN is cheap and avoids a destructive rebuild.
@@ -186,12 +245,205 @@ class AuthService:
             )
         except sqlite3.OperationalError:
             pass
+        # First-run finish is distinct from account creation. The column is
+        # added only when it is missing. Rows already in the table are
+        # finished installs from before this column existed, so they are
+        # marked complete in that same migration. A later operator still
+        # starts incomplete: the default stays 0, and this update does not
+        # run again once the column is present.
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN setup_finished INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
+        else:
+            self._db.execute("UPDATE account SET setup_finished = 1")
+        # Frozen when the operator is created. Later vault opens must not
+        # rewrite it, or a reload would change Step N of M.
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN setup_vault_presecured INTEGER"
+            )
+        except sqlite3.OperationalError:
+            pass
+        self._migrate_single_operator()
         self._db.commit()
+        self._backfill_session_binding()
+
+    def _backfill_session_binding(self) -> None:
+        """Bind an account that predates the session epoch.
+
+        The binding lives outside the account row so a reset can bump the
+        epoch after the account itself is deleted. Tokens issued before the
+        binding existed no longer match.
+        """
+        existing = self._db.execute(
+            "SELECT 1 FROM account_session WHERE id = 1"
+        ).fetchone()
+        if existing is not None or not self.is_setup():
+            return
+        self._db.execute(
+            "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
+            [str(uuid.uuid4())],
+        )
+        self._db.commit()
+
+    def current_session_binding(self) -> tuple[str, int] | None:
+        """Return the operator id and account epoch, if one has been issued.
+
+        Returns:
+            ``(operator_id, epoch)`` or ``None`` before the first account exists.
+        """
+        try:
+            row = self._db.execute(
+                "SELECT operator_id, epoch FROM account_session WHERE id = 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if row is None:
+            return None
+        return str(row["operator_id"]), int(row["epoch"])
+
+    def _bump_epoch_locked(self) -> None:
+        """Invalidate every previously issued session. Caller holds the write lock."""
+        row = self._db.execute(
+            "SELECT epoch FROM account_session WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            self._db.execute(
+                "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
+                [str(uuid.uuid4())],
+            )
+            return
+        self._db.execute(
+            "UPDATE account_session SET epoch = ? WHERE id = 1",
+            [int(row["epoch"]) + 1],
+        )
+
+    def _bind_new_operator_locked(self) -> None:
+        """Record a new operator id. Re-creation also bumps the epoch.
+
+        Caller holds the write lock and commits.
+        """
+        row = self._db.execute(
+            "SELECT epoch FROM account_session WHERE id = 1"
+        ).fetchone()
+        operator_id = str(uuid.uuid4())
+        if row is None:
+            self._db.execute(
+                "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
+                [operator_id],
+            )
+            return
+        self._db.execute(
+            "UPDATE account_session SET operator_id = ?, epoch = ? WHERE id = 1",
+            [operator_id, int(row["epoch"]) + 1],
+        )
+
+    def _operator_count(self) -> int:
+        row = self._db.execute("SELECT COUNT(*) FROM account").fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def _migrate_single_operator(self) -> None:
+        """Refuse a second operator row without discarding an existing account.
+
+        New databases already declare ``CHECK (id = 1)``. Older files may
+        not. A unique index on a constant allows one row and is safe to add
+        when zero or one operator is present. Two or more rows are left as
+        they are: the migration is refused and one line is logged. The line
+        carries the row count only — no path and no account names.
+        """
+        count = self._operator_count()
+        if count > 1:
+            logger.error("%s", migration_update_paused_line(count))
+            return
+        try:
+            self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS account_one_operator ON account ((1))"
+            )
+        except sqlite3.IntegrityError:
+            raced = self._operator_count()
+            if raced > 1:
+                logger.error("%s", migration_update_paused_line(raced))
+
+    def migration_blocked(self) -> str | None:
+        """Return the paused-update state, or ``None`` when the desk may start.
+
+        ``two_operators`` means more than one operator row is present. The
+        value is read from the database so a later recovery is visible on the
+        next status check without restarting this process.
+        """
+        if self._operator_count() > 1:
+            return MIGRATION_BLOCKED_TWO_OPERATORS
+        return None
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""
         row = self._db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
         return row is not None
+
+    def is_setup_finished(self) -> bool:
+        """Return whether first-run setup has been finished.
+
+        Account creation alone is not finished setup. The operator still has
+        the vault and Practice affirm ahead of them until this flag is set.
+        """
+        row = self._db.execute(
+            "SELECT setup_finished FROM account WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return False
+        return bool(row["setup_finished"])
+
+    def mark_setup_finished(self) -> None:
+        """Record that first-run setup has finished.
+
+        Raises:
+            RuntimeError: If the account does not exist yet.
+        """
+        if not self.is_setup():
+            raise RuntimeError("Account is not set up")
+        with self._write_lock:
+            self._db.execute(
+                "UPDATE account SET setup_finished = 1 WHERE id = 1"
+            )
+            self._db.commit()
+
+    def setup_vault_presecured(self) -> bool | None:
+        """Return whether the vault was already secured when the operator was created.
+
+        ``None`` before that fact is recorded. A later vault open does not
+        change the value.
+        """
+        if not self.is_setup():
+            return None
+        row = self._db.execute(
+            "SELECT setup_vault_presecured FROM account WHERE id = 1"
+        ).fetchone()
+        if not row or row["setup_vault_presecured"] is None:
+            return None
+        return bool(row["setup_vault_presecured"])
+
+    def record_setup_vault_presecured(self, presecured: bool) -> None:
+        """Freeze the start-of-setup vault fact. A second call does not overwrite it.
+
+        Raises:
+            RuntimeError: If the account does not exist yet.
+        """
+        if not self.is_setup():
+            raise RuntimeError("Account is not set up")
+        with self._write_lock:
+            row = self._db.execute(
+                "SELECT setup_vault_presecured FROM account WHERE id = 1"
+            ).fetchone()
+            if row and row["setup_vault_presecured"] is not None:
+                return
+            self._db.execute(
+                "UPDATE account SET setup_vault_presecured = ? WHERE id = 1",
+                (1 if presecured else 0,),
+            )
+            self._db.commit()
 
     def wipe_account(self) -> None:
         """Delete the single-user account and related setup state.
@@ -203,6 +455,7 @@ class AuthService:
             self._db.execute("DELETE FROM account WHERE id = 1")
             self._db.execute("DELETE FROM backup_codes")
             self._db.execute("DELETE FROM login_attempts")
+            self._bump_epoch_locked()
             self._db.commit()
 
         if hasattr(self, "_totp_secret_cache"):
@@ -249,28 +502,36 @@ class AuthService:
         fernet = _derive_fernet_key(password, totp_salt)
         encrypted = fernet.encrypt(totp_secret.encode("utf-8"))
 
-        # Generate 8 backup codes — insert all rows + account under a
-        # single write-lock acquisition so a concurrent reader never sees
-        # a half-populated row set.
+        # Hash backup codes before the reserved transaction so argon2 does
+        # not hold the write lock. The insert below re-checks the operator
+        # inside that transaction; a stale is_setup() answer cannot commit
+        # a second account, and a reader never sees a half-written row.
         backup_codes: list[str] = []
-        with self._write_lock:
-            for _ in range(8):
-                code = secrets.token_hex(4).upper()  # 8-char hex
-                backup_codes.append(code)
-                code_hash = self._hasher.hash(code)
-                self._db.execute(
-                    "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
-                    [code_hash],
+        code_hashes: list[str] = []
+        for _ in range(8):
+            code = secrets.token_hex(4).upper()  # 8-char hex
+            backup_codes.append(code)
+            code_hashes.append(self._hasher.hash(code))
+        try:
+            with self._immediate_write() as db:
+                existing = db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
+                if existing is not None:
+                    raise RuntimeError("Account already set up")
+                for code_hash in code_hashes:
+                    db.execute(
+                        "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
+                        [code_hash],
+                    )
+                db.execute(
+                    """INSERT INTO account (id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at)
+                       VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                    [username, email, password_hash, pin_hash, encrypted, totp_salt,
+                     datetime.now(UTC).isoformat()],
                 )
-            # Store account in the same transaction.
-            self._db.execute(
-                """INSERT INTO account (id, username, email, password_hash, pin_hash,
-                   totp_secret_encrypted, totp_salt, totp_enabled, created_at)
-                   VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
-                [username, email, password_hash, pin_hash, encrypted, totp_salt,
-                 datetime.now(UTC).isoformat()],
-            )
-            self._db.commit()
+                self._bind_new_operator_locked()
+        except sqlite3.IntegrityError as exc:
+            raise RuntimeError("Account already set up") from exc
 
         # Cache the TOTP secret in memory for immediate use
         self._totp_secret_cache = totp_secret
@@ -688,6 +949,15 @@ class AuthService:
         return (self.get_totp_provisioning_uri(), backup_codes)
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        """Close every connection this service opened, on any thread."""
+        with self._connections_lock:
+            self._connection_generation += 1
+            conns = list(self._connections)
+            self._connections.clear()
+        for conn in conns:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        self._local.conn = None
+        self._local.generation = self._connection_generation

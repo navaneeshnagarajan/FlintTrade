@@ -84,7 +84,7 @@ def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> Non
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
     assert body["reason"] == body["message"]
-    assert body["reason"] == "Laya is Down. Orders are paused until it's Ready."
+    assert body["reason"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert "Practice orders are blocked" not in body["reason"]
     assert "Live" not in body["reason"]
     assert "limits" not in body
@@ -171,7 +171,7 @@ def test_practice_down_denies_before_the_sandbox() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
-    assert body["reason"] == "Laya is Down. Orders are paused until it's Ready."
+    assert body["reason"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
     assert "Practice orders are blocked" not in json.dumps(body)
     assert "Live" not in body["reason"]
     assert "limits" not in body
@@ -251,7 +251,9 @@ def test_explore_stays_on_the_mode_refusal() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body.get("code") == "mode_blocked"
-    assert "Explore mode" in body["message"]
+    assert body["message"] == (
+        "Orders are not available for Example. Switch to Practice or Live to trade."
+    )
     safety.check_order.assert_not_called()
 
 

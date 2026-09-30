@@ -317,11 +317,13 @@ describe("QuickTradeWidget", () => {
   });
 
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
-    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Laya is Down. Orders are paused until it's Ready.", 403, {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      403,
+      {
       code: "laya_denied",
-      reason: "Laya is Down. Orders are paused until it's Ready.",
-      message: "Laya is Down. Orders are paused until it's Ready.",
-      limits: { max_quantity: 100 },
+      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
     }));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
