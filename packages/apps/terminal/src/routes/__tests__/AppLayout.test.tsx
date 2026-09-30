@@ -253,7 +253,7 @@ describe("AppLayout", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "practice");
     expect(bar).toHaveTextContent(
-      "Practice — SandboxEngine fills. Not your funded broker account.",
+      "Practice — simulated fills, no real money.",
     );
     expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });
@@ -268,7 +268,7 @@ describe("AppLayout", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "explore");
     expect(bar).toHaveTextContent(
-      "Explore — sample data only. No broker session, no live orders.",
+      "Example data. No broker is connected and no orders are sent.",
     );
     expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });

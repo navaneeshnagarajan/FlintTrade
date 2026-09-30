@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { formatCurrencyCompact } from "@/lib/formatters";
@@ -46,10 +46,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/lib/xirr", () => ({
-  xirr: () => 0.15,
-}));
-
 vi.mock("@/components/magicui/animated-counter", () => ({
   AnimatedCounter: ({ value, formatter }: { value: number; formatter: (v: number) => string }) => (
     <span>{formatter(value)}</span>
@@ -58,10 +54,6 @@ vi.mock("@/components/magicui/animated-counter", () => ({
 
 vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}));
-
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
 }));
 
 vi.mock("@/components/motion/StaggeredList", () => ({
@@ -98,7 +90,9 @@ vi.mock("../../InvestContext", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { useModeStore } from "@/stores/modeStore";
 import { DashboardTab } from "../DashboardTab";
+import { NetWorthTab } from "../NetWorthTab";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -165,5 +159,72 @@ describe("DashboardTab", () => {
     expect(screen.getByText(formatCurrencyCompact(expectedNetWorth))).toBeInTheDocument();
     expect(screen.queryByText(formatCurrencyCompact(845_000))).not.toBeInTheDocument();
     expect(expectedNetWorth).not.toBe(845_000);
+  });
+
+  it("labels the sample XIRR with one Example chip and no sample banner in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    investState.isSampleData = true;
+    render(<DashboardTab />);
+
+    expect(screen.queryByText(/Showing sample data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
+    const xirr = screen.getByTestId("sample-xirr");
+    expect(xirr).toHaveTextContent("XIRR +17.44%");
+    expect(within(xirr).getAllByTestId("example-chip")).toHaveLength(1);
+    expect(within(xirr).getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.queryByText("Portfolio XIRR")).not.toBeInTheDocument();
+  });
+
+  it("does not mark Practice XIRR as Example", () => {
+    useModeStore.setState({ mode: "practice" });
+    investState.isSampleData = true;
+    render(<DashboardTab />);
+
+    expect(screen.queryByText(/Showing sample data/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sample-xirr")).toHaveTextContent("XIRR +17.44%");
+  });
+
+  it("shows no Live wording on sample Dashboard and Net Worth figures", () => {
+    useModeStore.setState({ mode: "explore" });
+    investState.isSampleData = true;
+    investState.holdings = LIVE_ROWS;
+    render(
+      <>
+        <DashboardTab />
+        <NetWorthTab />
+      </>,
+    );
+
+    for (const regionId of ["dashboard-figures", "net-worth-figures"]) {
+      const region = screen.getByTestId(regionId);
+      expect(region.textContent ?? "").not.toMatch(/\blive\b/i);
+    }
+    expect(screen.getByText("Example equity and cash. Connect a broker to see yours.")).toBeInTheDocument();
+    expect(screen.queryByText("Allocation (live assets only)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live from broker")).not.toBeInTheDocument();
+    expect(screen.queryByText("Portfolio XIRR")).not.toBeInTheDocument();
+  });
+
+  it("keeps live broker wording when the figures are not sample data", () => {
+    useModeStore.setState({ mode: "practice" });
+    investState.isSampleData = false;
+    investState.holdings = LIVE_ROWS;
+    render(
+      <>
+        <DashboardTab />
+        <NetWorthTab />
+      </>,
+    );
+
+    expect(screen.getByText(
+      "Live equity and cash from your connected broker. Other asset classes require additional data sources.",
+    )).toBeInTheDocument();
+    expect(screen.getByText("Allocation (live assets only)")).toBeInTheDocument();
+    expect(screen.getAllByText("Live from broker").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(
+      "Equity + Cash from your connected broker. Debt / MF requires NAV data source.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("Example equity and cash. Connect a broker to see yours.")).not.toBeInTheDocument();
   });
 });

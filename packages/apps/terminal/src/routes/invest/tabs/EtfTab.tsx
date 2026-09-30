@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/table";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 import { ETF_UNIVERSE, type EtfInfo } from "@/lib/etfs";
 import { formatINR, formatPercent } from "../formatters";
@@ -321,7 +321,7 @@ export function EtfTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip />}
 
       {/* Header */}
       <div className="flex items-center justify-between">

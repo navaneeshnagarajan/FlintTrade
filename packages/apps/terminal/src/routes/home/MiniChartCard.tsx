@@ -79,7 +79,7 @@ export function MiniChartCard() {
           <FlintMiniSparkline
             points={shape}
             positive={positive}
-            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (sample data)`}
+            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (Example)`}
             className="h-full w-full"
           />
         </div>

@@ -363,7 +363,7 @@ function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: Acc
         password: values.password,
         pin: values.pin || "",
       });
-      // /auth/setup mints an explore-mode session so the rest of the wizard
+      // /auth/setup mints a practice session so the rest of the wizard
       // (broker connection behind the G9 write guard, mode selection behind the
       // D6 session-bound PIN) is authenticated. Without it those steps 401.
       // Fall back to logged-out only if an older backend returned no token.
@@ -694,7 +694,7 @@ function TotpDisplay({
 
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
-            An authenticator is optional for Explore and Practice. Enrol it now, or choose
+            An authenticator is optional for Example and Practice. Enrol it now, or choose
             Later and use your password. Live unlock still requires the authenticator
             and your PIN.
           </p>
@@ -782,7 +782,7 @@ function TotpDisplay({
           </div>
         )}
         <p className="text-[11px] text-text-muted text-right">
-          Explore and Practice work with your password only. Enrol the
+          Example and Practice work with your password only. Enrol the
           authenticator before unlocking Live.
         </p>
       </div>
@@ -1622,9 +1622,9 @@ export default function SetupAccountRoute({
 
   async function handleOpenPractice() {
     setModeSyncError("");
-    // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
-    // the JWT claim, so the Practice desk needs a Practice session before
-    // the first sandbox order.
+    // /auth/setup mints a practice JWT. Confirm that claim before the desk
+    // opens, including when an older token is still example data. The server
+    // reads the mode from the JWT, so the first sandbox order needs Practice.
     try {
       const authState = useAuthStore.getState();
       const practiceToken = await downgradeMode(

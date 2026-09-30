@@ -49,7 +49,7 @@ describe('homepage honest CTA (PR #157) with Graphite A1 motion', () => {
     expect(primaryMatches.length).toBe(1);
     expect(pageSource).toContain('Install the web app');
     expect(pageSource).toContain('href="/download"');
-    expect(pageSource).toContain('Explore demo');
+    expect(pageSource).toContain('Demo (example data)');
     expect(pageSource).toContain('/demo-app/welcome');
   });
 
@@ -66,9 +66,9 @@ describe('homepage honest CTA (PR #157) with Graphite A1 motion', () => {
     expect(pageSource).not.toContain('desktopInstallOptions');
   });
 
-  it('keeps truthful copy and Explore/Practice/Live vocabulary', () => {
+  it('keeps truthful copy and Practice / example-data vocabulary', () => {
     expect(pageSource).toContain('v0.0.1 is not production ready');
-    expect(pageSource).toContain('Explore and Practice modes first');
+    expect(pageSource).toContain('Use Practice and example data first');
     expect(pageSource).toContain('/demo-app/welcome');
   });
 

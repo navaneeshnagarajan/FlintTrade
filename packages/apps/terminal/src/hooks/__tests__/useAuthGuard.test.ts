@@ -238,7 +238,7 @@ describe("useAuthGuard", () => {
     await waitFor(() => {
       expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
         "demo-user",
-        "Explorer",
+        "Guest",
         "",
         { status: "unknown", principal: null, generation: 0 },
       );
@@ -264,7 +264,7 @@ describe("useAuthGuard", () => {
     await waitFor(() => {
       expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
         "demo-user",
-        "Explorer",
+        "Guest",
         "",
         { status: "unknown", principal: null, generation: 0 },
       );

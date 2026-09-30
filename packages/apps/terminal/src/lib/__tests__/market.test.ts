@@ -27,6 +27,8 @@ import {
   getMCXStatus,
   getExchangeStatus,
   getNseCashSessionStatus,
+  MARKET_CLOSED_LABEL,
+  operatorMarketLabel,
   EXCHANGE_HOURS,
 } from "../market";
 import type { MarketHoursTarget } from "../market";
@@ -570,6 +572,7 @@ describe("getNseCashSessionStatus IST session window", () => {
     const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
     expect(session.status).toBe("closed");
     expect(session.label).toBe("Closed");
+    expect(operatorMarketLabel(session)).toBe(MARKET_CLOSED_LABEL);
   });
 
   it("is closed on an IST Sunday", () => {
@@ -593,12 +596,15 @@ describe("getNseCashSessionStatus IST session window", () => {
   });
 
   it("is unavailable when timings are missing", () => {
-    expect(getNseCashSessionStatus(undefined)).toEqual({
+    const session = getNseCashSessionStatus(undefined);
+    expect(session).toEqual({
       status: "unavailable",
       label: "Market unavailable",
       title: "Market unavailable",
       foSecondary: null,
       isGreenOpen: false,
     });
+    expect(operatorMarketLabel(session)).toBe("Market unavailable");
+    expect(operatorMarketLabel(session)).not.toBe(MARKET_CLOSED_LABEL);
   });
 });

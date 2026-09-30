@@ -55,7 +55,7 @@ describe("PayoffTab", () => {
       />,
     );
 
-    expect(screen.getByText("Sample premium — edit to model")).toBeInTheDocument();
+    expect(screen.getByText("Example premium — edit to model")).toBeInTheDocument();
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
     expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22545");

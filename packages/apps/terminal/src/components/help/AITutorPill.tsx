@@ -99,7 +99,7 @@ function routeLabel(pathname: string): string {
   const labels: Record<string, string> = {
     "": "Home",
     welcome: "Welcome",
-    explore: "Explore",
+    explore: "Demo (example data)",
     setup: "Setup",
     settings: "Settings",
     trade: "Trade",

@@ -1338,7 +1338,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         role="img"
-        aria-label={`DOM heatmap for ${symbol}${isExplore ? " (sample data)" : ""}. ${
+        aria-label={`DOM heatmap for ${symbol}${isExplore ? " (Example)" : ""}. ${
           isReplay
             ? "Replay view: scrub the captured snapshots with the transport controls below."
             : "Live view: snapshots accumulate left to right."
