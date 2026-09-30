@@ -1161,6 +1161,78 @@ def test_pid_and_key_changes_flip_status_within_the_watch_interval(
     reset_process_laya_for_tests()
 
 
+@pytest.mark.unit
+def test_a_cli_restart_is_verified_once_the_first_process_has_exited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = 424242, 434343
+    alive = {first}
+    monkeypatch.setattr("flinttrade_core.laya_runtime._pid_alive", lambda candidate: candidate in alive)
+    policy = load_policy()
+    _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    _accept_pinned_digests(monkeypatch, policy)
+    processes: list[_Process] = []
+
+    def factory(_argv: list[str], _env: dict[str, str]) -> _Process:
+        process = _Process()
+        process.pid = first  # type: ignore[attr-defined]
+        processes.append(process)
+        return process
+
+    runtime = LayaRuntime(tmp_path, process_factory=factory, health_reader=lambda _url: _healthy(), watch=False)
+    runtime.start()
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    runtime._watch_had_pid = True  # noqa: SLF001
+
+    # A CLI stop ends the first process, and a CLI start records a new pid and token.
+    processes[0].returncode = 0
+    alive.clear()
+    alive.add(second)
+    _write_run(runtime, pid=second, token="command-line-run")
+    payload = _healthy()
+    payload.pop("sha256")
+    runtime._health_reader = lambda _url: payload  # type: ignore[method-assign]
+    runtime.reconcile_watched_state()
+    runtime.publish_status()
+
+    assert process_laya().status is not DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] is None
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    client = process_laya()._decision_client  # noqa: SLF001
+    assert client is not None
+    assert client._verified == (policy.revision, policy.sha256)  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_a_record_from_an_exited_process_is_not_trusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = 424242
+    monkeypatch.setattr("flinttrade_core.laya_runtime._pid_alive", lambda candidate: candidate == first)
+    policy = load_policy()
+    _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    _accept_pinned_digests(monkeypatch, policy)
+    processes: list[_Process] = []
+
+    def factory(_argv: list[str], _env: dict[str, str]) -> _Process:
+        process = _Process()
+        process.pid = first  # type: ignore[attr-defined]
+        processes.append(process)
+        return process
+
+    runtime = LayaRuntime(tmp_path, process_factory=factory, health_reader=lambda _url: _healthy(), watch=False)
+    runtime.start()
+    check = runtime._artifact_check  # noqa: SLF001
+    assert check is not None
+    assert runtime._record_belongs_to_running_sidecar(check, policy)  # noqa: SLF001
+    processes[0].returncode = 0
+    (runtime.runtime_root / "sidecar.pid").unlink()
+    assert not runtime._record_belongs_to_running_sidecar(check, policy)  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
 def _shift_weight_identity(path: Path, field: str) -> None:
     """Change one of inode, size, or mtime without touching the other two."""
     before = path.stat()
@@ -1476,6 +1548,33 @@ def test_clean_cache_downloads_then_launches_offline(
 def runtime_root_checkpoint(staging: Path) -> Path:
     """Launch directory that sits next to a staging directory."""
     return staging.parent / "checkpoint"
+
+
+@pytest.mark.unit
+def test_start_without_a_pinned_commit_says_cant_verify_and_attempts_no_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dataclasses
+
+    policy = dataclasses.replace(load_policy(), revision="main")
+    monkeypatch.setattr("flinttrade_engine.laya_decision.load_policy", lambda: policy)
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
+    downloads: list[object] = []
+    launched: list[object] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        downloader=lambda _argv, _env: downloads.append(1) or 1,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't verify the model"):
+        runtime.start()
+    assert downloads == []
+    assert launched == []
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert runtime.status()["detail"] == "Can't verify the model"
+    reset_process_laya_for_tests()
 
 
 @pytest.mark.unit
