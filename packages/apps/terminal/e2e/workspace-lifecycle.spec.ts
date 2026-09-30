@@ -30,7 +30,11 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   registerExploreAdvisorStatusProbe(syntheticApi, {
     expectedCalls: { minimum: 1, maximum: 12 },
   });
-  registerOperatorStatusProbes(syntheticApi);
+  // The Laya chip polls this ping every 1.5 seconds for the whole journey.
+  // Remounts plus that interval sit above the shared operator-probe cap.
+  registerOperatorStatusProbes(syntheticApi, {
+    pingCalls: { minimum: 1, maximum: 16 },
+  });
   syntheticApi.register({
     name: "Mode menu Live-arm status",
     method: "GET",
