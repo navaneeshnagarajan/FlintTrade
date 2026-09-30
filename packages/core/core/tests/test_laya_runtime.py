@@ -141,6 +141,7 @@ def test_install_command_pins_the_sidecar_venv_not_the_main_interpreter(tmp_path
     assert "torch==2.14.0+cpu" in pinned
     assert "laya==0.3.21" in pinned
     assert "huggingface_hub==1.33.0" in pinned
+    assert "tqdm==4.70.1" in pinned
     assert constraint_lines_with_extras(pinned) == []
     assert LAYA_SERVE_REQUIREMENT == "laya[serve]==0.3.21"
     assert CPU_TORCH_INDEX in pinned
@@ -2003,6 +2004,34 @@ def test_download_progress_accepts_hub_tqdm_methods() -> None:
     bar.set_postfix_str("1.2MB/s", refresh=False)
     bar.set_postfix(rate="1.2MB/s")
     assert _progress_lines(stdout)[-1] == (2_370_000_000, 2_370_000_000)
+
+
+@pytest.mark.unit
+def test_download_progress_uses_real_tqdm_and_counts_the_model_once() -> None:
+    """Drive the hub's tqdm. Skip only when that package is not installed."""
+    import importlib.util
+
+    if importlib.util.find_spec("tqdm") is None:
+        pytest.skip("tqdm is not installed")
+    from tqdm.auto import tqdm as tqdm_base
+
+    progress, stdout = _load_download_progress()
+    assert issubclass(progress, tqdm_base)
+    staged = 2_370_000_000
+    transfer = progress(total=0, unit="B", desc="Downloading bytes")
+    reconstruct = progress(total=0, unit="B", desc="Reconstructing")
+    transfer.total = staged
+    reconstruct.total = staged
+    transfer.update(staged)
+    reconstruct.update(staged)
+    transfer.refresh()
+    transfer.set_description_str("Download complete")
+    transfer.set_postfix_str("1.2MB/s", refresh=False)
+    reconstruct.set_description("Reconstruction complete")
+    transfer.close()
+    reconstruct.close()
+    done, total = _progress_lines(stdout)[-1]
+    assert (done, total) == (staged, staged)
 
 
 @pytest.mark.unit

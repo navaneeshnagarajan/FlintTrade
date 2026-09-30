@@ -166,8 +166,8 @@ LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
                 return result
     else:
         class _Progress:
-            # Used only when tqdm is not installed. The sidecar hub already
-            # depends on tqdm, so a download takes the subclass above.
+            # Used only when tqdm is not installed. The sidecar pins tqdm
+            # next to huggingface_hub, so a download takes the subclass above.
             def __init__(self, *args, total=None, **kwargs):
                 self.n = 0
                 self.total = int(total or 0)

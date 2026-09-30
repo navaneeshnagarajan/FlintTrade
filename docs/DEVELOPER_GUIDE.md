@@ -525,7 +525,7 @@ The install refuses a command whose prefix is the FlintTrade environment.
 The default install puts CPU torch in the sidecar environment from
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
 the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`,
-`laya==0.3.21`, and `huggingface_hub==1.33.0` with no extras
+`laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
 (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`).
 The `serve` extra stays on the install requirement. The CPU install applies
 that file to both pip commands, and installs torch first. The install size
@@ -638,8 +638,8 @@ Can't download the model, Unreachable, Wrong model version, Can't verify
 the model, Can't reach Laya, and The Laya API key file is missing.
 `key_missing` stays until the next start or an explicit stop. A health
 check does not replace it with Not started. The download progress class
-subclasses `tqdm.auto.tqdm` when that package is already installed with
-the hub, and the progress line counts the model once. `unverified` applies when this start did
+subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`), and the progress
+line counts the model once. `unverified` applies when this start did
 not download. A failed download, including one over an older unverified
 snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
 sidecar port. Tooltips for
