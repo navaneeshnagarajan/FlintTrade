@@ -496,7 +496,7 @@ Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Example-data
 placement is refused by the backend (HTTP 403 `mode_blocked`,
 `Orders are not available for Example. Switch to Practice or Live to trade.`);
-Order Pad Example Buy is a local example fill (no HTTP order route, no Laya admit, no
+Order Pad Example Buy is a local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no Laya admit, no
 SafetySystem). Other Live write verbs still reach SafetySystem without
 this place admission. The global auth check covers both a session JWT
 and `FLINTTRADE_API_KEY`. The session JWT is read from
@@ -575,7 +575,7 @@ sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1` (read by `huggingface_hub` 1.33.0), so transfer
 logs stay in that folder. The step does
 not start the sidecar. While it runs, including a pin change, the reason
-is `downloading` and the popover is `Downloading the model · 1.2 of 3.4 GB`
+is `downloading` and the popover is `Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`)
 (live, one decimal, decimal GB), with no Next line and no Updating label.
 Orders stay on the Down refusal. It then hashes `model.safetensors` and
 every manifest file in that staging directory. When no checkpoint is
@@ -674,7 +674,7 @@ version. Restart Laya. If it keeps happening, reinstall it."
 `still_loading`, `downloading`, `download_failed`, `unreachable`,
 `wrong_revision`, `unverified`, `key_rejected`, or `key_missing`. `identity_absent` is
 not a status code. The desk shows Not started, Stopped,
-`Port <n> in use`, Still loading, Downloading the model · 1.2 of 3.4 GB,
+`Port <n> in use`, Still loading, `Downloading the model · X of Y GB`,
 Can't download the model, Unreachable, Wrong model version, Can't verify
 the model, Can't reach Laya, and The Laya API key file is missing.
 `key_missing` stays until a later start finds the file, or an explicit

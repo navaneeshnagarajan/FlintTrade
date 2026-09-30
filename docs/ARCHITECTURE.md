@@ -391,7 +391,7 @@ Example-data placement is refused by the backend
 (HTTP 403 `mode_blocked`,
 `Orders are not available for Example. Switch to Practice or Live to trade.`)
 and does not enter `Laya.admit`.
-Order Pad Example Buy is a local client fill (no HTTP
+Order Pad Example Buy is a local client fill (`Example order placed`, id starting `SAMPLE-`; no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
 **place** run the mode guard, then `Laya.admit`. Live place is checked
 by Laya admission and then SafetySystem L1–L5, `gate_order`, and
@@ -491,7 +491,7 @@ Example data is not a menu Mode. The guard lives at
 Example data has no Live broker order authority: backend and Live-intent
 order paths still refuse with `mode_blocked` and never call a broker.
 The exception is Order Pad Example Buy on `/trade`, which records a
-local example fill (no HTTP order route, no SafetySystem,
+local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no SafetySystem,
 no broker). Practice remains simulated fills; Live remains the
 gated broker path.
 
@@ -692,7 +692,7 @@ Practice is `practice_unsupported` (no Practice parity yet), and Live
 without PIN unlock is `live_locked`. A Live bracket with exactly one
 stop-loss or one target places through that guard. Basket, split, and
 options-strategy place return HTTP 501 and do not place. Order Pad Example Buy on `/trade`
-with example data is a local example fill — no HTTP order route,
+with example data is a local example fill (`Example order placed`, id starting `SAMPLE-`) — no HTTP order route,
 SafetySystem, or broker.
 
 ### OpenAlgo X-API-Key

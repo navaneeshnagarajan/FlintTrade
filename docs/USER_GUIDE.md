@@ -317,11 +317,11 @@ Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) 
 | **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
 | **Connected (read)** | Read-only posture on a Practice session after a broker is connected. Until then the menu item stays disabled and shows `Connect a broker first`. It is not a separate session claim. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
-| **Example** | Sample data. The chip reads **Example**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. |
+| **Example** | Sample data. The chip reads **Example**. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
 
 **Switching Mode.** Open the Mode chip. Its accessible name is the current
 label plus `mode. Open the mode menu.` Choose **Practice** for simulated
-fills. A sample-data session (`demo-user`) is sent to Setup instead of
+fills. A sample-data session, signed in as **Guest**, is sent to Setup instead of
 switching in place. Choose **Connected (read)** only when a broker is
 connected. Choose **Live** only when the item is enabled. Opening the menu
 does not open the Live dialog. An eligible Live choice opens **Switch to Live
@@ -353,6 +353,7 @@ banner. Where those chips sit is under [Invest](#invest).
 The confirm button reads **Confirm simulation** (accessible name
 `Confirm simulated Practice order`). Example data reads `Example only. Nothing is sent to a broker and no order is placed.`
 The confirm button reads **Continue** (accessible name `Confirm Example order`).
+**Continue** records a sample fill. The success line is `Example order placed` and the id starts with `SAMPLE-`.
 Both reviews offer **Back to edit**. While the confirm is in flight the
 button reads `Confirming…`.
 
@@ -369,8 +370,8 @@ never offers Neo Practice — Kotak Neo has no sandbox. Operator copy is
 **Mode, session, and sample data.** Practice and Live name the session Mode.
 **Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
 Post-close · Closed) are market-session status, never Live mode. Example data
-uses **Example Buy** / **Example Sell** and records an example fill after
-review. Practice keeps **Practice Buy** / **Practice Sell**. Live uses
+uses **Example Buy** / **Example Sell**. After review, **Continue** records
+a sample fill (`Example order placed`, id starting `SAMPLE-`). Practice keeps **Practice Buy** / **Practice Sell**. Live uses
 **Place BUY Order**. Connected / green is never shown for an unconfigured
 subsystem.
 
@@ -384,10 +385,10 @@ subsystem.
   market session is not unavailable and neither the WebSocket nor a fresh
   REST fallback is producing quotes. The link opens `/settings#brokers`.
   An unavailable session is never labelled last close.
-- **Broker** lives once, in the desk-status broker chip (**Broker Connected**,
-  **Broker Connected (read)**, or **Broker Unavailable**, plus a plain failure
-  when a money-path incident darkens the session). Account switching does not
-  add a second broker chip.
+- **Broker** lives once, as the **Broker** row in the TopBar **Status** menu:
+  **Connected**, **Connected (read)**, or **Unavailable**, plus a plain failure
+  when a money-path incident darkens the session. Account switching does not
+  add a second broker row. Laya and LLM are the other rows in that menu.
 - **Market** lives once, in the TopBar market-session chip. A confirmed
   closed cash session reads `Market closed · opens 09:15`. Unavailable
   timings read `Market unavailable`. Neither sentence is Live mode.
@@ -430,30 +431,35 @@ rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
-The TopBar **Status** menu shows **Broker**, **Laya**, and **LLM** as
-separate labels, each with a one-line description. Its dot shows the worst
-state: red when Laya is **Down** or the broker path is unavailable, amber when
-degraded, neutral with example data (nothing is connected by design) and while
-Laya is **Checking** or **Still loading**. Broker is **Connected**, **Connected (read)**, or
-**Unavailable**. The Laya chip is **Ready**, **Degraded**, **Down**,
-**Still loading**, or **Checking**. The label follows the active mode.
-Practice shows the sidecar. Live shows Live-facing status. During the
-first load the label is **Still loading** and does not read **Down**.
-**Checking** is the neutral colour, and it is not a stale **Ready**. In Practice the chip does not
-read **Down** while Practice orders are being admitted, when the sidecar is
-**Ready** or **Degraded** and Live-facing status is **Down** for missing
-qualification. **Not qualified for Live** is the chip tooltip, and the
-popover line, when the sidecar is up and Live is not qualified. It is not
-painted as **Down** on the Practice chip. How to start the sidecar is
-[Start Laya](#start-laya). The desk ping
-still publishes Live-facing `laya`, sidecar `laya_practice`, and
-`laya_live_qualified`. Laya starts **Down**, including before a heartbeat
-and when the ping omits `laya`. Missing status is never painted **Ready**.
-The ping does not invent Ready. A base checkpoint leaves Live unqualified,
-so Live-facing status stays **Down** until that exact revision, weight
-digest, and policy version are qualified with LIVE_DECISION evidence. Only
-Live-facing **Down** opens the Laya Blocked strip and mutes Live place
-and Position Mirror start. Practice is not muted by that strip.
+The TopBar **Status** menu is the one home for **Broker**, **Laya**, and
+**LLM**. Each row has its own label, value, and one-line description.
+Broker's line is `Your broker account for live orders and holdings.`
+Laya's line is the current reason, or `Checks every order before it is placed.`
+LLM's line is `Optional AI model for chat and suggestions.` The same three
+rows sit in the More sheet on a narrow window. Feed provenance stays on the
+ticker.
+
+The button's dot is the worst state. Example data is neutral and reads
+`Example data only`, including when Laya is **Down**. After that, Laya
+**Down** is red, a broker failure that marks the path unavailable is red,
+and Live with no broker connected is red (`No broker connected`). Laya
+**Degraded**, a degraded broker path, and an LLM of **Error** or
+**Disconnected** are amber. **Checking** (the summary reads `Checking Laya`)
+and **Still loading** (the summary reads `Laya still loading`) stay neutral.
+In Practice, broker **Unavailable** with Laya **Ready** and an LLM of **Not
+configured** leaves the dot green (`All systems ready`).
+
+Broker's value is **Connected**, **Connected (read)**, or **Unavailable**.
+Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**, or
+**Checking**. Laya starts **Down**, including before a heartbeat and when
+the ping omits `laya`. Missing status is never painted **Ready**. While the
+value is **Checking**, the row reads `Checking Laya…`. Download and model
+lines, and how to start the sidecar, are in [Start Laya](#start-laya):
+`Downloading the model · X of Y GB`, `Can't download the model`,
+`Wrong model version`, and `Can't verify the model`. The refusal while
+orders are paused is `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+Only Live-facing **Down** opens the Laya Blocked strip and mutes Live place
+and Position Mirror start. Practice place follows the Practice chip.
 Live-facing **Degraded** leaves Live open, shows **Laya Degraded — tighter
 limits**, and does not look Blocked. LLM is **Not configured**, or
 **Connected (suggest only)** when Chat is ready.
@@ -461,7 +467,7 @@ limits**, and does not look Blocked. LLM is **Not configured**, or
 Install-host disk, RAM, CPU, GPU, and network stay on Settings → Monitoring
 (`/settings#monitoring`). That page is its own Settings section. See
 [Monitoring](#monitoring). It is not folded into this Broker / Laya / LLM
-cluster.
+menu.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
@@ -541,7 +547,7 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `stopped` | Stopped | `Stopped. Next: python -m flinttrade_core.laya_runtime start` |
 | `port_in_use` | `Port <n> in use` | `Port <n> in use. Next: python -m flinttrade_core.laya_runtime start` |
 | `still_loading` | Still loading | `Still loading. Next: python -m flinttrade_core.laya_runtime start` |
-| `downloading` | Downloading the model · 1.2 of 3.4 GB | (none) |
+| `downloading` | `Downloading the model · X of Y GB` | (none) |
 | `download_failed` | Can't download the model | `Check your connection, then Start Laya again.` |
 | `unreachable` | Unreachable | `Unreachable. Next: python -m flinttrade_core.laya_runtime start` |
 | `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` Applies when this start did not download. A failed download shows **Can't download the model** instead. |
@@ -553,7 +559,7 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 is **Still loading**. Orders are refused with
 `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
 The `downloading` chip text is live progress, one decimal place, decimal
-gigabytes, as in `Downloading the model · 1.2 of 3.4 GB`. It has no
+gigabytes: `Downloading the model · X of Y GB`, for example `Downloading the model · 1.2 of 3.4 GB`. It has no
 tooltip and no Next line. A new model version uses that same chip and
 the same **Down** word. There is no separate Updating label.
 
@@ -693,7 +699,7 @@ launch directory and not in the shared Hugging Face cache. The download
 sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1`, so transfer logs stay in that folder and not in
 the shared cache. The model is about 2.37 GB, and that size is reported
-once. While that runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
+once. While that runs, the popover reads **Downloading the model · X of Y GB** (live
 progress, one decimal, decimal GB). Orders are refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. When no
 checkpoint is already there, a full match renames that directory onto
@@ -701,7 +707,7 @@ checkpoint is already there, a full match renames that directory onto
 boot. Hub access stays off for that launch.
 
 When FlintTrade pins a new model version, the next start downloads it the
-same way. The chip is the same **Downloading the model · 1.2 of 3.4 GB**
+same way. The chip is the same **Downloading the model · X of Y GB**
 line, with status **Down**. There is no Updating label. Your current copy
 stays in place until the new files match the pin. On a full match,
 FlintTrade renames `<workspace>/runtime/laya/checkpoint` aside to
@@ -758,7 +764,7 @@ place run Mode guard → Laya.admit → SafetySystem → gate_order →
 BrokerRouter. Laya does not place the order and does not replace those
 layers. A refusal or a quantity clamp stops before SafetySystem. Practice
 place is admitted before the sandbox and does not enter SafetySystem.
-A body with `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call, on place, routed place, exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.` Example data is HTTP 403 `mode_blocked` before admission: `Orders are not available for Example. Switch to Practice or Live to trade.` Chat is not an
+A body with `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call, on place, routed place, exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.` On the server, example data is HTTP 403 `mode_blocked` before admission: `Orders are not available for Example. Switch to Practice or Live to trade.` The Order Pad on example data records a sample fill instead (`Example order placed`, id starting `SAMPLE-`). Chat is not an
 admission source. The model can deny or clamp. It cannot raise a
 quantity or overturn a hard-rule refusal.
 
@@ -800,7 +806,7 @@ reaches the sandbox only after that admit. On Live, an admitted quantity
 continues to SafetySystem and gate_order. **Cancel** places nothing.
 
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
-**Laya Degraded — tighter limits** on the status cluster and under those
+**Laya Degraded — tighter limits** on the Status menu and under those
 place controls. That line is not the Blocked strip, and it does not mute
 Live place or Position Mirror start. The chip shows Degraded when Live
 itself is Degraded. Practice Degraded applies the tighter ceiling to a
@@ -896,9 +902,9 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
    The sandbox order appears in the **Positions** widget immediately; the
    **Orders** widget shows it as filled (simulated). **Example Buy** on
-   example data records an example fill after review. Review reads
-   `Example only. Nothing is sent to a broker and no order is placed.`
-   The example-data confirm button reads **Continue**. That fill does not
+   example data opens the example review (`Example only. Nothing is sent to a broker and no order is placed.`).
+   **Continue** records a sample fill on this pad: `Example order placed`,
+   with an id starting `SAMPLE-`. That fill stays on the pad and does not
    call the order API.
 7. Close the position from the Positions widget. Practice square-off
    posts an opposite order to `POST /api/v1/orders/place`. Confirm your
@@ -1790,7 +1796,7 @@ does not close Live.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
-(including example data / `demo-user` and Practice), not a leftover local setting.
+(including example data, signed in as **Guest**, and Practice), not a leftover local setting.
 When Settings `#llm` is empty ("No LLM provider configured") or the stored
 provider is blank, Chat on example data and Practice shows **Not configured** /
 **LLM not configured** unless `advisor/status` reports an explicit
@@ -2354,14 +2360,19 @@ as a toast.
    show **Max quantity** and does not say to start the model. **Laya
    Degraded — tighter limits** means Live-facing Degraded: Live is open
    with a tighter ceiling. It is not a Blocked strip.
-3. Example data still refuses before admission. A safety-layer rejection names   the layer and is a separate message.
+3. On the Order Pad, example data records a sample fill. The success line is
+   `Example order placed` and the id starts with `SAMPLE-`. The server
+   refusal `Orders are not available for Example. Switch to Practice or Live to trade.`
+   is the HTTP path. A safety-layer rejection names the layer and is a separate message.
 
 ### Orders not arriving / silently dropped
 
-1. Check the Mode chip in the TopBar. **Example** is sample data: no broker
-   is connected and no orders are sent. Order Pad **Example Buy** on
-   `/trade` records an example fill after review
-   (`Example only. Nothing is sent to a broker and no order is placed.`).
+1. Check the Mode chip in the TopBar. **Example** is sample data, signed in
+   as **Guest**. The Mode line reads `Example data. No broker is connected and no orders are sent.`
+   Order Pad **Example Buy** on `/trade` opens a review that reads
+   `Example only. Nothing is sent to a broker and no order is placed.`
+   **Continue** then records a sample fill (`Example order placed`, id
+   starting `SAMPLE-`).
    Open the Mode menu and choose **Practice** for simulated fills, or
    unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.
