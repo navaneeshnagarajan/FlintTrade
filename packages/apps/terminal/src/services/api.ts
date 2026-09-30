@@ -41,6 +41,7 @@ import type {
 import { useConnectionStore } from "@/stores/connectionStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { liveWritesMuted } from "@/lib/operatorIncident";
+import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -2086,7 +2087,7 @@ function mockOrders(): Order[] {
     orderType: order.orderType,
     status: order.status,
     product: order.product,
-    strategy: "Explore",
+    strategy: "Example",
     timestamp: order.timestamp,
   }));
 }
@@ -2450,7 +2451,7 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
 
 function getExploreBrokerCapabilities(): BrokerCapabilities {
   return {
-    broker_name: "Explore",
+    broker_name: "Example",
     broker_type: "multi",
     supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
     features: {
@@ -2630,7 +2631,7 @@ async function postOrder<T>(
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
       throw new Error(
-        `Order blocked: mode changed from ${authority.mode} to ${currentModeForExplore} before submission.`,
+        `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
       );
     }
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
@@ -2645,7 +2646,7 @@ async function postOrder<T>(
   const currentMode = useModeStore.getState().mode;
   if (authority?.mode && authority.mode !== currentMode) {
     throw new Error(
-      `Order blocked: mode changed from ${authority.mode} to ${currentMode} before submission.`,
+      `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {
@@ -2775,7 +2776,7 @@ async function post<T>(
     if (fallback !== undefined) return fallback;
     const kind = NATIVE_READ_ENDPOINTS[endpoint];
     if (kind && NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) {
-      throw new Error(`${endpoint} is not available in Explore mode.`);
+      throw new Error(`${endpoint} is not available in this session.`);
     }
   }
 
@@ -3551,7 +3552,7 @@ export const getMaxPain = async (
 ) => {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (isExploreMode()) throw new Error("Max Pain is not available in Explore mode.");
+  if (isExploreMode()) throw new Error("Max Pain is not available in this session.");
   const value = await awaitMarketDataAuthority(
     () => postFtApi<BackendMaxPainData>(
       "maxpain",

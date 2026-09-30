@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import type { Holding } from "@/types/api";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
@@ -182,7 +182,7 @@ export function HoldingsTab() {
       {/* Demo banner */}
       {isDemo && (
         <div className="px-2 pt-2 shrink-0">
-          <DemoBanner />
+          <ExampleChip />
         </div>
       )}
 

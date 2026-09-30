@@ -479,23 +479,23 @@ when the body has exactly one stop-loss or one target. Each bracket leg
 is admitted, then placed through SafetySystem. Practice on that route is
 HTTP 403 `practice_unsupported`. GTT, a broker-held variety, a stop-loss
 and a target together, and a trailing stop are refused before that
-admission. Practice orders skip L1–L5 and go to
-`SandboxEngine`. Practice **place** runs `Laya.admit` before that
-sandbox; a refusal or a quantity clamp stops before the sandbox. A
-Practice close and a Practice square-off are opposite orders on place.
-The sandbox routes cancel and modify only. Settings → Practice does not
-place. Live operator and automate **place** is checked when it's
-placed: Mode guard → `Laya.admit` → SafetySystem L1–L5 → `gate_order`
-→ `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
+admission. Practice orders skip L1–L5 and go to the Practice fill path.
+Practice **place** runs `Laya.admit` before that path; a refusal or a
+quantity clamp stops before a simulated fill. A Practice close and a
+Practice square-off are opposite orders on place. The Practice fill path
+cancels and modifies only. Settings → Practice does not place. Live
+operator and automate **place** is checked when it's placed: Mode guard
+→ `Laya.admit` → SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
+`"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 (`Not placed. GTT orders aren't supported right now.`) before that
 path, on place, routed place, exit-all, and a bracket. No submit route reaches a
 broker forever or super-order endpoint. The Kotak Neo adapter refuses a
 `gtt` place. `POST /api/v1/orders/forever` returns HTTP 501 and does not
 place.
 Exit-all records a server reduce-only proof before `exit_all_positions`.
-`cancel-all` only cancels. Explore
-placement is refused by the backend (`mode_blocked`); Order Pad Sample
-Buy is a local client fill (no HTTP order route, no Laya admit, no
+`cancel-all` only cancels. Example-data
+placement is refused by the backend (`mode_blocked`); Order Pad Example
+Buy is a local example fill (no HTTP order route, no Laya admit, no
 SafetySystem). Other Live write verbs still reach SafetySystem without
 this place admission. The global auth check covers both a session JWT
 and `FLINTTRADE_API_KEY`. The session JWT is read from

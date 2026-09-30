@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -100,7 +100,7 @@ vi.mock("jotai", async () => {
 // ---------------------------------------------------------------------------
 
 import OrderPadWidget from "../OrderPadWidget";
-import { OrderApiError, placeOrder, getSymbol } from "@/services/api";
+import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/api";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
@@ -116,7 +116,7 @@ const defaultProps = makeWidgetPanelProps();
 async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell)/i): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: buttonName }));
   const confirm = await screen.findByRole("button", {
-    name: /confirm (simulated practice|sample) order/i,
+    name: /confirm (simulated practice|example) order/i,
   });
   fireEvent.click(confirm);
 }
@@ -200,6 +200,105 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
     // Symbol seeded into the search field.
     expect(screen.getByDisplayValue("RELIANCE")).toBeInTheDocument();
+  });
+
+  it("applies a watchlist prefill for this pad only", () => {
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+      api: { id: "pad-1", updateParameters: () => {} },
+    })} />);
+    const input = screen.getByPlaceholderText("Search symbol…") as HTMLInputElement;
+    expect(input.value).toBe("SBIN");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: { tabId: "other-pad", params: { symbol: "TCS", exchange: "NSE", action: "BUY" } },
+      }));
+    });
+    expect(input.value).toBe("SBIN");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: { tabId: "pad-1", params: { symbol: "RELIANCE", exchange: "NSE", action: "SELL" } },
+      }));
+    });
+    expect(input.value).toBe("RELIANCE");
+  });
+
+  it("reapplies the same quick-trade target when the event nonce changes", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "INFY", exchange: "NSE" }]);
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      api: { id: "pad-1", updateParameters: () => {} },
+    })} />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "pad-1",
+          nonce: "trade-1",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "SELL" }));
+    fireEvent.change(screen.getByLabelText("Symbol"), { target: { value: "INFY" } });
+    fireEvent.click(await screen.findByRole("button", { name: /INFY/ }));
+    expect(screen.getByDisplayValue("INFY")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "pad-1",
+          nonce: "trade-2",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("INFY")).not.toBeInTheDocument();
+  });
+
+  it("Enter selects the typed symbol and does not submit the previous one", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "INFY", exchange: "NSE" }]);
+    render(
+      <OrderPadWidget
+        {...makeWidgetPanelProps({
+          params: { symbol: "NIFTY", exchange: "NSE", action: "BUY" },
+        })}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText("Search symbol…");
+    fireEvent.change(input, { target: { value: "INFY" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByDisplayValue("INFY")).toBeInTheDocument());
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(screen.queryByText(/No match for INFY/)).not.toBeInTheDocument();
+  });
+
+  it("Enter shows no match and does not submit the previous symbol", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([]);
+    render(
+      <OrderPadWidget
+        {...makeWidgetPanelProps({
+          params: { symbol: "NIFTY", exchange: "NSE", action: "BUY" },
+        })}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText("Search symbol…");
+    fireEvent.change(input, { target: { value: "ZZZNOT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByText("No match for ZZZNOT")).toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("ZZZNOT")).toBeInTheDocument();
   });
 
   it("has order type pills (MARKET, LIMIT, SL, SL-M)", () => {
@@ -308,22 +407,22 @@ describe("OrderPadWidget", () => {
   });
 
   it("shows Laya denied under the confirm control and leaves it off", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Explore cannot place orders.", 403, {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
       code: "laya_denied",
-      reason: "Explore cannot place orders.",
-      message: "Explore cannot place orders.",
+      reason: "Example cannot place orders.",
+      message: "Example cannot place orders.",
       limits: { max_quantity: 100 },
     }));
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const confirm = await screen.findByRole("button", {
-      name: /confirm (simulated practice|sample) order/i,
+      name: /confirm (simulated practice|example) order/i,
     });
     fireEvent.click(confirm);
     const denied = await screen.findByTestId("laya-denied");
     expect(denied).toHaveTextContent("Laya denied");
-    expect(denied).toHaveTextContent("Explore cannot place orders.");
+    expect(denied).toHaveTextContent("Example cannot place orders.");
     expect(denied).toHaveTextContent("Max quantity 100.");
     expect(confirm).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
@@ -345,7 +444,7 @@ describe("OrderPadWidget", () => {
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const confirm = await screen.findByRole("button", {
-      name: /confirm (simulated practice|sample) order/i,
+      name: /confirm (simulated practice|example) order/i,
     });
     fireEvent.click(confirm);
     expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
@@ -356,7 +455,7 @@ describe("OrderPadWidget", () => {
     });
 
     expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
   });
 
   it("shows a quantity clamp before the place completes", async () => {
@@ -372,13 +471,13 @@ describe("OrderPadWidget", () => {
     fireEvent.change(qty, { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     fireEvent.click(await screen.findByRole("button", {
-      name: /confirm (simulated practice|sample) order/i,
+      name: /confirm (simulated practice|example) order/i,
     }));
     expect(await screen.findByTestId("laya-clamp")).toHaveTextContent("Qty reduced to 1 (Laya limit)");
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
     expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
   });
 
   it("caps Close at the open quantity and keeps it enabled while Laya is Down", async () => {
@@ -638,7 +737,7 @@ describe("OrderPadWidget options premium prefill", () => {
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
-    expect(screen.getByText(/Sample premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Example premium ₹623.45/)).toBeInTheDocument();
     expect(screen.queryByText(/Live premium/i)).not.toBeInTheDocument();
   });
 
@@ -773,11 +872,11 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockMode.current = "explore";
     render(<OrderPadWidget {...defaultProps} />);
 
-    expect(screen.getByRole("button", { name: /sample buy/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /example buy/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /practice buy/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /sample buy/i }));
+    fireEvent.click(screen.getByRole("button", { name: /example buy/i }));
 
-    expect(await screen.findByRole("dialog", { name: /review sample order/i })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /review example order/i })).toBeInTheDocument();
     expect(screen.queryByText(/connect a broker to place orders/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -787,7 +886,7 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockPlaceOrder.mockResolvedValue({ orderId: "SAMPLE-EXPLORE" });
     render(<OrderPadWidget {...defaultProps} />);
 
-    await reviewAndConfirmPractice(/sample buy/i);
+    await reviewAndConfirmPractice(/example buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
@@ -875,8 +974,9 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     expect(reviewQueries.getByText("1")).toBeInTheDocument();
     expect(reviewQueries.getByText("₹250.50 (estimated fill)")).toBeInTheDocument();
     expect(reviewQueries.getByText("₹250.50")).toBeInTheDocument();
-    expect(reviewQueries.getByText(/simulation only/i)).toBeInTheDocument();
-    expect(reviewQueries.getByText(/no broker or native trading api is contacted/i)).toBeInTheDocument();
+    expect(reviewQueries.getByText("Confirm places this simulated order.")).toBeInTheDocument();
+    expect(reviewQueries.queryByText(/Explore records a sample fill/i)).not.toBeInTheDocument();
+    expect(reviewQueries.queryByText(/sandboxengine/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 

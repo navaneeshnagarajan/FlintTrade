@@ -145,7 +145,7 @@ describe("StrategyBuilderTool", () => {
     await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
 
     expect(screen.getByLabelText("Premium")).toHaveValue(45);
-    expect(screen.getAllByText("Sample premium — edit to model").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Example premium — edit to model").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
 
@@ -153,7 +153,7 @@ describe("StrategyBuilderTool", () => {
     expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
     expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹3,375.00");
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22545");
-    expect(screen.getByText("Sample premium — edit to model")).toBeInTheDocument();
+    expect(screen.getByText("Example premium — edit to model")).toBeInTheDocument();
     expect(screen.getAllByText("₹3,375.00 per lot · 1 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Premium is ₹0 — payoff treats cost as free")).not.toBeInTheDocument();
   });
@@ -195,7 +195,7 @@ describe("StrategyBuilderTool", () => {
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
     expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("₹0.00");
     expect(screen.getByText("Premium is ₹0 — payoff treats cost as free")).toBeInTheDocument();
-    expect(screen.queryByText("Sample premium — edit to model")).not.toBeInTheDocument();
+    expect(screen.queryByText("Example premium — edit to model")).not.toBeInTheDocument();
   });
 
   it("applies a live load-template event while mounted", () => {

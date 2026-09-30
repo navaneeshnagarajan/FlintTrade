@@ -32,7 +32,7 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import { downgradeMode, modeAfterPasswordSignIn, unlockWithPin } from "@/lib/modeAuth";
 import { lockedDeskHeading, unlockDeskLabel } from "@/lib/unlockDeskLabel";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
@@ -123,33 +123,29 @@ export default function LoginRoute({
       });
       const data = await resp.json();
       if (resp.ok && data.data?.token) {
+        // A finished Setup opens in Practice. Password login mints a
+        // practice JWT. A missing claim, a legacy explore claim, or a Live
+        // claim is upgraded before the desk opens, so sign-in never stays
+        // on example data and never arms Live.
+        const reportedMode = data.data.mode;
+        const deskMode = modeAfterPasswordSignIn(reportedMode);
+        let practiceToken = data.data.token as string;
+        if (reportedMode !== "practice") {
+          try {
+            practiceToken = await downgradeMode(deskMode, data.data.token);
+          } catch {
+            if (!isAuthSessionFenceCurrent(requestFence)) return;
+            setError("Could not open Practice. Try again.");
+            return;
+          }
+        }
         if (!useAuthStore.getState().setLoggedInIfCurrent(
-          data.data.token,
+          practiceToken,
           data.data.username,
           data.data.expires_at,
           requestFence,
         )) return;
-        const loginFence = captureAuthSessionFence();
-        // Reconcile the persisted UI mode with the freshly-minted JWT.
-        // Password login always mints an `explore` JWT. If the UI was last
-        // in Live, drop to Explore (never silently re-arm real money — Live
-        // requires the explicit PIN dialog). If the UI was in Practice,
-        // upgrade the JWT to practice so sandbox orders aren't rejected 403
-        // `mode_blocked` (Phase 1 G1: the login-time half of the divergence).
-        const uiMode = useModeStore.getState().mode;
-        if (uiMode === "live") {
-          useModeStore.getState().setMode("explore");
-        } else if (uiMode === "practice") {
-          try {
-            const practiceToken = await downgradeMode("practice", data.data.token);
-            if (!useAuthStore.getState().updateToken(practiceToken, loginFence.generation)) return;
-          } catch {
-            if (!isAuthSessionFenceCurrent(loginFence)) return;
-            // Couldn't sync — fall back to Explore rather than leave the UI
-            // in a Practice state the JWT doesn't back.
-            useModeStore.getState().setMode("explore");
-          }
-        }
+        useModeStore.getState().setMode(deskMode);
         onSuccess();
       } else if (isAuthSessionFenceCurrent(requestFence)) {
         setError(data.message || "Invalid credentials.");
@@ -251,9 +247,8 @@ export default function LoginRoute({
         {mode === "pin" ? (
           <div className="space-y-4">
             <div>
-              <p className="text-xs text-text-muted mb-1.5">Quick Unlock</p>
-              <label htmlFor="pin" className="text-xs text-text-secondary font-medium block mb-1.5">
-                PIN
+              <label htmlFor="pin" className="text-xs text-text-muted font-medium block mb-1.5">
+                Quick Unlock
               </label>
               <Input
                 id="pin"
@@ -263,7 +258,6 @@ export default function LoginRoute({
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
                 placeholder="6-digit PIN"
-                aria-label="Enter your 6-digit PIN"
                 className="text-center font-mono text-lg tracking-widest"
                 onKeyDown={(e) => e.key === "Enter" && handlePinLogin()}
                 autoFocus
@@ -352,9 +346,9 @@ export default function LoginRoute({
                 type="button"
                 onClick={onExplore}
                 className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
-                aria-label="Try with sample data without signing in"
+                aria-label="Try with example data without signing in"
               >
-                Try with sample data →
+                Try with example data →
               </button>
             )}
             {onUnfinishedSetup && (

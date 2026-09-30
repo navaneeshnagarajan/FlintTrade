@@ -48,7 +48,7 @@ _WEBHOOK_REGISTRY_LOCK_TIMEOUT_SECONDS = 10.0
 # ------------------------------------------------------------------
 
 
-_EXPLORE_SCHEDULE_WRITE_BLOCKED = "Sample schedule — control unavailable in Explore"
+_EXPLORE_SCHEDULE_WRITE_BLOCKED = "Example schedule — control unavailable"
 
 
 def _explore_schedule_write_blocked() -> tuple[Any, int] | None:
@@ -1670,7 +1670,7 @@ def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
     )
     return jsonify({
         "status": "error",
-        "message": "Mirroring is blocked in Explore (sample-only).",
+        "message": "Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.",
         "code": "mode_blocked",
     }), 403
 

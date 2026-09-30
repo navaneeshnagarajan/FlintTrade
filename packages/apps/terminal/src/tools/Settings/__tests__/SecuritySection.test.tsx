@@ -286,4 +286,81 @@ describe("SecuritySection — quick-unlock PIN", () => {
     );
     expect(pinSetCalls).toHaveLength(0);
   });
+
+  it("enrols an authenticator from Security after Set up later", async () => {
+    const bodies: { url: string; body: unknown }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/auth/status")) {
+        return Promise.resolve(
+          jsonResponse({
+            status: "success",
+            data: { is_setup: true, is_locked: false, has_pin: true, totp_enabled: false },
+          }),
+        );
+      }
+      if (url.includes("/security/stats")) {
+        return Promise.resolve(
+          jsonResponse({ status: "success", data: { total_ips: 0, banned_count: 0, top_offenders: [] } }),
+        );
+      }
+      if (url.includes("/security/bans")) {
+        return Promise.resolve(jsonResponse({ status: "success", data: { bans: [] } }));
+      }
+      if (url.includes("/security/settings")) {
+        return Promise.resolve(
+          jsonResponse({
+            status: "success",
+            data: {
+              auto_ban_enabled: false,
+              ban_threshold: 25,
+              notfound_ban_threshold: 10,
+              ban_duration: 24,
+            },
+          }),
+        );
+      }
+      if (url.includes("regenerate-2fa") || url.includes("/totp/enable")) {
+        bodies.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
+        if (url.includes("regenerate-2fa")) {
+          return Promise.resolve(
+            jsonResponse({
+              status: "success",
+              data: {
+                totp_uri: "otpauth://totp/FlintTrade:op?secret=ABC234&issuer=FlintTrade",
+                backup_codes: ["CODE1234"],
+              },
+            }),
+          );
+        }
+        return Promise.resolve(jsonResponse({ status: "success", data: { totp_enabled: true } }));
+      }
+      return Promise.resolve(jsonResponse({ status: "success", data: {} }));
+    });
+
+    renderSection();
+
+    expect(await screen.findByText("Not enrolled")).toBeInTheDocument();
+    expect(screen.getByTestId("authenticator-enrolment")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Password to enrol authenticator"), {
+      target: { value: "hunter2secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /show authenticator qr/i }));
+
+    expect(await screen.findByLabelText("Authenticator QR code")).toBeInTheDocument();
+    expect(screen.getByText("CODE1234")).toBeInTheDocument();
+    expect(bodies[0]?.body).toEqual({ password: "hunter2secret" });
+
+    fireEvent.change(screen.getByLabelText("Authenticator enrolment code"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /confirm enrolment/i }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Authenticator enrolled. Live can use it once a PIN and a broker are in place.",
+    );
+    expect(screen.getByText("Authenticator enrolled")).toBeInTheDocument();
+    expect(bodies[1]?.body).toEqual({ totp_code: "123456" });
+    expect(String(bodies[1]?.url)).toContain("/v1/auth/totp/enable");
+  });
 });

@@ -17,7 +17,7 @@ import {
 describe("exploreScheduleGate", () => {
   it("uses the locked Pause helper title", () => {
     expect(SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE).toBe(
-      "Sample schedule — control unavailable in Explore",
+      "Example schedule — control unavailable",
     );
   });
 
@@ -28,8 +28,8 @@ describe("exploreScheduleGate", () => {
   });
 
   it("remints Active Explore jobs to Sample and muted paused jobs to Demo", () => {
-    expect(exploreScheduleDisplayStatus("ACTIVE", "explore")).toBe("Sample");
-    expect(exploreScheduleDisplayStatus("active", "explore")).toBe("Sample");
+    expect(exploreScheduleDisplayStatus("ACTIVE", "explore")).toBe("Example");
+    expect(exploreScheduleDisplayStatus("active", "explore")).toBe("Example");
     expect(exploreScheduleDisplayStatus("PAUSED", "explore")).toBe("Demo");
     expect(exploreScheduleDisplayStatus("paused", "explore")).toBe("Demo");
   });

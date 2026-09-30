@@ -152,7 +152,7 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
   `cancelgttorder`, `gttorderbook`. Live broker support: Dhan + Zerodha.
   Other brokers return a clean 501 ("GTT orders are not supported for
   broker 'X' yet") on the OpenAlgo service itself. FlintTrade still
-  registers `/api/v1/orders/gtt-{place,modify,cancel}` so Explore and
+  registers `/api/v1/orders/gtt-{place,modify,cancel}` so example data and
   Practice are refused; Live `gtt-*` returns HTTP 501 rather than
   forwarding that upstream 501. A body with `"variety": "gtt"` on
   place, routed place, exit-all, or a single-exit bracket is HTTP 422 `gtt_unsupported`
@@ -174,8 +174,8 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
 Upstream renamed "virtual / paper trading" to "sandbox trading" in
 v2.0.0.6. API field names (`analyzer_status`, `analyzer_toggle`) were
 left intact, so FlintTrade's client wrappers needed only docstring
-updates. FlintTrade's own Explore / Practice / Live tri-mode is a
-separate concept and stays named "Practice".
+updates. FlintTrade Modes are Practice, Connected (read), and Live.
+Example is sample data, not a Mode. Simulated fills stay named Practice.
 
 ### Deployment security — `TRUST_PROXY_HEADERS`
 

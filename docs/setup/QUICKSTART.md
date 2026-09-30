@@ -1,8 +1,8 @@
 # Machine Setup Guide
 
 > Works on any Windows, macOS, or Ubuntu machine — including a new contributor's box.
-> FlintTrade `v0.0.1` is not production ready; use Explore and Practice
-> modes before connecting any live broker workflow.
+> FlintTrade `v0.0.1` is not production ready; use Practice, and example data,
+> before connecting any live broker workflow.
 
 ## 1. Install FlintTrade
 

@@ -1,32 +1,62 @@
 ---
 title: Product Modes
-description: Separate Explore/Practice/Live operating modes from Sample/Unavailable/Live/Stale provenance. Home versus Trade ownership.
+description: Practice and Live are Modes. Connected (read) is a broker status. Example is sample data. Provenance stays separate. Home versus Trade ownership.
 ---
 
 # Product Modes
 
-FlintTrade distinguishes operating modes from data provenance. Provenance is independent of operating mode.
+FlintTrade distinguishes Modes from sample data and from data provenance.
 
-## Operating Modes
+## Modes
 
-- **Explore**: sample-only discovery; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
-- **Practice**: FlintTrade `SandboxEngine` fills (primary paper); no real broker order or capital movement. Orders are placed on `POST /api/v1/orders/place` after Laya admission. Square-off is that same place. Settings → Practice does not place. Restore of a Practice backup is Practice only; restored fills are tagged **Restored** and left out of Laya, strategy, benchmark, and training readers. Kotak Neo has no sandbox — never offer “Neo Practice”.
-- **Live**: fail-closed until native Dhan + Neo Connected (read) is trusted and funded unlock is explicit. Connected (read) is a broker status, not a Mode. Non-funded live reads are never placeable Live orders. Live place is `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, or `POST /api/v1/orders/bracket` when the body has exactly one stop-loss or one target (Laya, then SafetySystem). Practice on the bracket route is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Every order FlintTrade submits goes through admission when it's placed. `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` on that place, on routed place, on `POST /api/v1/positions/exit-all`, and on that bracket, before Laya, SafetySystem, and any broker call. The refusal is `Not placed. GTT orders aren't supported right now.` The Order Pad GTT option stays visible and disabled, with the tooltip `GTT orders aren't supported right now.` Exit-all requires a server reduce-only proof. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.` Laya is not Ready by default.
+A fresh browser with no saved Mode opens in Practice. Password sign-in and account setup open in Practice. A fresh login opens Practice. Quick Unlock restores the existing session and keeps its Mode. Live is entered only through the Live switch (`POST /v1/auth/live`). `POST /v1/auth/mode` accepts only a switch to Practice.
 
-## Provenance Labels
+Practice orders are placed on `POST /api/v1/orders/place` after Laya admission. Square-off is that same place. Settings → Practice does not place. Restore of a Practice backup is Practice only; restored fills are tagged **Restored** and left out of Laya, strategy, benchmark, and training readers.
 
-- **Sample**: Synthetic or historical sample data for illustration.
-- **Unavailable**: Data source temporarily unavailable.
-- **Live**: Real-time live data.
-- **Stale**: Data that has not been refreshed within expected freshness window. Stale requires a real freshness clock; this page describes the label, not a fake clock.
+Live place is `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, or `POST /api/v1/orders/bracket` when the body has exactly one stop-loss or one target (Laya, then SafetySystem). Practice on the bracket route is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Every order FlintTrade submits goes through admission when it's placed. `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` on that place, on routed place, on `POST /api/v1/positions/exit-all`, and on that bracket, before Laya, SafetySystem, and any broker call. The refusal is `Not placed. GTT orders aren't supported right now.` The Order Pad GTT option stays visible and disabled, with the tooltip `GTT orders aren't supported right now.` Exit-all requires a server reduce-only proof. Non-funded live reads are never placeable Live orders. Laya is not Ready by default.
 
-## Surface Ownership
+The Mode chip in the TopBar opens the Mode menu: **Practice**, **Connected (read)**, and **Live**.
 
-- **Home**: Concise, read-only overview and discovery surface.
-- **Trade**: Execution, charts, positions, orders, monitoring, and operational-risk controls.
+- **Practice**: simulated fills, no real money. The Mode line reads `Practice — simulated fills, no real money.` Order review reads `Confirm places this simulated order.` The confirm button reads **Confirm simulation**. Kotak Neo has no sandbox — never offer “Neo Practice”.
+- **Connected (read)**: a read-only posture on a Practice session after a broker is connected. The menu item stays disabled until then and shows `Connect a broker first`. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
+- **Live**: real-money capable when a broker is Connected. Orders place only on a live session. The Mode line reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Choosing an eligible Live item asks for the 6-digit PIN (**Switch to Live Trading?**). Opening the menu does not open that dialog.
 
-**71 widgets** in the current catalogue (historical context of 102→69 consolidation preserved in the repository).
+Live stays locked while any of these reasons apply, in this order:
+
+- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no broker is connected. Either gap is enough. When the authenticator is not enrolled, including after **Later** on **Two-factor authentication**, **Enrol authenticator in Settings** links to Settings → Security (`/settings#security`). The Live switch does not ask for an authenticator code.
+- `Create a PIN in Settings` — no PIN exists. Live stays locked, and those words link to Settings → Security (`/settings#security`).
+- `Not qualified for Live` — only when the place gate reports that this operator is not qualified. A missing report adds nothing. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
+
+## Example data
+
+Example is sample data, not a Mode. The chip reads **Example**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**.
+
+On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
+
+The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the single inline sample XIRR. There is no Portfolio XIRR card. On sample figures, Net Worth reads `Example equity and cash. Connect a broker to see yours.`; the allocation label is `Allocation` with the Example chip, and each `Live from broker` note on those figures is the Example chip. On those Net Worth figures the Example chip paints only on example data. A connected book keeps `Allocation (live assets only)` and `Live from broker`. Mutual Funds on example data reads `Example NAVs · as of 10-Sep-2026`. Benchmark figures stay hard-coded in every Mode and keep the **Example** chip.
+
+## Status homes
+
+Each status has one home.
+
+- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`. The Practice ticker shows `Last close prices · Connect a broker for live prices →`, linking to `/settings#brokers`, only when the market session is not unavailable and neither the WebSocket nor a fresh REST fallback is producing quotes. An unavailable session is never labelled last close.
+- **Broker** — the desk-status broker chip (**Broker Connected**, **Broker Connected (read)**, or **Broker Unavailable**).
+- **Market** — the TopBar market-session chip. A confirmed closed cash session reads `Market closed · opens 09:15`. Unavailable timings read `Market unavailable`. That chip is not a Mode.
+
+## Provenance labels
+
+- **Sample**: synthetic or historical figures for illustration. Operator-facing sample figures are labelled **Example**.
+- **Unavailable**: data source temporarily unavailable.
+- **Live**: real-time live data. This label is not Live mode.
+- **Stale**: data that has not been refreshed within the expected freshness window. Stale requires a real freshness clock; this page describes the label, not a fake clock.
+
+## Surface ownership
+
+- **Home**: concise, read-only overview and discovery surface.
+- **Trade**: execution, charts, positions, orders, monitoring, and operational-risk controls.
+
+**71 widgets** in the current catalogue.
 
 Beta software. No financial advice. No promise of production readiness.
 
-Practice does not imply Sample data. Live mode does not guarantee Live provenance. Provenance remains independent of Explore/Practice/Live.
+Practice does not imply Example data. Live mode does not guarantee a Live feed. Provenance remains independent of Practice, Connected (read), and Live.

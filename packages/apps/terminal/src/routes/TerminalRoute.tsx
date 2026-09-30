@@ -318,10 +318,14 @@ function TradeCompactWorkspace({
   onOpenPresetPicker: () => void;
 }) {
   const [activeWidgetId, setActiveWidgetId] = useState<CompactTradeWidgetId>("chart");
+  const [orderPadParams, setOrderPadParams] = useState<Record<string, unknown> | undefined>();
   const tabRefs = useRef<Partial<Record<CompactTradeWidgetId, HTMLButtonElement | null>>>({});
   const activeWidget = COMPACT_TRADE_WIDGETS.find((widget) => widget.id === activeWidgetId) ?? COMPACT_TRADE_WIDGETS[0];
   const ActiveWidgetPanel = widgetComponents[activeWidget.id];
-  const panelProps = detachedPanelProps(`compact-${activeWidget.id}`);
+  const panelProps = detachedPanelProps(
+    `compact-${activeWidget.id}`,
+    activeWidget.id === "orderpad" ? orderPadParams : undefined,
+  );
 
   function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | undefined;
@@ -338,6 +342,20 @@ function TradeCompactWorkspace({
     setActiveWidgetId(nextId);
     tabRefs.current[nextId]?.focus();
   }
+
+  useEffect(() => {
+    function onAddWidget(event: Event) {
+      const detail = (event as CustomEvent<{
+        widgetId?: string;
+        props?: Record<string, unknown>;
+      }>).detail;
+      if (detail?.widgetId !== "orderpad") return;
+      setActiveWidgetId("orderpad");
+      if (detail.props) setOrderPadParams(detail.props);
+    }
+    window.addEventListener("flinttrade:addWidget", onAddWidget);
+    return () => window.removeEventListener("flinttrade:addWidget", onAddWidget);
+  }, []);
 
   return (
     <section
@@ -366,12 +384,7 @@ function TradeCompactWorkspace({
                 tabIndex={isActive ? 0 : -1}
                 onClick={() => setActiveWidgetId(id)}
                 onKeyDown={(event) => handleTabKeyDown(event, index)}
-                className={[
-                  "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors",
-                  isActive
-                    ? "border-profit/40 bg-profit/15 text-profit shadow-[0_0_18px_rgba(34,197,94,0.12)]"
-                    : "border-border-default bg-surface-card text-text-secondary hover:border-profit/25 hover:text-text-primary",
-                ].join(" ")}
+                className="ft-tray-tab inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs"
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden />
                 {label}
@@ -409,7 +422,7 @@ function TradeCompactWorkspace({
             onClick={onOpenWidgetPicker}
           >
             <LayoutGrid className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Add
+            + Widget
           </Button>
           <Button
             type="button"
@@ -743,6 +756,13 @@ export default function TerminalRoute() {
       if (!api) return;
 
       const meta = widgetCatalog.find((widget) => widget.id === widgetId);
+      if (widgetId === "orderpad") {
+        const reused = api.retargetOrderPad(
+          detail.props ?? {},
+          detail.props ? detail.title : undefined,
+        );
+        if (reused) return;
+      }
       api.addPanel({
         id: `${widgetId}-${Date.now()}`,
         component: widgetId,
@@ -866,6 +886,20 @@ export default function TerminalRoute() {
                       realtimeResize
                     />
                   )}
+                  {panelCount !== null && panelCount > 0 && (
+                    <div className="pointer-events-none absolute right-14 top-1 z-20">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="pointer-events-auto h-7 border-border-default px-2 text-xs text-text-secondary hover:text-text-primary"
+                        onClick={() => setWidgetPickerOpen(true)}
+                        data-testid="add-widget-button"
+                      >
+                        + Widget
+                      </Button>
+                    </div>
+                  )}
                   {/* Empty-state overlay: shown when the canvas has no open panels */}
                   {panelCount === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
@@ -893,7 +927,7 @@ export default function TerminalRoute() {
                             data-tour-target="widget-picker"
                           >
                             <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
-                            Add Widgets
+                            + Widget
                           </Button>
                           <Button
                             size="sm"

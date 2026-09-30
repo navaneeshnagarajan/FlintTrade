@@ -311,7 +311,7 @@ def _create_token(
     username: str,
     *,
     live_mode_unlocked: bool = False,
-    mode: str = "explore",
+    mode: str = "practice",
     setup_session: bool = False,
     setup_bound: str = "",
 ) -> str:
@@ -327,8 +327,11 @@ def _create_token(
             ``live_mode_unlocked`` claim that authorises live order
             execution.  Only set after successful PIN verification.
         mode: Trading mode at token-issue time: ``"explore"``,
-            ``"practice"``, or ``"live"``.  Defaults to ``"explore"`` so
-            that freshly issued (non-PIN) tokens cannot place live orders.
+            ``"practice"``, or ``"live"``.  Defaults to ``"practice"``.
+            Password login and account setup use that default.
+            ``"explore"`` is passed explicitly and is reserved for the web
+            demo; a desk session does not mint it. ``"live"`` still
+            requires PIN verification (``live_mode_unlocked``).
         setup_session: If ``True``, mark this as the one-shot account-create
             JWT. Passwordless ``/setup/reset`` accepts only this claim.
         setup_bound: Account ``created_at`` stamp bound into a setup JWT so
@@ -583,16 +586,17 @@ def auth_setup() -> tuple[Any, int]:
     except RuntimeError:
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
 
-    # Mint an explore-mode session token so the REST of the setup wizard is
+    # Mint a practice session so the rest of the setup wizard is
     # authenticated (broker connection + mode selection are behind the G9
     # write guard / D6 session-bound PIN). Legitimate: the operator is
     # physically creating the account right now, so this first session needs no
-    # separate TOTP step. It is non-live (mode=explore, live_mode_unlocked
-    # false). Authenticator enrolment is optional for Explore/Practice;
+    # separate TOTP step. It is non-live (mode=practice, live_mode_unlocked
+    # false). Authenticator enrolment is optional for Practice;
     # arming Live still requires PIN and a confirmed authenticator.
+    # Example data is reserved for the web demo and is not minted here.
     token = _create_token(
         username,
-        mode="explore",
+        mode="practice",
         setup_session=True,
         setup_bound=svc.get_created_at(),
     )
@@ -602,7 +606,7 @@ def auth_setup() -> tuple[Any, int]:
             "backup_codes": backup_codes,
             "totp_uri": svc.get_totp_provisioning_uri(),
             "token": token,
-            "mode": "explore",
+            "mode": "practice",
         },
     }), 201
 
@@ -973,6 +977,7 @@ def auth_login() -> tuple[Any, int]:
             "token": token,
             "username": profile.get("username"),
             "expires_at": _next_8am_ist().isoformat(),
+            "mode": "practice",
         },
     }), 200
 
@@ -1311,28 +1316,27 @@ def auth_totp_enable() -> tuple[Any, int]:
 @auth_bp.route("/mode", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_mode_switch() -> tuple[Any, int]:
-    """Downgrade the current session to Practice or Explore mode.
+    """Downgrade the current session to Practice.
 
-    Issues a NEW JWT with ``mode: "practice"`` or ``mode: "explore"`` and
+    Issues a NEW JWT with ``mode: "practice"`` and
     ``live_mode_unlocked: false``, and REVOKES the caller's existing JWT
     (so a stale live-unlocked token can't be replayed). This closes the
     2026-05-19 Codex audit finding that ``ModeIndicator.tsx`` was
     flipping local UI state to Practice without ever invalidating the
     PIN-unlocked JWT — meaning a retained live-unlocked JWT could still
-    place live orders even after the UI displayed Practice. The Explore
-    target was added in Phase 1 (2026-07-03) so that EVERY UI mode change
-    keeps the JWT claim in lockstep — a Practice/Live session flipping the
-    UI to Explore must not keep holding a higher-mode token (design D1,
-    ``.local/specs/auth-phase1/DESIGN_LOG.md``).
+    place live orders even after the UI displayed Practice.
 
-    Both accepted targets are privilege reductions (explore is the most
-    restrictive mode; practice routes to the broker-free sandbox), so any
-    valid session token may request them. Switching to Live goes through
-    ``POST /v1/auth/live`` (PIN plus authenticator enrolment). This endpoint
-    does not change Mode to Live.
+    Practice is a privilege reduction (the broker-free sandbox), so any
+    valid session token may request it. Example data is not a desk
+    downgrade: ``explore`` is refused before the current session is
+    revoked, and an existing explore token stays valid until the next
+    sign-in. Switching to Live goes through ``POST /v1/auth/live``
+    (PIN plus authenticator enrolment). This endpoint does not change
+    Mode to Live.
 
     Request JSON:
-        mode (str): ``"practice"`` or ``"explore"``. Any other value is a 400.
+        mode (str): ``"practice"``. Any other value, including
+        ``"explore"`` and ``"live"``, is a 400.
 
     Auth:
         Caller must send a valid Bearer JWT (any mode). The endpoint reads
@@ -1346,11 +1350,11 @@ def auth_mode_switch() -> tuple[Any, int]:
         target; 503 if auth service is not configured.
     """
     target_mode = str((request.get_json(silent=True) or {}).get("mode", "")).strip().lower()
-    if target_mode not in ("practice", "explore"):
+    if target_mode != "practice":
         return jsonify({
             "status": "error",
             "message": (
-                "Only downgrades to 'practice' or 'explore' are allowed here. "
+                "Only a downgrade to practice is allowed here. "
                 "Switch to Live via POST /v1/auth/live with PIN verification."
             ),
         }), 400

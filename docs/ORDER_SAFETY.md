@@ -31,7 +31,7 @@ the admission below. `place-smart`, `open-position`, and `close-position`
 are not mounted. The Practice sandbox has no place or square-off route.
 Settings → Practice does not place.
 
-1. The mode guard runs first. Explore stays `mode_blocked` and does not
+1. The mode guard runs first. Example data stays `mode_blocked` and does not
    enter `Laya.admit`.
 2. `Laya.admit` then admits or refuses the proposal. A refusal
    (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
@@ -101,7 +101,7 @@ Operator and automate place run the mode guard, then `Laya.admit`.
 `BrokerRouter`. Laya does not replace those layers, and `gate_order`
 remains the only mint after an allowed Live place. **Practice** place is
 admitted before the sandbox and does not enter SafetySystem, `gate_order`,
-or `BrokerRouter`. Explore stays `mode_blocked` before admit. A refusal
+or `BrokerRouter`. Example data stays `mode_blocked` before admit. A refusal
 (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
 SafetySystem on Live and before the sandbox on Practice. A clamp names
 the reduced quantity. Neither size is placed. Order Pad and Quick Trade
@@ -161,7 +161,7 @@ straight to the sandbox.
 | Allow or deny | `allowed` and `reason` | L1–L5 pass or fail | refusal string | verdict `allow` and `reason` |
 | Size | `position_qty` | L1 quantity, L2 limits | lot multiple | `limits.max_quantity` |
 | Price | stop and target | L1 price band | limit and trigger present | price and trigger present |
-| Mode | not modelled | mode guard | Explore refused | Explore stays `mode_blocked` before admit; Down refuses the proposal |
+| Mode | not modelled | mode guard | Example data refused | Example data stays `mode_blocked` before admit; Down refuses the proposal |
 | Book, margin, Greeks, daily loss, kill | daily loss is agent config | L2–L5 | not present | not owned |
 
 The automate risk note is not this admission. Lot size, the price band,

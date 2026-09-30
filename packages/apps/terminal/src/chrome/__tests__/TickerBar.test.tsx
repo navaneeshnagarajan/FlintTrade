@@ -35,17 +35,42 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-// isMarketHours mock — controlled per test
+// isMarketHours mock — controlled per test. The shared session label stays real.
 const mockIsMarketHours = vi.fn().mockReturnValue(false);
-vi.mock("@/lib/market", () => ({
-  isMarketHours: (...args: unknown[]) => mockIsMarketHours(...args),
+vi.mock("@/lib/market", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/market")>();
+  return {
+    ...actual,
+    isMarketHours: (...args: unknown[]) => mockIsMarketHours(...args),
+  };
+});
+
+const mockMarketSession: {
+  status: "unavailable" | "closed" | "continuous";
+  label: string;
+  title: string;
+  foSecondary: string | null;
+  isGreenOpen: boolean;
+} = {
+  status: "unavailable",
+  label: "Market unavailable",
+  title: "Market unavailable",
+  foSecondary: null,
+  isGreenOpen: false,
+};
+
+vi.mock("@/hooks/useOperatorMarketSession", () => ({
+  useOperatorMarketSession: () => mockMarketSession,
 }));
 
+import { tickerFallbackStatusAtom } from "@/hooks/useTickerFallback";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import TickerBar from "../TickerBar";
 
-function renderTickerBar() {
-  const store = createStore();
+const LAST_CLOSE_LINE = "Last close prices · Connect a broker for live prices →";
+
+function renderTickerBar(store = createStore()) {
   return render(
     <JotaiProvider store={store}>
       <MemoryRouter>
@@ -53,6 +78,12 @@ function renderTickerBar() {
       </MemoryRouter>
     </JotaiProvider>,
   );
+}
+
+function confirmMarketClosed() {
+  mockMarketSession.status = "closed";
+  mockMarketSession.label = "Closed";
+  mockMarketSession.title = "Market closed";
 }
 
 function setIndices(
@@ -67,7 +98,12 @@ describe("TickerBar", () => {
     vi.restoreAllMocks();
     mockIndicesData.length = 0;
     mockIsMarketHours.mockReturnValue(false);
+    mockMarketSession.status = "unavailable";
+    mockMarketSession.label = "Market unavailable";
+    mockMarketSession.title = "Market unavailable";
+    mockMarketSession.isGreenOpen = false;
     useModeStore.setState({ mode: "explore" });
+    useConnectionStore.setState({ wsConnected: false });
   });
 
   it("renders without crashing", () => {
@@ -76,14 +112,15 @@ describe("TickerBar", () => {
     expect(container).toBeTruthy();
   });
 
-  it("shows broker connect prompt when no live data", () => {
+  it("does not repeat broker status on the ticker", () => {
     setIndices([
       { name: "NIFTY 50", data: null },
       { name: "SENSEX", data: null },
     ]);
     renderTickerBar();
 
-    expect(screen.getByText(/connect broker for live prices/i)).toBeInTheDocument();
+    expect(screen.queryByText(/connect broker for live prices/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no broker connected/i)).not.toBeInTheDocument();
   });
 
   it("shows index names when data is present", () => {
@@ -112,7 +149,7 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveTextContent("Example");
     expect(chip).toHaveAttribute("data-state", "sample");
     expect(chip).not.toHaveTextContent("Live");
   });
@@ -123,6 +160,76 @@ describe("TickerBar", () => {
 
     expect(screen.getByRole("region", { name: "Market indices" })).toBeInTheDocument();
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
+  });
+
+  it("shows one last-close line in Practice when no live feed is connected", () => {
+    confirmMarketClosed();
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({ wsConnected: false });
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50, prevClose: 23400 } as WsTick },
+      { name: "SENSEX", data: { ltp: 77200 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    const line = screen.getByTestId("ticker-last-close");
+    expect(line).toHaveTextContent(LAST_CLOSE_LINE);
+    expect(line).toHaveClass("text-text-secondary");
+    expect(screen.getAllByTestId("ticker-last-close")).toHaveLength(1);
+    const link = screen.getByRole("link", { name: "Connect a broker for live prices →" });
+    expect(link).toHaveAttribute("href", "/settings#brokers");
+    expect(screen.getAllByText("NIFTY 50").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Last close prices/)).toHaveLength(1);
+  });
+
+  it("hides the last-close line when a live feed is connected", () => {
+    confirmMarketClosed();
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({ wsConnected: true });
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    expect(screen.queryByTestId("ticker-last-close")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last close prices/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Connect a broker for live prices/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the last-close line when the REST fallback is still fresh", () => {
+    confirmMarketClosed();
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({ wsConnected: false });
+    const store = createStore();
+    store.set(tickerFallbackStatusAtom, {
+      active: true,
+      lastUpdatedAt: Date.now(),
+      isStale: false,
+      polledKeys: ["NSE_INDEX:NIFTY"],
+      droppedKeys: [],
+      truncated: false,
+    });
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50 } as WsTick },
+    ]);
+    renderTickerBar(store);
+
+    expect(screen.queryByTestId("ticker-last-close")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last close prices/)).not.toBeInTheDocument();
+  });
+
+  it("does not label an unavailable session as closed or last close", () => {
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({ wsConnected: false });
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    expect(screen.queryByTestId("ticker-last-close")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last close/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Market closed/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("NSE closed")).toBeInTheDocument();
   });
 
   it("does not show connect prompt when live data exists", () => {
@@ -150,7 +257,7 @@ describe("TickerBar", () => {
       renderTickerBar();
 
       // The MCX label badge should be present
-      expect(screen.getByLabelText(/MCX (open|closed)/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^MCX/)).toBeInTheDocument();
     });
 
     it("does not render MCX separator when no MCX instruments are in the atom", () => {
@@ -160,7 +267,7 @@ describe("TickerBar", () => {
       ]);
       renderTickerBar();
 
-      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^MCX/)).not.toBeInTheDocument();
     });
 
     it("renders MCX commodity chip names", () => {
@@ -201,7 +308,7 @@ describe("TickerBar", () => {
 
       const badge = screen.getByLabelText("MCX closed");
       expect(badge).toBeInTheDocument();
-      expect(badge).toHaveAttribute("title", "MCX session is closed");
+      expect(badge).toHaveAttribute("title", "MCX closed");
     });
 
     it("MCX instruments display LTP values correctly", () => {
@@ -274,7 +381,7 @@ describe("TickerBar", () => {
 
       expect(screen.getByLabelText("NSE closed")).toHaveAttribute(
         "title",
-        "NSE session is closed",
+        "NSE closed",
       );
       expect(screen.getByLabelText("BSE closed")).toBeInTheDocument();
       expect(screen.getByLabelText("MCX open")).toHaveAttribute(
@@ -296,7 +403,7 @@ describe("TickerBar", () => {
         "data-venues",
         "NSE,BSE",
       );
-      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^MCX/)).not.toBeInTheDocument();
     });
 
     it("adds NFO when an F&O symbol feeds the marquee", () => {
@@ -313,8 +420,23 @@ describe("TickerBar", () => {
       );
       expect(screen.getByLabelText("NFO closed")).toHaveAttribute(
         "title",
-        "NFO session is closed",
+        "NFO closed",
       );
+    });
+
+    it("uses the shared closed sentence only when the session is confirmed closed", () => {
+      confirmMarketClosed();
+      setIndices([
+        { name: "NIFTY 50", data: null },
+        { name: "SENSEX", data: null },
+      ]);
+      renderTickerBar();
+
+      expect(screen.getByLabelText("NSE: Market closed · opens 09:15")).toHaveAttribute(
+        "title",
+        "Market closed · opens 09:15",
+      );
+      expect(screen.getByLabelText("BSE: Market closed · opens 09:15")).toBeInTheDocument();
     });
 
     it("omits the badge strip when the marquee has no symbols", () => {
@@ -334,9 +456,9 @@ describe("TickerBar", () => {
         "unavailable",
       );
       expect(screen.getByLabelText("Venues unavailable")).toHaveTextContent("Unavailable");
-      expect(screen.queryByLabelText(/NSE (open|closed)/i)).not.toBeInTheDocument();
-      expect(screen.queryByLabelText(/BSE (open|closed)/i)).not.toBeInTheDocument();
-      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^NSE/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^BSE/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^MCX/)).not.toBeInTheDocument();
     });
   });
 
@@ -347,6 +469,7 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("ticker-marquee-clone")).toHaveAttribute("aria-hidden", "true");
     const marquee = screen.getByTestId("ticker-marquee");
     expect(marquee).toHaveAttribute("data-motion", "marquee");
     expect(marquee.querySelector(".ticker-track")).not.toBeNull();

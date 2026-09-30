@@ -55,10 +55,7 @@ export function TradeBottomPanel() {
               tabIndex={isActive ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "px-2.5 h-5 text-xxs font-medium rounded transition-colors",
-                isActive
-                  ? "bg-surface-active text-text-primary"
-                  : "text-text-muted hover:text-text-secondary hover:bg-surface-hover"
+                "ft-tray-tab px-2.5 h-6 text-xxs rounded-none",
               )}
             >
               {tab.label}

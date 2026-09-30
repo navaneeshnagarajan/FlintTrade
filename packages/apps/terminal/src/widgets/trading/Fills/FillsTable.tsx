@@ -507,7 +507,7 @@ export function FillsTable({
               attachDisabled={isExplore || r.tradeKey === null}
               disabledReason={
                 isExplore
-                  ? "Sample data — attaching is disabled in Explore mode"
+                  ? "Example — attaching is disabled"
                   : "Screenshots attach to journalled fills — this fill has no journal record yet"
               }
               onAttach={(dataUrl) => {

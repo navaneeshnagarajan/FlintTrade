@@ -203,6 +203,10 @@ class TestLoginEndpoint:
         assert resp.status_code == 200
         data = resp.get_json()
         assert "token" in data["data"]
+        assert data["data"]["mode"] == "practice"
+        from flinttrade_core.auth_routes import decode_token
+
+        assert decode_token(data["data"]["token"])["mode"] == "practice"
 
     def test_login_password_only_when_authenticator_deferred(self, client):
         """FT-SETUP-002: Explore/Practice daily login is password-only
@@ -217,7 +221,14 @@ class TestLoginEndpoint:
             "password": "StrongP@ss123!",
         }, headers={"Content-Type": "application/json"})
         assert resp.status_code == 200
-        assert "token" in resp.get_json()["data"]
+        body = resp.get_json()["data"]
+        assert "token" in body
+        assert body["mode"] == "practice"
+        from flinttrade_core.auth_routes import decode_token
+
+        payload = decode_token(body["token"])
+        assert payload["mode"] == "practice"
+        assert payload["live_mode_unlocked"] is False
 
     def test_login_requires_totp_once_enrolled(self, client):
         c, svc = client
@@ -671,15 +682,37 @@ class TestModeSwitchEndpoint:
         # keeps the old live-unlocked JWT, frontend stays in Live.
         assert "data" not in resp.get_json() or "token" not in resp.get_json().get("data", {})
 
-    def test_downgrade_to_explore_returns_fresh_token(self, client):
-        """Phase 1 G1: /auth/mode must also accept an 'explore' downgrade so
-        a Practice/Live session flipping the UI to Explore keeps the JWT claim
-        in lockstep instead of holding a higher-mode token.
+    def test_legacy_explore_token_remains_a_session(self, client):
+        """An explore token issued before this default still authenticates
+        as example data until the next sign-in."""
+        c, _ = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        from flinttrade_core.auth_routes import _create_token, decode_token
+
+        legacy = _create_token("nav", mode="explore")
+        assert decode_token(legacy)["mode"] == "explore"
+        resp = c.post(
+            "/v1/auth/mode",
+            json={"mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {legacy}",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["mode"] == "practice"
+
+    def test_downgrade_to_explore_is_refused_without_revoking(self, client):
+        """A desk session cannot move to example data. The refusal happens
+        before revocation, so the live token can still downgrade to practice.
         """
         c, _ = client
         live_token = self._setup_and_pin_unlock(client)
 
-        resp = c.post(
+        refused = c.post(
             "/v1/auth/mode",
             json={"mode": "explore"},
             headers={
@@ -687,32 +720,19 @@ class TestModeSwitchEndpoint:
                 "Authorization": f"Bearer {live_token}",
             },
         )
-        assert resp.status_code == 200
-        data = resp.get_json()["data"]
-        assert data["mode"] == "explore"
-        assert data["live_mode_unlocked"] is False
-        assert data["token"] != live_token
+        assert refused.status_code == 400
+        assert "practice" in refused.get_json()["message"].lower()
 
-    def test_downgrade_to_explore_revokes_prior_jwt(self, client):
-        c, _ = client
-        live_token = self._setup_and_pin_unlock(client)
-        c.post(
+        still_valid = c.post(
             "/v1/auth/mode",
-            json={"mode": "explore"},
+            json={"mode": "practice"},
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {live_token}",
             },
         )
-        retry = c.post(
-            "/v1/auth/mode",
-            json={"mode": "explore"},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {live_token}",
-            },
-        )
-        assert retry.status_code == 401
+        assert still_valid.status_code == 200
+        assert still_valid.get_json()["data"]["mode"] == "practice"
 
     def test_downgrade_rejects_unknown_target(self, client):
         c, _ = client
@@ -1223,12 +1243,11 @@ class TestSetupRegenerateRequiresSession:
 
 
 class TestSetupMintsSession:
-    """Audit fix (#18/#19): /v1/auth/setup returns an explore-mode session token
-    so the rest of the setup wizard (broker connect behind the G9 guard, mode
-    select behind the D6 PIN) is authenticated. Non-live: arming Live still
-    needs the PIN."""
+    """/v1/auth/setup returns a practice session token so the rest of the
+    setup wizard (broker connect behind the G9 guard, mode select behind the
+    D6 PIN) is authenticated. Non-live: arming Live still needs the PIN."""
 
-    def test_setup_returns_explore_session_token(self, client):
+    def test_setup_returns_practice_session_token(self, client):
         c, _ = client
         resp = c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
@@ -1236,12 +1255,12 @@ class TestSetupMintsSession:
         }, headers={"Content-Type": "application/json"})
         assert resp.status_code == 201
         data = resp.get_json()["data"]
-        assert data["mode"] == "explore"
+        assert data["mode"] == "practice"
         from flinttrade_core.auth_routes import decode_token
 
         payload = decode_token(data["token"])
         assert payload["type"] == "session"
-        assert payload["mode"] == "explore"
+        assert payload["mode"] == "practice"
         assert payload["live_mode_unlocked"] is False
         assert payload["setup_session"] is True
         assert payload["setup_bound"]

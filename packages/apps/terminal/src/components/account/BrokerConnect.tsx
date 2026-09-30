@@ -71,7 +71,7 @@ import {
   isMondayReadBroker,
   mondayReadChrome,
   mondayReadConnectable,
-} from "@/lib/mondayReadChrome";
+} from "@/lib/connectedReadChrome";
 
 function brokerSelectable(broker: Pick<NativeBroker, "adapter_id" | "connectable">): boolean {
   return mondayReadConnectable(broker.adapter_id, broker.connectable);

@@ -18,7 +18,9 @@
  *   - react-hook-form + zod validation
  *   - FDC3 channel follower — an unpinned pad prefills from (and follows)
  *     the instrument broadcast on its joined user channel; a pad opened
- *     with explicit symbol params (a CreateOrder intent) ignores channels
+ *     with explicit symbol params (a CreateOrder intent) ignores channels.
+ *     A quick-trade or CreateOrder retarget of a reused pad pins it the
+ *     same way until the operator changes the symbol or closes the pad.
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
@@ -365,6 +367,10 @@ interface SymbolSuggestion {
   company_name?: string;
 }
 
+function suggestionSymbol(item: SymbolSuggestion): string {
+  return (item.symbol ?? item.ticker ?? item.tradingsymbol ?? "").toUpperCase();
+}
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
 /** Prefill params carried by a `flinttrade:addWidget` orderpad request (W2). */
@@ -372,6 +378,11 @@ interface OrderPadPrefill {
   symbol?: string;
   exchange?: string;
   action?: "BUY" | "SELL";
+}
+
+/** Symbol, exchange, and action used to ignore a repeated props sync. */
+function prefillTargetKey(next: OrderPadPrefill): string {
+  return `${next.symbol ?? ""}|${next.exchange ?? ""}|${next.action ?? ""}`;
 }
 
 function OrderPadWidget(props: WidgetProps) {
@@ -383,14 +394,21 @@ function OrderPadWidget(props: WidgetProps) {
 
   // FDC3 channel membership (Phase 2). A pad opened with an explicit
   // `symbol` param is PINNED: it joins no channel and ignores broadcasts
-  // entirely, exactly as it ignored the global selection before. Otherwise
-  // the pad reads its joined channel (red when params carry no `channel`
-  // key; `channel: "none"` joins nothing) and the channel's instrument
-  // slots between the params prefill and the NIFTY default.
-  const isPinned = prefill.symbol != null;
+  // entirely, exactly as it ignored the global selection before. A reused
+  // preset pad has no symbol param, so FlexLayout can keep `props.params`
+  // stale after a quick-trade retarget; `eventPinned` holds that pin until
+  // the operator changes the symbol or closes the pad. Otherwise the pad
+  // reads its joined channel (red when params carry no `channel` key;
+  // `channel: "none"` joins nothing) and the channel's instrument slots
+  // between the params prefill and the NIFTY default.
+  const [eventPinned, setEventPinned] = useState(false);
+  const isPinned = prefill.symbol != null || eventPinned;
   const liveChannel = useChannelMembership(props.api.id, props.params);
   const channel = isPinned ? null : liveChannel;
   const channelInstrument = useChannelInstrument(channel);
+  // Still read the live channel while pinned, so releasing the pin does not
+  // treat the instrument already on the channel as a fresh broadcast.
+  const liveInstrument = useChannelInstrument(liveChannel);
 
   const initialSymbol = prefill.symbol ?? channelInstrument?.symbol ?? "NIFTY";
   const initialExchange = prefill.exchange ?? channelInstrument?.exchange ?? "NSE";
@@ -401,6 +419,7 @@ function OrderPadWidget(props: WidgetProps) {
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [searchMiss, setSearchMiss] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
@@ -426,6 +445,7 @@ function OrderPadWidget(props: WidgetProps) {
   const lastSubmissionModeRef = useRef<"practice" | "live" | null>(null);
   const lastExitRef = useRef(false);
   const practiceConfirmInFlightRef = useRef(false);
+  const suppressedChannelInstrumentRef = useRef<ReturnType<typeof useChannelInstrument>>(null);
 
   // Practice review/confirm state — paper path for Practice and Explore.
   // The snapshot is immutable; edits or a switch to Live invalidate it.
@@ -458,6 +478,60 @@ function OrderPadWidget(props: WidgetProps) {
       discQty: undefined,
     },
   });
+
+  const appliedTargetRef = useRef("");
+  const appliedNonceRef = useRef("");
+  const applyPrefill = useCallback((
+    next: OrderPadPrefill,
+    options?: { nonce?: string; pin?: boolean },
+  ) => {
+    if (!next.symbol) return;
+    const nonce = options?.nonce;
+    const targetKey = prefillTargetKey(next);
+    // Props sync dedupes on the target so a stale preset re-render does not
+    // wipe a local edit. An explicit event dedupes on its nonce, so the same
+    // symbol/exchange/action applies again after the operator edits the pad.
+    if (nonce) {
+      if (appliedNonceRef.current === nonce) return;
+      appliedNonceRef.current = nonce;
+    } else if (appliedTargetRef.current === targetKey) {
+      return;
+    }
+    appliedTargetRef.current = targetKey;
+    if (options?.pin) setEventPinned(true);
+    setValue("symbol", next.symbol);
+    if (next.exchange) setValue("exchange", next.exchange);
+    if (next.action === "BUY" || next.action === "SELL") setValue("action", next.action);
+    setQuery(next.symbol);
+    setSearchMiss(null);
+    setSearchOpen(false);
+  }, [setValue]);
+
+  const prefillSymbol = prefill.symbol;
+  const prefillExchange = prefill.exchange;
+  const prefillAction = prefill.action;
+  useEffect(() => {
+    applyPrefill({ symbol: prefillSymbol, exchange: prefillExchange, action: prefillAction });
+  }, [applyPrefill, prefillSymbol, prefillExchange, prefillAction]);
+
+  // Fired by retargetOrderPad. The docking library does not re-render a tab
+  // whose node object is unchanged, so props.params stay stale. The nonce is
+  // the event's identity: a repeated quick-trade of the same target still
+  // applies, and the pad pins so a later channel or preset sync cannot
+  // replace that retarget.
+  useEffect(() => {
+    function onPrefill(event: Event) {
+      const detail = (event as CustomEvent<{
+        tabId?: string;
+        params?: OrderPadPrefill;
+        nonce?: string;
+      }>).detail;
+      if (!detail || detail.tabId !== props.api.id || !detail.params) return;
+      applyPrefill(detail.params, { nonce: detail.nonce, pin: true });
+    }
+    window.addEventListener("flinttrade:orderPadPrefill", onPrefill);
+    return () => window.removeEventListener("flinttrade:orderPadPrefill", onPrefill);
+  }, [applyPrefill, props.api.id]);
 
   const orderType = watch("orderType") as OrderTypeValue;
   const action = watch("action") as ActionValue;
@@ -524,6 +598,8 @@ function OrderPadWidget(props: WidgetProps) {
   // form safe should a malformed context ever reach the channel atom.
   useEffect(() => {
     if (isPinned || !channelInstrument) return;
+    if (channelInstrument === suppressedChannelInstrumentRef.current) return;
+    suppressedChannelInstrumentRef.current = null;
     const { symbol: chSymbol, exchange: chExchange } = channelInstrument;
     if (!chSymbol || !chExchange) return;
     setValue("symbol", chSymbol);
@@ -683,20 +759,58 @@ function OrderPadWidget(props: WidgetProps) {
     (item: SymbolSuggestion) => {
       const sym = item.symbol ?? item.ticker ?? item.tradingsymbol ?? "";
       const exch = item.exchange ?? item.exch_seg ?? "NSE";
+      if (eventPinned && sym.toUpperCase() !== symbol.trim().toUpperCase()) {
+        suppressedChannelInstrumentRef.current = liveInstrument;
+        setEventPinned(false);
+      }
       setValue("symbol", sym);
       setValue("exchange", exch);
       setQuery(sym);
       setSuggestions([]);
       setSearchOpen(false);
     },
-    [setValue],
+    [eventPinned, liveInstrument, setValue, symbol],
   );
 
   const handleClearSearch = useCallback(() => {
     setQuery("");
     setSuggestions([]);
     setSearchOpen(false);
+    setSearchMiss(null);
   }, []);
+
+  const commitTypedSymbol = useCallback(async () => {
+    const q = query.trim().toUpperCase();
+    if (!q || q === symbol.trim().toUpperCase()) {
+      setSearchMiss(null);
+      setSearchOpen(false);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    let list = suggestions;
+    const already = list.find((item) => suggestionSymbol(item) === q);
+    if (!already) {
+      setSearching(true);
+      try {
+        const result = await searchSymbol(q);
+        list = (Array.isArray(result) ? result : []).slice(0, 8) as SymbolSuggestion[];
+        setSuggestions(list);
+      } catch {
+        list = [];
+        setSuggestions([]);
+      } finally {
+        setSearching(false);
+      }
+    }
+    const exact = list.find((item) => suggestionSymbol(item) === q);
+    if (exact) {
+      handleSelect(exact);
+      setSearchMiss(null);
+      return;
+    }
+    setSearchOpen(false);
+    setSearchMiss(q);
+  }, [handleSelect, query, suggestions, symbol]);
 
   const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
     clearTimeout(toastTimerRef.current);
@@ -1073,7 +1187,15 @@ function OrderPadWidget(props: WidgetProps) {
           stepMismatch and silently blocks submission before handleSubmit runs. */}
       <form
         noValidate
-        onSubmit={(e) => void handleSubmit(onSubmit)(e)}
+        onSubmit={(e) => {
+          const typed = query.trim().toUpperCase();
+          if (typed && typed !== symbol.trim().toUpperCase()) {
+            e.preventDefault();
+            void commitTypedSymbol();
+            return;
+          }
+          void handleSubmit(onSubmit)(e);
+        }}
         className="flex-1 flex flex-col gap-3 px-3 py-3 overflow-y-auto"
       >
         {/* Symbol search */}
@@ -1086,7 +1208,15 @@ function OrderPadWidget(props: WidgetProps) {
                 id="orderpad-symbol"
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setQuery(e.target.value.toUpperCase());
+                  setSearchMiss(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  void commitTypedSymbol();
+                }}
                 onFocus={() => {
                   if (query !== symbol && suggestions.length > 0) setSearchOpen(true);
                 }}
@@ -1140,6 +1270,11 @@ function OrderPadWidget(props: WidgetProps) {
               </div>
             )}
           </div>
+          {searchMiss && (
+            <p role="status" className="text-xs text-loss mt-0.5">
+              No match for {searchMiss}
+            </p>
+          )}
           {errors.symbol && (
             <span id="orderpad-symbol-error" role="alert" className="text-xs text-loss mt-0.5">
               {errors.symbol.message}

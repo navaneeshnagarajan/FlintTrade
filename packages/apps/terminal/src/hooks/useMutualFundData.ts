@@ -1,5 +1,5 @@
 /**
- * useMutualFundData — Mode-aware data hook for the Mutual Fund Explorer tab.
+ * useMutualFundData — Mode-aware data hook for the Browse Mutual Funds tab.
  *
  * - explore mode:  returns hardcoded fallback data (no backend needed)
  * - practice/live: fetches from /ft-api/api/v1/mf/* via TanStack Query

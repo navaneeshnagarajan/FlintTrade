@@ -138,7 +138,7 @@ def test_explore_and_chat_sources_are_refused() -> None:
     explore = engine.admit(_proposal(mode="explore"))
     chat = engine.admit(_proposal(source="chat"))
     assert explore.allow is False
-    assert "Explore" in explore.reason
+    assert "Example" in explore.reason
     assert chat.allow is False
     assert chat.reason
     assert admission_kind(chat, 1) == "deny"

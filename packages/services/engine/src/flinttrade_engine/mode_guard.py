@@ -94,7 +94,7 @@ def require_non_explore(view: Callable[..., Any]) -> Callable[..., Any]:
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Order placement disabled in Explore mode.",
+                        "message": "Order placement disabled for Example.",
                         "code": "mode_blocked",
                     }
                 ),
@@ -162,7 +162,7 @@ def require_live_unlocked(view: Callable[..., Any]) -> Callable[..., Any]:
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Order placement disabled in Explore mode.",
+                        "message": "Order placement disabled for Example.",
                         "code": "mode_blocked",
                     }
                 ),

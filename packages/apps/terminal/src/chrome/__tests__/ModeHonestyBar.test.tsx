@@ -9,7 +9,7 @@ describe("ModeHonestyBar", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "explore");
     expect(bar).toHaveTextContent(
-      "Explore — sample data only. No broker session, no live orders.",
+      "Example data. No broker is connected and no orders are sent.",
     );
     expect(bar.querySelector("p")).toHaveClass("whitespace-nowrap");
     expect(bar).not.toHaveAttribute("role", "alert");
@@ -17,9 +17,11 @@ describe("ModeHonestyBar", () => {
 
   it("renders the Practice line", () => {
     render(<ModeHonestyBar mode="practice" />);
-    expect(screen.getByTestId("mode-honesty-bar")).toHaveTextContent(
-      "Practice — SandboxEngine fills. Not your funded broker account.",
+    const bar = screen.getByTestId("mode-honesty-bar");
+    expect(bar).toHaveTextContent(
+      "Practice — simulated fills, no real money.",
     );
+    expect(bar).not.toHaveTextContent(/SandboxEngine/i);
   });
 
   it("renders the Live line", () => {

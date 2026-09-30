@@ -189,7 +189,7 @@ For step-by-step instructions tailored to each operating system, see:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 ![Welcome screen](screenshots/01-welcome.png)
-*The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with sample data stays in Explore.*
+*The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with example data opens sample data, labelled Example.*
 
 ---
 
@@ -217,8 +217,8 @@ reads as a working operator path.
 2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
-   broker). OpenAlgo persists the session. Skip this step for Explore mode
-   and Practice mode.
+   broker). OpenAlgo persists the session. Skip this step for Example data
+   and for Practice.
 3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
    copy the generated API key. This is the key FlintTrade uses for the
    OpenAlgo-compatible bridge only (not your broker's key).
@@ -297,42 +297,109 @@ funded-order, Live-promotion, and cross-platform proof remain open.
 
 ---
 
-## 3. First sandbox order (Practice mode)
+## 3. First Practice order
 
 Before enabling any order-capable integration, exercise the order path in
-**Practice mode**. FlintTrade has a three-mode system:
+**Practice**. A fresh browser with no saved Mode opens in Practice. Password
+sign-in and account setup open in Practice. A fresh login opens Practice.
+Quick Unlock restores the existing session and keeps its Mode. Live is
+entered only through `POST /v1/auth/live`. `POST /v1/auth/mode` accepts
+only a switch to Practice.
 
-| Mode | Order behaviour | Best for |
-|---|---|---|
-| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
-| **Practice** | Orders simulated by FlintTrade's native `SandboxEngine` (primary paper path) | Strategy tests, Practice SandboxEngine fills, AI analysis |
-| **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
+The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
+**Connected (read)**, and **Live**. Practice and Live are the session Modes.
+**Connected (read)** is a broker status on a Practice session, not a separate
+Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
+**Demo (example data)**.
 
-The current mode is shown in the top bar and is server-enforced via the JWT
-claim — switching to Live requires a deliberate confirmation step.
+| Label | What it means |
+|---|---|
+| **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
+| **Connected (read)** | Read-only posture on a Practice session after a broker is connected. Until then the menu item stays disabled and shows `Connect a broker first`. It is not a separate session claim. |
+| **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
+| **Example** | Sample data. The chip reads **Example**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. |
 
-**Practice SandboxEngine fills.** This is the
-shipped Practice path. Explore is sample-only. Practice is the
-primary paper path: orders place and record fills on FlintTrade's
-native `SandboxEngine`. AI and terminal surfaces read that Practice
-book. Practice never leaks a live broker order. Live stays
-fail-closed until MSI native read smoke is trusted and funded unlock.
-OpenAlgo is a Settings fallback only — not the primary
-connect CTA. Setup's primary connect action is **Continue without
-a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn →
-Practice Trading never offers Neo Practice — Kotak Neo has no
-sandbox. Operator copy is `Live read only until funded unlock.`
+**Switching Mode.** Open the Mode chip. Its accessible name is the current
+label plus `mode. Open the mode menu.` Choose **Practice** for simulated
+fills. A sample-data session (`demo-user`) is sent to Setup instead of
+switching in place. Choose **Connected (read)** only when a broker is
+connected. Choose **Live** only when the item is enabled. Opening the menu
+does not open the Live dialog. An eligible Live choice opens **Switch to Live
+Trading?** with the line `You are about to switch to Live mode. All orders will be executed with real money through your broker.` Enter
+the 6-digit PIN (`Enter your PIN to confirm`) and choose **Switch to Live**.
+Cancel leaves the current Mode.
 
-**Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
-mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·
-Post-close · Closed) are session status, never Live mode. Explore Order Pad
-uses **Sample Buy** / **Sample Sell** (a local sample fill after review).
-Practice keeps **Practice Buy** / **Practice Sell**. Live uses **Place BUY
-Order**. Connected / green is never shown for an unconfigured subsystem.
+**When Live is locked.** The Live item lists every reason that applies, in
+this order:
 
-**Market session (FT-CORE-001, as of Aug 2026).** The TopBar shows one active
-session chip: **Continuous**, **CAS**, **Matching**, **Post-close**, or
-**Closed**. The chip tooltip/title is the window, for example
+- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no
+  broker is connected. Either gap is enough for this one reason. When the
+  authenticator is not enrolled, including after **Later** on
+  **Two-factor authentication**, **Enrol authenticator in Settings** links
+  to Settings → Security (`/settings#security`). The Live switch does not
+  ask for an authenticator code.
+- `Create a PIN in Settings` — no PIN exists. Live stays locked, and those
+  words link to Settings → Security (`/settings#security`).
+- `Not qualified for Live` — only when the place gate reports that this
+  operator is not qualified. If that report is absent, this reason is not
+  shown. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
+
+**Example-data marker.** Where a sample figure still uses the shared banner,
+that banner reads `Example data. Connect a broker to see your own.` It never
+shows in Practice. On Invest, an **Example** chip on the view replaces that
+banner. The sample Dashboard carries that chip on the single inline sample
+XIRR figure (`XIRR` plus one `Example` chip). There is no Portfolio XIRR
+card. Practice leaves the XIRR unmarked.
+
+**Order review.** Practice reads `Confirm places this simulated order.`
+The confirm button reads **Confirm simulation** (accessible name
+`Confirm simulated Practice order`). Example data reads `Example only. Nothing is sent to a broker and no order is placed.`
+The confirm button reads **Continue** (accessible name `Confirm Example order`).
+Both reviews offer **Back to edit**. While the confirm is in flight the
+button reads `Confirming…`.
+
+**Practice fills.** This is the shipped Practice path. Example is sample data.
+Practice is the shipped simulated-fill path: orders place and record simulated fills.
+AI and terminal surfaces read that Practice book. Practice never leaks a live
+broker order. Live stays fail-closed until native read smoke is trusted and
+funded unlock is explicit. OpenAlgo is a Settings fallback only — not the
+primary connect CTA. Setup's primary connect action is **Continue without
+a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn → Practice Trading
+never offers Neo Practice — Kotak Neo has no sandbox. Operator copy is
+`Live read only until funded unlock.`
+
+**Mode, session, and sample data.** Practice and Live name the session Mode.
+**Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
+Post-close · Closed) are market-session status, never Live mode. Example data
+uses **Example Buy** / **Example Sell** and records an example fill after
+review. Practice keeps **Practice Buy** / **Practice Sell**. Live uses
+**Place BUY Order**. Connected / green is never shown for an unconfigured
+subsystem.
+
+**One home per status.**
+
+- **Feed** lives once, at the start of the ticker. The chip is feed provenance,
+  not a Mode. Example data always reads **Example**. Practice and Live may
+  read **Live**, **Delayed**, **Stale ·** age, or **Unknown**. Practice with
+  no feed reads `No live feed (Practice)`. The Practice ticker shows
+  `Last close prices · Connect a broker for live prices →` only when the
+  market session is not unavailable and neither the WebSocket nor a fresh
+  REST fallback is producing quotes. The link opens `/settings#brokers`.
+  An unavailable session is never labelled last close.
+- **Broker** lives once, in the desk-status broker chip (**Broker Connected**,
+  **Broker Connected (read)**, or **Broker Unavailable**, plus a plain failure
+  when a money-path incident darkens the session). Account switching does not
+  add a second broker chip.
+- **Market** lives once, in the TopBar market-session chip. A confirmed
+  closed cash session reads `Market closed · opens 09:15`. Unavailable
+  timings read `Market unavailable`. Neither sentence is Live mode.
+
+
+**Market session.** The TopBar market chip shows the open phase
+(**Continuous**, **CAS**, **Matching**, or **Post-close**). A confirmed
+closed cash session reads `Market closed · opens 09:15`, not the word
+Closed on its own. Unavailable timings read `Market unavailable`, and
+are never labelled last close. The chip tooltip/title is the window, for example
 `CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
 after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
@@ -342,16 +409,20 @@ continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
 last 30 min" closing-price copy. The September 2026 consultation stays out
 of the UI.
 
-**Mode honesty.** One line under the TopBar, always, owned by Mode.
-Explore reads `Explore — sample data only. No broker session, no live orders.`
-Practice reads `Practice — SandboxEngine fills. Not your funded broker account.`
+**Mode honesty.** One line under the TopBar, always, owned by the active
+label. Example data reads `Example data. No broker is connected and no orders are sent.`
+Practice reads `Practice — simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
-Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own sample banner. An incident strip,
+Widgets stay quiet: they do not repeat a second feed chip for the same fact.
+Mode is not provenance. Benchmark figures stay hard-coded in every Mode
+and keep the **Example** chip. The example-data banner
+`Example data. Connect a broker to see your own.` never shows in Practice.
+On Invest, an Example chip on each view replaces that banner. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 
 **Operator status strip.** One sticky strip sits between the TopBar and the Mode line. It is
-Info, Degraded, or Blocked. Explore and Practice sample copy is not this strip. Practice sample holdings keep `DemoBanner` — the strip is not that banner. Live risk, a broken desk, a broker fault, or a
+Info, Degraded, or Blocked. Example-data copy and the Practice Mode line are not this strip. Live risk, a broken desk, a broker fault, or a
 local-network fault uses Degraded or Blocked. There is not a second banner
 for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome normally says **Unavailable** or **Degraded** plus the failure
@@ -417,8 +488,8 @@ SafetySystem, and any broker call, on place, routed place, exit-all, and a brack
 `Not placed. GTT orders aren't supported right now.`
 Laya does not place the order and does not replace those layers. A
 refusal or a quantity clamp stops before SafetySystem. Practice place
-is admitted before the sandbox and does not enter SafetySystem. Explore
-stays a mode refusal. Chat is not an admission source.
+is admitted before the sandbox and does not enter SafetySystem. Example data
+stays a refusal before admission. Chat is not an admission source.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
@@ -463,14 +534,11 @@ exit-all, and a bracket before admission, with `Not placed. GTT orders aren't su
 No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
 with the tooltip `GTT orders aren't supported right now.`
 
-**Feed freshness (FT-CORE-002).** Explore disclosure is that Mode line.
-Per-widget Sample chips are retired. Per-symbol ticker Sample chips are
-optional, and the Market Clock freshness chip appears only when that
-widget is mounted. Practice and Live still need feed provenance on the
-TopBar or the ticker strip: **Live**, **Delayed**, or **Sample** (and
-muted **Stale** / **Unknown** plus age when known). Silent-stale is a
-fail. This is provenance, not execution mode — Live mode does not imply
-a Live feed.
+**Feed freshness.** Feed provenance lives on the ticker chip, not in the
+Mode line. Example data reads **Example**. Practice and Live may read
+**Live**, **Delayed**, muted **Stale** or **Unknown** plus age when known,
+or `No live feed (Practice)`. Silent-stale is a fail. This is provenance,
+not a Mode — Live mode does not imply a Live feed.
 
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
@@ -503,31 +571,34 @@ and NFO when an F&O symbol feeds. A venue with no feeding symbol is
 omitted. Symbols that do not resolve to a venue show **Unavailable**.
 An empty tape omits the badge strip. The marquee runs continuously
 when motion is allowed. With `prefers-reduced-motion: reduce`, the
-tape freezes and shows **Reduced motion**. The Sample freshness chip
-may stay; it must not hide venue honesty.
+tape freezes and shows **Reduced motion**. The feed chip may read **Example**; it must not hide venue honesty.
 
 ### Walkthrough
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
-2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
-   **Sample Buy** — sample review, then a local sample fill (no broker).
-   For the full native-sandbox path this walkthrough uses, click the
-   badge once to switch to Practice. There is no confirmation dialog.
-   The UI calls `POST /v1/auth/mode` so the JWT matches.
-3. From the dock sidebar, drag the **Order Pad** widget into the workspace
-   (or pick a preset that contains it).
+2. A fresh desk is already in **Practice**. Open the Mode menu if the
+   chip says **Example** and choose **Practice** (a sample-data session is
+   sent to Setup). Practice does not ask for a PIN. The UI calls
+   `POST /v1/auth/mode` so the session matches. To look at sample data
+   instead, use **Try with example data** from Welcome or sign-in.
+3. Open **+ Widget** (the dialog title is **Add Widget**) and choose
+   **Order Pad**, or pick a preset that contains it. If an Order Pad is
+   already open, choosing it again focuses that pad. It does not add a
+   second one.
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity to 1 lot. After you select the future, Order Pad
    auto-fills Quantity from that instrument's current lot size — do
    not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
    figures separately. Choose **MARKET**. Side = **BUY**.
-6. Click **Practice Buy** and confirm the review. The sandbox order
-   appears in the **Positions** widget immediately; the **Orders**
-   widget shows it as filled (simulated). **Sample Buy** on Explore is
-   only the local sample fill from step 2 — it does not appear as a new
-   Positions or Orders row, and it never calls the order API.
+6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
+   The sandbox order appears in the **Positions** widget immediately; the
+   **Orders** widget shows it as filled (simulated). **Example Buy** on
+   example data records an example fill after review. Review reads
+   `Example only. Nothing is sent to a broker and no order is placed.`
+   The example-data confirm button reads **Continue**. That fill does not
+   call the order API.
 7. Close the position from the Positions widget. Practice square-off
    posts an opposite order to `POST /api/v1/orders/place`. Confirm your
    simulated P&L is recorded in the **P&L Monitor** widget. Settings →
@@ -545,7 +616,7 @@ or **this contract** when the symbol is empty. When admission
 allows the quantity, the path is front-end → JWT guard → mode guard →
 Laya.admit → FlintTrade sandbox → simulated fill → REST refresh of
 Positions and Orders. No real money moved. A refusal or a quantity clamp
-stops before the sandbox. Explore Sample Buy never enters that path.
+stops before the sandbox. Example Buy never enters that path.
 Restoring a Practice backup marks those fills **Restored** (tooltip
 **Restored from backup. Not sent to a broker or checked by Laya.**).
 Performance shows **Excludes N restored fills** when N is at least 1,
@@ -554,7 +625,7 @@ and hides that line when N is 0.
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
 
-On Explore `/trade` Positions → Heat, **Group by Exchange** and
+On example data, `/trade` Positions → Heat, **Group by Exchange** and
 **Group by Sector** draw a labelled band per group (name chip plus
 exposure when there is room). Flat stays leaf-only. Positions with no
 exchange metadata show `No exchange groups in these positions` instead
@@ -571,18 +642,18 @@ honest empty for that window, not a quiet YTD fallback. Metrics cover
 the labelled window up to the journal's 1,000-fill analytics page; a
 larger window is disclosed rather than silently sliced.
 
-On Explore `/trade` Analysis layout, **OI Chart** shares the Option
+With example data, `/trade` Analysis layout, **OI Chart** shares the Option
 Chain expiry list for that symbol/exchange. When the list is
 non-empty, the expiry control is shown and charts/statistics cover
 only the selected expiry (the chain’s selected expiry when both
-widgets are open; otherwise the nearest listed). Explore sample
+widgets are open; otherwise the nearest listed). Example-data
 expiries stay listed. The Mode honesty line is the disclosure — there
-is no Sample chip on the chain. No expiries or no
+is no second Example chip on the chain. No expiries or no
 OI is an honest empty — `No expiries for this symbol` or
 `No OI for this expiry` — with no bars and no PCR/max-pain stats.
 The widget never pairs “No expiries” with generic or sample bars.
 
-On Explore `/trade` Watchlist, checked LTP and % change columns
+With example data, `/trade` Watchlist checked LTP and % change columns
 paint their headers and cells. Those values use the same sample
 quotes as the ticker tape. A missing quote
 shows `—` after a brief `…`, never a silent blank. Unchecking a
@@ -590,26 +661,24 @@ column hides it (FT-TRADE-008).
 
 Selecting a symbol in `/trade` Watchlist retargets Chart,
 Option Chain, and Scalper to that symbol — no retype.
-Explore retarget is allowed.
+Retarget on example data is allowed.
 An empty watchlist never silently retargets
 (FT-TRADE-011).
 
-On Explore `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
+With example data, `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
 stay disarmed — the same honesty class as Automate Telegram
 **Send Test**. They never open Confirm Order and never place.
-Helper: "Orders blocked in Explore (sample-only). Switch to
-Practice or Live with a broker connected to trade." **1-CLICK**
-stays OFF and disabled; its title is "One-click unavailable in
-Explore". Sample quote preview is allowed; there is no Confirm
+Helper: `Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` **1-CLICK**
+stays OFF and disabled; its title is `One-click is unavailable for Example`. Sample quote preview is allowed; there is no Confirm
 BUY / Confirm SELL chrome. Practice and Live open Confirm only
-when the mode allows it and a gateway is configured. The
-backend rejects Explore orders if the UI slips (FT-TRADE-009).
+when the Mode allows it and a gateway is configured. The
+backend refuses an example-data order if the UI slips (FT-TRADE-009).
 
 ### Learn → Practice Trading (OpenAlgo fallback)
 
 This is a fallback path, not the primary Practice fills path. The
-primary paper path is Practice mode on `/trade` through the native
-`SandboxEngine`. Explore `/learn` → **Practice
+shipped path is Practice on `/trade`, with simulated fills
+and no real money. With example data, `/learn` → **Practice
 Trading** still walks through optional OpenAlgo broker Practice /
 sandbox setup when you need that fallback. **Dhan Sandbox** remains
 optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
@@ -620,9 +689,9 @@ text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 `/settings#api`. The CTA does not send operators to Settings →
 Brokers (`/settings#brokers`). Point the Broker Gateway at that
 OpenAlgo Practice instance only as fallback paper, then return to
-native Practice `SandboxEngine` fills for Practice and AI analysis.
+native Practice simulated fills for Practice and AI analysis.
 
-On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
+With example data, `/learn` → Glossary → Lot Size, the glossary teaches dated
 Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
 MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
 link to circular NSE/FAOP/70616. Learn market facts that exchanges
@@ -630,7 +699,7 @@ revise must ship dated, not as forever hardcodes.
 
 ### Learn → Resource Hub (local documents)
 
-Explore `/learn` → **Resource Hub** opens project docs from the local
+With example data, `/learn` → **Resource Hub** opens project docs from the local
 FlintTrade backend (`USER_GUIDE.md`, `ORDER_SAFETY.md`, and the other
 listed cards). First open shows `Loading document…` while that local
 load settles — it never flashes a red backend error on a cold-start
@@ -654,14 +723,17 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Broker or OpenAlgo session is current if you are intentionally testing a
       live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
-- [ ] The authenticator is enrolled, or you will confirm a one-time
-      authenticator code in the Live switch dialog (if you chose **Set up
-      later** on the optional authenticator panel). Explore and Practice stay
-      password-only until enrolment. First-run Setup does not unlock Live.
+- [ ] The authenticator is enrolled. After **Later** on the
+      **Two-factor authentication** card, the Live menu stays locked and
+      **Enrol authenticator in Settings** links to Settings → Security
+      (`/settings#security`). The Live switch does not ask for an
+      authenticator code. Example and Practice stay password-only until
+      enrolment. First-run Setup does not unlock Live.
 - [ ] An **exactly 6-digit** PIN is set under Settings → Security
-      (`/settings#security`). The Live switch asks for this PIN together
-      with authenticator enrolment. Quick Unlock uses the same PIN to
-      reopen the current Mode.
+      (`/settings#security`). With no PIN, Live stays locked and shows
+      `Create a PIN in Settings`, linking to that same page. Once Live is
+      eligible, the switch asks for this PIN. Quick Unlock uses the same
+      PIN to reopen the current Mode.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Laya is **Ready** or **Degraded** if you intend a place attempt.
@@ -679,13 +751,13 @@ See [Laya on place](#laya-on-place).
 
 ### Walkthrough
 
-1. Click the **PRACTICE** badge in the top bar, or select **Live** on
-   the welcome mode picker. The dialog warns that real orders will be
-   placed and asks for an **authenticator code** and your **exactly
-   6-digit PIN**. The Live switch requires both — a confirmed authenticator
-   enrolment plus the PIN. If you deferred 2FA with **Set up later** on
-   the optional authenticator panel, enter a one-time authenticator code
-   in the dialog to enrol, then the PIN. `POST /v1/auth/live` refuses
+1. Open the Mode menu and choose **Live** when it is enabled. **Switch to
+   Live Trading?** warns that real orders will be placed and asks for your
+   **exactly 6-digit PIN** (`Enter your PIN to confirm`). It does not ask
+   for an authenticator code. After **Later** on the **Two-factor
+   authentication** card, Live stays locked and **Enrol authenticator in
+   Settings** links to Settings → Security. With no PIN, Live stays locked
+   on `Create a PIN in Settings`. `POST /v1/auth/live` refuses
    403 `totp_required` until the authenticator is enabled. Quick Unlock
    reopens the same Mode the session already had, with the correct PIN,
    and never changes the Mode. Set the PIN under Settings → Security
@@ -729,9 +801,9 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock on this screen is **Quick Unlock** and reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
-| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
+| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -744,15 +816,46 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
 First-run Setup finishes on the Practice desk. Step N of 3 counts only
-Create operator, Vault, and Practice desk. After the affirm, Later / Skip
-covers the authenticator (TOTP; the control may still say **Set up later**),
-broker connect, LLM, Monitoring, trading defaults, and risk. Those panels
-never appear before the affirm, never block Practice, and never change
-Step N of 3. On the broker Later path, **Continue without a broker** is
-the first control, above FlintTrade Native and OpenAlgo Bridge. Persona
-is not a required first-run gate and is not part of that count. First run
-has no Live unlock. Live place stays fail-closed. A later Live unlock,
-outside this path, still needs the authenticator and PIN.
+Create operator, Vault, and Practice desk. After the affirm, the desk
+shows a one-line strip. With nothing skipped it reads
+`Optional setup · N of 4 done`. N counts finished cards only. Skipping
+a card does not increase N. When at least one card is skipped, the strip
+adds the skipped count:
+`Optional setup · N of 4 done · M skipped`. When M is 0, that
+`· M skipped` clause is left off.
+
+**Show** expands the cards in place. **Hide** collapses them. **Dismiss**
+on the desk removes the strip there and leaves the same reminder at the
+top of Settings. The Settings reminder has **Show** and **Hide**. It has
+no **Dismiss**.
+
+The four cards use these titles, with no " — later" suffix:
+**Two-factor authentication**, **Broker connect**, **LLM**, and
+**Trading defaults**. A card that is still open offers **Set up** and
+**Later**, except **Broker connect**, which offers
+**Continue without a broker** and **Set up** only while that card is
+neither done nor skipped. A skipped card shows a **Skipped** tag and
+only **Set up** (no **Later**, and no **Continue without a broker**).
+A finished card shows a **Done** tag and only **Set up** (no **Later**,
+and no **Continue without a broker**). **Later** on the card row marks
+that card **Skipped** and updates the strip. **Later** inside an open
+authenticator, **LLM**, or trading-defaults panel only closes the
+panel. It does not mark the card **Skipped** or **Done**, and the strip
+does not change. The authenticator panel's actions are **Enrol** and
+**Later**. Card-row **Later** buttons, and **Later** in the open
+**LLM** and **Trading defaults** panels, are announced as
+`Later {title}`.
+
+Monitoring and risk limits stay in Settings. They are not cards on this
+strip. The cards never appear before the affirm, never block Practice,
+and never change Step N of 3. On the broker panel,
+**Continue without a broker** stays the first control, above
+**FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
+**Broker connect** **Skipped**, the same as on the card. A successful
+native or OpenAlgo connection still marks the card **Done**. Persona is not a required
+first-run gate and is not part of that count. First run has no Live
+unlock. Live place stays fail-closed. A later Live unlock, outside this
+path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
@@ -760,24 +863,34 @@ sees the same Home as sidebar Home, Alt+H, or the TopBar logo —
 never the password Welcome Back gate. That gate stays on `/welcome`
 for unauthenticated visitors only (FT-HOME-003).
 
-On Explore `/invest#mutual-funds`, Mutual Fund Explorer labels the static
-fixture `Sample NAVs · as of 10-Sep-2026` (from `EXPLORE_SAMPLE_NAV_DATE`)
-and does not claim "Updated daily after market close." The as-of is the
+With example data, `/invest#mutual-funds` labels the static
+fixture `Example NAVs · as of 10-Sep-2026`
+on the view header and again on the disclaimer, and does not claim
+"Updated daily after market close." The as-of is the
 fixture date and does not auto-update. Practice and Live keep the live
 AMFI sentence ("Updated daily after market close") when the live feed is
 in use.
 
-On Practice or Explore `/invest` → Holdings with no broker, the header
+On `/invest` → Holdings with no broker, the header
 badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
-sample table. There is no Sample chip on the Holdings table or header.
-When the sample book is shown — Explore always, and Practice after the
-holdings query has settled empty — Holdings and Dashboard keep the
-`DemoBanner` (`Showing sample data — connect a broker for live data`),
-in Explore as well as Practice. Explore also has the Mode honesty line
-(`Explore — sample data only. No broker session, no live orders.`).
-The Practice Mode line (`Practice — SandboxEngine fills. Not your funded
-broker account.`) does not call that book sample; `DemoBanner` is the
-required Practice disclosure for it. Dashboard and "N stocks"
+sample table. Example data shows one Example chip on the view. The banner
+`Example data. Connect a broker to see your own.` is not repeated there, and
+it never shows in Practice. The sample Dashboard marks the sample XIRR with
+that same one **Example** chip. There is no Portfolio XIRR card. On sample
+figures, `/invest#networth` reads `Example equity and cash. Connect a broker to see yours.`
+The allocation label is `Allocation` with the Example chip, and each
+`Live from broker` note on Equity Holdings and Available Cash is that
+chip. Those sentences follow the sample-figure flag, including a Practice
+book that has fallen back to sample holdings. A connected book
+keeps `Live equity and cash from your connected broker. Other asset classes require additional data sources.`,
+the label `Allocation (live assets only)`, and the note `Live from broker`.
+The Example chip itself paints only on example data, so that Practice
+fallback shows the example sentences without the chip. On the sample
+Dashboard, Portfolio Allocation replaces `Equity + Cash from your connected broker. Debt / MF requires NAV data source.`
+with the Example chip; a connected book keeps that sentence. The Mode line on example data is
+`Example data. No broker is connected and no orders are sent.`
+The Practice Mode line (`Practice — simulated fills, no real money.`)
+does not call that book Example. Dashboard and "N stocks"
 use that same N. Practice waits
 until the holdings query has settled empty before the sample fallback,
 so a cold load does not flash the sample N over a pending book.
@@ -789,13 +902,13 @@ under a failed load. A connected broker with no positions shows
 table under a zero badge. Connected positions use the live count only
 (FT-TRADE-010).
 
-On Explore `/invest#basket` (Stock Baskets), the Mode honesty line owns
-disclosure — seeded cards do **not** carry a card-level Sample chip. Bare ₹ / P&L
-under that banner is acceptable once **Edit** and **Delete** cannot look
-live. Seeded Explore baskets disable **Edit** and **Delete**, with title
-helper `Sample basket — editing unavailable in Explore`. User-created
-Practice or Live baskets keep full Edit/Delete. Empty Explore is an
-honest empty state or a clearly labelled sample set (FT-INVEST-002).
+With example data, `/invest#basket` (Stock Baskets) shows one Example chip
+for the view. Seeded cards do not add a second marker. Bare ₹ / P&L
+is acceptable once **Edit** and **Delete** cannot look
+live. Seeded example baskets disable **Edit** and **Delete**, with title
+helper `Example basket — editing unavailable`. User-created
+Practice or Live baskets keep full Edit/Delete. An empty example-data
+view is an honest empty state or a clearly labelled sample set (FT-INVEST-002).
 
 ### The widgets (71)
 
@@ -823,36 +936,42 @@ from the widget registry
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
+**+ Widget** on the trade desk opens **Add Widget**. Choosing
+**Order Pad** when one is already open focuses that pad. It does not
+add a second Order Pad. A watchlist **Buy** or **Sell** retargets that
+same open pad.
+
 Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
 09:15–15:30 "open" window (FT-CORE-001, as of Aug 2026). When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
 
-Feed freshness (FT-CORE-002) is mode-split. In Explore, the Mode honesty
-line is the disclosure; widgets do not add a Sample chip. Per-symbol
-ticker Sample chips are optional, and the Market Clock freshness chip
-appears only when that widget is mounted. In Practice and Live, TopBar
-or the ticker must show **Live**, **Delayed**, or **Sample** (and muted
-**Stale** / **Unknown** plus age when known) — feed provenance is
-independent of Explore / Practice / Live execution mode, so silent-stale
-is a fail.
+Feed provenance lives on the ticker chip. Example data reads **Example**.
+Practice and Live may read **Live**, **Delayed**, muted **Stale** or
+**Unknown** plus age when known, or `No live feed (Practice)`. The
+Practice ticker shows
+`Last close prices · Connect a broker for live prices →`, linking to
+`/settings#brokers`, only when the market session is not unavailable and
+neither the WebSocket nor a fresh REST fallback is producing quotes.
+Unavailable timings read `Market unavailable` and are never labelled last
+close. Feed provenance is independent of Practice, Connected (read), and
+Live, so silent-stale is a fail.
 
-On Explore `/trade` Watchlist, checked LTP and % change columns
+With example data, `/trade` Watchlist checked LTP and % change columns
 use the same sample quotes as the ticker tape.
 A missing quote shows `—` after a brief `…`, never a silent blank
 (FT-TRADE-008). Selecting a watchlist symbol retargets Chart,
 Option Chain, and Scalper to that symbol. An empty watchlist never silently retargets
 (FT-TRADE-011).
 
-On Explore `/trade` Scalper (including the Scalper Zone preset),
+With example data, `/trade` Scalper (including the Scalper Zone preset),
 **Buy CE**, **Sell**, and **1-CLICK** stay disarmed. Helper:
-"Orders blocked in Explore (sample-only). Switch to Practice or
-Live with a broker connected to trade." There is no Confirm Order
-path from Explore (FT-TRADE-009).
+`Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` There is no Confirm Order
+path from example data (FT-TRADE-009).
 
-On Explore `/trade` Option Chain, the strip shows OI profile
-+ PCR for the selected expiry/symbol. Explore does not invent live OI.
+With example data, `/trade` Option Chain, the strip shows OI profile
++ PCR for the selected expiry/symbol. Example data does not invent live OI.
 An empty expiry is an honest
 empty, not zeros-as-data (FT-TRADE-012).
 
@@ -898,9 +1017,9 @@ Streaming option-chain widget rendered with
 Max Pain badge derived from the same chain.
 
 The Option Chain strip shows **OI profile + PCR** for the
-selected expiry and symbol (FT-TRADE-012). Explore does not
+selected expiry and symbol (FT-TRADE-012). Example data does not
 invent live OI. The Mode honesty line is the disclosure —
-there is no Sample chip on the chain strip. An empty expiry
+there is no second Example chip on the chain strip. An empty expiry
 is an honest empty — not zeros-as-data.
 
 1. Drag the **Option Chain** widget into the workspace.
@@ -920,8 +1039,8 @@ no standalone Max Pain widget.
 OI Chart shares Option Chain expiries for the symbol/exchange. The
 expiry control appears when that list is non-empty; charts and
 statistics cover only the selected expiry (the chain’s selection
-when both widgets are open; otherwise the nearest listed). Explore
-sample expiries stay listed. The Mode honesty line is the disclosure
+when both widgets are open; otherwise the nearest listed). Example-data
+expiries stay listed. The Mode honesty line is the disclosure
 — expiries and the OI Chart are not badged Sample. Empty states
 are honest: `No expiries for this symbol` or `No OI for this expiry`,
 with no bars and no PCR/max-pain stats — never “No expiries” over
@@ -951,14 +1070,14 @@ and Options Builder.
    configured providers (OpenChart, yfinance, or a licensed feed).
 4. **Run.** The backtest engine is FlintTrade's native event-driven simulator
    (pure Python by default). Install the optional VectorBT extra for
-   vectorised exploration, or opt in to the Rust `ticks` engine for
+   vectorised runs, or opt in to the Rust `ticks` engine for
    tick-level precision.
 5. **Review.** **Total Return (%)**, **Net trade P&L (₹)** (or **Trade
    log P&L** when net P&L is missing from the result), equity curve,
    Sharpe, Sortino, max drawdown, win rate, trade list, Monte Carlo
    confidence band.
 
-After a backtest run on Explore `/lab`, Review shows labelled dual
+After a backtest run on example data in `/lab`, Review shows labelled dual
 metrics. **Total Return (%)** is initial capital → final equity
 (including a forced last-bar close), with subtitle
 `Initial capital → final equity` — not a sum of trades.
@@ -994,7 +1113,7 @@ Profit, Max Loss, Net Premium, and BEP(s) show `—`. Helper:
 `Enter premium to model payoff`. A blank premium is unknown, not
 zero-risk.
 
-On Explore, the **Long Call** template seeds a **sample premium** from
+With example data, the **Long Call** template seeds a **sample premium** from
 the sample-chain ATM CE LTP, labelled `Sample premium — edit to model`.
 Edit the field if you want a different cost. Other templates leave
 premium blank so Payoff stays on that helper instead of modelling ₹0.
@@ -1041,12 +1160,11 @@ Time-based automations on the **Schedules** tab. Examples:
 
 Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
-On Explore `/automate` → Schedules, the Mode honesty line owns
-disclosure — seeded jobs do **not** carry an extra Sample chip
-once Pause is gated. Seeded Explore jobs show status Sample/Demo
-(or muted), not a production-looking Active badge. **Pause** on
-those jobs is disabled, with title helper `Sample schedule —
-control unavailable in Explore`. Practice and Live keep
+With example data, `/automate` → Schedules shows one Example marker for
+the view — seeded jobs do not carry a second chip
+once Pause is gated. Seeded example jobs show a muted sample status,
+not a production-looking Active badge. **Pause** on
+those jobs is disabled, with title helper `Example schedule — control unavailable`. Practice and Live keep
 Pause/Resume for real jobs (FT-AUTO-004).
 
 ### Monitors
@@ -1057,22 +1175,19 @@ When none are running, the empty state shows "No strategies running"
 and "Start a strategy from the Strategy Builder tool.", plus an
 **Open Strategy Builder** outline link that navigates to `/lab`.
 
-On Explore `/automate` → Settings → Telegram Alerts, **Send Test** is
+With example data, `/automate` → Settings → Telegram Alerts, **Send Test** is
 disabled (click and Enter do not send). The prefilled message stays
-visible as a preview-only sample. Helper: "Telegram tests are blocked in
-Explore (sample-only). Switch to Practice or Live with Telegram configured
-to send a real test." There is no confirm-and-send path from Explore.
+visible as a preview-only sample. Helper: `Telegram tests are blocked for Example. Switch to Practice or Live with Telegram configured to send a real test.` There is no confirm-and-send path from example data.
 Practice and Live arm Send Test only when Telegram is configured; otherwise
 the helper is "Configure Telegram first".
 
 ### Execution Logs
 
 **Execution Logs** is the date-paginated history of automated actions.
-On Explore `/automate` → Execution Logs, a healthy sample session shows
-the muted empty state `No execution logs in Explore (sample-only). Switch
-to Practice or Live to see real run history.` It never shows `Failed to
-load logs. Backend may be offline.` while the app is live and the Explore
-sample banner is present (FT-AUTO-003). In Practice or Live, a successful
+With example data, `/automate` → Execution Logs, a healthy sample session shows
+the muted empty state `No execution logs for Example. Switch to Practice or Live to see real run history.` It never shows `Failed to
+load logs. Backend may be offline.` while the app is live and example data
+is showing (FT-AUTO-003). In Practice or Live, a successful
 load with no rows for the selected date shows `No execution logs for this
 date.` — not an outage. The red `Failed to load logs. Backend may be
 offline.` line (or Retry) is reserved for a real request failure. While
@@ -1114,9 +1229,9 @@ being offline does not close Live.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
-(including Explore / `demo-user` and Practice), not a leftover local setting.
+(including example data / `demo-user` and Practice), not a leftover local setting.
 When Settings `#llm` is empty ("No LLM provider configured") or the stored
-provider is blank, Chat on Explore and Practice shows **Not configured** /
+provider is blank, Chat on example data and Practice shows **Not configured** /
 **LLM not configured** unless `advisor/status` reports an explicit
 env-backed provider (`LLM_PROVIDER`). **Connected (suggest only)** must not appear from
 an env-default advisor `configured` (empty provider → ollama). Returning
@@ -1145,13 +1260,13 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
-**Retry** — never a green **Connected (suggest only)**. Explore does not show a fake
+**Retry** — never a green **Connected (suggest only)**. Example data does not show a fake
 Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
 AI Chat live-read context: when an LLM is configured, Chat may
-use Practice SandboxEngine fills and native live-read feeds for
+use Practice simulated fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
 does not place Live orders — Live place stays fail-closed. Chat never
@@ -1161,7 +1276,7 @@ turn already has live ticks. Chat never shows green **Connected** without a real
 When Chat is connected, the badge reads **Connected (suggest only)**.
 Suggest stays labelled illustrative and is not this live-read path.
 
-On Explore `/settings#llm`, a demo or unconfigured session shows the empty
+On example data, `/settings#llm`, an unconfigured session shows the empty
 state "No LLM provider configured" with **Retry** — not a broken load.
 That Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; the two are aligned for readiness, so Chat also looks
@@ -1231,12 +1346,10 @@ workspace.
 - **Risk** — per-account risk limits, kill-switch propagation, trailing
   stop-loss governor.
 
-On Explore `/ditto` Position Mirror, **Start Position Mirroring**
+With example data, `/ditto` Position Mirror, **Start Position Mirroring**
 stays muted and disabled — the same honesty class as Telegram
-**Send Test** and Explore Scalper. Explore is always disarmed
-(sample-only). Helper: "Mirroring blocked in Explore
-(sample-only). Switch to Practice or Live with broker accounts
-connected." Practice stays disarmed. Helper: "Mirroring requires
+**Send Test** and example-data Scalper. Example data is always disarmed.
+Helper: `Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.` Practice stays disarmed. Helper: "Mirroring requires
 Live with broker accounts connected." Live arms Start only when a
 source account, at least one target, and broker accounts are
 ready. Otherwise the helpers are "Select a source account and at
@@ -1245,12 +1358,12 @@ and "Connect a source and at least one target account to start
 mirroring." (list loaded empty). Pending or failed account
 fetches stay muted (`Loading accounts...` / `Could not load
 accounts.`) and are not empty states. The backend rejects
-Explore, Practice, or incomplete starts if the UI slips
+example-data, Practice, or incomplete starts if the UI slips
 (FT-DITTO-002).
 
-On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
+With example data, `/ditto` Risk, **Kill All Positions** is disabled when there are
 no managed accounts (empty state "No managed accounts"; no confirm).
-Whenever the risk runtime is unavailable — including Explore — Kill All
+Whenever the risk runtime is unavailable — including example data — Kill All
 stays muted and disabled with helper "Risk runtime unavailable — Kill All
 disabled." It is never the armed red emergency CTA in that state. The
 backend rejects a Kill All if the UI slips (FT-DITTO-003). Live and
@@ -1279,15 +1392,18 @@ Lives in your platform-specific workspace directory:
 | Windows | `%APPDATA%\flinttrade\workspace.json` |
 | Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
-The Setup and Settings UI write `workspace.json`. Key
-Settings panels:
+The Setup and Settings UI write `workspace.json`. If optional setup was
+dismissed from the Practice desk, Settings opens with that same strip
+(`Optional setup · N of 4 done`, and `· M skipped` only when M is at
+least 1). The Settings reminder has **Show** and **Hide**. It has no
+**Dismiss**. Key Settings panels:
 
 | Settings panel | Maps to | Configures |
 |---|---|---|
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
-| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
+| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); example data keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
 On `/settings#security`, **Quick-unlock PIN** is the 6-digit PIN that
@@ -1302,24 +1418,39 @@ not `^[0-9]{6}$`. Setting or changing the PIN does not change Mode.
 
 ### Idle lock and Quick Unlock
 
-After an idle lock, Welcome Quick Unlock titles the screen for Practice
-and Live: `Practice desk locked` or `Live desk locked`. The button reads
-`Unlock Practice desk` or `Unlock Live desk`. An Example (sample-data)
-session, or any unknown value, shows the plain heading `Locked` and the
-plain button `Unlock`. `Quick Unlock` is the small label above the PIN
-field. Connected (read) is a broker status, not a session Mode, so it
-does not choose this heading. The operator sees the Practice or Live
-heading for that session.
+Welcome and the idle lock overlay both take their heading from the
+session JWT `mode` claim:
+
+- Practice: `Practice desk locked`
+- Live: `Live desk locked`
+- Example data (the `explore` claim), a retired claim, or any other
+  value: `Locked`
+
+A Practice session whose broker status is Connected (read) keeps
+`Practice desk locked`. Connected (read) is a broker status, not a
+session Mode, so it does not choose the heading. A claim that is
+itself the words Connected (read) is not Practice or Live, and stays
+on the plain heading `Locked`.
+
+On Welcome, **Quick Unlock** is the small label above the PIN field,
+not a heading. The PIN field's accessible name is
+`Enter your 6-digit PIN`. The primary button reads
+`Unlock Practice desk`, `Unlock Live desk`, or plain `Unlock`, for the
+same cases as the heading.
+
+The idle lock overlay uses that same heading. Its PIN field's
+accessible name is `Enter your 6-digit PIN`. The PIN submits itself
+when six digits are entered. The overlay has no Unlock button.
 
 Quick Unlock reopens the same Mode the session already had, with the
-correct PIN. It never changes the Mode. The request is
+correct PIN. It keeps that Mode. The request is
 `POST /v1/auth/pin` with body `{ "pin" }`. A successful unlock replaces
-the session token. The previous token stops working. Live is only
-entered through the explicit Live switch (`POST /v1/auth/live`), which
-requires the PIN and authenticator enrolment and also replaces the
-session token. Until the authenticator is enabled, that call refuses
-403 `totp_required`. A session that is already Live keeps that
-enrolment check when Quick Unlock reopens it.
+the session token. The previous token stops working. Live is entered
+only through `POST /v1/auth/live`, which requires the PIN and
+authenticator enrolment and also replaces the session token. Until the
+authenticator is enabled, that call refuses 403 `totp_required`. A
+session that is already Live keeps that enrolment check when Quick
+Unlock reopens it.
 
 Resetting a finished account needs you to be signed in. Recovery asks
 for an authenticator code only once an authenticator is enrolled. That
@@ -1328,9 +1459,9 @@ the desk says **Sign in to reset this account. You'll need your password.**
 With an authenticator enrolled it says **Sign in to reset this account.
 You'll need your password and authenticator code.**
 
-On Explore `/settings` → **LLM Config**, a demo or unconfigured session
+With example data, `/settings` → **LLM Config**, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
-guidance that Explore cannot load or persist LLM secrets. This is not a
+guidance `Example uses example data and cannot load or persist LLM secrets.` This is not a
 broken session; configure a provider in Live or Practice on this machine.
 Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
@@ -1365,9 +1496,9 @@ checks use `GET /healthz` and `GET /readyz`, which return status only.
 
 **Subsystem status** lists **Broker** and **DuckDB** on their own lines.
 Broker shows its note, otherwise its status, otherwise **unknown** — for
-example **Broker — Explore**. DuckDB reads **DuckDB — Healthy** when the
-check passes, and otherwise its note (Explore can read **DuckDB — Explore**)
-or **Error**. Explore on a service row is that service. It does not stand
+example **Broker — Example**. DuckDB reads **DuckDB — Healthy** when the
+check passes, and otherwise its note (example data can read **DuckDB — Example**)
+or **Error**. **Example** on a service row is that service's fallback. Monitoring fallback rows are Example. It does not stand
 in for disk, Memory, CPU, GPU, or network, and it is not merged into the
 TopBar Broker / Laya / LLM cluster.
 
@@ -1385,12 +1516,12 @@ TopBar Broker / Laya / LLM cluster.
 
 A missing host figure says **Unavailable**. So does a zero or absent disk
 or RAM total, a total that is not from this machine, and any sample that
-looks like real capacity — including an Explore sample disk or RAM total.
+looks like real capacity — including an example-data disk or RAM total.
 The row stays **Unavailable**. It does not show 0/0 or invented gigabytes.
 When the backend returns a real host reading, including a degraded health
 response that still carries those totals, **This host** shows that reading
-in Explore, Practice, and Live. When Explore has no such reading, the host
-rows stay **Unavailable** while Broker and DuckDB may still say Explore.
+in example data, Practice, and Live. When example data has no such reading, the host
+rows stay **Unavailable** while Broker and DuckDB may still say **Example**.
 
 **Process (this app)** appears when FlintTrade's own memory is known. It
 shows **RSS**, and **VMS** when that figure is known. A missing RSS on that
@@ -1471,8 +1602,8 @@ Stop-Process -Id <pid>
 
 ### "No LLM provider configured" or "AI settings could not be loaded"
 
-On Explore `/settings` → LLM Config, the empty state "No LLM provider
-configured" is expected for a demo or unconfigured session. Explore
+With example data, `/settings` → LLM Config, the empty state "No LLM provider
+configured" is expected for an unconfigured session. Example data
 cannot load or persist LLM secrets. Use **Retry**, or configure a
 provider in Live or Practice on this machine.
 
@@ -1482,7 +1613,7 @@ to protect a saved configuration. Use **Retry**.
 On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
 (badge **Not configured**) with **Open Settings → AI** and an outline
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
-Composer input and Send stay disabled. Explore and Practice Chat both
+Composer input and Send stay disabled. Example-data and Practice Chat both
 look unconfigured when Settings `#llm` is empty or the stored provider
 is blank — **Connected (suggest only)** must not appear from an env-default advisor
 `configured`. If leftover transcript messages hide that empty state, the
@@ -1526,16 +1657,17 @@ as a toast.
 2. **Qty reduced to N (Laya limit)** — nothing was placed. Place quantity N
    yourself if you still want that order. **Laya Degraded — tighter limits**
    means Live is open with a tighter ceiling. It is not a Blocked strip.
-3. Explore still refuses as a mode refusal. A safety-layer rejection names
+3. Example data still refuses before admission. A safety-layer rejection names
    the layer and is a separate message.
 
 ### Orders not arriving / silently dropped
 
-1. Check the mode badge in the top bar. **Explore** has no Live broker
-   order authority — Live-intent submits are blocked. Order Pad
-   **Sample Buy** on `/trade` records a local sample fill after sample
-   review (no broker). Switch to **Practice** for the native sandbox
-   path, or unlock **Live** for a real broker order.
+1. Check the Mode chip in the TopBar. **Example** is sample data: no broker
+   is connected and no orders are sent. Order Pad **Example Buy** on
+   `/trade` records an example fill after review
+   (`Example only. Nothing is sent to a broker and no order is placed.`).
+   Open the Mode menu and choose **Practice** for simulated fills, or
+   unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.
    A Laya denial or clamp stops before the safety layers. Order Pad and
    Quick Trade show it under the place control; see
