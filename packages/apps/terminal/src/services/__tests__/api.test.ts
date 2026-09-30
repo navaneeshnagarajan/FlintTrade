@@ -3428,6 +3428,63 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(headers["Content-Type"]).toBe("application/json");
   });
 
+  it("placeOrder drops Ready on the Laya pause and says Checking when a Down chip then admits", async () => {
+    const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    const pause = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    resetOperatorSignals();
+    useOperatorSignalStore.setState({
+      decisionStatus: "ready",
+      layaPracticeStatus: "ready",
+      layaChecking: false,
+    });
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY" as const,
+      quantity: 1,
+      product: "MIS" as const,
+      orderType: "MARKET" as const,
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "error",
+      code: "laya_denied",
+      message: pause,
+      reason: pause,
+    }, 403));
+    await expect(placeOrder(order)).rejects.toThrow(pause);
+    expect(useOperatorSignalStore.getState().decisionStatus).toBe("down");
+    expect(useOperatorSignalStore.getState().layaPracticeStatus).toBe("down");
+    expect(useOperatorSignalStore.getState().layaChecking).toBe(false);
+
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { orderId: "ORD-1" } }));
+    await placeOrder(order);
+    expect(useOperatorSignalStore.getState().layaChecking).toBe(true);
+    resetOperatorSignals();
+  });
+
+  it("placeOrder sends the operator admission note and an empty note", async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(
+      jsonResponse({ status: "success", data: { orderId: "ORD-NOTE" } }),
+    ));
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY" as const,
+      quantity: 1,
+      product: "MIS" as const,
+      orderType: "MARKET" as const,
+    };
+
+    await placeOrder({ ...order, rationale: "Planned breakout" });
+    await placeOrder({ ...order, rationale: "" });
+
+    const noted = JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body));
+    const empty = JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body));
+    expect(noted.rationale).toBe("Planned breakout");
+    expect(empty.rationale).toBe("");
+  });
+
   it("placeOrder with a Practice authority pin keeps sandbox mode even if the store flips after the gate", async () => {
     mockModeState.mode = "practice";
     fetchSpy.mockImplementation(async (_url, init) => {
@@ -3653,6 +3710,44 @@ describe("OpenAlgo API client (api.ts)", () => {
       market_protection: true,
     });
     expect(body).not.toHaveProperty("apikey");
+  });
+
+  it("posts the desk Order Pad body with no note", async () => {
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "PAD-1" } }),
+    );
+
+    await placeOrder({
+      symbol: "SBIN",
+      exchange: "NSE",
+      action: "BUY",
+      product: "MIS",
+      orderType: "MARKET",
+      quantity: 1,
+      price: 0,
+      triggerPrice: 0,
+      strategy: "FlintOrderPad",
+    }, { mode: "practice" });
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(body).toEqual({
+      symbol: "SBIN",
+      exchange: "NSE",
+      action: "BUY",
+      product: "MIS",
+      orderType: "MARKET",
+      quantity: 1,
+      price: 0,
+      triggerPrice: 0,
+      strategy: "FlintOrderPad",
+      order_type: "MARKET",
+      trigger_price: 0,
+    });
+    expect(body).not.toHaveProperty("rationale");
+    expect(body).not.toHaveProperty("note");
   });
 
   it("routes live placeOrder through the active connected native account when no OpenAlgo key is configured", async () => {

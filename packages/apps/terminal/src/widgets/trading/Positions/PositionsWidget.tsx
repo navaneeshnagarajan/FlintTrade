@@ -87,6 +87,7 @@ import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { LAYA_EXIT_WHILE_DOWN } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
@@ -387,6 +388,7 @@ function SquareOffDialog({
 }: SquareOffDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   const [layaNotice, setLayaNotice] = useState<LayaNotice | null>(null);
 
   const exitAction: "BUY" | "SELL" = position.quantity > 0 ? "SELL" : "BUY";
@@ -419,6 +421,7 @@ function SquareOffDialog({
         price: squareOffMark(position, practice),
         triggerPrice: 0,
         strategy: "FlintPositions",
+        rationale: admissionRationale(note),
       }, mutationIdentity, { exit: true });
       if (
         !isActionAllowed()
@@ -459,6 +462,7 @@ function SquareOffDialog({
     getCurrentIdentity,
     onClose,
     onSquaredOff,
+    note,
   ]);
 
   return (
@@ -497,6 +501,7 @@ function SquareOffDialog({
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
           </p>
         )}
+        <AdmissionNoteField id="positions-admission-note" value={note} onChange={setNote} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel

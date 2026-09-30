@@ -406,6 +406,34 @@ describe("OrderPadWidget", () => {
     expect(Number(qtyInput.value)).toBeGreaterThanOrEqual(1);
   });
 
+  it("keeps the reason collapsed until the operator opens it", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    expect(screen.getByRole("button", { name: "Add a reason (optional)" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Add a reason (optional)")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
+    const note = screen.getByLabelText("Add a reason (optional)");
+    expect(note.tagName).toBe("INPUT");
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
+  });
+
+  it("sends the admission note with a practice place", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Planned breakout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|example) order/i,
+    }));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ rationale: "Planned breakout" }),
+      expect.objectContaining({ mode: "practice" }),
+    );
+  });
+
   it("shows Laya denied under the confirm control and leaves it off", async () => {
     mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
       code: "laya_denied",
@@ -430,14 +458,10 @@ describe("OrderPadWidget", () => {
   });
 
   it("clears a Laya denial when decision status changes and leaves confirm retryable", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
-      403,
-      {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. New orders are paused until it's Ready. You can still close positions.", 403, {
       code: "laya_denied",
       reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
-      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
-      limits: { max_quantity: 100 },
+      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
     }));
     useOperatorSignalStore.setState({ decisionStatus: "down" });
     render(<OrderPadWidget {...defaultProps} />);
@@ -447,7 +471,12 @@ describe("OrderPadWidget", () => {
       name: /confirm (simulated practice|example) order/i,
     });
     fireEvent.click(confirm);
-    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
+    expect(await screen.findByTestId("laya-denied")).toHaveTextContent(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
+    expect(screen.queryByTestId("laya-limits")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Max quantity/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start the Laya model/)).not.toBeInTheDocument();
     expect(confirm).toBeDisabled();
 
     act(() => {
@@ -458,10 +487,11 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
   });
 
-  it("shows a quantity clamp before the place completes", async () => {
-    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Qty reduced to 1 (Laya limit)", 409, {
+  it("shows a clamp and does not place until Place N is clicked", async () => {
+    const clamp = "Not placed. Laya allows up to 1.";
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
       code: "laya_clamp",
-      message: "Qty reduced to 1 (Laya limit)",
+      message: clamp,
       applied_quantity: 1,
       limits: { max_quantity: 1 },
     }));
@@ -473,11 +503,76 @@ describe("OrderPadWidget", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: /confirm (simulated practice|example) order/i,
     }));
-    expect(await screen.findByTestId("laya-clamp")).toHaveTextContent("Qty reduced to 1 (Laya limit)");
+    expect(await screen.findByTestId("laya-clamp")).toHaveTextContent(clamp);
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Place 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeDisabled();
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    let releasePlaced: (value: { orderId: string }) => void = () => {};
+    mockPlaceOrder.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        releasePlaced = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Place 1" }));
+    const review = screen.getByRole("dialog");
+    const quantityRow = within(review).getByText("Quantity").parentElement;
+    expect(quantityRow).toHaveTextContent("1");
+    expect(quantityRow).not.toHaveTextContent("4");
+    releasePlaced({ orderId: "TEST001" });
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+    expect(mockPlaceOrder).toHaveBeenLastCalledWith(
+      expect.objectContaining({ quantity: 1, strategy: "FlintOrderPad" }),
+      expect.objectContaining({ mode: "practice" }),
+    );
+  });
+
+  it("cancels a clamp without placing", async () => {
+    const clamp = "Not placed. Laya allows up to 1.";
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
+      code: "laya_clamp",
+      message: clamp,
+      applied_quantity: 1,
+      limits: { max_quantity: 1 },
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|example) order/i,
+    }));
+    expect(await screen.findByTestId("laya-clamp")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
+  });
+
+  it("submits the desk Order Pad request with no note", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    expect(screen.getByRole("button", { name: "Add a reason (optional)" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Add a reason (optional)")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|example) order/i,
+    }));
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        strategy: "FlintOrderPad",
+        orderType: "MARKET",
+        quantity: 1,
+        triggerPrice: 0,
+        rationale: "",
+      }),
+      expect.objectContaining({ mode: "practice" }),
+    );
+    const params = mockPlaceOrder.mock.calls[0]?.[0];
+    expect(params?.rationale).toBe("");
+    expect(params).not.toHaveProperty("note");
   });
 
   it("caps Close at the open quantity and keeps it enabled while Laya is Down", async () => {
@@ -624,8 +719,7 @@ describe("OrderPadWidget", () => {
     const close = screen.getByTestId("orderpad-close");
     expect(close).toBeDisabled();
     fireEvent.click(close);
-    expect(mockPlaceOrder).not.toHaveBeenCalled();
-  });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();  });
 
   it("shows tighter Degraded limits without Blocked chrome", async () => {
     useOperatorSignalStore.setState({ decisionStatus: "degraded" });
@@ -998,6 +1092,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
         price: 250.5,
         triggerPrice: 0,
         strategy: "FlintOrderPad",
+        rationale: "",
       },
       { mode: "practice" },
     );

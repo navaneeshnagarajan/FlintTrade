@@ -18,6 +18,8 @@ interface PracticeOrderReviewStageProps {
   admission?: LayaNotice | null;
   onBack: () => void;
   onConfirm: () => void;
+  onPlaceClamped?: (quantity: number) => void;
+  onCancelClamp?: () => void;
 }
 
 const currency = new Intl.NumberFormat("en-IN", {
@@ -46,6 +48,8 @@ export function PracticeOrderReviewStage({
   admission = null,
   onBack,
   onConfirm,
+  onPlaceClamped,
+  onCancelClamp,
 }: PracticeOrderReviewStageProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -121,7 +125,11 @@ export function PracticeOrderReviewStage({
         </dl>
 
         <div className="mt-3">
-          <LayaAdmissionNotice notice={admission} />
+          <LayaAdmissionNotice
+            notice={admission}
+            onPlaceClamped={onPlaceClamped}
+            onCancelClamp={onCancelClamp}
+          />
         </div>
 
         <div className="mt-4 flex gap-2">
@@ -137,7 +145,7 @@ export function PracticeOrderReviewStage({
           <button
             ref={confirmRef}
             type="button"
-            disabled={confirming || admission?.kind === "deny"}
+            disabled={confirming || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={orderReviewConfirmAria(mode)}
             aria-busy={confirming}
             onClick={onConfirm}
