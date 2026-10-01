@@ -169,7 +169,7 @@ class _Limiter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def acquire(self, adapter_id: str, kind: str) -> None:
+    async def acquire(self, adapter_id: str, kind: str, *, before_retry=None) -> None:
         self.calls.append((adapter_id, kind))
 
 
@@ -3032,7 +3032,7 @@ def test_cancellation_propagates_and_releases_the_exact_admitted_read(harness, b
             self.started = asyncio.Event()
             self.release = asyncio.Event()
 
-        async def acquire(self, _adapter_id, _kind) -> None:
+        async def acquire(self, _adapter_id, _kind, *, before_retry=None) -> None:
             self.started.set()
             await self.release.wait()
 
@@ -3520,4 +3520,57 @@ async def test_real_limiter_cancellation_releases_owner_and_leaves_next_token_av
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+        assert owner.close(timeout=0) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["revoke", "close", "authority", "workspace"])
+@pytest.mark.parametrize("rate", [1, 0.1])
+async def test_stale_throttled_queue_drains_together_without_spending_refills(harness, change, rate):
+    from flinttrade_gateway.rate_limiter import BrokerRateLimiter
+    from tests.mocks.rate_limit_clock import RateLimitClock
+
+    clock = RateLimitClock()
+    limiter = BrokerRateLimiter(
+        {"dhan": {"quote": rate, "data": 5}}, clock=clock.time, sleep=clock.sleep
+    )
+    authority = [harness.context]
+    owner = _owner(harness, limiter=limiter)
+    port = owner.bind(target=ExactReadTarget(harness.selector), verify_current_authority=lambda: authority[0])
+    await limiter.acquire("dhan", "quote")
+    tasks = [asyncio.create_task(port.quote(QuoteRequest(InstrumentRef("NIFTY", "NSE")))) for _ in range(8)]
+    try:
+        await asyncio.to_thread(clock.wait_for_settled, 8)
+        assert owner._active == 8
+        expected = BrokerReadErrorCode.REVOKED
+        if change == "revoke":
+            owner.revoke(port)
+        elif change == "close":
+            assert owner.close(timeout=0) is False
+        elif change == "authority":
+            authority[0] = None
+            expected = BrokerReadErrorCode.UNAUTHORISED
+        else:
+            snapshot = read_workspace_snapshot(harness.workspace_path)
+
+            def mutate(config):
+                config["brokers"]["data"]["quote"] = "dhan:Other"
+
+            compare_and_swap_workspace(harness.workspace_path, snapshot.version, mutate)
+            expected = BrokerReadErrorCode.TARGET_STALE
+        clock.advance(1)
+        outcomes = await asyncio.wait_for(asyncio.gather(*tasks), timeout=1)
+        assert outcomes == [BrokerReadFailure(expected)] * 8
+        assert harness.adapter.calls == 0
+        assert owner._active == 0
+        assert owner.close(timeout=0) is True
+        # Refusals must leave both budgets available for valid callers.
+        clock.advance(1 / rate - 1)
+        await asyncio.wait_for(limiter.acquire("dhan", "quote"), timeout=1)
+        for _ in range(4):
+            await asyncio.wait_for(limiter.acquire("dhan", "data"), timeout=1)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         assert owner.close(timeout=0) is True

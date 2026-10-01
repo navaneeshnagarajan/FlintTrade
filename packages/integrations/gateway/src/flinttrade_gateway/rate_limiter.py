@@ -137,7 +137,13 @@ class BrokerRateLimiter:
             raise ValueError("rate limits must be finite")
         return value
 
-    async def acquire(self, broker_id: str, kind: str = "order") -> None:
+    async def acquire(
+        self,
+        broker_id: str,
+        kind: str = "order",
+        *,
+        before_retry: Callable[[], None] | None = None,
+    ) -> None:
         """Wait for and consume a token from every applicable budget.
 
         Quotes (including quote-backed depth) share both quote and generic data
@@ -145,6 +151,10 @@ class BrokerRateLimiter:
         A cancelled sleep holds no reservation and spends no partial budget.
         Synchronous accounting is shared across threads and event loops; every
         wake rechecks current rates and competes for a real refilled token.
+        An optional ``before_retry`` callback runs outside the accounting lock
+        after each sleep and may raise to abandon a stale request without
+        spending tokens. Such waits recheck at least once per second, including
+        fractional rates, so retired read grants do not wait through a queue.
         """
         kinds = ("data", "quote") if kind == "quote" else (kind,)
         while True:
@@ -168,7 +178,9 @@ class BrokerRateLimiter:
                     for bucket in buckets:
                         bucket.tokens -= 1.0
                     return
-            await self._sleep(wait)
+            await self._sleep(min(wait, 1.0) if before_retry is not None else wait)
+            if before_retry is not None:
+                before_retry()
 
     def snapshot(self) -> dict[str, dict[str, float]]:
         """Return the current effective per-broker limits (a deep copy).
