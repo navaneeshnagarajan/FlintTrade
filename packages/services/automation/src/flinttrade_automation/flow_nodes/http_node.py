@@ -46,9 +46,10 @@ def _validate_public_url(url: str) -> None:
     for info in infos:
         addr = info[4][0]
         try:
-            _reject_if_private(ipaddress.ip_address(addr), host)
+            ip = ipaddress.ip_address(addr)
         except ValueError:
             continue
+        _reject_if_private(ip, host)
 
 
 def _reject_if_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str) -> None:

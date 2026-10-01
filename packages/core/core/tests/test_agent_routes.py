@@ -242,14 +242,16 @@ def test_no_jwt_401(monkeypatch):
     assert resp.status_code == 401
 
 
-def test_practice_mode_403(monkeypatch):
+def test_practice_mode_requires_the_original_full_session_token(monkeypatch):
     monkeypatch.setattr(
         order_routes_mod,
         "_decode_request_payload",
         lambda: {"mode": "practice", "sub": "user-1", "jti": "jti-1"},
     )
     resp = _make_app().test_client().post("/api/v1/ai/agent/start", json=_start_body())
-    assert resp.status_code == 403
+    # Claims mocked for the legacy routing decision are not Practice authority.
+    # The new isolated runtime re-verifies the original signed session token.
+    assert resp.status_code == 401
 
 
 def test_missing_acl_grant_403_with_instruction(monkeypatch, live_auth):
