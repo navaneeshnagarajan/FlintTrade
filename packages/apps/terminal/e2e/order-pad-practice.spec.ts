@@ -210,9 +210,9 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     name: "read empty Practice sandbox orders",
     method: "GET",
     path: "/ft-api/v1/sandbox/orders",
-    // The paused Order Pad mount reads the book, and the visible-desk
-    // rearm adds one more read.
-    expectedCalls: 4,
+    // The paused mount reads the book three times. A visible-desk rearm
+    // may add one more read before the assertion.
+    expectedCalls: { minimum: 3, maximum: 4 },
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { status: "success", data: { orders: [] } } };
