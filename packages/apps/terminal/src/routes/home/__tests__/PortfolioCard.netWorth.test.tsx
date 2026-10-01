@@ -84,7 +84,7 @@ describe("PortfolioCard net worth", () => {
 
     const worth = Number(screen.getByTestId("portfolio-net-worth").getAttribute("data-value"));
     expect(worth).toBe(accountNetWorth(holdings, cash, positions, charges));
-    expect(screen.getByText("Net Worth (Cash + Holdings + Positions)")).toBeInTheDocument();
+    expect(screen.getByText("Net Worth")).toBeInTheDocument();
     expect(screen.getByText("Practice account, after estimated charges")).toBeInTheDocument();
   });
 });
