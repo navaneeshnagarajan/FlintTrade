@@ -193,8 +193,8 @@ def test_build_requirements_lock_is_exact_wheel_only_and_hash_closed() -> None:
 
     assert sdk_environment.BUILD_REQUIREMENTS_LOCK.read_text(encoding="utf-8").splitlines() == [
         "# Build backend for the immutable Kotak Neo Git source. Install only hashed universal wheels.",
-        "packaging==26.2 \\",
-        "    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e",
+        "packaging==26.3 \\",
+        "    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
         "setuptools==84.0.0 \\",
         "    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
         "wheel==0.48.0 \\",
@@ -209,7 +209,7 @@ def test_uv_sync_uses_the_same_exact_build_constraints() -> None:
 
     project = tomllib.loads((sdk_environment.REPO / "pyproject.toml").read_text(encoding="utf-8"))
     assert project["tool"]["uv"]["build-constraint-dependencies"] == [
-        "packaging==26.2",
+        "packaging==26.3",
         "setuptools==84.0.0",
         "wheel==0.48.0",
     ]
@@ -218,7 +218,7 @@ def test_uv_sync_uses_the_same_exact_build_constraints() -> None:
     gateway = tomllib.loads(
         (sdk_environment.REPO / "packages/integrations/gateway/pyproject.toml").read_text(encoding="utf-8")
     )
-    assert {"packaging==26.2", "setuptools==84.0.0", "wheel==0.48.0"} <= set(
+    assert {"packaging==26.3", "setuptools==84.0.0", "wheel==0.48.0"} <= set(
         gateway["project"]["dependencies"]
     )
 
