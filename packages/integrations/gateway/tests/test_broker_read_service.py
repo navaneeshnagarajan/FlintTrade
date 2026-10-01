@@ -3574,3 +3574,41 @@ async def test_stale_throttled_queue_drains_together_without_spending_refills(ha
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         assert owner.close(timeout=0) is True
+
+
+@pytest.mark.parametrize("scope", [{"NSE"}, ("NSE",), True, None, frozenset({1}), frozenset()])
+def test_invalid_static_depth_scope_fails_before_limiter_and_adapter(harness, scope) -> None:
+    class ScopedAdapter(_QuoteAdapter):
+        _BROKER_READ_DEPTH_EXCHANGES = scope
+
+        async def depth(self, *_args):
+            pytest.fail("Unsupported depth must not dispatch")
+
+    owner = _owner(harness, adapters={"dhan": ScopedAdapter({})})
+    port = owner.bind(target=ExactReadTarget(harness.selector), verify_current_authority=lambda: harness.context)
+    assert not isinstance(port, BrokerReadFailure)
+
+    result = asyncio.run(port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))))
+
+    assert result == BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+    assert harness.limiter.calls == []
+    assert owner._active == 0
+
+
+def test_static_depth_scope_never_executes_descriptor(harness) -> None:
+    class ScopedAdapter(_QuoteAdapter):
+        @property
+        def _BROKER_READ_DEPTH_EXCHANGES(self):
+            pytest.fail("Depth support metadata must be read statically")
+
+        async def depth(self, *_args):
+            pytest.fail("Unsupported depth must not dispatch")
+
+    owner = _owner(harness, adapters={"dhan": ScopedAdapter({})})
+    port = owner.bind(target=ExactReadTarget(harness.selector), verify_current_authority=lambda: harness.context)
+    assert not isinstance(port, BrokerReadFailure)
+
+    assert asyncio.run(port.depth(QuoteRequest(InstrumentRef("TCS", "NSE")))) == (
+        BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+    )
+    assert harness.limiter.calls == []
