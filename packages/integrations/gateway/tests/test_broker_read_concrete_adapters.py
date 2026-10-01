@@ -63,7 +63,7 @@ class _Limiter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def acquire(self, adapter_id: str, kind: str) -> None:
+    async def acquire(self, adapter_id: str, kind: str, *, before_retry=None) -> None:
         self.calls.append((adapter_id, kind))
 
 

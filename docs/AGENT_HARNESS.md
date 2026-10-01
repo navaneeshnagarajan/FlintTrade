@@ -34,6 +34,16 @@ in this field.
 
 ## Behaviour
 
+Broker reads share a rate limiter across request threads and background loops.
+Single quotes, batch quotes and quote-backed depth consume the same quote
+budget as well as the generic data budget; Dhan's published quote/depth cap is
+one request per second. Other reads retain the generic data budget. Waiting
+calls recheck current authority before reaching the provider. Throttled reads
+also recheck authority at least once per second, so revoked or stale queues
+drain together without spending refills. Cancellation while waiting spends no
+token. In-place limiter rate changes preserve credit
+rather than opening a new burst. This does not enable native depth adapters.
+
 The worker waits outside the effective market session. During an open session
 it reads authorised market data, asks the configured LLM for a signal, applies
 agent limits and submits through canonical Practice admission. New entries

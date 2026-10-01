@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from flask import Flask
@@ -133,6 +133,53 @@ def test_put_requires_broker_id(client):
 def test_put_rejects_negative_rate(client):
     resp = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": -1})
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("with_registry", [False, True], ids=["standalone", "managed"])
+@pytest.mark.parametrize("field", ["order", "data"])
+@pytest.mark.parametrize(
+    "rate_json",
+    ["Infinity", "-Infinity", "NaN", '"1e309"', '"-1e309"', str(10**400), str(-(10**400)), "1e309"],
+    ids=[
+        "infinity",
+        "negative-infinity",
+        "nan",
+        "overflow-string",
+        "negative-overflow-string",
+        "overflow-integer",
+        "negative-overflow-integer",
+        "overflow-json-number",
+    ],
+)
+def test_put_rejects_nonfinite_rates_before_side_effects(app, client, tmp_path, with_registry, field, rate_json):
+    from flinttrade_core.workspace import Workspace
+
+    Workspace(tmp_path).initialise()
+    workspace_path = tmp_path / "workspace.json"
+    before = workspace_path.read_bytes()
+    limiter = app.config["_TEST_LIMITER"]
+    before_limits = limiter.snapshot()
+    if with_registry:
+        app.config["REGISTRY"] = object()
+
+    with (
+        patch.object(Workspace, "update", autospec=True, side_effect=Workspace.update) as persist,
+        patch.object(limiter, "apply_override", wraps=limiter.apply_override) as apply_override,
+        patch("flinttrade_core.app.retire_broker_dependencies", return_value=True) as retire,
+    ):
+        response = client.put(
+            "/v1/rate-limits",
+            data=f'{{"broker_id": "openalgo", "{field}": {rate_json}}}',
+            content_type="application/json",
+        )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "error"
+    persist.assert_not_called()
+    apply_override.assert_not_called()
+    retire.assert_not_called()
+    assert workspace_path.read_bytes() == before
+    assert limiter.snapshot() == before_limits
 
 
 def test_rejected_workspace_write_leaves_live_rate_limits_unchanged(app, client, tmp_path):

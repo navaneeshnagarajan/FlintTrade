@@ -159,6 +159,14 @@ _FACADE_OWNERS: weakref.WeakKeyDictionary[_BrokerReadFacade, weakref.ReferenceTy
 )
 
 
+class _ReadAdmissionRefused(Exception):
+    """Internal control flow for an authority refusal while awaiting a token."""
+
+    def __init__(self, failure: BrokerReadFailure) -> None:
+        super().__init__()
+        self.failure = failure
+
+
 class _BrokerReadFacade:
     """Identity-only public facade; all authority remains in owner side tables."""
 
@@ -739,8 +747,20 @@ class BrokerReadOwner:
         if selected is None:
             return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
         if self._rate_limiter is not None:
+            def revalidate_waiter() -> None:
+                result = self._revalidate(grant)
+                if type(result) is BrokerReadFailure:
+                    raise _ReadAdmissionRefused(result)
+
             try:
-                await self._rate_limiter.acquire(grant.selector.adapter_id, "data")
+                # Single/batch quotes and quote-backed depth share the stricter
+                # market-quote cap as well as the generic data budget.
+                kind = "quote" if selected in {"quotes", "depth"} else "data"
+                await self._rate_limiter.acquire(
+                    grant.selector.adapter_id, kind, before_retry=revalidate_waiter
+                )
+            except _ReadAdmissionRefused as refusal:
+                return refusal.failure
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         second = self._revalidate(grant)
