@@ -740,7 +740,10 @@ class BrokerReadOwner:
             return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
         if self._rate_limiter is not None:
             try:
-                await self._rate_limiter.acquire(grant.selector.adapter_id, "data")
+                # Single/batch quotes and quote-backed depth share the stricter
+                # market-quote cap as well as the generic data budget.
+                kind = "quote" if selected in {"quotes", "depth"} else "data"
+                await self._rate_limiter.acquire(grant.selector.adapter_id, kind)
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         second = self._revalidate(grant)
