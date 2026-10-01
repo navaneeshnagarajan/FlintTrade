@@ -16,9 +16,10 @@ admission and the real `SandboxEngine`. It does not place real-money orders.
   available. The harness does not remove native-account setup/read-port guards.
 - The current complete market-input route is a working OpenAlgo connection.
   Native saved-session reconnection/account setup remains behind the existing
-  lifecycle cutover, and native depth is not yet implemented. The harness
-  refuses unavailable required inputs rather than pretending a native session
-  is ready.
+  lifecycle cutover. Dhan cash-equity depth is implemented on the in-process
+  read port, but this does not establish a working native setup/reconnection
+  route. The harness refuses unavailable required inputs rather than
+  pretending a native session is ready.
 - Start with an empty Practice position book and no pending Practice orders.
   Existing manual exposure is not silently adopted by an agent.
 
@@ -42,7 +43,25 @@ calls recheck current authority before reaching the provider. Throttled reads
 also recheck authority at least once per second, so revoked or stale queues
 drain together without spending refills. Cancellation while waiting spends no
 token. In-place limiter rate changes preserve credit
-rather than opening a new burst. This does not enable native depth adapters.
+rather than opening a new burst.
+
+Dhan now provides cash-equity depth for exact NSE/BSE instruments through its
+existing `quote_data` transport and the authenticated `BrokerReadOwner`. The
+canonical instrument resolver must agree on symbol, exchange, security ID and
+`EQUITY` instrument class (separate from exchange subtype); a supplied security
+ID must match. Non-cash exchanges retain the explicit `unsupported` depth
+outcome rather than blocking otherwise supported read-only analysis. The
+documented REST and SDK response envelopes are validated before copying buy/sell ladders. Missing or
+ambiguous instruments, malformed levels, negative/non-finite numbers and
+fractional counts fail closed. Explicit empty sides and zero levels remain
+explicit source data. No depth, quantity or derivative lot metadata is invented.
+
+This is an offline-tested in-process capability. Native HTTP reads still
+return `409`, account mutations still return `503`, and streaming-depth
+readiness remains unchanged. It does not prove a live Dhan feed or a full
+market-day Practice run. Transport/schema references:
+[Dhan Market Quote](https://dhanhq.co/docs/v2/market-quote/) and the
+[pinned SDK response wrapper](https://github.com/dhan-oss/DhanHQ-py/blob/v2.2.0/src/dhanhq/dhan_http.py).
 
 The worker waits outside the effective market session. During an open session
 it reads authorised market data, asks the configured LLM for a signal, applies

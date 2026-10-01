@@ -60,7 +60,7 @@ from flinttrade_core.broker_read_port import (
     QuoteSnapshot,
     TradeSnapshot,
 )
-from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.models import (
     OHLCV,
     Candles,
@@ -1063,6 +1063,8 @@ class BrokerReadOwner:
                 return call
             try:
                 raw_result = await call.method(call.handle, request)
+            except UnsupportedCapabilityError:
+                return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
             except BrokerReadResponseInvalid:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             except Exception:
