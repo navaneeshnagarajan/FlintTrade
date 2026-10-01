@@ -35,6 +35,14 @@ _EXCHANGES = frozenset({"NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD"})
 _PRODUCTS = frozenset({"MIS", "CNC", "NRML"})
 
 
+class _PracticeInputError(ValueError):
+    """A validation refusal whose public text is owned by this module."""
+
+    def __init__(self, public_message: str) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+
+
 def validate_practice_config(body: Any) -> dict[str, Any]:
     """Validate JSON without truthiness defaults, coercion or non-finite values."""
     defaults: dict[str, Any] = {
@@ -45,45 +53,46 @@ def validate_practice_config(body: Any) -> dict[str, Any]:
         "model_call_limit": 500, "model_output_limit": 512,
     }
     if type(body) is not dict or set(body) - (set(defaults) | {"symbols", "mode"}):
-        raise ValueError("Provide an object containing only supported Practice agent parameters")
+        raise _PracticeInputError("Provide an object containing only supported Practice agent parameters")
     if body.get("mode", "practice") != "practice":
-        raise ValueError("Practice execution mode cannot be changed")
+        raise _PracticeInputError("Practice execution mode cannot be changed")
     symbols = body.get("symbols")
     if type(symbols) is not list or not 1 <= len(symbols) <= 20:
-        raise ValueError("symbols must be a list containing 1 to 20 instrument names")
+        raise _PracticeInputError("symbols must be a list containing 1 to 20 instrument names")
     normalised = []
     for symbol in symbols:
         if type(symbol) is not str or not re.fullmatch(r"[A-Z0-9][A-Z0-9 &._+\-]{0,63}", symbol.strip().upper()):
-            raise ValueError("Each symbol must be a non-empty bounded instrument name")
+            raise _PracticeInputError("Each symbol must be a non-empty bounded instrument name")
         if symbol.strip().upper() not in normalised:
             normalised.append(symbol.strip().upper())
     result = {**defaults, **{key: value for key, value in body.items() if key not in {"symbols", "mode"}}}
     result["symbols"] = normalised
     rationale = result["entry_rationale"]
     if type(rationale) is not str or len(rationale.strip()) > 2000:
-        raise ValueError("entry_rationale must be a string of at most 2,000 characters")
+        raise _PracticeInputError("entry_rationale must be a string of at most 2,000 characters")
     result["entry_rationale"] = rationale.strip()
     for key, minimum, maximum in (("model_call_limit", 1, 10_000), ("model_output_limit", 16, 4096)):
         if type(result[key]) is not int or not minimum <= result[key] <= maximum:
-            raise ValueError(f"{key} must be an integer between {minimum} and {maximum}")
+            raise _PracticeInputError(f"{key} must be an integer between {minimum} and {maximum}")
     for key, choices in (("exchange", _EXCHANGES), ("product", _PRODUCTS)):
         value = result[key]
         if type(value) is not str or value.strip().upper() not in choices:
-            raise ValueError(f"{key} must be one of {', '.join(sorted(choices))}")
+            raise _PracticeInputError(f"{key} must be one of {', '.join(sorted(choices))}")
         result[key] = value.strip().upper()
     for key, maximum in (("max_position_size", 1_000_000), ("max_trades_per_symbol", 1000), ("cycle_interval_sec", 3600)):
         if type(result[key]) is not int or not 1 <= result[key] <= maximum:
-            raise ValueError(f"{key} must be an integer between 1 and {maximum}")
+            raise _PracticeInputError(f"{key} must be an integer between 1 and {maximum}")
     for key in ("stop_loss_pct", "take_profit_pct", "daily_stop_loss"):
         value = result[key]
         if type(value) not in {int, float}:
-            raise ValueError(f"{key} must be a finite number")
+            raise _PracticeInputError(f"{key} must be a finite number")
         try:
             value = float(value)
         except (OverflowError, ValueError) as exc:
-            raise ValueError(f"{key} must be a finite number") from exc
+            raise _PracticeInputError(f"{key} must be a finite number") from exc
         if not math.isfinite(value) or (value >= 0 if key == "daily_stop_loss" else not 0 < value <= 100):
-            raise ValueError(f"{key} must be negative" if key == "daily_stop_loss" else f"{key} must be above 0 and at most 100")
+            raise _PracticeInputError(f"{key} must be negative" if key == "daily_stop_loss"
+                                      else f"{key} must be above 0 and at most 100")
         result[key] = value
     return result
 
@@ -96,6 +105,22 @@ def _enabled() -> bool:
 
 def _error(message: str, status: int) -> tuple[Any, int]:
     return jsonify({"status": "error", "message": message}), status
+
+
+def _known_error(exc: Exception, messages: dict[str, str], status: int, fallback: str) -> tuple[Any, int]:
+    """Return canonical local refusal text, never dependency exception text."""
+    for expected, public_message in messages.items():
+        if exc.args == (expected,):
+            return _error(public_message, status)
+    return _error(fallback, 503)
+
+
+_IDENTIFIER_ERRORS = {
+    "run identifiers and event kinds must be bounded identifier text":
+        "run identifiers and event kinds must be bounded identifier text",
+    "credential material is not permitted in run evidence":
+        "credential material is not permitted in run evidence",
+}
 
 
 def _authorise() -> tuple[str, str, tuple[Any, int] | None]:
@@ -280,20 +305,21 @@ class PracticeAgentSupervisor:
         with self.lock:
             if run.stop.is_set() and status in {"waiting", "running"}:
                 status = "stopping"
-            previous = run.status
+            previous_status, previous_error = run.status, run.error
             run.status = status
             run.error = error
-            run.snapshot = self._snapshot(run)
             try:
-                if previous != status:
-                    self.store.append_event(run.run_id, kind="status_changed", data={"previous": previous, "status": status})
-                # Keep the durable active fence until transition evidence has
-                # committed. A failure must never leave a free terminal row.
-                self.store.update_run(run.run_id, status=status, snapshot=run.snapshot, error=error or None)
-            except Exception:
+                snapshot = self._snapshot(run)
+                # The snapshot and its transition evidence share one commit.
+                # Neither a phantom terminal event nor a free fence may survive
+                # failure of the other write.
+                self.store.transition_run(run.run_id, status=status, snapshot=snapshot, error=error or None)
+            except BaseException:  # restore volatile state even when snapshotting or persistence is interrupted
+                run.status, run.error = previous_status, previous_error
                 run.evidence_failed = True
                 run.stop.set()
                 raise
+            run.snapshot = snapshot
 
     def _event(self, run: _Run, kind: str, data: dict[str, Any]) -> None:
         try:
@@ -497,17 +523,17 @@ class PracticeAgentSupervisor:
                     and self.run is not None and self.run.run_id == run_id and self.run.evidence_failed):
                 # Storage may have recovered since the worker's terminal event
                 # failed. Re-establish the durable uncertainty before resolving.
-                row = self.store.update_run(run_id, status="reconciliation_required",
-                                            snapshot=self.run.snapshot, error=self.run.error)
+                row = self.store.transition_run(run_id, status="reconciliation_required",
+                                                snapshot=self.run.snapshot, error=self.run.error)
             if row["status"] != "reconciliation_required":
                 raise RuntimeError("Only a run requiring reconciliation can be resolved")
             if not _sandbox_flat(self.app):
                 raise RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving")
-            self.store.append_event(run_id, kind="reconciliation_resolved", data={"flat": True})
             snapshot = {**row["snapshot"], "status": "stopped", "agent_status": "stopped", "running": False,
                         "shutdown_complete": True, "error": "", "stop_failure": "",
                         "active_positions": {}, "position_details": {}, "squared_off": True}
-            result = self.store.update_run(run_id, status="stopped", snapshot=snapshot, error=None)
+            result = self.store.transition_run(run_id, status="stopped", snapshot=snapshot, error=None,
+                                               event_kind="reconciliation_resolved", event_data={"flat": True})
             if self.run is not None and self.run.run_id == run_id:
                 self.run.status = "stopped"
                 self.run.snapshot = snapshot
@@ -782,8 +808,10 @@ def start_practice_agent() -> tuple[Any, int]:
         return _error("Enable ai.autonomous_agent.enabled in workspace settings first", 403)
     try:
         config = validate_practice_config(request.get_json(silent=True))
-    except ValueError as exc:
-        return _error(str(exc), 400)
+    except _PracticeInputError as exc:
+        return _error(exc.public_message, 400)
+    except Exception:
+        return _error("Practice agent dependencies or durable evidence are unavailable", 503)
     app = current_app._get_current_object()  # noqa: SLF001
     if app.extensions.get(_EXTENSION + "_shutdown"):
         return _error("The application is shutting down", 409)
@@ -793,13 +821,17 @@ def start_practice_agent() -> tuple[Any, int]:
     try:
         snapshot = get_practice_supervisor(app).start(token, owner, config)
     except RuntimeError as exc:
-        # These errors are local refusals, never upstream exception messages.
-        if str(exc) in {
-            "The application is shutting down", "A Practice agent worker is still owned; stop it first",
-            "Practice positions and pending orders must be flat before starting",
-        }:
-            return _error(str(exc), 409)
-        return _error("A Practice run is active or requires reconciliation", 409)
+        return _known_error(exc, {
+            "The application is shutting down": "The application is shutting down",
+            "A Practice agent worker is still owned; stop it first":
+                "A Practice agent worker is still owned; stop it first",
+            "Practice positions and pending orders must be flat before starting":
+                "Practice positions and pending orders must be flat before starting",
+            "The preceding Practice worker requires reconciliation":
+                "A Practice run is active or requires reconciliation",
+            "an active run or unresolved interruption already exists":
+                "A Practice run is active or requires reconciliation",
+        }, 409, "Practice agent dependencies or durable evidence are unavailable")
     except Exception:
         return _error("Practice agent dependencies or durable evidence are unavailable", 503)
     return jsonify({"status": "success", "data": snapshot}), 202
@@ -835,7 +867,7 @@ def practice_agent_status() -> tuple[Any, int]:
 def _query_integer(name: str, default: int, minimum: int, maximum: int) -> int:
     raw = request.args.get(name, str(default))
     if not re.fullmatch(r"[0-9]{1,10}", raw) or not minimum <= int(raw) <= maximum:
-        raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
+        raise _PracticeInputError(f"{name} must be an integer between {minimum} and {maximum}")
     return int(raw)
 
 
@@ -847,8 +879,8 @@ def list_practice_runs() -> tuple[Any, int]:
         limit = _query_integer("limit", 20, 1, 100)
         result = get_practice_supervisor(current_app._get_current_object()).history(owner, limit=limit)  # noqa: SLF001
         return jsonify({"status": "success", "data": result}), 200
-    except ValueError as exc:
-        return _error(str(exc), 400)
+    except _PracticeInputError as exc:
+        return _error(exc.public_message, 400)
     except Exception:
         return _error("Practice run history is unavailable", 503)
 
@@ -864,8 +896,10 @@ def practice_run_events(run_id: str) -> tuple[Any, int]:
         if supervisor.owned_run(owner, run_id) is None:
             return _error("Practice run not found", 404)
         return jsonify({"status": "success", "data": supervisor.store.events(run_id, after=after, limit=limit)}), 200
+    except _PracticeInputError as exc:
+        return _error(exc.public_message, 400)
     except ValueError as exc:
-        return _error(str(exc), 400)
+        return _known_error(exc, _IDENTIFIER_ERRORS, 400, "Practice run evidence is unavailable")
     except Exception:
         return _error("Practice run evidence is unavailable", 503)
 
@@ -876,14 +910,28 @@ def resolve_practice_run(run_id: str) -> tuple[Any, int]:
         return denied
     try:
         supervisor = get_practice_supervisor(current_app._get_current_object())  # noqa: SLF001
+    except Exception:
+        return _error("Practice reconciliation could not be verified", 503)
+    try:
         result = supervisor.resolve(owner, run_id)
         return jsonify({"status": "success", "data": {**result["snapshot"], "run_id": run_id, "mode": "practice"}}), 200
-    except KeyError:
-        return _error("Practice run not found", 404)
+    except KeyError as exc:
+        if exc.args == (run_id,):
+            return _error("Practice run not found", 404)
+        return _error("Practice reconciliation could not be verified", 503)
     except ValueError as exc:
-        return _error(str(exc), 400)
+        return _known_error(exc, _IDENTIFIER_ERRORS, 400, "Practice reconciliation could not be verified")
     except RuntimeError as exc:
-        return _error(str(exc), 409)
+        return _known_error(exc, {
+            "The worker has not finished; reconciliation cannot release it":
+                "The worker has not finished; reconciliation cannot release it",
+            "Practice resources have not closed; reconciliation cannot release them":
+                "Practice resources have not closed; reconciliation cannot release them",
+            "Only a run requiring reconciliation can be resolved":
+                "Only a run requiring reconciliation can be resolved",
+            "Practice positions or pending orders remain; inspect the sandbox before resolving":
+                "Practice positions or pending orders remain; inspect the sandbox before resolving",
+        }, 409, "Practice reconciliation could not be verified")
     except Exception:
         return _error("Practice reconciliation could not be verified", 503)
 

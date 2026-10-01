@@ -50,6 +50,23 @@ def _confirmed_fill_price(decision: Any) -> float | None:
     return float(value)
 
 
+def _rebase_protection_price(level: float, entry_price: float, fill_price: float) -> float:
+    """Preserve an assessed protection percentage around a confirmed fill.
+
+    Legacy callers may omit the decision quote or a protection level. Keep
+    those absolute values rather than inventing percentages from config.
+    These are monitoring thresholds, so retain precision instead of rounding
+    a stop farther away from entry and widening its assessed percentage.
+    """
+    if any(
+        type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+        for value in (level, entry_price)
+    ):
+        return level
+    rebased = fill_price * (level / entry_price)
+    return rebased if math.isfinite(rebased) and rebased > 0 else level
+
+
 # ---------------------------------------------------------------------------
 # Response normalisation
 #
@@ -952,13 +969,18 @@ class AutonomousTrader:
 
             if getattr(decision, "passed", False):
                 orderid = str(getattr(decision.order_response, "orderid", "") or "")
-                entry_price = _confirmed_fill_price(decision) or entry_price
+                fill_price = _confirmed_fill_price(decision)
+                stop_loss, take_profit = risk.stop_loss, risk.take_profit
+                if fill_price is not None:
+                    stop_loss = _rebase_protection_price(stop_loss, entry_price, fill_price)
+                    take_profit = _rebase_protection_price(take_profit, entry_price, fill_price)
+                    entry_price = fill_price
                 async with self._state_lock:
                     self.state.active_positions[symbol] = entry_price
                     self.state.position_details[symbol] = {
                         "entry_price": entry_price,
-                        "stop_loss": risk.stop_loss,
-                        "take_profit": risk.take_profit,
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
                         "action": action,
                         "quantity": risk.position_qty,
                     }

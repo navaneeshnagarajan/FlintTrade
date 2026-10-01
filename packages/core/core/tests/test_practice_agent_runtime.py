@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 from datetime import UTC, datetime, time as wall_time
@@ -431,18 +432,14 @@ def test_fallback_hold_signal_remains_json_serialisable(desk):
     assert desk.sandbox.get_orders() == []
 
 
-def test_terminal_evidence_failure_never_releases_durable_or_memory_fence(desk, monkeypatch):
+def test_terminal_evidence_failure_never_releases_durable_or_memory_fence(desk):
     desk.now = desk.now.replace(hour=20)
     assert _start(desk).status_code == 202
     _wait_for(lambda: _supervisor(desk).run.status == "waiting")
-    original = desk.store.append_event
-
-    def fail_terminal(run_id, *, kind, data):
-        if kind == "status_changed" and data["status"] == "stopped":
-            raise OSError("synthetic terminal event failure")
-        return original(run_id, kind=kind, data=data)
-
-    monkeypatch.setattr(desk.store, "append_event", fail_terminal)
+    with sqlite3.connect(desk.store.database_path) as conn:
+        conn.execute("""CREATE TRIGGER reject_terminal BEFORE INSERT ON agent_run_events
+            WHEN NEW.kind = 'status_changed' AND json_extract(NEW.data, '$.status') = 'stopped'
+            BEGIN SELECT RAISE(ABORT, 'synthetic terminal event failure'); END""")
     assert desk.client.post("/stop", headers=desk.headers, json={}).status_code == 200
     _wait_for(lambda: _run_finished(desk))
     run = _supervisor(desk).run
@@ -450,7 +447,8 @@ def test_terminal_evidence_failure_never_releases_durable_or_memory_fence(desk, 
     assert desk.store.get_run(run.run_id)["status"] == "stopping"
     assert _start(desk).status_code == 409
     assert desk.sandbox.get_orders() == []
-    monkeypatch.setattr(desk.store, "append_event", original)
+    with sqlite3.connect(desk.store.database_path) as conn:
+        conn.execute("DROP TRIGGER reject_terminal")
     assert desk.client.post(f"/runs/{run.run_id}/resolve", headers=desk.headers).status_code == 200
     assert desk.store.get_run(run.run_id)["status"] == "stopped"
 

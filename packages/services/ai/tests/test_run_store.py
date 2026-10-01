@@ -527,3 +527,92 @@ def test_database_path_resolves_existing_alias(tmp_path: Path) -> None:
 
 def test_database_path_preserves_explicit_memory_store(store: AgentRunStore) -> None:
     assert store.database_path == ":memory:"
+
+
+def test_transition_commits_snapshot_and_event_with_one_timestamp(store: AgentRunStore) -> None:
+    store.create_run(run_id="run-1", mode="practice", config={})
+    row = store.transition_run("run-1", status="running", snapshot={"cycles": 1})
+    event = store.events("run-1")[0]
+    assert row["status"] == "running"
+    assert row["snapshot"] == {"cycles": 1}
+    assert event["kind"] == "status_changed"
+    assert event["data"] == {"previous": "starting", "status": "running"}
+    assert event["created_at"] == row["updated_at"]
+    refreshed = store.transition_run("run-1", status="running", snapshot={"cycles": 2})
+    assert refreshed["snapshot"] == {"cycles": 2}
+    assert store.events("run-1") == [event]
+
+
+@pytest.mark.parametrize("target", ["agent_runs", "agent_run_events"])
+def test_atomic_transition_rolls_back_both_writes_and_survives_reopen(tmp_path: Path, target: str) -> None:
+    path = tmp_path / "runs.sqlite"
+    store = AgentRunStore(path)
+    original = store.create_run(run_id="run-1", mode="practice", config={})
+    operation = "UPDATE" if target == "agent_runs" else "INSERT"
+    after_event = ("WHEN EXISTS (SELECT 1 FROM agent_run_events WHERE run_id = 'run-1')"
+                   if target == "agent_runs" else "")
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"""CREATE TRIGGER reject_transition BEFORE {operation} ON {target} {after_event} BEGIN
+            SELECT RAISE(ABORT, 'synthetic transition failure'); END""")
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="synthetic transition failure"):
+            store.transition_run("run-1", status="stopped", snapshot={"cycles": 1})
+        assert store.get_run("run-1") == original
+        assert store.events("run-1") == []
+        with pytest.raises(RuntimeError, match="active"):
+            store.create_run(run_id="new-run", mode="practice", config={})
+    finally:
+        store.close()
+    reopened = AgentRunStore(path)
+    try:
+        assert reopened.get_run("run-1") == original
+        assert reopened.events("run-1") == []
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("source,target", [
+    ("stopped", "running"), ("completed", "failed"), ("failed", "waiting"),
+    ("reconciliation_required", "running"), ("stopping", "running"),
+])
+def test_invalid_atomic_transition_cannot_append_evidence(store: AgentRunStore, source: str, target: str) -> None:
+    store.create_run(run_id="run-1", mode="practice", config={})
+    original = store.update_run("run-1", status=source)
+    with pytest.raises(ValueError, match="transition"):
+        store.transition_run("run-1", status=target, snapshot={"cycles": 99})
+    assert store.get_run("run-1") == original
+    assert store.events("run-1") == []
+
+
+@pytest.mark.parametrize("independent_connections", [False, True])
+def test_concurrent_worker_and_stop_transitions_have_coherent_evidence(tmp_path: Path,
+                                                                     independent_connections: bool) -> None:
+    first = AgentRunStore(tmp_path / "runs.sqlite")
+    stores = [first, AgentRunStore(tmp_path / "runs.sqlite") if independent_connections else first]
+    first.create_run(run_id="run-1", mode="practice", config={})
+    barrier = threading.Barrier(2)
+
+    def transition(index: int) -> str:
+        barrier.wait(timeout=5)
+        try:
+            stores[index].transition_run("run-1", status=["running", "stopping"][index])
+        except ValueError:
+            assert index == 0  # Only a worker overtaken by stop can be refused.
+            return "refused"
+        return "committed"
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(transition, range(2)))
+        assert outcomes[1] == "committed"
+        events = first.events("run-1")
+        previous = "starting"
+        for event in events:
+            assert event["kind"] == "status_changed"
+            assert event["data"]["previous"] == previous
+            previous = event["data"]["status"]
+        assert previous == first.get_run("run-1")["status"] == "stopping"
+        assert len(events) == outcomes.count("committed")
+    finally:
+        for item in set(stores):
+            item.close()

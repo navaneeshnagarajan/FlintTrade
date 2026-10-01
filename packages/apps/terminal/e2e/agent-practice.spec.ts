@@ -1,4 +1,5 @@
-import type { Locator, Page, Request } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import type { Locator, Page, Request, TestInfo } from "@playwright/test";
 
 import { expect, test, type SyntheticFixtureRegistry } from "./fixture-registry";
 import { registerExampleDeskReads, registerPracticeOrderPadReads } from "./visual/desk-mocks";
@@ -18,6 +19,11 @@ const EVENTS = `${AGENT}/practice/runs/${RUN_ID}/events?after=0&limit=100`;
 const RESOLVE = `${AGENT}/practice/runs/${RUN_ID}/resolve`;
 const READ_CALLS = { minimum: 1, maximum: 32 } as const;
 const CREATED_AT = "2026-08-11T03:00:00Z";
+
+// Keep the state badge and its action in one real desktop viewport. Element
+// screenshots of the animated, internally scrolled overlay previously produced
+// a 512x351 crop, including one capture of the Chat underneath it.
+test.use({ viewport: { width: 1440, height: 1080 } });
 
 interface AgentState {
   snapshot: Record<string, unknown>;
@@ -131,6 +137,73 @@ async function refresh(panel: Locator): Promise<void> {
   await expect(button).toBeEnabled();
 }
 
+async function captureAgentEvidence(
+  page: Page,
+  panel: Locator,
+  control: Locator,
+  expectedStatus: string,
+  testInfo: TestInfo,
+  name: string,
+): Promise<void> {
+  const status = panel.getByRole("status");
+  await page.evaluate(() => document.fonts.ready);
+  await status.scrollIntoViewIfNeeded();
+  await control.scrollIntoViewIfNeeded();
+  await expect(status).toHaveText(expectedStatus);
+  await expect(status).toBeInViewport({ ratio: 1 });
+  await expect(control).toBeInViewport({ ratio: 1 });
+  await expect(panel).toHaveCSS("opacity", "1");
+  // Visibility assertions alone allow transparent/transformed elements. Wait
+  // for the real animation and stable geometry; never force CSS or sleep a
+  // guessed duration to make the evidence look settled.
+  await expect.poll(() => panel.evaluate(async (element) => {
+    const before = element.getBoundingClientRect();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const after = element.getBoundingClientRect();
+    const transform = getComputedStyle(element).transform;
+    const atRest = transform === "none" || new DOMMatrixReadOnly(transform).isIdentity;
+    return atRest && ["x", "y", "width", "height"].every((key) => {
+      const dimension = key as "x" | "y" | "width" | "height";
+      return Math.abs(before[dimension] - after[dimension]) < 0.5;
+    });
+  }), { message: "Agent overlay must finish its animation before evidence capture" }).toBe(true);
+  for (const target of [status, control]) {
+    await expect.poll(() => target.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const painted = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      const dialog = element.closest('[role="dialog"][aria-label="Autonomous Agent"]');
+      if (painted === null) return false;
+      if (element.contains(painted)) return true;
+      // Only a disabled pointer-events:none button may yield its hit-test to
+      // an ancestor. A sibling in the same dialog must never hide a target.
+      const disabled = element instanceof HTMLButtonElement && element.disabled
+        && getComputedStyle(element).pointerEvents === "none";
+      return disabled && painted.contains(element) && dialog?.contains(painted) === true;
+    }), { message: "Agent state and action must own their visible screenshot region" }).toBe(true);
+  }
+  const geometry = await panel.evaluate((element) => ({
+    rect: element.getBoundingClientRect().toJSON(),
+    opacity: getComputedStyle(element).opacity,
+    transform: getComputedStyle(element).transform,
+    viewport: { width: innerWidth, height: innerHeight },
+    status: element.querySelector('[role="status"]')?.textContent,
+  }));
+  const screenshot = testInfo.outputPath(`${name}.png`);
+  // Capture the viewport directly so a later element-scroll/clip calculation
+  // cannot select the underlying Chat instead of the settled overlay.
+  await page.screenshot({ path: screenshot, fullPage: false });
+  await expect(status).toHaveText(expectedStatus);
+  await expect(status).toBeInViewport({ ratio: 1 });
+  await expect(control).toBeInViewport({ ratio: 1 });
+  await testInfo.attach(name, { path: screenshot, contentType: "image/png" });
+  const geometryPath = testInfo.outputPath(`${name}-geometry.json`);
+  await writeFile(geometryPath, `${JSON.stringify(geometry, null, 2)}\n`);
+  await testInfo.attach(`${name}-geometry`, {
+    path: geometryPath, contentType: "application/json",
+  });
+}
+
 // Mode isolation is exercised through the same store boundary as the app's
 // authenticated mode menu. This is synthetic state injection, not a Live unlock
 // or a claim that the browser has authenticated with a real server.
@@ -220,9 +293,7 @@ test("Practice navigation validates model bounds and submits one explicit start 
   await expect(start).toHaveCount(0);
   expect(syntheticApi.callCount("POST", `${AGENT}/start`)).toBe(1);
   expect(syntheticApi.callCount("POST", `${AGENT}/stop`)).toBe(1);
-  const screenshot = testInfo.outputPath("practice-agent-stopping.png");
-  await panel.screenshot({ path: screenshot });
-  await testInfo.attach("practice-agent-stopping", { path: screenshot, contentType: "image/png" });
+  await captureAgentEvidence(page, panel, stop, "Stopping", testInfo, "practice-agent-stopping");
 });
 
 test.describe("Practice reconciliation", () => {
@@ -272,9 +343,7 @@ test.describe("Practice reconciliation", () => {
     await expect(panel.getByRole("list", { name: "Practice run events" })).toContainText("stopped");
     // No start/stop/order/model handler is registered: any replay fails teardown.
     expect(syntheticApi.callCount("POST", RESOLVE)).toBe(2);
-    const screenshot = testInfo.outputPath("practice-agent-resolved.png");
-    await panel.screenshot({ path: screenshot });
-    await testInfo.attach("practice-agent-resolved", { path: screenshot, contentType: "image/png" });
+    await captureAgentEvidence(page, panel, start, "Stopped", testInfo, "practice-agent-resolved");
   });
 });
 

@@ -43,7 +43,9 @@ available. Final write admission is held only around the synchronous sandbox
 write, after Laya has decided. Laya refusals
 and quantity clamps do not place an order and are never automatically accepted
 or retried. Orders require a confirmed sandbox fill before they become tracked
-agent positions. Derivative orders require an exact, freshly receipted contract
+agent positions. Percentage-based stop and target monitoring thresholds are
+rebased on that confirmed fill, preserving the assessed percentages rather
+than retaining stale quote-based levels. Derivative orders require an exact, freshly receipted contract
 lot size from the authorised quote account. Missing metadata or a quantity
 that is not a valid lot multiple is refused; there is no lot-size fallback.
 
@@ -107,7 +109,9 @@ persistence stop new execution and can require reconciliation.
 
 Practice run identity, configuration, lifecycle, snapshots and ordered events
 are stored in `practice_agent_runs.sqlite` in the platform workspace. Auth
-credentials are not stored in this ledger. The UI exposes run history and
+credentials are not stored in this ledger. Each lifecycle transition commits
+its run row, snapshot and transition event atomically; a failed write cannot
+leave a phantom successful transition. The UI exposes run history and
 paginated evidence, including refusals and interrupted runs.
 
 After a process interruption, an active run becomes **Reconciliation required**.

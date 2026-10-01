@@ -247,6 +247,39 @@ class AgentRunStore:
         error: str | None = None,
     ) -> dict[str, Any]:
         """Commit a lifecycle transition and, when supplied, its snapshot."""
+        return self._update_run(run_id, status=status, snapshot=snapshot, error=error)
+
+    def transition_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        snapshot: dict[str, Any] | None = None,
+        error: str | None = None,
+        event_kind: str = "status_changed",
+        event_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically commit a changed lifecycle, its snapshot and evidence.
+
+        Default evidence names the previous durable status, read under the
+        same transaction. Callers may supply a specific lifecycle event, such
+        as reconciliation resolution. Same-status refreshes emit no event.
+        """
+        _identifier(event_kind)
+        encoded_event = None if event_data is None else _payload(event_data)
+        return self._update_run(run_id, status=status, snapshot=snapshot, error=error,
+                                event_kind=event_kind, encoded_event=encoded_event)
+
+    def _update_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        snapshot: dict[str, Any] | None,
+        error: str | None,
+        event_kind: str | None = None,
+        encoded_event: str | None = None,
+    ) -> dict[str, Any]:
         _identifier(run_id)
         if type(status) is not str or status not in _TRANSITIONS:
             raise ValueError("unknown run status")
@@ -262,12 +295,18 @@ class AgentRunStore:
             previous = current["status"]
             if status != previous and status not in _TRANSITIONS[previous]:
                 raise ValueError(f"invalid run status transition: {previous} to {status}")
+            timestamp = _stamp()
+            if event_kind is not None and status != previous:
+                self._conn.execute(
+                    "INSERT INTO agent_run_events (run_id, kind, data, created_at) VALUES (?, ?, ?, ?)",
+                    (run_id, event_kind, encoded_event or _payload({"previous": previous, "status": status}), timestamp),
+                )
             self._conn.execute(
                 """
                 UPDATE agent_runs SET status = ?, snapshot = COALESCE(?, snapshot), error = ?, updated_at = ?
                 WHERE run_id = ?
                 """,
-                (status, encoded, error, _stamp(), run_id),
+                (status, encoded, error, timestamp, run_id),
             )
             row = self._conn.execute("SELECT * FROM agent_runs WHERE run_id = ?", (run_id,)).fetchone()
             return self._run(row)
