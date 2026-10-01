@@ -718,6 +718,8 @@ class BrokerReadOwner:
         self,
         grant: _Grant,
         capability: str | tuple[str, ...],
+        *,
+        depth_exchange: str | None = None,
     ) -> _ProviderCall | BrokerReadFailure:
         first = self._revalidate(grant)
         if type(first) is BrokerReadFailure:
@@ -746,6 +748,17 @@ class BrokerReadOwner:
                 break
         if selected is None:
             return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+        if selected == "depth":
+            # A request outside an adapter's static depth scope makes no provider
+            # call, so it must not wait for or consume quote/data quota either.
+            missing = object()
+            exchanges = inspect.getattr_static(adapter_type, "_BROKER_READ_DEPTH_EXCHANGES", missing)
+            if exchanges is not missing and (
+                type(exchanges) is not frozenset
+                or any(type(exchange) is not str or not exchange for exchange in exchanges)
+                or depth_exchange not in exchanges
+            ):
+                return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
         if self._rate_limiter is not None:
             def revalidate_waiter() -> None:
                 result = self._revalidate(grant)
@@ -1058,7 +1071,7 @@ class BrokerReadOwner:
         if type(grant) is BrokerReadFailure:
             return grant
         try:
-            call = await self._admit_provider(grant, "depth")
+            call = await self._admit_provider(grant, "depth", depth_exchange=request.instrument.exchange)
             if type(call) is BrokerReadFailure:
                 return call
             try:

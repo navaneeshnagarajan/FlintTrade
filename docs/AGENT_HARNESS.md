@@ -50,8 +50,8 @@ existing `quote_data` transport and the authenticated `BrokerReadOwner`. The
 canonical instrument resolver must agree on symbol, exchange, security ID and
 `EQUITY` instrument class (separate from exchange subtype); a supplied security
 ID must match. Non-cash exchanges retain the explicit `unsupported` depth
-outcome rather than blocking otherwise supported read-only analysis. The
-documented REST and SDK response envelopes are validated before copying buy/sell ladders. Missing or
+outcome before consuming quote/data quota, rather than blocking otherwise
+supported read-only analysis. The documented REST and SDK response envelopes are validated before copying buy/sell ladders. Missing or
 ambiguous instruments, malformed levels, negative/non-finite numbers and
 fractional counts fail closed. Explicit empty sides and zero levels remain
 explicit source data. No depth, quantity or derivative lot metadata is invented.

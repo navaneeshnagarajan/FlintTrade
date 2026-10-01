@@ -4414,6 +4414,7 @@ async def test_dhan_depth_outside_cash_scope_stays_unsupported_without_sdk(bind_
 
     assert result == BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
     assert client.calls == []
+    assert bound.limiter.calls == []
 
 
 @pytest.mark.asyncio

@@ -319,6 +319,7 @@ class DhanAdapter(BrokerAdapter):
     """
 
     safety_snapshot_requires_serial_reads = True
+    _BROKER_READ_DEPTH_EXCHANGES = frozenset({"NSE", "BSE"})
 
     def __init__(
         self,
@@ -1814,7 +1815,7 @@ class DhanAdapter(BrokerAdapter):
         streaming readiness, account lifecycle or derivative lot evidence.
         """
         instrument = request.instrument
-        if instrument.exchange not in {"NSE", "BSE"}:
+        if instrument.exchange not in self._BROKER_READ_DEPTH_EXCHANGES:
             raise UnsupportedCapabilityError("Dhan read-port depth supports cash equities only", broker_id="dhan")
         if self._security_resolver is None:
             raise BrokerReadResponseInvalid from None
