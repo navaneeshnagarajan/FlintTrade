@@ -2588,6 +2588,9 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
             order_type=order_type,
             trigger_price=trigger_price,
             strategy=str(body.get("strategy") or "").strip(),
+            instrument_token=str(
+                body.get("instrument_token") or body.get("security_id") or ""
+            ).strip(),
             **provenance,
         )
         if not _subscribe_pending_practice_order(result, body):

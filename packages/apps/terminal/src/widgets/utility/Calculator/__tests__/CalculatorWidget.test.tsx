@@ -16,6 +16,8 @@ import { useLayoutEffect, type ReactNode } from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
+import { statutoryLeg } from "@/lib/indianCharges";
+import { lotSizeFromMaster } from "@/lib/instrumentLots";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
@@ -572,18 +574,50 @@ describe("Target / R:R tab", () => {
 // Brokerage tab
 // ---------------------------------------------------------------------------
 
+function chargesAsOfToday(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function inr(amount: number): string {
+  return `₹${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(amount)}`;
+}
+
 describe("Brokerage tab", () => {
   it("pins the default round-trip charges breakdown", async () => {
     render(<CalculatorWidget {...defaultProps} />);
     await openTab(/brokerage/i);
 
-    // 1 lot × 25 at ₹100 = ₹2,500 turnover, options, round trip, ₹20 flat.
-    // STT 0.15% on the sell leg only = ₹3.75; brokerage ₹40 both legs.
+    const lot = lotSizeFromMaster("NIFTY");
+    expect(lot).not.toBeNull();
+    const turnover = (lot ?? 0) * 100;
+    const on = chargesAsOfToday();
+    const buy = statutoryLeg({
+      exchange: "NSE",
+      segment: "equity_options",
+      turnover,
+      isBuy: true,
+      on,
+      brokerage: 20,
+    });
+    const sell = statutoryLeg({
+      exchange: "NSE",
+      segment: "equity_options",
+      turnover,
+      isBuy: false,
+      on,
+      brokerage: 20,
+    });
     const charges = screen.getByText("Charges Breakdown").closest("div") as HTMLElement;
-    expect(resultValueIn(charges, "STT")).toBe("₹3.75");
-    expect(resultValueIn(charges, "Brokerage")).toBe("₹40");
-    expect(resultValueIn(charges, "Total Cost")).toBe("₹51.22");
-    expect(resultValueIn(charges, "Breakeven/Unit")).toBe("₹2.049");
+    expect(resultValueIn(charges, "STT")).toBe(inr(sell.stt));
+    expect(resultValueIn(charges, "Brokerage")).toBe(inr(buy.brokerage + sell.brokerage));
+    expect(resultValueIn(charges, "Total Cost")).toBe(inr(buy.total + sell.total));
+    expect(resultValueIn(charges, "Breakeven/Unit")).toBe(
+      `₹${((buy.total + sell.total) / (lot ?? 1)).toFixed(3)}`,
+    );
+    expect(screen.getByText("Lot size comes from the broker instrument master.")).toBeInTheDocument();
   });
 
   it("recomputes when the price changes", async () => {
@@ -591,9 +625,17 @@ describe("Brokerage tab", () => {
     await openTab(/brokerage/i);
 
     setField("Price (₹)", "200");
-    // Turnover doubles, so STT doubles.
+    const lot = lotSizeFromMaster("NIFTY") ?? 0;
+    const sell = statutoryLeg({
+      exchange: "NSE",
+      segment: "equity_options",
+      turnover: lot * 200,
+      isBuy: false,
+      on: chargesAsOfToday(),
+      brokerage: 20,
+    });
     const charges = screen.getByText("Charges Breakdown").closest("div") as HTMLElement;
-    expect(resultValueIn(charges, "STT")).toBe("₹7.5");
+    expect(resultValueIn(charges, "STT")).toBe(inr(sell.stt));
   });
 });
 
@@ -617,11 +659,12 @@ describe("Margin tab", () => {
     render(<CalculatorWidget {...defaultProps} />);
     await openTab(/margin/i);
 
-    // Notional 25 × ₹100 × 1 leg = ₹2,500; NRML 15% → ₹375, split 60/40.
+    const lot = lotSizeFromMaster("NIFTY") ?? 0;
+    const total = lot * 100 * 0.15;
     expect(screen.getByText("ESTIMATE")).toBeInTheDocument();
-    expect(resultValue("SPAN Margin")).toBe("₹225");
-    expect(resultValue("Exposure Margin")).toBe("₹150");
-    expect(resultValue("Total Required")).toBe("₹375");
+    expect(resultValue("SPAN Margin")).toBe(inr(total * 0.6));
+    expect(resultValue("Exposure Margin")).toBe(inr(total * 0.4));
+    expect(resultValue("Total Required")).toBe(inr(total));
   });
 
   it("replaces the estimate with the broker's figures and compares funds", async () => {
@@ -663,7 +706,7 @@ describe("Margin tab", () => {
       context,
       "NIFTY",
       "NFO",
-      25,
+      lotSizeFromMaster("NIFTY"),
       "NRML",
       "BUY",
       signal,

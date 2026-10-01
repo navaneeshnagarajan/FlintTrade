@@ -25,7 +25,7 @@ Max options premium = Account Capital × 0.01
 ```
 
 ### Lot-Based Sizing (F&O)
-Nifty lot size = 75 | BankNifty lot size = 30 | Sensex lot size = 10
+NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)
 Lot-based simulations should use whole lots and round down when a model produces a fractional lot.
 
 ## Stop-Loss Placement

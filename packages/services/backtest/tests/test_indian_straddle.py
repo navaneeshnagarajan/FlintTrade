@@ -113,7 +113,9 @@ class TestLotSizeLookup:
 
     def test_nifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("NIFTY") == 75
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
+        assert lot_size_for("NIFTY") == lot_size_from_master("NIFTY")
 
     def test_banknifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
@@ -766,8 +768,7 @@ class TestMTMSLMode:
 
     def test_mtm_sl_triggers(self):
         IndianShortStraddle, *_ = _import_strategy()
-        # 1 lot NIFTY = 75 shares; sell at 100 each; MTM SL at 1000 rupees
-        # Pnl per unit change = 75; so 14 units move = ~1050 loss
+        # One Nifty lot from the instrument master; sell at 100 each; MTM SL at 1000 rupees.
         s = IndianShortStraddle(
             underlying="NIFTY",
             sl_mode="mtm_rupees",
@@ -785,7 +786,7 @@ class TestMTMSLMode:
         # After a significant premium rise, MTM loss should exceed threshold
         # (ce_sell - ce_ltp + pe_sell - pe_ltp) * qty < -1000
         # In premium mode, each leg = 100; if combined rises to 230, each leg = 115
-        # pnl = (100 - 115 + 100 - 115) * 75 = -30 * 75 = -2250 < -1000 → exit
+        # pnl = (100 - 115 + 100 - 115) * lot size is well below -1000 → exit
         s.on_bar(_make_ohlcv("2025-01-02 09:21:00", 230.0))
         orders = s.generate_orders()
         buy_orders = [o for o in orders if o.action == "BUY"]
@@ -808,7 +809,7 @@ class TestMTMSLMode:
         s.on_bar(_make_ohlcv("2025-01-02 09:20:00", 200.0))
         s.generate_orders()
 
-        # Combined falls to 186; each leg = 93; pnl = (100-93+100-93)*75 = 14*75=1050 > 500
+        # Combined falls to 186; each leg = 93; the rupee gain clears the 500 target.
         s.on_bar(_make_ohlcv("2025-01-02 09:21:00", 186.0))
         orders = s.generate_orders()
         buy_orders = [o for o in orders if o.action == "BUY"]
@@ -879,9 +880,10 @@ class TestQuantityCalculation:
 
     def test_quantity_nifty_1_lot(self):
         IndianShortStraddle, *_ = _import_strategy()
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
         s = IndianShortStraddle(underlying="NIFTY", lots=1)
-        # NIFTY lot size = 75
-        assert s._quantity == 75
+        assert s._quantity == lot_size_from_master("NIFTY")
 
     def test_quantity_banknifty_2_lots(self):
         IndianShortStraddle, *_ = _import_strategy()
@@ -901,8 +903,12 @@ class TestQuantityCalculation:
         s.start()
         s.on_bar(_make_ohlcv("2025-01-02 09:20:00", 19_000.0))
         orders = s.generate_orders()
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
+        lot = lot_size_from_master("NIFTY")
+        assert lot is not None
         for o in orders:
-            assert o.quantity == str(2 * 75)  # 150
+            assert o.quantity == str(2 * lot)
 
 
 # ===========================================================================

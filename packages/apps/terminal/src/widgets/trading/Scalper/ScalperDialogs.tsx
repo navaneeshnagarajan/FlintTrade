@@ -19,7 +19,7 @@ import type { OrderTypeValue, PendingOrder, ProductType } from "./types";
 export interface OrderConfirmModalProps {
   pendingOrder: PendingOrder | null;
   lots: number;
-  lotSize: number;
+  lotSize: number | null;
   product: ProductType;
   orderType: OrderTypeValue;
   /** Limit price actually sent with the order — shown only for LIMIT. */
@@ -83,7 +83,7 @@ export function OrderConfirmModal({
           <div className="flex justify-between text-xs">
             <span className="text-text-muted font-sans">Qty</span>
             <span className="font-mono font-bold text-text-primary">
-              {lots * lotSize} ({lots} lot{lots > 1 ? "s" : ""})
+              {lotSize == null ? "—" : `${lots * lotSize} (${lots} lot${lots > 1 ? "s" : ""})`}
             </span>
           </div>
           <div className="flex justify-between text-xs">

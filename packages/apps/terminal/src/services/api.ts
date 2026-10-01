@@ -47,6 +47,7 @@ import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
+import { exchangeTransactionLabel } from "@/lib/indianCharges";
 import { buildCompactOptionSymbol, normaliseExpiryForOptionSymbol } from "@/lib/optionSymbols";
 import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
@@ -288,6 +289,10 @@ function normaliseFundsShape(value: unknown): Funds {
     row.usedMargin ?? row.utiliseddebits ?? row.usedmargin ?? row.used_margin
       ?? row.utilized_margin ?? row.utilised_margin,
   );
+  const estimatedRaw = row.estimatedCharges ?? row.estimated_charges;
+  const estimatedCharges = estimatedRaw === undefined || estimatedRaw === null
+    ? undefined
+    : toNumber(estimatedRaw);
   const ledgerBalance = optionalFinite(row.ledgerBalance ?? row.ledger_balance);
   const futuresFlag = row.futuresMtmInLedger ?? row.futures_mtm_in_ledger;
   return {
@@ -299,6 +304,7 @@ function normaliseFundsShape(value: unknown): Funds {
     ),
     ...(ledgerBalance !== undefined ? { ledgerBalance } : {}),
     ...(typeof futuresFlag === "boolean" ? { futuresMtmInLedger: futuresFlag } : {}),
+    ...(estimatedCharges !== undefined ? { estimatedCharges } : {}),
   };
 }
 
@@ -2210,11 +2216,27 @@ function normalisePracticeTrade(value: unknown): Trade | undefined {
   const tradeId = String(value.tradeId ?? value.trade_id ?? orderId);
   if (!tradeId || !orderId) return undefined;
   const action = String(value.action ?? "BUY").toUpperCase() === "SELL" ? "SELL" : "BUY";
+  const exchange = String(value.exchange ?? "");
+  const breakdown = isRecord(value.charges_breakdown) ? value.charges_breakdown : undefined;
+  const storedLabel = breakdown ? String(breakdown.exchange_label ?? "") : "";
+  const estimatedCharges = breakdown
+    ? {
+        total: toNumber(breakdown.total ?? value.charges),
+        stt: toNumber(breakdown.stt),
+        exchangeCharges: toNumber(breakdown.exchange_charges),
+        exchangeLabel: exchange.trim().length > 0
+          ? exchangeTransactionLabel(exchange)
+          : (storedLabel || "NSE transaction"),
+        sebiFee: toNumber(breakdown.sebi_fee),
+        stampDuty: toNumber(breakdown.stamp_duty),
+        gst: toNumber(breakdown.gst),
+      }
+    : undefined;
   return {
     tradeId,
     orderId,
     symbol: String(value.symbol ?? ""),
-    exchange: String(value.exchange ?? ""),
+    exchange,
     action,
     quantity: toNumber(value.quantity),
     price: toNumber(value.price ?? value.fill_price ?? value.avg_fill_px),
@@ -2222,6 +2244,7 @@ function normalisePracticeTrade(value: unknown): Trade | undefined {
     ...(typeof value.strategy === "string" && value.strategy
       ? { strategy: value.strategy }
       : {}),
+    ...(estimatedCharges ? { estimatedCharges } : {}),
   };
 }
 
@@ -2260,6 +2283,7 @@ async function readPracticeAccountData<T>(
       total_balance: row.current_balance,
       ledger_balance: row.ledger_balance,
       futures_mtm_in_ledger: row.futures_mtm_in_ledger,
+      estimated_charges: row.estimated_charges,
     }) as T;
   }
   if (endpoint === "limits") {

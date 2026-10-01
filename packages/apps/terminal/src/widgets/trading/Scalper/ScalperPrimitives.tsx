@@ -3,6 +3,7 @@
 import { AlertTriangle, Minus, Plus, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmt2, fmtInt } from "./helpers";
 import type { StatusType, TickMap } from "./types";
 
@@ -48,11 +49,22 @@ export interface StepperProps {
   onDec: () => void;
   onInc: () => void;
   sublabel?: string;
+  /** Tooltip for the sublabel, used when the lot size cannot be shown. */
+  sublabelTitle?: string;
   large?: boolean;
   className?: string;
 }
 
-export function Stepper({ label, value, onDec, onInc, sublabel, large = false, className = "" }: StepperProps) {
+export function Stepper({
+  label,
+  value,
+  onDec,
+  onInc,
+  sublabel,
+  sublabelTitle,
+  large = false,
+  className = "",
+}: StepperProps) {
   const btnSize = large ? "w-8 h-8" : "w-6 h-8";
   const iconSize = large ? 12 : 10;
   const valueClass = large
@@ -61,9 +73,24 @@ export function Stepper({ label, value, onDec, onInc, sublabel, large = false, c
 
   return (
     <div className={`flex flex-col gap-0.5 ${className}`}>
-      <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">
-        {label}
-        {sublabel && <span className="text-text-disabled ml-1">{sublabel}</span>}
+      <span className="text-xxs text-text-muted font-sans">
+        <span className="uppercase tracking-wider">{label}</span>
+        {sublabel && (
+          sublabelTitle ? (
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-text-disabled ml-1" title={sublabelTitle}>
+                    {sublabel}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{sublabelTitle}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <span className="text-text-disabled ml-1">{sublabel}</span>
+          )
+        )}
       </span>
       <div className="flex items-center">
         <Button

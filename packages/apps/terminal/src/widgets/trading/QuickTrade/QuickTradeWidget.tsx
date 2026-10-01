@@ -25,6 +25,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
+import { lotCountLabel } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -139,7 +140,7 @@ function ConfirmOverlay({ symbol, action, lots, quantity, onConfirm, onCancel }:
     >
       <div className="text-sm font-semibold text-text-primary">Confirm Order</div>
       <div className="text-xs text-text-secondary text-center px-4">
-        {action} <span className="font-semibold text-text-primary">{lots} lots</span>{" "}
+        {action} <span className="font-semibold text-text-primary">{lotCountLabel(lots)}</span>{" "}
         (<span className="font-semibold text-text-primary">{quantity} qty</span>) of{" "}
         <span className="font-semibold text-text-primary">{symbol}</span>?
         <br />
@@ -299,7 +300,7 @@ function QuickTradeWidget(props: WidgetProps) {
         setAdmission(null);
         setStatus({
           type: "success",
-          message: `${action} order placed · ${lots} lot(s) = ${quantity} qty`,
+          message: `${action} order placed · ${lotCountLabel(lots)} = ${quantity} qty`,
         });
         track("trade", `quicktrade_${action.toLowerCase()}`);
         setTimeout(() => setStatus(null), 4000);
@@ -503,7 +504,7 @@ function QuickTradeWidget(props: WidgetProps) {
           <Button
             onClick={() => handleAction("BUY")}
             disabled={isPending || admission?.kind === "deny" || admission?.kind === "clamp"}
-            aria-label={`Buy ${lots} lots of ${symbol}`}
+            aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
           >
             {isPending && pendingAction === "BUY" ? (
@@ -514,7 +515,7 @@ function QuickTradeWidget(props: WidgetProps) {
           <Button
             onClick={() => handleAction("SELL")}
             disabled={isPending || admission?.kind === "deny" || admission?.kind === "clamp"}
-            aria-label={`Sell ${lots} lots of ${symbol}`}
+            aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
           >
             {isPending && pendingAction === "SELL" ? (

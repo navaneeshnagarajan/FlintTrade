@@ -68,6 +68,12 @@ import {
 import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
+import {
+  deskContractName,
+  lotSizeForDisplayedSymbol,
+  missingLotRefusal,
+  useInstrumentLotRows,
+} from "@/lib/instrumentLots";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
 import {
   SESSION_OPEN_LABEL,
@@ -627,15 +633,25 @@ function OrderPadWidget(props: WidgetProps) {
   }, [isPinned, channelInstrument, setValue, prefill.exchange]);
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
-  // On match, qty is set to the instrument's lotsize so the first order is valid.
-  // The lot constraint is reset BEFORE the lookup so a failed fetch never leaves
-  // a stale lot size from the previous instrument — derivative submissions fail
-  // closed on an unknown lot size.
+  // The shared instrument master wins when it lists this underlying. Otherwise
+  // the symbol lookup's lot is used. The lot constraint is reset BEFORE the
+  // lookup so a failed fetch never leaves a stale lot size from the previous
+  // instrument — derivative submissions fail closed when both are missing.
+  const lotRows = useInstrumentLotRows();
   useEffect(() => {
     if (!symbol || !exchange) return;
     let cancelled = false;
     setLotSize(0);
     setLotSizeKnown(false);
+    const masterLot = isDerivativeExchange(exchange)
+      ? lotSizeForDisplayedSymbol(symbol, lotRows)
+      : null;
+    if (masterLot != null && masterLot > 0) {
+      setLotSize(masterLot);
+      setLotSizeKnown(true);
+      setValue("qty", masterLot, { shouldValidate: true });
+      return;
+    }
     const result = getSymbol(symbol, exchange);
     if (!result || typeof result.then !== "function") return;
     result.then((info) => {
@@ -655,7 +671,7 @@ function OrderPadWidget(props: WidgetProps) {
     return () => {
       cancelled = true;
     };
-  }, [symbol, exchange, setValue]);
+  }, [symbol, exchange, setValue, lotRows]);
 
   // When the user types an INR capital amount, auto-calculate quantity.
   // If lotSize > 0 the quantity is rounded down to the nearest lot:
@@ -1009,7 +1025,7 @@ function OrderPadWidget(props: WidgetProps) {
     );
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
-        ? `Lot size unknown for ${values.symbol} (${values.exchange}) — cannot validate the F&O quantity. Reselect the symbol and try again.`
+        ? missingLotRefusal(deskContractName(values.symbol))
         : lotRefusal;
       setError("qty", { type: "validate", message: msg });
       showToast("error", msg, 6000);

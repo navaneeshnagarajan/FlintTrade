@@ -58,7 +58,9 @@ export function LegsTab({
   // one (a debit larger than the strike width, a credit structure priced as a
   // debit); this can. Every other shape reports `not-a-vertical` and is left
   // alone.
-  const spreadCheck = analyseVerticalSpread(legs, underlying.lotSize);
+  const spreadCheck = underlying.lotSize == null
+    ? { kind: "not-a-vertical" as const }
+    : analyseVerticalSpread(legs, underlying.lotSize);
 
   return (
     <div className="flex flex-col h-full gap-2">

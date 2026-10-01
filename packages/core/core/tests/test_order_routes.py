@@ -472,6 +472,7 @@ class TestPracticeMode:
             order_type="MARKET",
             trigger_price=0.0,
             strategy="",
+            instrument_token="",
         )
 
     def test_practice_rejection_is_an_http_error(self, flask_app, client):
@@ -673,6 +674,7 @@ class TestPracticeMode:
             product="MIS",
             order_type="LIMIT",
             trigger_price=1_490.0,
+            instrument_token="",
             strategy="mean-revert",
         )
         recorder.add_symbols.assert_called_once_with(

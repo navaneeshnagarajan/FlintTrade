@@ -11,6 +11,14 @@
  * optional exposure) so grouping is visible at a glance — not a silent
  * re-sort of the same P&L-coloured tiles (FT-TRADE-005). Flat stays leaf-only.
  *
+ * Bands are stacked at full width. Each one is at least tall enough for its
+ * header and one row of tiles, so a small group such as NFO always has a band.
+ * When that stack is taller than the canvas the map scrolls. A tile that still
+ * cannot fit is named by a "+N more" chip in that band: the tooltip lists the
+ * hidden symbols, and the chip opens those rows in the positions list. The
+ * omitted positions also stay in an sr-only list. A position is never missing
+ * unless its own band says so.
+ *
  * Cell AREA is {@link PositionRow.exposure} and cell COLOUR is the row's P&L%,
  * both from the shared kernel — the same numbers the other two views show.
  */
@@ -19,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import type { MouseEvent } from "react";
 import { SquareStack } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { divergingColourScaleRange } from "@/lib/colourScale";
 import { fmtExposure, fmtPnl, fmtPnlPct, type PositionRow } from "./positionBook";
 import { squarifiedTreemap } from "./treemap";
@@ -58,6 +67,183 @@ const GROUP_HEADER_PX = 22;
 
 /** Inner padding from the group border to the leaf tiles. */
 const GROUP_PAD_PX = 3;
+
+/**
+ * Shortest band that can show its header and one thin tile row.
+ * A squarified sliver shorter than this used to drop the whole group.
+ */
+const GROUP_MIN_HEIGHT = GROUP_GUTTER_PX + GROUP_HEADER_PX + GROUP_PAD_PX + MIN_CELL_PX;
+
+function positionTileLabel(row: PositionRow): string {
+  return `${row.symbol}: ${fmtPnl(row.mtm)} (${fmtPnlPct(row.pnlPercent)})`;
+}
+
+/** Symbol list for a "+N more" title. A repeated symbol keeps its product. */
+function hiddenSymbolTitle(rows: readonly PositionRow[]): string {
+  const counts = new Map<string, number>();
+  rows.forEach((row) => counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1));
+  return rows
+    .map((row) => ((counts.get(row.symbol) ?? 0) > 1 && row.product ? `${row.symbol} ${row.product}` : row.symbol))
+    .join(", ");
+}
+
+/**
+ * Full-width bands, largest exposure first. Every group gets a band at least
+ * {@link GROUP_MIN_HEIGHT} tall, even when the stack is taller than the canvas
+ * (the map scrolls). Leftover height, once every band has its minimum, follows
+ * exposure.
+ */
+function distributeBandHeights(exposures: readonly number[], height: number): number[] {
+  if (exposures.length === 0) return [];
+  const stack = Math.max(height, exposures.length * GROUP_MIN_HEIGHT);
+  const weight = exposures.reduce((total, value) => total + value, 0) || 1;
+  const extra = stack - exposures.length * GROUP_MIN_HEIGHT;
+  const heights = exposures.map((value) => GROUP_MIN_HEIGHT + Math.floor((extra * value) / weight));
+  let used = heights.reduce((total, value) => total + value, 0);
+  let index = 0;
+  while (used < stack) {
+    heights[index % heights.length] += 1;
+    used += 1;
+    index += 1;
+  }
+  return heights;
+}
+
+function tileFits(width: number, height: number): boolean {
+  return width >= MIN_CELL_PX && height >= MIN_CELL_PX;
+}
+
+/** Split `total` into parts of at least `min`, weighted by `values`. */
+function splitSizes(values: readonly number[], total: number, min: number): number[] | null {
+  if (values.length === 0 || values.length * min > total) return null;
+  const weight = values.reduce((sum, value) => sum + value, 0) || 1;
+  const extra = total - values.length * min;
+  const sizes = values.map((value) => min + Math.floor((extra * value) / weight));
+  let used = sizes.reduce((sum, value) => sum + value, 0);
+  let index = 0;
+  while (used < total) {
+    sizes[index % sizes.length] += 1;
+    used += 1;
+    index += 1;
+  }
+  return sizes;
+}
+
+/**
+ * One row or column of tiles, each at least {@link MIN_CELL_PX} on both sides.
+ * Used when the squarified layout would crush a leg into nothing.
+ */
+function layoutStrip(
+  members: readonly PositionRow[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): { drawn: LaidOutCell[]; hidden: PositionRow[] } | null {
+  const horizontal = width >= height;
+  const along = Math.floor(horizontal ? width : height);
+  const cross = horizontal ? height : width;
+  if (cross < MIN_CELL_PX) return null;
+  const capacity = Math.floor(along / MIN_CELL_PX);
+  if (capacity <= 0) return null;
+  const visible = members.slice(0, capacity);
+  const sizes = splitSizes(visible.map((member) => member.exposure), along, MIN_CELL_PX);
+  if (!sizes) return null;
+  let cursor = 0;
+  const drawn: LaidOutCell[] = visible.map((member, index) => {
+    const size = sizes[index] ?? MIN_CELL_PX;
+    const cell: LaidOutCell = {
+      ...member,
+      value: member.exposure,
+      x: horizontal ? x + cursor : x,
+      y: horizontal ? y : y + cursor,
+      width: horizontal ? size : width,
+      height: horizontal ? height : size,
+    };
+    cursor += size;
+    return cell;
+  });
+  return { drawn, hidden: members.slice(capacity) };
+}
+
+function layoutCellsInRect(
+  members: readonly PositionRow[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): { drawn: LaidOutCell[]; hidden: PositionRow[] } {
+  const ordered = [...members].sort((a, b) => b.exposure - a.exposure);
+  if (width < MIN_CELL_PX || height < MIN_CELL_PX) {
+    return { drawn: [], hidden: ordered };
+  }
+  const laid = squarifiedTreemap(
+    ordered.map((member) => ({ ...member, value: member.exposure })),
+    x,
+    y,
+    width,
+    height,
+  );
+  const drawn = laid.filter((cell) => tileFits(cell.width, cell.height));
+  const drawnKeys = new Set(drawn.map((cell) => heatRowKey(cell)));
+  const squarifyHidden = ordered.filter((member) => !drawnKeys.has(heatRowKey(member)));
+  if (squarifyHidden.length === 0) return { drawn, hidden: [] };
+
+  const strip = layoutStrip(ordered, x, y, width, height);
+  if (strip && strip.hidden.length < squarifyHidden.length) return strip;
+  return { drawn, hidden: squarifyHidden };
+}
+
+function layoutFlatCells(
+  cells: readonly PositionRow[],
+  width: number,
+  height: number,
+): { cells: LaidOutCell[]; hidden: PositionRow[] } {
+  const laid = layoutCellsInRect(cells, 0, 0, width, height);
+  return { cells: laid.drawn, hidden: laid.hidden };
+}
+
+function layoutGroupedBands(
+  groups: readonly HeatGroup[],
+  width: number,
+  height: number,
+): { groups: LaidOutGroup[]; cells: LaidOutCell[]; contentHeight: number } {
+  const heights = distributeBandHeights(groups.map((group) => group.exposure), height);
+  const laidOutGroups: LaidOutGroup[] = [];
+  const cells: LaidOutCell[] = [];
+  let y = 0;
+  heights.forEach((bandHeight, index) => {
+    const group = groups[index];
+    const gx = GROUP_GUTTER_PX / 2;
+    const gy = y + GROUP_GUTTER_PX / 2;
+    const gw = Math.max(0, width - GROUP_GUTTER_PX);
+    const gh = Math.max(0, bandHeight - GROUP_GUTTER_PX);
+    const laid = layoutCellsInRect(
+      group.members,
+      gx + GROUP_PAD_PX,
+      gy + GROUP_HEADER_PX,
+      gw - GROUP_PAD_PX * 2,
+      gh - GROUP_HEADER_PX - GROUP_PAD_PX,
+    );
+    laidOutGroups.push({
+      key: group.key,
+      members: group.members,
+      exposure: group.exposure,
+      x: gx,
+      y: gy,
+      width: gw,
+      height: gh,
+      hidden: laid.hidden,
+    });
+    cells.push(...laid.drawn);
+    y += bandHeight;
+  });
+  return { groups: laidOutGroups, cells, contentHeight: y };
+}
+
+function heatRowKey(row: PositionRow): string {
+  return `${row.symbol}\0${row.product}\0${row.exchange}`;
+}
 
 export interface HeatGroup {
   key: string;
@@ -163,13 +349,20 @@ function CellTooltip({ cell, x, y, containerWidth }: TooltipProps) {
 
 type LaidOutCell = PositionRow & { value: number; x: number; y: number; width: number; height: number };
 
-type LaidOutGroup = HeatGroup & { x: number; y: number; width: number; height: number };
+type LaidOutGroup = HeatGroup & {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Members of this band whose tile is thinner than a readable cell. */
+  hidden: PositionRow[];
+};
 
 type HeatLayout =
   | { kind: "empty-book" }
   | { kind: "empty-exchange" }
-  | { kind: "flat"; cells: LaidOutCell[] }
-  | { kind: "grouped"; groups: LaidOutGroup[]; cells: LaidOutCell[] };
+  | { kind: "flat"; cells: LaidOutCell[]; hidden: PositionRow[] }
+  | { kind: "grouped"; groups: LaidOutGroup[]; cells: LaidOutCell[]; contentHeight: number };
 
 export interface HeatMapViewProps {
   rows: PositionRow[];
@@ -178,9 +371,11 @@ export interface HeatMapViewProps {
   emptyMessage: string;
   emptyHint: string;
   onOpenChart: (row: PositionRow) => void;
+  /** Open the positions list on the rows a "+N more" chip could not draw. */
+  onRevealRows?: (rows: readonly PositionRow[]) => void;
 }
 
-function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: HeatMapViewProps) {
+function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart, onRevealRows }: HeatMapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [tooltip, setTooltip] = useState<{ cell: PositionRow; x: number; y: number } | null>(null);
@@ -233,84 +428,31 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
 
     const { width, height } = dimensions;
     if (width < 10 || height < 10) {
-      return groupMode === "flat" ? { kind: "flat", cells: [] } : { kind: "grouped", groups: [], cells: [] };
+      return groupMode === "flat"
+        ? { kind: "flat", cells: [], hidden: [] }
+        : { kind: "grouped", groups: [], cells: [], contentHeight: 0 };
     }
 
     if (groupMode === "flat") {
-      const sorted = [...cells].sort((a, b) => b.exposure - a.exposure);
-      return {
-        kind: "flat",
-        cells: squarifiedTreemap(
-          sorted.map((cell) => ({ ...cell, value: cell.exposure })),
-          0,
-          0,
-          width,
-          height,
-        ),
-      };
+      return { kind: "flat", ...layoutFlatCells(cells, width, height) };
     }
 
     const groups = collectHeatGroups(cells, groupMode);
     if (groups.length === 0) {
-      const sorted = [...cells].sort((a, b) => b.exposure - a.exposure);
-      return {
-        kind: "flat",
-        cells: squarifiedTreemap(
-          sorted.map((cell) => ({ ...cell, value: cell.exposure })),
-          0,
-          0,
-          width,
-          height,
-        ),
-      };
+      return { kind: "flat", ...layoutFlatCells(cells, width, height) };
     }
 
-    const groupLayout = squarifiedTreemap(
-      groups.map((group) => ({ ...group, value: group.exposure })),
-      0,
-      0,
-      width,
-      height,
-    );
-
-    const laidOutGroups: LaidOutGroup[] = [];
-    const result: LaidOutCell[] = [];
-    groupLayout.forEach((group) => {
-      const gx = group.x + GROUP_GUTTER_PX / 2;
-      const gy = group.y + GROUP_GUTTER_PX / 2;
-      const gw = Math.max(0, group.width - GROUP_GUTTER_PX);
-      const gh = Math.max(0, group.height - GROUP_GUTTER_PX);
-      laidOutGroups.push({
-        key: group.key,
-        members: group.members,
-        exposure: group.exposure,
-        x: gx,
-        y: gy,
-        width: gw,
-        height: gh,
-      });
-
-      const members = [...group.members].sort((a, b) => b.exposure - a.exposure);
-      const innerX = gx + GROUP_PAD_PX;
-      const innerY = gy + GROUP_HEADER_PX;
-      const innerW = gw - GROUP_PAD_PX * 2;
-      const innerH = gh - GROUP_HEADER_PX - GROUP_PAD_PX;
-      result.push(
-        ...squarifiedTreemap(
-          members.map((member) => ({ ...member, value: member.exposure })),
-          innerX,
-          innerY,
-          innerW,
-          innerH,
-        ),
-      );
-    });
-
-    return { kind: "grouped", groups: laidOutGroups, cells: result };
+    return { kind: "grouped", ...layoutGroupedBands(groups, width, height) };
   }, [cells, dimensions, groupMode]);
 
   const heatmapCells = heatLayout.kind === "flat" || heatLayout.kind === "grouped" ? heatLayout.cells : [];
   const groupBands = heatLayout.kind === "grouped" ? heatLayout.groups : [];
+  const contentHeight = heatLayout.kind === "grouped" ? heatLayout.contentHeight : dimensions.height;
+  const hiddenRows = heatLayout.kind === "flat"
+    ? heatLayout.hidden
+    : heatLayout.kind === "grouped"
+      ? groupBands.flatMap((group) => group.hidden)
+      : [];
   const showExchangeEmpty = heatLayout.kind === "empty-exchange";
 
   const handleMouseMove = useCallback((event: MouseEvent<HTMLDivElement>, cell: PositionRow) => {
@@ -322,7 +464,12 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
   const handleMouseLeave = useCallback(() => setTooltip(null), []);
 
   return (
-    <div className="flex-1 min-h-0 relative" ref={containerRef} onMouseLeave={handleMouseLeave}>
+    <div
+      className="flex-1 min-h-0 relative"
+      data-testid="heat-map"
+      ref={containerRef}
+      onMouseLeave={handleMouseLeave}
+    >
       {cells.length === 0 || showExchangeEmpty ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
           <SquareStack size={28} className="text-text-disabled" />
@@ -330,7 +477,11 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
           {!showExchangeEmpty && <span className="text-xxs text-text-disabled">{emptyHint}</span>}
         </div>
       ) : (
-        <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute inset-0 overflow-auto">
+          <div
+            className="relative min-h-full"
+            style={{ height: contentHeight > 0 ? contentHeight : "100%" }}
+          >
           {groupBands.map((group) => {
             const showExposure = group.width >= 88;
             return (
@@ -361,13 +512,28 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
                       {fmtExposure(group.exposure)}
                     </span>
                   )}
+                  <HeatMoreLabel
+                    rows={group.hidden}
+                    testId={`heat-more-${group.key}`}
+                    onReveal={onRevealRows}
+                  />
                 </div>
               </div>
             );
           })}
+          {heatLayout.kind === "flat" && hiddenRows.length > 0 && (
+            <div className="absolute right-1 top-0.5 z-20">
+              <HeatMoreLabel rows={hiddenRows} testId="heat-more-flat" onReveal={onRevealRows} />
+            </div>
+          )}
+          {hiddenRows.length > 0 && (
+            <ul className="sr-only" aria-label="Positions without a heat map tile">
+              {hiddenRows.map((row) => (
+                <li key={heatRowKey(row)}>{positionTileLabel(row)}</li>
+              ))}
+            </ul>
+          )}
           {heatmapCells.map((cell) => {
-            if (cell.width < MIN_CELL_PX || cell.height < MIN_CELL_PX) return null;
-
             const showLabel = cell.width >= 40 && cell.height >= 24;
             const showPnl = cell.width >= 60 && cell.height >= 36;
 
@@ -386,7 +552,7 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
                 onClick={() => onOpenChart(cell)}
                 role="button"
                 tabIndex={0}
-                aria-label={`${cell.symbol}: ${fmtPnl(cell.mtm)} (${fmtPnlPct(cell.pnlPercent)})`}
+                aria-label={positionTileLabel(cell)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") onOpenChart(cell);
                 }}
@@ -406,6 +572,7 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
               </div>
             );
           })}
+          </div>
         </div>
       )}
 
@@ -418,6 +585,36 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
         />
       )}
     </div>
+  );
+}
+
+function HeatMoreLabel({
+  rows,
+  testId,
+  onReveal,
+}: {
+  rows: readonly PositionRow[];
+  testId: string;
+  onReveal?: (rows: readonly PositionRow[]) => void;
+}) {
+  if (rows.length === 0) return null;
+  const title = hiddenSymbolTitle(rows);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      data-testid={testId}
+      title={title}
+      aria-label={`+${rows.length} more: ${title}`}
+      className="pointer-events-auto h-4 shrink-0 px-1 text-xxs font-medium"
+      onClick={(event) => {
+        event.stopPropagation();
+        onReveal?.(rows);
+      }}
+    >
+      +{rows.length} more
+    </Button>
   );
 }
 

@@ -18,7 +18,7 @@ description: Delta, gamma, theta, vega explained with practical trading implicat
 
 **Practical use:**
 - Delta-neutral portfolio: sum of all deltas = 0 (fully hedged)
-- Position delta tells you equivalent futures exposure: delta 0.5 × 75 (Nifty lot) = 37.5 equivalent futures
+- Example: delta 0.5 × 65 = 32.5 equivalent futures. The 65 is an example quantity, not a live lot.
 
 ## Gamma (Γ)
 

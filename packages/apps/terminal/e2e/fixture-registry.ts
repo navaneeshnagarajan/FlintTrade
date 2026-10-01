@@ -638,6 +638,18 @@ export function registerOperatorStatusProbes(
   ]);
 
   registry.register({
+    name: "read instrument lots",
+    method: "GET",
+    path: "/ft-api/api/v1/instrument-lots",
+    // The desk fetches this once per page load. A journey that never mounts
+    // the shell must still dispose cleanly.
+    expectedCalls: { minimum: 0, maximum: 12 },
+    handler: (request) => {
+      assertReadOnlyProbe(request);
+      return { json: { rows: [] } };
+    },
+  });
+  registry.register({
     name: "operator desk ping",
     method: "GET",
     path: "/ft-api/api/v1/ping",

@@ -465,6 +465,166 @@ class TestImportData:
         assert data1["capital"]["initial"] == pytest.approx(data2["capital"]["initial"])
 
 
+class TestPracticeCharges:
+    """Every Practice fill persists the shared-table estimate."""
+
+    def test_fill_stores_breakdown_and_daily_total(self, engine: SandboxEngine) -> None:
+        from flinttrade_core.indian_charges import estimate_practice_fill
+
+        engine.place_order("ITC", "NSE", "BUY", 10, 400.0)
+        expected = estimate_practice_fill(
+            symbol="ITC",
+            exchange="NSE",
+            product="MIS",
+            action="BUY",
+            quantity=10,
+            price=400.0,
+        )
+        trade = engine.get_trades()[0]
+        assert trade["charges"] == pytest.approx(float(expected.total))
+        assert trade["charges_breakdown"]["exchange_label"] == "NSE transaction"
+        assert trade["charges_breakdown"]["brokerage"] == 0.0
+        history = engine.get_pnl_history()
+        assert history[0]["charges"] == pytest.approx(float(expected.total))
+        assert history[0]["net_pnl"] == pytest.approx(history[0]["gross_pnl"] - history[0]["charges"])
+        assert engine.get_capital()["estimated_charges"] == pytest.approx(float(expected.total))
+        assert engine.get_pnl()["net"] == pytest.approx(engine.get_pnl()["gross"] - engine.get_pnl()["charges"])
+
+    def test_practice_fill_uses_the_named_contracts_lot(
+        self, engine: SandboxEngine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """October stays 75; a quantity of 65 is the November contract, not October."""
+        import json
+        from datetime import date
+        from pathlib import Path
+
+        from flinttrade_core.indian_charges import estimate_practice_fill
+        from flinttrade_core.instrument_lots import contract_quantity_message as master_message
+
+        revision = json.loads(
+            (Path(__file__).resolve().parents[2] / "core" / "tests" / "data" / "instrument_lot_revision_window.json")
+            .read_text(encoding="utf-8")
+        )
+        rows = [
+            row
+            for row in revision["rows"]
+            if row.get("SEM_CUSTOM_SYMBOL") == "NIFTY" or row.get("pSymbolName") == "NIFTY"
+        ]
+
+        def _message(token: str, quantity: int, contract: str = "") -> str | None:
+            return master_message(token, quantity, rows, as_of=date(2026, 9, 1), contract=contract)
+
+        monkeypatch.setattr("flinttrade_data.sandbox_engine.contract_quantity_message", _message)
+        rejected = engine.place_order(
+            "NIFTY-OCT2026-FUT",
+            "NFO",
+            "BUY",
+            65,
+            100.0,
+            instrument_token="13",
+        )
+        assert rejected["status"] == "REJECTED"
+        assert rejected["message"] == "Quantity must be a positive multiple of the lot size (75)"
+
+        unnamed = engine.place_order(
+            "NIFTY 24500 CE",
+            "NFO",
+            "BUY",
+            65,
+            100.0,
+            instrument_token="missing",
+        )
+        assert unnamed["status"] == "REJECTED"
+        assert unnamed["message"] == (
+            "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, "
+            "so this order can't be sized."
+        )
+
+        accepted = engine.place_order(
+            "NIFTY-NOV2026-FUT",
+            "NFO",
+            "BUY",
+            65,
+            100.0,
+            instrument_token="14",
+        )
+        assert accepted["status"] == "COMPLETE"
+        trade = engine.get_trades()[0]
+        assert trade["quantity"] == 65
+        october = estimate_practice_fill(
+            symbol="NIFTY-OCT2026-FUT",
+            exchange="NFO",
+            product="MIS",
+            action="BUY",
+            quantity=75,
+            price=100.0,
+        )
+        november = estimate_practice_fill(
+            symbol="NIFTY-NOV2026-FUT",
+            exchange="NFO",
+            product="MIS",
+            action="BUY",
+            quantity=65,
+            price=100.0,
+        )
+        assert trade["charges"] == pytest.approx(float(november.total))
+        assert trade["charges"] != pytest.approx(float(october.total))
+
+    def test_imported_fill_uses_the_rate_on_its_trade_date(self, engine: SandboxEngine) -> None:
+        from datetime import datetime
+
+        from flinttrade_core.indian_charges import estimate_practice_fill
+        from flinttrade_data.state_store import IST
+
+        traded = datetime(2025, 6, 2, 10, 15, tzinfo=IST)
+        historical = estimate_practice_fill(
+            symbol="NIFTY24APRFUT",
+            exchange="NFO",
+            product="NRML",
+            action="SELL",
+            quantity=1,
+            price=20_000,
+            on=traded.date(),
+        )
+        current = estimate_practice_fill(
+            symbol="NIFTY24APRFUT",
+            exchange="NFO",
+            product="NRML",
+            action="SELL",
+            quantity=1,
+            price=20_000,
+        )
+        assert float(historical.total) != pytest.approx(float(current.total))
+        engine.import_data(json.dumps({
+            "capital": {"initial": 1_000_000, "current": 1_000_000},
+            "orders": [{
+                "order_id": "hist-1",
+                "symbol": "NIFTY24APRFUT",
+                "exchange": "NFO",
+                "action": "SELL",
+                "quantity": 1,
+                "price": 20_000,
+                "product": "NRML",
+                "status": "COMPLETE",
+                "created_at": traded.isoformat(),
+            }],
+            "trades": [{
+                "order_id": "hist-1",
+                "symbol": "NIFTY24APRFUT",
+                "exchange": "NFO",
+                "action": "SELL",
+                "quantity": 1,
+                "price": 20_000,
+                "product": "NRML",
+                "traded_at": traded.isoformat(),
+            }],
+        }))
+        trade = engine.get_trades()[0]
+        assert trade["charges"] == pytest.approx(float(historical.total))
+        assert trade["charges"] != pytest.approx(float(current.total))
+        assert engine.get_funds()["estimated_charges"] == pytest.approx(float(historical.total))
+
+
 class TestNetWorthLedger:
     """Practice funds expose ledger cash and do not settle futures MTM."""
 

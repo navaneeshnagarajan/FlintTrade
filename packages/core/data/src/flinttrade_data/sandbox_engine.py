@@ -25,10 +25,13 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_core.indian_charges import estimate_practice_fill
+from flinttrade_core.instrument_lots import contract_quantity_message
 from flinttrade_core.restored_fills import RESTORED_FROM_BACKUP
 from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
 
@@ -68,6 +71,48 @@ def _validate_table(table: str) -> str:
     if table not in _VALID_TABLES:
         raise ValueError(f"Invalid table name: {table}")
     return table
+
+
+def _charges_for_fill(
+    *,
+    symbol: str,
+    exchange: str,
+    product: str,
+    action: str,
+    quantity: int,
+    price: float,
+    traded_at: float | None = None,
+) -> tuple[float, str]:
+    """Return ``(total, json)`` for one Practice fill from the shared table.
+
+    ``traded_at`` is Unix seconds. The statutory schedule is the one in force
+    on that IST date, not today's, so a restored fill keeps the rate that
+    applied when it traded.
+    """
+    on = None
+    if traded_at is not None:
+        on = datetime.fromtimestamp(float(traded_at), tz=IST).date()
+    breakdown = estimate_practice_fill(
+        symbol=symbol,
+        exchange=exchange,
+        product=product,
+        action=action,
+        quantity=quantity,
+        price=Decimal(str(price)),
+        on=on,
+    )
+    payload = breakdown.as_floats()
+    return float(breakdown.total), json.dumps(payload)
+
+
+def _parse_charges_json(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 @dataclass(slots=True)
@@ -306,6 +351,7 @@ class SandboxEngine:
         self.config = self._load_config()
         self._initial_capital = self.config.starting_capital
         init_capital(self._conn, self._initial_capital)
+        self._backfill_fill_charges()
 
     def _load_config(self) -> SandboxConfig:
         row = self._conn.execute(
@@ -411,6 +457,7 @@ class SandboxEngine:
             "current": current,
             "available": max(available, 0.0),
             "used_margin": used_margin,
+            "estimated_charges": self.total_estimated_charges(),
         }
 
     def get_funds(self) -> dict[str, float | bool]:
@@ -438,6 +485,7 @@ class SandboxEngine:
             "current_balance": capital["current"],
             "ledger_balance": self._net_worth_ledger(capital),
             "futures_mtm_in_ledger": False,
+            "estimated_charges": capital["estimated_charges"],
             "total_equity": capital["current"] + pnl["unrealised"],
         }
 
@@ -516,6 +564,7 @@ class SandboxEngine:
         order_type: str = "MARKET",
         trigger_price: float = 0.0,
         strategy: str = "",
+        instrument_token: str = "",
         price_source: str | None = None,
         price_age_s: int | None = None,
     ) -> dict[str, Any]:
@@ -536,6 +585,8 @@ class SandboxEngine:
             order_type: ``MARKET``, ``LIMIT``, ``SL`` or ``SL-M``.
             trigger_price: Required positive trigger for stop orders.
             strategy: Optional strategy label retained on the order and trade.
+            instrument_token: Security id of the listed contract. When set, the
+                quantity must be a positive multiple of that contract's lot size.
 
         Returns:
             Dict with keys:
@@ -557,6 +608,11 @@ class SandboxEngine:
             return {"order_id": "", "status": "REJECTED", "message": "Exchange is required"}
         if quantity <= 0:
             return {"order_id": "", "status": "REJECTED", "message": "Quantity must be > 0"}
+        token = str(instrument_token or "").strip()
+        if token:
+            refusal = contract_quantity_message(token, quantity, contract=symbol)
+            if refusal:
+                return {"order_id": "", "status": "REJECTED", "message": refusal}
         if action not in ("BUY", "SELL"):
             return {"order_id": "", "status": "REJECTED", "message": f"Invalid action: {action}"}
         if order_type not in {"MARKET", "LIMIT", "SL", "SL-M"}:
@@ -1085,24 +1141,29 @@ class SandboxEngine:
         """Return executed Practice fills ordered newest first."""
         rows = self._conn.execute(
             """SELECT trade_id, order_id, symbol, exchange, action, quantity,
-                      price, product, strategy, traded_at
+                      price, product, strategy, traded_at, charges, charges_json
                FROM trades ORDER BY traded_at DESC, trade_id DESC"""
         ).fetchall()
-        return [
-            {
-                "trade_id": row[0],
-                "order_id": row[1],
-                "symbol": row[2],
-                "exchange": row[3],
-                "action": row[4],
-                "quantity": row[5],
-                "price": row[6],
-                "product": row[7],
-                "strategy": row[8],
-                "traded_at": _format_ts(row[9]),
-            }
-            for row in rows
-        ]
+        trades: list[dict[str, Any]] = []
+        for row in rows:
+            breakdown = _parse_charges_json(row[11])
+            trades.append(
+                {
+                    "trade_id": row[0],
+                    "order_id": row[1],
+                    "symbol": row[2],
+                    "exchange": row[3],
+                    "action": row[4],
+                    "quantity": row[5],
+                    "price": row[6],
+                    "product": row[7],
+                    "strategy": row[8],
+                    "traded_at": _format_ts(row[9]),
+                    "charges": float(row[10] or 0.0),
+                    "charges_breakdown": breakdown,
+                }
+            )
+        return trades
 
     # ------------------------------------------------------------------
     # P&L
@@ -1126,10 +1187,15 @@ class SandboxEngine:
         ).fetchone()
 
         realised, unrealised = row or (0.0, 0.0)
+        gross = float(realised) + float(unrealised)
+        charges = self.total_estimated_charges()
         return {
             "realised": realised,
             "unrealised": unrealised,
-            "total": realised + unrealised,
+            "gross": gross,
+            "charges": charges,
+            "net": gross - charges,
+            "total": gross,
         }
 
     def get_pnl_history(self) -> list[dict[str, Any]]:
@@ -1543,22 +1609,45 @@ class SandboxEngine:
                         if row["status"] == "COMPLETE" and row["filled_qty"] > 0
                     ]
                 for trade in effective_trades:
+                    symbol = str(trade.get("symbol", "")).strip().upper()
+                    exchange = str(trade.get("exchange", "")).strip().upper()
+                    action = str(trade.get("action", "BUY")).strip().upper()
+                    quantity = int(trade.get("quantity", 0))
+                    price = float(trade.get("price", 0.0))
+                    product = str(trade.get("product", "MIS")).strip().upper()
+                    traded_at = _coerce_timestamp(trade.get("traded_at"), now)
+                    stored = trade.get("charges_breakdown")
+                    if isinstance(stored, dict) and "total" in stored:
+                        charges = float(trade.get("charges", stored.get("total", 0.0)))
+                        charges_json = json.dumps(stored)
+                    else:
+                        charges, charges_json = _charges_for_fill(
+                            symbol=symbol,
+                            exchange=exchange,
+                            product=product,
+                            action=action,
+                            quantity=quantity,
+                            price=price,
+                            traded_at=traded_at,
+                        )
                     self._conn.execute(
                         """INSERT INTO trades
                            (trade_id, order_id, symbol, exchange, action, quantity,
-                            price, product, strategy, traded_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            price, product, strategy, traded_at, charges, charges_json)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             str(trade.get("trade_id") or uuid.uuid4()),
                             str(trade.get("order_id", "")),
-                            str(trade.get("symbol", "")).strip().upper(),
-                            str(trade.get("exchange", "")).strip().upper(),
-                            str(trade.get("action", "BUY")).strip().upper(),
-                            int(trade.get("quantity", 0)),
-                            float(trade.get("price", 0.0)),
-                            str(trade.get("product", "MIS")).strip().upper(),
+                            symbol,
+                            exchange,
+                            action,
+                            quantity,
+                            price,
+                            product,
                             RESTORED_FROM_BACKUP,
-                            _coerce_timestamp(trade.get("traded_at"), now),
+                            traded_at,
+                            charges,
+                            charges_json,
                         ),
                     )
 
@@ -1692,6 +1781,37 @@ class SandboxEngine:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def total_estimated_charges(self) -> float:
+        """Sum of estimated statutory charges across every Practice fill."""
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(charges), 0.0) FROM trades"
+        ).fetchone()
+        return float(row[0] or 0.0)
+
+    def _backfill_fill_charges(self) -> None:
+        """Estimate charges for fills recorded before the shared table existed."""
+        rows = self._conn.execute(
+            """SELECT trade_id, symbol, exchange, action, quantity, price, product, traded_at
+               FROM trades
+               WHERE charges_json IS NULL OR charges_json = ''"""
+        ).fetchall()
+        if not rows:
+            return
+        for trade_id, symbol, exchange, action, quantity, price, product, traded_at in rows:
+            charges, charges_json = _charges_for_fill(
+                symbol=str(symbol),
+                exchange=str(exchange),
+                product=str(product),
+                action=str(action),
+                quantity=int(quantity),
+                price=float(price),
+                traded_at=float(traded_at) if traded_at is not None else None,
+            )
+            self._conn.execute(
+                "UPDATE trades SET charges = ?, charges_json = ? WHERE trade_id = ?",
+                (charges, charges_json, trade_id),
+            )
+
     def _pending_sell_quantity(
         self,
         symbol: str,
@@ -1726,12 +1846,22 @@ class SandboxEngine:
         price_source: str | None = None,
         price_age_s: int | None = None,
     ) -> None:
+        charges, charges_json = _charges_for_fill(
+            symbol=symbol,
+            exchange=exchange,
+            product=product,
+            action=action,
+            quantity=quantity,
+            price=price,
+            traded_at=traded_at,
+        )
         source, age = _fill_provenance(price_source, price_age_s)
         self._conn.execute(
             """INSERT INTO trades
                (trade_id, order_id, symbol, exchange, action, quantity, price,
-                product, strategy, price_source, price_age_s, traded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                product, strategy, price_source, price_age_s, traded_at,
+                charges, charges_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(uuid.uuid4()),
                 order_id,
@@ -1745,6 +1875,8 @@ class SandboxEngine:
                 source,
                 age,
                 traded_at,
+                charges,
+                charges_json,
             ),
         )
         self._update_position(
@@ -1808,24 +1940,33 @@ class SandboxEngine:
             ).fetchone()[0]
         )
         gross = float(realised) + float(unrealised)
+        charges = float(
+            self._conn.execute(
+                """SELECT COALESCE(SUM(charges), 0.0) FROM trades
+                   WHERE date(traded_at, 'unixepoch', '+5 hours', '+30 minutes') = ?""",
+                (session_date,),
+            ).fetchone()[0]
+        )
+        net = gross - charges
         existing = self._conn.execute(
             "SELECT high_water_mark, max_drawdown FROM pnl WHERE session_date = ?",
             (session_date,),
         ).fetchone()
-        previous_high = float(existing[0]) if existing else gross
+        previous_high = float(existing[0]) if existing else net
         previous_drawdown = float(existing[1]) if existing else 0.0
-        high_water = max(previous_high, gross)
-        max_drawdown = max(previous_drawdown, high_water - gross)
+        high_water = max(previous_high, net)
+        max_drawdown = max(previous_drawdown, high_water - net)
         self._conn.execute(
             """INSERT INTO pnl
                (session_date, realised_total, unrealised_total, gross_pnl,
                 charges, net_pnl, total_trades, high_water_mark, max_drawdown,
                 updated_at)
-               VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(session_date) DO UPDATE SET
                    realised_total = excluded.realised_total,
                    unrealised_total = excluded.unrealised_total,
                    gross_pnl = excluded.gross_pnl,
+                   charges = excluded.charges,
                    net_pnl = excluded.net_pnl,
                    total_trades = excluded.total_trades,
                    high_water_mark = excluded.high_water_mark,
@@ -1836,7 +1977,8 @@ class SandboxEngine:
                 realised,
                 unrealised,
                 gross,
-                gross,
+                charges,
+                net,
                 total_trades,
                 high_water,
                 max_drawdown,

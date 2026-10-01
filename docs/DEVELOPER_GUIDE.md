@@ -938,6 +938,94 @@ and Cash notes are blank on example data. A connected book keeps
 6. **Never touch OpenAlgo's SQLite directly.** Concurrent access
    corrupts the DB. Always go through the REST API.
 
+### Instrument lot sizes
+
+A lot belongs to one listed contract. NIFTY, BANKNIFTY, and SENSEX are
+not stored as fixed sizes in this module. `flinttrade_core.instrument_lots.active_rows`
+uses the workspace disk cache `instrument_lot_cache.json` when that file
+has rows, and otherwise the shipped excerpt
+`packages/core/core/src/flinttrade_core/data/instrument_lot_fixture.json`.
+`instrument_lot_master.build_excerpt` builds that excerpt from the public
+Dhan scrip master and the Kotak Neo F&O master (near month and next month
+of NIFTY, BANKNIFTY, and SENSEX futures). The document carries `source`
+and `fetched_at`. `refresh_master_cache_if_due` downloads again when the
+cache is missing or from an earlier IST day; `start_instrument_master_refresh`
+runs that at startup and again at each IST midnight. A failed download
+leaves a previous non-empty cache in place. Contracts whose expiry is
+before today (IST) are dropped. `contracts_from_rows` raises only when
+the same contract (underlying, expiry month, and kind) has two sizes
+across Dhan and Neo. A later expiry with a different size is kept.
+
+`scalper_lot_label` returns `size · expiry` (for example `65 · Sep expiry`
+per the broker instrument master). When the next month’s size differs,
+both months are named. `index_lot_line` is the risk line, for example
+`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)` on the shipped
+excerpt, with `—` for an underlying the master does not list.
+`missing_lot_refusal` is the order text:
+`Not placed. The lot size for <contract> isn't in the instrument master, so this order can't be sized.`
+Order Pad shows that string when a derivative has no lot in the lookup.
+The terminal does not bundle a second copy of the excerpt. The app shell
+calls `loadInstrumentLotRows` once (`GET /api/v1/instrument-lots`). A
+store that already has rows does not fetch again. Glossary (`useIndexLotLine`),
+Scalper, and Order Pad read that one in-memory lookup. The route returns
+`active_rows()` and `index_lot_line()`. Tests may still import the
+excerpt through `@flinttrade/instrument-lots`. Demo `getLotSize` rows are
+labelled `Example`, follow the near-month size, and do not name a
+contract month. Glossary Lot Size is
+`Minimum quantity for F&O trading. ` plus `indexLotLine()` plus `.`.
+
+### Statutory charges
+
+One table, `packages/core/core/src/flinttrade_core/data/indian_charges.json`,
+is loaded by `flinttrade_core.indian_charges`. It feeds the backtest
+calculator, Practice fills (`estimate_practice_fill`), the terminal
+charges calculator, and mirror statutory defaults. Each row has an
+exchange (`NSE`, `BSE`, `MCX`, or `ANY`), a segment, a component, a side,
+a basis, a rate, `effective_from`, and an optional `effective_to`.
+Components are STT, exchange transaction, SEBI fee, stamp duty, and GST.
+Segments cover equity delivery, equity intraday, equity futures, equity
+options, Sensex options, Bankex options, Sensex 50 options, and MCX
+commodity futures and options.
+Brokerage is not in the table. Lot sizes are not in the table; callers
+read them from the instrument master. Practice passes brokerage zero.
+`exchange_transaction_label` names the line `BSE transaction`,
+`MCX transaction`, or `NSE transaction`. The Fills widget names the
+line from the fill's exchange: `BSE transaction` for BSE and BFO, and
+`NSE transaction` otherwise. Each component is rounded to the paisa
+before GST is applied to the rounded brokerage, exchange charge, and
+SEBI fee. The BSE futures exchange-transaction rate in the table is zero.
+Sensex options and Bankex options use their own premium rate.
+Home and Invest share `NET_WORTH_LABEL` in
+`packages/apps/terminal/src/lib/accountNetWorth.ts`
+(`Net Worth (Cash + Holdings + Positions)`). Invest → Net Worth is
+headed `Net Worth Breakdown`. `Known Total` is not rendered.
+`accountNetWorth` is the mark of holdings, plus the mark of positions,
+plus available cash, minus the estimated-charges argument. `markedValue`
+is last price times absolute quantity for every row. Callers pass
+available cash from the funds available-cash field, and pass estimated
+charges only in Practice (otherwise zero). In Practice the source line
+is `Practice account, after estimated charges`.
+
+### Positions book
+
+Positions Table, Net, and Heat render one normalised book
+(`positionBook.ts`). Flat means every leg of a symbol is at quantity 0;
+those symbols are omitted from Net rows. Offset means the legs net to 0
+and at least one leg is still open: each open leg stays its own row,
+with its own margin, and an `Offset` tag. `offsetLegTooltip` names the
+first two open products in book order. It adds the intraday square-off
+sentence only when one product is MIS. The Net footer shows
+`incl. N offset symbol(s) (legs still open)` and
+`incl. N flat symbol(s)`, each hidden at 0. The Example book
+(`sampleBook.ts`) is `+₹16,575`, with the NIFTY group at `+₹1,625`
+(MIS `+₹3,575`, NRML `-₹1,950`) and BANKNIFTY at `+₹2,400`, and the
+footer `incl. 2 offset symbols (legs still open)`. Heat bands are at
+least tall enough for a header and one tile row, and the map scrolls
+when the stack is taller than the canvas. A `+N more` chip’s tooltip
+lists symbols that still do not fit; clicking it opens the list on
+those rows and highlights them. Hidden positions are also in a
+screen-reader list, `Positions without a heat map tile`.
+
 ---
 
 ## 12. Where to ask for help

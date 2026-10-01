@@ -22,6 +22,7 @@ import useWebSocket from "@/hooks/useWebSocket";
 import { useVoiceAlert } from "@/hooks/useVoiceAlert";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
+import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
@@ -167,13 +168,13 @@ function ScalperWidget(props: WidgetProps) {
   // symbol master via getSymbol (the same symbol-info API QuickTrade uses),
   // probed on the concrete CE contract once it resolves. Secondary: the
   // backend lot-size resolver route, accepted only when NOT flagged as
-  // sample data. The built-in INDEX_CONFIG value is an explicitly-marked
-  // LAST-RESORT display fallback; real (non-explore) orders are blocked
-  // until a backend source confirms, because lot sizes change over time and
-  // a stale hardcoded value mis-sizes every order.
+  // sample data. The caption names the cached master's near month, and the
+  // next month when its size differs. A symbol missing from that master
+  // shows an em dash. Real orders stay blocked until a live source confirms.
   const [resolvedLot, setResolvedLot] = useState<ResolvedLot | null>(null);
-  const lotSize = resolvedLot?.size ?? cfg.lotSize;
-  const lotSizeVerified = resolvedLot != null;
+  const lotRows = useInstrumentLotRows();
+  const lotLabel = scalperLotLabel(symbol, lotRows);
+  const lotSize = resolvedLot?.size ?? null;
   const symbolInfoProbeRef = useRef<string | null>(null);
 
   const refreshLotSize = useCallback((signal?: { cancelled: boolean }) => {
@@ -340,9 +341,9 @@ function ScalperWidget(props: WidgetProps) {
         showStatus(modeRefusal, "error");
         return;
       }
-      // Fail closed: never size a real order from the hardcoded fallback lot
-      // table — lot sizes change and a stale value mis-sizes every order.
-      if (!lotSizeVerified) {
+      // Fail closed: the on-screen master lot is for display. A live order
+      // waits until the symbol master confirms the multiplier.
+      if (resolvedLot == null) {
         showStatus("Lot size not confirmed from the backend yet — order not sent", "error");
         refreshLotSize();
         // Re-probe the symbol master with the exact contract being traded.
@@ -351,7 +352,7 @@ function ScalperWidget(props: WidgetProps) {
             if (info.lotsize > 0) setResolvedLot({ size: info.lotsize, source: "symbol-info" });
           })
           .catch(() => {
-            // Stays unverified — orders remain blocked.
+            // Stays unconfirmed — orders remain blocked.
           });
         return;
       }
@@ -366,7 +367,7 @@ function ScalperWidget(props: WidgetProps) {
         showStatus(priceRefusal, "error");
         return;
       }
-      const qty = lots * lotSize;
+      const qty = lots * resolvedLot.size;
 
       // Optional protective exit leg (points from entry). Validated before
       // anything is sent — a malformed value must never degrade to a silent
@@ -478,7 +479,7 @@ function ScalperWidget(props: WidgetProps) {
     // that used to sit in this array is not read by the callback and did not
     // cover it — a Live -> Practice downgrade leaves `isExplore` false, so the
     // callback kept checking against the mode it was created under.
-    [mode, ordersArmed, lots, lotSize, lotSizeVerified, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
+    [mode, ordersArmed, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
   );
 
   const handleOrder = useCallback(
@@ -659,8 +660,8 @@ function ScalperWidget(props: WidgetProps) {
         status={status}
         focused={focused}
         lots={lots}
+        lotLabel={lotLabel}
         lotSize={lotSize}
-        lotSizeVerified={lotSizeVerified}
         onLotsDec={() => setLots((l) => Math.max(1, l - 1))}
         onLotsInc={() => setLots((l) => l + 1)}
         product={product}

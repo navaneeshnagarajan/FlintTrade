@@ -619,6 +619,67 @@ describe("FillsWidget (live)", () => {
     await waitFor(() => expect(mockJournal).toHaveBeenCalled());
   });
 
+  it("names NSE and BSE transaction lines from the fill exchange, with no Brokerage", async () => {
+    runtime.mode = "practice";
+    mockUseTradebook.mockReturnValue(queryResult({
+      data: [
+        {
+          ...BOOK_TRADES[0],
+          symbol: "NIFTY24APR23000CE",
+          exchange: "NFO",
+          estimatedCharges: {
+            total: 12.5,
+            stt: 4,
+            exchangeCharges: 3.5,
+            // A stored label must not override the fill's exchange.
+            exchangeLabel: "BSE transaction",
+            sebiFee: 0.1,
+            stampDuty: 1.2,
+            gst: 3.7,
+          },
+        },
+        {
+          symbol: "SENSEX24APR75000CE",
+          action: "BUY",
+          quantity: "20",
+          average_price: "400.00",
+          trade_time: "2026-04-08T10:40:00+05:30",
+          orderid: "OB-200",
+          exchange: "BFO",
+          estimatedCharges: {
+            total: 8.25,
+            stt: 2,
+            exchangeCharges: 2.6,
+            exchangeLabel: "NSE transaction",
+            sebiFee: 0.05,
+            stampDuty: 0.8,
+            gst: 2.8,
+          },
+        },
+      ],
+    }));
+    renderFills();
+    const nifty = await screen.findByRole("button", { name: "Charges ₹12.50 (estimated)" });
+    const sensex = screen.getByRole("button", { name: "Charges ₹8.25 (estimated)" });
+    expect(screen.queryByText("NSE transaction ₹3.50")).not.toBeInTheDocument();
+    expect(screen.queryByText("BSE transaction ₹2.60")).not.toBeInTheDocument();
+    fireEvent.click(nifty);
+    fireEvent.click(sensex);
+    expect(screen.getByText("STT ₹4.00")).toBeInTheDocument();
+    expect(screen.getByText("NSE transaction ₹3.50")).toBeInTheDocument();
+    expect(screen.getByText("SEBI fee ₹0.10")).toBeInTheDocument();
+    expect(screen.getByText("Stamp duty ₹1.20")).toBeInTheDocument();
+    expect(screen.getByText("GST ₹3.70")).toBeInTheDocument();
+    expect(screen.getByText("STT ₹2.00")).toBeInTheDocument();
+    expect(screen.getByText("BSE transaction ₹2.60")).toBeInTheDocument();
+    expect(screen.getByText("SEBI fee ₹0.05")).toBeInTheDocument();
+    expect(screen.getByText("Stamp duty ₹0.80")).toBeInTheDocument();
+    expect(screen.getByText("GST ₹2.80")).toBeInTheDocument();
+    expect(screen.queryByText("BSE transaction ₹3.50")).not.toBeInTheDocument();
+    expect(screen.queryByText("NSE transaction ₹2.60")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Brokerage/i)).not.toBeInTheDocument();
+  });
+
   it("does not query the journal or screenshots in Practice — sandbox fills only", async () => {
     runtime.mode = "practice";
     mockUseTradebook.mockReturnValue(queryResult({ data: BOOK_TRADES }));

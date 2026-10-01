@@ -55,6 +55,10 @@ build-backend = "hatchling.build"
 packages = ["src/flinttrade_core"]
 artifacts = ["src/flinttrade_core/*.txt"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/flinttrade_core/data/indian_charges.json" = "flinttrade_core/data/indian_charges.json"
+"src/flinttrade_core/data/instrument_lot_fixture.json" = "flinttrade_core/data/instrument_lot_fixture.json"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

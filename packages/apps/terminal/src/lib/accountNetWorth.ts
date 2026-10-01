@@ -38,13 +38,21 @@ export const NET_WORTH_POSITIONS_NOTE = "Options at market value, futures at unr
 export type FuturesMarkSource = "avg" | "fallback";
 
 /**
- * Charges on the account book. Practice funds have no charges field today,
- * so this is 0 until a later book exposes a finite `charges` value.
+ * Charges on the account book.
+ *
+ * Practice funds expose `estimatedCharges` (statutory estimate, not brokerage).
+ * A broker book may expose `charges`. Either finite number is subtracted from
+ * net worth. A missing field is zero.
  */
 export function accountCharges(source: object | null | undefined): number {
-  if (source == null || !("charges" in source)) return 0;
-  const charges = source.charges;
-  return typeof charges === "number" && Number.isFinite(charges) ? charges : 0;
+  if (source == null) return 0;
+  const record = source as {
+    charges?: unknown;
+    estimatedCharges?: unknown;
+    estimated_charges?: unknown;
+  };
+  const raw = record.charges ?? record.estimatedCharges ?? record.estimated_charges;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
 }
 
 export interface MarkedLine {
