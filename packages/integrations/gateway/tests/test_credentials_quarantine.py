@@ -123,7 +123,7 @@ def test_generated_source_columns_refuse_without_changing_any_source_state(tmp_p
 
 
 @pytest.mark.parametrize("adapter", [False, True])
-def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, monkeypatch, adapter):
+def test_zero_to_three_partitions_invalid_rows_and_preserves_raw_types(tmp_path, monkeypatch, adapter):
     path = source(tmp_path, adapter=adapter)
     with closing(sqlite3.connect(path)) as conn:
         add(conn, "Valid:Case")
@@ -135,9 +135,9 @@ def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, m
         conn.commit()
 
     def forbidden(*args, **kwargs):
-        pytest.fail("Migration/list must not invoke credential cryptography")
+        pytest.fail("Migration/list must not decrypt any existing credential or quarantined cell")
 
-    monkeypatch.setattr(vault.CredentialStore, "_derive_key", forbidden)
+    monkeypatch.setattr(vault.CredentialStore, "_decrypt", forbidden)
     store = vault.CredentialStore(path, "synthetic")
     assert [row["account_id"] for row in store.list_accounts()] == ["Valid:Case"]
     entries = store.list_quarantine()
@@ -148,8 +148,8 @@ def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, m
     assert all(entry.ref.row_generation == 1 for entry in entries)
     assert "PRIVATE" not in repr(entries) and "bad%" not in repr(entries)
     with closing(sqlite3.connect(path)) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert conn.execute("SELECT schema_version FROM credential_vault_metadata").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("SELECT schema_version FROM credential_vault_metadata").fetchone()[0] == 3
         assert (
             conn.execute("SELECT salt,encrypted_creds,label,created_at,is_primary FROM accounts").fetchone() == before
         )
@@ -824,7 +824,7 @@ def test_uncertain_migration_commit_is_failure_without_retry_or_false_rollback(t
         vault.CredentialStore(path, "synthetic")
     assert commits == [1]
     applied = logical(path)
-    assert applied[0] == (2,)
+    assert applied[0] == (3,)
     monkeypatch.setattr(vault.CredentialStore, "_get_connection", real)
     assert len(vault.CredentialStore(path, "synthetic").list_quarantine()) == 1
     assert logical(path) == applied
