@@ -10,6 +10,7 @@ import struct
 import threading
 from collections.abc import Callable
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 from weakref import WeakSet
@@ -61,6 +62,12 @@ class BackendLeaseProof:
     def incarnation(self) -> UUID:
         """Non-secret generation bound into later write admission."""
         return self._incarnation
+
+    @property
+    def workspace_path(self) -> Path:
+        """Return the bound workspace only while this ownership proof is live."""
+        require_backend_lease_proof(self)
+        return self._workspace_path
 
     def wait_revoked(self, timeout: float | None = None) -> bool:
         """Wait for one-way revocation without exposing a mutable event."""
