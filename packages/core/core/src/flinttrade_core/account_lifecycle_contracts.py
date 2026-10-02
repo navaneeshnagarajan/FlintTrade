@@ -453,6 +453,8 @@ class AccountOperationSnapshot:
     abandonment_reason: str | None = None
     before_digest: str | None = None
     after_digest: str | None = None
+    workspace_attempted: bool = False
+    workspace_conflicted: bool = False
 
     def __post_init__(self) -> None:
         _uuid(self.operation_id)
@@ -467,6 +469,15 @@ class AccountOperationSnapshot:
             or type(self.abandoned) is not bool
             or type(self.abandonment_committed) is not bool
             or (self.abandonment_committed and not self.abandoned)
+            or type(self.workspace_attempted) is not bool
+            or type(self.workspace_conflicted) is not bool
+            or self.workspace_conflicted and not self.workspace_attempted
+            or self.workspace_attempted and (
+                self.state not in (AccountOperationStage.PLAN_READY, AccountOperationStage.COMMITTED)
+                or self.before_digest is None or self.after_digest is None
+            )
+            or self.state is AccountOperationStage.COMMITTED and not self.workspace_attempted
+            or self.abandonment_committed and not self.workspace_attempted
         ):
             raise AccountContractError
         self.actor.__post_init__()

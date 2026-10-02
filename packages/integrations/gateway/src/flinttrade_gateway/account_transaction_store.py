@@ -215,6 +215,29 @@ class AccountTransactionStore:
             raise AccountTransactionError
         return self._capability
 
+    def _require_workspace_capability(self, capability: object, path: Path, backend_proof: BackendLeaseProof) -> None:
+        """Validate the narrow workspace participant without exporting credentials."""
+        self._require_owner()
+        if capability is not self._capability or backend_proof is not self._proof or path != self._workspace_path:
+            raise AccountTransactionError
+
+    def current_credential_version(self, capability: object, selector: BrokerSelector) -> CredentialVersion:
+        """Read exact selector authority for a short capability-owned callback."""
+        self._require_workspace_capability(capability, self._workspace_path, self._proof)
+        with self._transaction() as conn:
+            return self._credentials._state(conn, selector).version
+
+    def assert_original_credentials(self, capability: object, operation_id: UUID) -> None:
+        """Check the retained operation's original vault state before witnessing."""
+        self._require_workspace_capability(capability, self._workspace_path, self._proof)
+        with self._transaction() as conn:
+            row, body, _ = self._active(conn, operation_id)
+            request = self._material(row, body).request
+            if request is None:
+                raise AccountOperationConflict
+            self._credentials._expected(conn, request.selector, request.expected_credential)
+            self._credentials._check_bump(conn, request.selector)
+
     @contextmanager
     def _transaction(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         self._require_owner()
@@ -304,6 +327,8 @@ class AccountTransactionStore:
             body["abandonment_reason"],
             body["before_digest"],
             body["after_digest"],
+            body["workspace_attempted"],
+            body["workspace_conflicted"],
         )
 
     def _validate(self, conn: sqlite3.Connection) -> None:
@@ -371,6 +396,8 @@ class AccountTransactionStore:
                     "abandonment_reason",
                     "before_digest",
                     "after_digest",
+                    "workspace_attempted",
+                    "workspace_conflicted",
                 }:
                     raise AccountTransactionError
                 snapshot = self._snapshot(body)
@@ -490,6 +517,8 @@ class AccountTransactionStore:
             "abandonment_reason": None,
             "before_digest": None,
             "after_digest": None,
+            "workspace_attempted": False,
+            "workspace_conflicted": False,
         }
         _preflight_terminal_envelopes(request, body)
         request_mac = self._mac("request", complete)
@@ -591,6 +620,42 @@ class AccountTransactionStore:
             )
             self._save(conn, row, body)
 
+    def mark_workspace_attempted(self, operation_id: UUID) -> None:
+        """Persist the sole CAS-dispatch phase before any workspace write."""
+        with self._transaction(write=True) as conn:
+            row, body, _ = self._active(conn, operation_id)
+            if (
+                body["stage"] != AccountOperationStage.PLAN_READY.value
+                or body["abandoned"]
+                or body["workspace_conflicted"]
+            ):
+                raise AccountOperationConflict
+            if body["workspace_attempted"]:
+                return
+            body["workspace_attempted"] = True
+            self._save(conn, row, body)
+
+    def mark_workspace_conflicted(self, operation_id: UUID) -> None:
+        """Latch uncertainty/publication refusal without discarding a plan.
+
+        A retained committed operation may also be fenced after claim release;
+        this never changes its receipt, head or credential authority.
+        """
+        with self._transaction(write=True) as conn:
+            row = self._row(conn, operation_id)
+            body = parse_account_json(row["body"])
+            if (
+                not body["workspace_attempted"]
+                or body["stage"] not in (AccountOperationStage.PLAN_READY.value, AccountOperationStage.COMMITTED.value)
+            ):
+                raise AccountOperationConflict
+            if body["stage"] == AccountOperationStage.PLAN_READY.value:
+                self._active(conn, operation_id)
+            if body["workspace_conflicted"]:
+                return
+            body["workspace_conflicted"] = True
+            self._save(conn, row, body)
+
     def active_operation(self, capability: object) -> AccountOperationSnapshot | None:
         """Discover the retained durable claim without exposing private payload."""
         self._require_owner()
@@ -659,7 +724,9 @@ class AccountTransactionStore:
                 return
             stage = AccountOperationStage(body["stage"])
             if (
-                stage is AccountOperationStage.COMMITTED
+                body["workspace_attempted"] and not committed
+                or committed and not body["workspace_attempted"]
+                or stage is AccountOperationStage.COMMITTED
                 and not committed
                 or committed
                 and stage not in (AccountOperationStage.PLAN_READY, AccountOperationStage.COMMITTED)
@@ -689,6 +756,7 @@ class AccountTransactionStore:
             snapshot = self._snapshot(body)
             if (
                 snapshot.state is not AccountOperationStage.PLAN_READY
+                or not snapshot.workspace_attempted
                 or snapshot.abandoned
                 and not snapshot.abandonment_committed
                 or witness.operation_id != operation_id
@@ -755,7 +823,7 @@ class AccountTransactionStore:
                 return receipt
             row, body, _ = self._active(conn, operation_id)
             snapshot = self._snapshot(body)
-            if snapshot.abandonment_committed or (
+            if snapshot.workspace_attempted or snapshot.abandonment_committed or (
                 state is AccountOperationStage.AUTHENTICATION_UNKNOWN
                 and snapshot.state is not AccountOperationStage.AUTHENTICATION_STARTED
             ):

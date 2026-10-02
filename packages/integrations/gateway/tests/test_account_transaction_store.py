@@ -81,7 +81,7 @@ def request(owned, c, head, **changes):
     return c.AccountMutationRequest(**values)
 
 
-def plan(store, req, head, c, *, remove=False):
+def plan(store, req, head, c, *, remove=False, attempt_workspace=True):
     if not remove:
         store.mark_authentication_started(req.operation_id)
     store.stage_plan(
@@ -91,6 +91,8 @@ def plan(store, req, head, c, *, remove=False):
         before_digest=head.after_digest,
         after_digest="b" * 64,
     )
+    if attempt_workspace:
+        store.mark_workspace_attempted(req.operation_id)
     return c.BrokerAccountWitness(
         schema=1,
         workspace_instance=head.workspace_instance,
@@ -153,6 +155,8 @@ def maximum_committed_body(c, m, req):
         "abandonment_reason": "r" * 64,
         "before_digest": "a" * 64,
         "after_digest": "b" * 64,
+        "workspace_attempted": False,
+        "workspace_conflicted": False,
     }
 
 
@@ -258,6 +262,7 @@ def test_boundary_private_input_retains_terminal_receipts_and_abandonment(owned,
             WorkspaceVersion(head.workspace_instance, INT64_MAX),
             BrokerWorkspaceVersion(head.workspace_instance, INT64_MAX),
         )
+        store.mark_workspace_attempted(req.operation_id)
         store.abandon(req.operation_id, committed=True, reason=reason)
         receipt = store.apply(req.operation_id, witness)
         assert receipt.credential_version.generation == INT64_MAX
@@ -631,6 +636,7 @@ def test_read_only_demotion_changes_only_exact_target_and_one_generation(owned):
         epoch=1,
         commit_workspace=WorkspaceVersion(head.workspace_instance, head.commit_workspace.generation + 1),
     )
+    store.mark_workspace_attempted(req.operation_id)
     receipt = store.apply(req.operation_id, witness)
     assert receipt.credential_version.generation == before_a.generation + 1
     assert not owned[2].account_for_selector(a).is_primary
@@ -801,3 +807,58 @@ def test_missing_enrolled_genesis_head_cannot_reenable_legacy_mutation(owned):
         store.head()
     with pytest.raises(vault.CredentialError):
         m.AccountTransactionStore(owned[2], workspace_path=owned[0], backend_proof=owned[1].proof)
+
+
+def test_workspace_phase_records_are_monotonic_and_protect_private_staging(owned):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    assert callable(getattr(store, "mark_workspace_attempted", None)), "workspace attempt evidence is missing"
+    assert callable(getattr(store, "mark_workspace_conflicted", None)), "workspace conflict evidence is missing"
+    with pytest.raises(vault.CredentialError):
+        store.mark_workspace_attempted(req.operation_id)
+    with pytest.raises(vault.CredentialError):
+        store.mark_workspace_conflicted(req.operation_id)
+    store.mark_authentication_started(req.operation_id)
+    store.stage_plan(req.operation_id, replay_credentials={"token": "PRIVATE-replay"}, read_only=False,
+                     before_digest=head.after_digest, after_digest="b" * 64)
+    operation = store.operation(req.operation_id)
+    assert not operation.workspace_attempted and not operation.workspace_conflicted
+    store.mark_workspace_attempted(req.operation_id)
+    store.mark_workspace_attempted(req.operation_id)
+    assert store.operation(req.operation_id).workspace_attempted
+    for state in (c.AccountOperationStage.REJECTED, c.AccountOperationStage.BLOCKED, c.AccountOperationStage.AUTHENTICATION_UNKNOWN):
+        with pytest.raises(vault.CredentialError):
+            store.settle(req.operation_id, state=state, reason="must_retain")
+    with pytest.raises(vault.CredentialError):
+        store.abandon(req.operation_id, committed=False, reason="caller_cancelled")
+    store.mark_workspace_conflicted(req.operation_id)
+    store.mark_workspace_conflicted(req.operation_id)
+    operation = store.operation(req.operation_id)
+    assert operation.state is c.AccountOperationStage.PLAN_READY and operation.workspace_conflicted
+    with pytest.raises(vault.CredentialError):
+        store.mark_workspace_attempted(req.operation_id)
+    cap = store.owner_capability(owned[1].proof)
+    assert store.recovery_material(cap, req.operation_id).request is not None
+    reopened = m.AccountTransactionStore(owned[2], workspace_path=owned[0], backend_proof=owned[1].proof)
+    assert reopened.operation(req.operation_id) == operation
+    witness = c.BrokerAccountWitness(
+        1, head.workspace_instance, head.vault_incarnation, req.operation_id, 1, head.after_digest, "b" * 64,
+        WorkspaceVersion(head.workspace_instance, head.commit_workspace.generation + 1),
+        BrokerWorkspaceVersion(head.workspace_instance, head.commit_broker_workspace.generation + 1),
+    )
+    store.abandon(req.operation_id, committed=True, reason="caller_cancelled")
+    receipt = store.apply(req.operation_id, witness)
+    assert receipt.state is c.AccountOperationStage.COMMITTED
+    assert store.operation(req.operation_id).workspace_conflicted
+    assert store.recovery_material(cap, req.operation_id).request is None
+
+
+def test_vault_apply_requires_durable_workspace_attempt_evidence(owned):
+    c, _, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    witness = plan(store, req, head, c, attempt_workspace=False)
+    with pytest.raises(vault.CredentialError):
+        store.apply(req.operation_id, witness)
+    assert owned[2].selector_state(req.selector).version.generation == 0
