@@ -6,6 +6,7 @@ import math
 import threading
 import time
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -137,6 +138,7 @@ class RetiredRegistryCandidate:
     selector: BrokerSelector
     session: Session | BrokerSession
     client: object | None
+    managed: bool = False
 
     def __repr__(self) -> str:
         return "<RetiredRegistryCandidate>"
@@ -238,6 +240,8 @@ class BrokerRegistry:
         self._metadata: dict[BrokerSelector, tuple[str | None, str]] = {}
         self._prepared: dict[PreparedRegistryCandidateReceipt, _Record] = {}
         self._retired: dict[RegistryRetirementReceipt, _Record] = {}
+        self._claimed: dict[int, tuple[weakref.ReferenceType, bool]] = {}
+        self._managed_sessions: dict[int, object] = {}
         self._authorities: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._handles: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._clients: dict[int, tuple[object, BrokerSelector, object]] = {}
@@ -326,6 +330,15 @@ class BrokerRegistry:
             raise RegistryVersionValidationError
         if type(authority) is ManagedSessionAuthority and authority.credential_version.selector != selector:
             raise RegistryVersionValidationError
+        if id(session) in self._managed_sessions:
+            raise RegistrySessionUnavailable
+        if type(authority) is ManagedSessionAuthority:
+            retained = (*self._records.values(), *self._prepared.values(), *self._retired.values())
+            borrowed = any(record.session is session for record in retained)
+            borrowed = borrowed or any(payload is not None and payload.session is session
+                                       for reference, _ in self._claimed.values() if (payload := reference()) is not None)
+            if borrowed:
+                raise RegistrySessionUnavailable
         client_binding = authority if selector != _DEFAULT else _DEFAULT
         if client is not None:
             owned = self._clients.get(id(client))
@@ -335,6 +348,8 @@ class BrokerRegistry:
                 raise RegistrySessionUnavailable
         receipt = PreparedRegistryCandidateReceipt()
         self._prepared[receipt] = _Record(selector, session, client, expected, authority, broker, label)
+        if type(authority) is ManagedSessionAuthority:
+            self._managed_sessions[id(session)] = session
         if client is not None:
             self._clients[id(client)] = (client, selector, client_binding)
         return receipt
@@ -453,11 +468,52 @@ class BrokerRegistry:
             if type(receipt) is not RegistryRetirementReceipt or receipt not in self._retired:
                 raise RegistryCapabilityError
             record = self._retired.pop(receipt)
+            payload = RetiredRegistryCandidate(record.selector, record.session, record.client,
+                                              type(record.authority) is ManagedSessionAuthority)
+            self._claimed[id(payload)] = (weakref.ref(payload), payload.managed)
+            # Preserve the existing client-claim contract. Session identity is
+            # reserved separately; it is not proof of unique transport custody.
             if record.client is not None:
                 retained = (*self._records.values(), *self._prepared.values(), *self._retired.values())
                 if not any(other.client is record.client for other in retained):
                     self._clients.pop(id(record.client), None)
-            return RetiredRegistryCandidate(record.selector, record.session, record.client)
+            return payload
+
+    def release_retired_candidate(self, payload: RetiredRegistryCandidate, *, owner_token: object) -> None:
+        """Release identity reservation only after its explicit local cleanup contract."""
+        self._owner(owner_token)
+        with self._lock:
+            claimed = self._claimed.get(id(payload))
+            if type(payload) is not RetiredRegistryCandidate or claimed is None or claimed[0]() is not payload:
+                raise RegistryCapabilityError
+            _, managed = self._claimed.pop(id(payload))
+            if managed:
+                self._managed_sessions.pop(id(payload.session), None)
+
+    def owns_live_candidate(self, payload: object, *, owner_token: object) -> bool:
+        """Prove exact managed payload custody, without reflecting SDK internals."""
+        self._owner(owner_token)
+        with self._lock:
+            return any(type(record.authority) is ManagedSessionAuthority and record.session is payload
+                       for record in self._records.values())
+
+    def live_candidate_version(self, payload: object, *, owner_token: object) -> SessionVersion | None:
+        """Capture the exact managed binding for continuous cleanup custody."""
+        self._owner(owner_token)
+        with self._lock:
+            for record in self._records.values():
+                if type(record.authority) is ManagedSessionAuthority and record.session is payload:
+                    return record.binding
+            return None
+
+    def retirement_for_candidate(self, payload: object, *, owner_token: object) -> RegistryRetirementReceipt | None:
+        """Find only this exact managed payload's still-unclaimed retirement."""
+        self._owner(owner_token)
+        with self._lock:
+            for receipt, record in self._retired.items():
+                if type(record.authority) is ManagedSessionAuthority and record.session is payload:
+                    return receipt
+            return None
 
     @staticmethod
     def _valid_expiry(session: Session) -> bool:
@@ -783,9 +839,39 @@ class RegistryPublicationOwner:
         self._call("set_execution_default_projection", *args, **kwargs)
 
     def claim_retired_candidate(self, receipt: RegistryRetirementReceipt) -> RetiredRegistryCandidate:
-        result = self._call("claim_retired_candidate", receipt)
-        self._retirements.discard(receipt)
-        return result
+        with self._registry._lock:
+            result = self._call("claim_retired_candidate", receipt)
+            self._retirements.discard(receipt)
+            return result
+
+    def transfer_retired_candidate(self, receipt: RegistryRetirementReceipt,
+                                  accept: Callable[[RetiredRegistryCandidate], Any]) -> Any:
+        """One synchronous custody transfer; failed acceptance restores the receipt."""
+        with self._registry._lock:
+            record = self._registry._retired.get(receipt)
+            payload = self._call("claim_retired_candidate", receipt)
+            try:
+                result = accept(payload)
+            except BaseException:
+                self._registry._claimed.pop(id(payload))
+                self._registry._retired[receipt] = record
+                if record.client is not None:
+                    binding = record.authority if record.selector != _DEFAULT else _DEFAULT
+                    self._registry._clients[id(record.client)] = (record.client, record.selector, binding)
+                raise
+            self._retirements.discard(receipt)
+            return result
+
+    def release_retired_candidate(self, payload: RetiredRegistryCandidate) -> None:
+        self._call("release_retired_candidate", payload)
+
+    def owns_live_candidate(self, payload: object) -> bool:
+        return self._call("owns_live_candidate", payload)
+    def live_candidate_version(self, payload: object) -> SessionVersion | None:
+        return self._call("live_candidate_version", payload)
+
+    def retirement_for_candidate(self, payload: object) -> RegistryRetirementReceipt | None:
+        return self._call("retirement_for_candidate", payload)
 
 
 def create_owned_registry(
