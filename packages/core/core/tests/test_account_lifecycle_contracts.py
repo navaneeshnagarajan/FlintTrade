@@ -148,3 +148,40 @@ def test_domain_digest_ignores_marker_unrelated_and_telegram():
         == digest
     )
     assert c.broker_account_digest(dict(source, brokers={"accounts": ["different"]})) != digest
+
+
+@pytest.mark.parametrize("attempted,conflicted", [(1, False), (False, 0), (False, True)])
+def test_operation_workspace_phase_flags_require_exact_monotonic_booleans(attempted, conflicted):
+    c = contracts()
+    assert "workspace_attempted" in c.AccountOperationSnapshot.__dataclass_fields__, "workspace phase evidence is missing"
+    req = request()
+    with pytest.raises(c.AccountContractError):
+        c.AccountOperationSnapshot(
+            req.operation_id, req.selector, req.kind, req.actor, c.AccountOperationStage.PLAN_READY,
+            req.expected_workspace, req.expected_broker_workspace, req.expected_credential,
+            before_digest="a" * 64, after_digest="b" * 64,
+            workspace_attempted=attempted, workspace_conflicted=conflicted,
+        )
+
+
+@pytest.mark.parametrize("state", ["admitted", "authentication_started"])
+def test_attempted_operation_cannot_have_pre_plan_stage(state):
+    c = contracts()
+    assert "workspace_attempted" in c.AccountOperationSnapshot.__dataclass_fields__, "workspace phase evidence is missing"
+    req = request()
+    with pytest.raises(c.AccountContractError):
+        c.AccountOperationSnapshot(
+            req.operation_id, req.selector, req.kind, req.actor, c.AccountOperationStage(state),
+            req.expected_workspace, req.expected_broker_workspace, req.expected_credential, workspace_attempted=True,
+        )
+
+
+def test_workspace_attempt_phase_requires_recorded_plan_digests():
+    c = contracts()
+    req = request()
+    with pytest.raises(c.AccountContractError):
+        c.AccountOperationSnapshot(
+            req.operation_id, req.selector, req.kind, req.actor, c.AccountOperationStage.PLAN_READY,
+            req.expected_workspace, req.expected_broker_workspace, req.expected_credential,
+            workspace_attempted=True,
+        )

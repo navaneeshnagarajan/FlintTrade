@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 
 from filelock import FileLock, Timeout as FileLockTimeout
 
+from . import secure_file
 from .secure_file import (
     PendingDurableUnlinkError,
     assert_hardened,
@@ -286,13 +287,35 @@ def _commit_update_locked(
     workspace_dir: Path,
     current: dict[str, Any] | None,
     updater: Callable[[dict[str, Any]], dict[str, Any] | None],
+    *,
+    _account_owner: tuple[object, object, object] | None = None,
+    _account_stamp: Callable[[WorkspaceSnapshot], dict[str, object]] | None = None,
 ) -> WorkspaceSnapshot:
+    if _account_owner is not None:
+        from flinttrade_gateway.account_transaction_store import AccountTransactionStore
+
+        store, proof, capability = _account_owner
+        if type(store) is not AccountTransactionStore:
+            raise ValueError("broker_account_workspace_owned")
+        store._require_workspace_capability(capability, workspace_dir, proof)
+    elif _account_stamp is not None:
+        raise ValueError("broker_account_workspace_owned")
     candidate = copy.deepcopy(current) if current is not None else default_workspace_config(initialized=True)
     updated = updater(candidate)
     if updated is not None:
         candidate = updated
     if not isinstance(candidate, dict) or candidate.get("version") != WORKSPACE_VERSION:
         raise ValueError("workspace updater must return the current-version configuration")
+    if _account_owner is None:
+        before = {} if current is None else current
+        marker = "_broker_account_store"
+        if (
+            (marker in candidate) != (marker in before)
+            or json.dumps(candidate.get(marker), sort_keys=True, allow_nan=False)
+            != json.dumps(before.get(marker), sort_keys=True, allow_nan=False)
+            or marker in before and _broker_authority(candidate) != _broker_authority(before)
+        ):
+            raise ValueError("broker_account_workspace_owned")
     if current is None:
         _mint_authority(candidate)
     else:
@@ -304,16 +327,87 @@ def _commit_update_locked(
         # JSON silently coerces integer mapping keys). Admit it before no-op
         # comparison or any authority change can become durable.
         WorkspaceSnapshot(candidate, _version(candidate))
-        if json.dumps(candidate, sort_keys=True, allow_nan=False) == json.dumps(current, sort_keys=True, allow_nan=False):
+        if _account_stamp is None and (
+            json.dumps(candidate, sort_keys=True, allow_nan=False) == json.dumps(current, sort_keys=True, allow_nan=False)
+        ):
             return WorkspaceSnapshot(current, _version(current))
         candidate["workspace_generation"] = current["workspace_generation"] + 1
         if _broker_authority(candidate) != _broker_authority(current):
             candidate["broker_authority_generation"] = current["broker_authority_generation"] + 1
     _validate_current(candidate)
+    if _account_stamp is not None:
+        candidate["_broker_account_store"] = _account_stamp(WorkspaceSnapshot(candidate, _version(candidate)))
     snapshot = WorkspaceSnapshot(candidate, _version(candidate))
     payload = json.dumps(snapshot.as_dict(), indent=2, sort_keys=True, allow_nan=False)
     _atomic_write(workspace_dir / "workspace.json", payload)
     return snapshot
+
+
+def _account_workspace_transaction[T](
+    workspace_dir: Path,
+    store: object,
+    backend_proof: object,
+    callback: Callable[[WorkspaceSnapshot, Callable[..., WorkspaceSnapshot]], T],
+) -> T:
+    """Run the capability-owning participant under one existing process lock.
+
+    The commit closure selects counters in the normal writer before stamping
+    the account witness. It must never escape this short synchronous callback.
+    """
+    from flinttrade_gateway.account_transaction_store import AccountTransactionStore
+
+    if type(store) is not AccountTransactionStore:
+        raise ValueError("broker_account_workspace_owned")
+    workspace_dir = workspace_dir.expanduser().resolve()
+    capability = store.owner_capability(backend_proof)
+    store._require_workspace_capability(capability, workspace_dir, backend_proof)
+    with _migration_lock(workspace_dir, wait=True):
+        store._require_workspace_capability(capability, workspace_dir, backend_proof)
+        if not (workspace_dir / "workspace.json").exists():
+            raise WorkspaceVersionConflict("workspace no longer exists")
+        current = _run_migrations_locked(workspace_dir)
+        live = True
+
+        def commit(updater, stamp):
+            nonlocal current
+            if not live:
+                raise ValueError("broker_account_workspace_owned")
+            prepared = None
+
+            def stamp_actual(actual):
+                nonlocal prepared
+                marker = stamp(actual)
+                prepared = actual.as_dict()
+                prepared["_broker_account_store"] = marker
+                return marker
+
+            try:
+                result = _commit_update_locked(
+                    workspace_dir, current, updater,
+                    _account_owner=(store, backend_proof, capability), _account_stamp=stamp_actual,
+                )
+            except Exception:
+                # Replacement can succeed before durability/result reporting
+                # raises. Recognise only this exact fully stamped revision;
+                # matching payloads or a guessed expected+1 are insufficient.
+                store._require_workspace_capability(capability, workspace_dir, backend_proof)
+                observed = _run_migrations_locked(workspace_dir)
+                if prepared is None or (
+                    json.dumps(observed, sort_keys=True, allow_nan=False)
+                    != json.dumps(prepared, sort_keys=True, allow_nan=False)
+                ):
+                    raise
+                secure_file.fsync_parent_directory(workspace_dir / "workspace.json")
+                result = WorkspaceSnapshot(observed, _version(observed))
+            current = result.as_dict()
+            return result
+
+        try:
+            result = callback(WorkspaceSnapshot(current, _version(current)), commit)
+            store._require_workspace_capability(capability, workspace_dir, backend_proof)
+            return result
+        finally:
+            live = False
 
 
 def compare_and_swap_workspace(
