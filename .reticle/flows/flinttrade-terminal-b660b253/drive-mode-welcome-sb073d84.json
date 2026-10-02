@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "name": "drive-mode-welcome-sb073d84",
+  "projectId": "flinttrade-terminal-b660b253",
+  "createdAt": 1790758866793,
+  "steps": [
+    {
+      "tool": "reticle_act",
+      "anchor": {
+        "kind": "role",
+        "role": "button",
+        "name": "Try with example data without creating an account"
+      },
+      "args": {},
+      "action": "click",
+      "expect": {
+        "kind": "allOf",
+        "predicates": [
+          {
+            "kind": "route",
+            "pathname": "/home"
+          },
+          {
+            "kind": "state",
+            "store": "mode",
+            "path": "mode",
+            "equals": "explore"
+          }
+        ]
+      }
+    }
+  ],
+  "startPath": "/welcome"
+}
