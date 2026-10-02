@@ -14,7 +14,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "flask>=3.0",
     "scipy>=1.18.1",
-    "quantstats>=0.0.62",
+    "quantstats>=0.0.85",
 ]
 
 [project.optional-dependencies]
