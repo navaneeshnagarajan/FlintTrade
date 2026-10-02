@@ -22,7 +22,7 @@
     },
     {
       "name": "anyio",
-      "version": "4.14.2",
+      "version": "4.15.1",
       "vulns": []
     },
     {
@@ -101,6 +101,11 @@
       "vulns": []
     },
     {
+      "name": "cloudpickle",
+      "version": "3.1.2",
+      "vulns": []
+    },
+    {
       "name": "colorama",
       "version": "0.4.6",
       "vulns": []
@@ -142,7 +147,7 @@
     },
     {
       "name": "filelock",
-      "version": "3.32.4",
+      "version": "4.0.0",
       "vulns": []
     },
     {
@@ -191,6 +196,16 @@
       "vulns": []
     },
     {
+      "name": "h2",
+      "version": "4.4.1",
+      "vulns": []
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "vulns": []
+    },
+    {
       "name": "httpcore",
       "version": "1.0.9",
       "vulns": []
@@ -198,6 +213,11 @@
     {
       "name": "httpx",
       "version": "0.28.1",
+      "vulns": []
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
       "vulns": []
     },
     {
@@ -217,12 +237,12 @@
     },
     {
       "name": "joblib",
-      "version": "1.5.3",
+      "version": "1.6.0",
       "vulns": []
     },
     {
       "name": "jugaad-data",
-      "version": "0.35.2",
+      "version": "0.35.5",
       "vulns": []
     },
     {
@@ -292,7 +312,7 @@
     },
     {
       "name": "numpy",
-      "version": "2.5.2",
+      "version": "2.5.3",
       "vulns": []
     },
     {
@@ -357,12 +377,12 @@
     },
     {
       "name": "pydantic",
-      "version": "2.13.4",
+      "version": "2.13.5",
       "vulns": []
     },
     {
       "name": "pydantic-core",
-      "version": "2.46.4",
+      "version": "2.46.5",
       "vulns": []
     },
     {
@@ -372,7 +392,7 @@
     },
     {
       "name": "pyjwt",
-      "version": "2.13.0",
+      "version": "2.14.0",
       "vulns": []
     },
     {
@@ -401,8 +421,13 @@
       "vulns": []
     },
     {
+      "name": "python-decouple",
+      "version": "3.8",
+      "vulns": []
+    },
+    {
       "name": "python-dotenv",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "vulns": []
     },
     {
@@ -447,7 +472,12 @@
     },
     {
       "name": "sentry-sdk",
-      "version": "2.68.0",
+      "version": "2.69.2",
+      "vulns": []
+    },
+    {
+      "name": "setuptools",
+      "version": "84.0.0",
       "vulns": []
     },
     {
@@ -468,6 +498,11 @@
     {
       "name": "tabulate",
       "version": "0.10.0",
+      "vulns": []
+    },
+    {
+      "name": "tenacity",
+      "version": "9.1.4",
       "vulns": []
     },
     {
@@ -492,7 +527,7 @@
     },
     {
       "name": "upstox-python-sdk",
-      "version": "2.29.0",
+      "version": "2.30.0",
       "vulns": []
     },
     {
@@ -531,6 +566,11 @@
       "vulns": []
     },
     {
+      "name": "wheel",
+      "version": "0.48.0",
+      "vulns": []
+    },
+    {
       "name": "wrapt",
       "version": "2.3.0",
       "vulns": []
@@ -555,9 +595,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-09-06T08:22:31.796407Z",
-    "audited_at": "2026-09-06T08:22:31.796407Z",
-    "requirements_lock_sha256": "1cbe0fb22ba395df734614a3801a779cf3b58e30daf83a3d2e15ab47b5cc7638",
+    "generated_at": "2026-09-27T09:49:35.035758Z",
+    "audited_at": "2026-09-27T09:49:35.035758Z",
+    "requirements_lock_sha256": "4f939a697570649316c80c7017c3514a4796c2385b3a8168718d8a55964b697c",
     "pip_audit_exit_code": 0
   }
 }
