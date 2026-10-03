@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -16,6 +16,8 @@ const aiSessionMocks = vi.hoisted(() => ({
   importAiSession: vi.fn(),
   getAiSession: vi.fn(),
 }));
+
+const motionMocks = vi.hoisted(() => ({ retainExitingChildren: false }));
 
 vi.mock("@/services/ftApi.ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/ftApi.ai")>();
@@ -51,19 +53,26 @@ const signalStreamMocks = vi.hoisted(() => {
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("framer-motion", () => ({
+vi.mock("framer-motion", async () => {
+  const { useRef } = await import("react");
+  return {
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => {
       const { initial: _i, animate: _a, exit: _e, variants: _v, transition: _t, layoutId: _l, ...rest } = props;
       return <div {...rest}>{children as React.ReactNode}</div>;
     },
     span: ({ children, ...props }: Record<string, unknown>) => {
-      const { initial: _i, animate: _a, exit: _e, transition: _t, ...rest } = props;
+      const { initial: _i, animate: _a, exit: _e, transition: _t, layoutId: _l, ...rest } = props;
       return <span {...rest}>{children as React.ReactNode}</span>;
     },
   },
-  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
+  AnimatePresence: function MockAnimatePresence({ children }: { children: React.ReactNode }) {
+    const retained = useRef(children);
+    if (children) retained.current = children;
+    return <>{children || (motionMocks.retainExitingChildren ? retained.current : null)}</>;
+  },
+  };
+});
 
 vi.mock("@/lib/motion", () => ({
   motionConfig: {
@@ -130,6 +139,15 @@ vi.mock("@/routes/ai/AISuggestionsPanel", () => ({
 vi.mock("@/services/ftApi", () => ({
   analyzeSentiment: vi.fn(),
   queryKnowledge: vi.fn(),
+  getAgentStatus: vi.fn().mockResolvedValue({
+    enabled: true, running: false, mode: "practice", agent_status: "idle",
+    started_at: "", params: {}, actor_id: "autonomous-trader",
+  }),
+  getPracticeAgentRuns: vi.fn().mockResolvedValue([]),
+  getPracticeAgentEvents: vi.fn().mockResolvedValue([]),
+  startAgent: vi.fn(),
+  stopAgent: vi.fn(),
+  resolvePracticeAgentRun: vi.fn(),
   getRecentSignals: vi.fn().mockResolvedValue({
     signals: [
       {
@@ -156,7 +174,7 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import AIRoute, { signalEventToCard } from "../AIRoute";
-import { getRecentSignals, queryKnowledge } from "@/services/ftApi";
+import { getAgentStatus, getRecentSignals, queryKnowledge, startAgent } from "@/services/ftApi";
 import type { SignalEvent } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useModeStore } from "@/stores/modeStore";
@@ -214,6 +232,7 @@ function storeMessage(overrides: Partial<Message> = {}): Message {
 describe("AIRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    motionMocks.retainExitingChildren = false;
     localStorage.clear();
     signalStreamMocks.state.connected = false;
     signalStreamMocks.state.replayLoss = null;
@@ -323,6 +342,63 @@ describe("AIRoute", () => {
     expect(nav).toBeInTheDocument();
     expect(screen.getByLabelText("Chat")).toBeInTheDocument();
     expect(screen.getByLabelText("Signals")).toBeInTheDocument();
+  });
+
+  it("opens the Practice agent explicitly at Advanced level without starting it", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    useModeStore.setState({ mode: "practice" });
+    const user = userEvent.setup();
+    renderAI();
+
+    expect(screen.queryByRole("dialog", { name: "Autonomous Agent" })).not.toBeInTheDocument();
+    expect(getAgentStatus).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Agent" }));
+    expect(await screen.findByRole("dialog", { name: "Autonomous Agent" })).toBeInTheDocument();
+    expect(await screen.findByText(/Practice · simulated money/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Start agent" })).toBeEnabled();
+    expect(startAgent).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Close panel" }));
+    expect(screen.queryByRole("dialog", { name: "Autonomous Agent" })).not.toBeInTheDocument();
+    expect(startAgent).not.toHaveBeenCalled();
+  });
+
+  it.each(["beginner", "intermediate"] as const)("keeps Agent out of %s Practice navigation", (level) => {
+    vi.mocked(useSkillLevel).mockReturnValue(level);
+    useModeStore.setState({ mode: "practice" });
+    renderAI();
+    expect(screen.queryByRole("button", { name: "Agent" })).not.toBeInTheDocument();
+    expect(getAgentStatus).not.toHaveBeenCalled();
+    expect(startAgent).not.toHaveBeenCalled();
+  });
+
+  it("unmounts Practice controls immediately during an animated exit to Live without querying Live agent status", async () => {
+    motionMocks.retainExitingChildren = true;
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    useModeStore.setState({ mode: "practice" });
+    const user = userEvent.setup();
+    renderAI();
+    await user.click(screen.getByRole("button", { name: "Agent" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start agent" })).toBeEnabled());
+    const practiceReads = vi.mocked(getAgentStatus).mock.calls.length;
+
+    act(() => useModeStore.setState({ mode: "live" }));
+
+    // The animation mock deliberately retains the overlay shell, exactly the
+    // interval in which a mode-subscribed AgentPanel must not become Live.
+    expect(screen.getByRole("dialog", { name: "Autonomous Agent" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start agent" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Live · real money/)).not.toBeInTheDocument();
+    expect(getAgentStatus).toHaveBeenCalledTimes(practiceReads);
+    expect(startAgent).not.toHaveBeenCalled();
+  });
+
+  it.each(["explore", "live"] as const)("does not expose or activate the Practice agent in %s mode", (mode) => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    useModeStore.setState({ mode });
+    renderAI();
+    expect(screen.queryByRole("button", { name: "Agent" })).not.toBeInTheDocument();
+    expect(getAgentStatus).not.toHaveBeenCalled();
+    expect(startAgent).not.toHaveBeenCalled();
   });
 
   it("keeps AI section navigation in normal flow so it cannot cover the chat composer", () => {

@@ -7,7 +7,8 @@ throttle so FlintTrade never trips a broker's ban for exceeding its rate, while
 keeping latency tight (it only delays a call when genuinely over the limit).
 
 :class:`BrokerRateLimiter` is a small async token bucket keyed by
-``(broker_id, kind)`` where ``kind`` is ``"order"`` or ``"data"``. The
+``(broker_id, kind)`` where ``kind`` is ``"order"``, ``"data"`` or ``"quote"``.
+Quote admission also consumes the generic data budget atomically. The
 ``BrokerRouter`` calls ``await acquire(adapter_id, kind)`` before each dispatch —
 a purely throttling step that sits *below* the gate, so it can only slow a call,
 never skip the safety gate. The clock and sleep are injectable, so the buckets
@@ -17,6 +18,7 @@ are tested deterministically without real time.
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 import time
 from typing import Any, Awaitable, Callable
@@ -25,31 +27,32 @@ from .capabilities import Capabilities
 
 
 class _Bucket:
-    """A single token bucket: ``rate`` tokens/sec, ``rate`` burst capacity."""
+    """A token bucket with room for at least one request at fractional rates."""
 
     __slots__ = ("rate", "tokens", "updated")
 
-    def __init__(self, rate: float, clock: Callable[[], float]) -> None:
+    def __init__(self, rate: float, now: float) -> None:
         self.rate = rate
-        self.tokens = float(rate)  # start full (allow an initial burst up to rate)
-        self.updated = clock()
-
-    def take(self, now: float) -> float:
-        """Consume one token; return seconds to wait (0 if a token was available)."""
-        # Refill for elapsed time (capped at the burst capacity = rate).
-        self.tokens = min(self.rate, self.tokens + (now - self.updated) * self.rate)
+        self.tokens = max(1.0, rate)
         self.updated = now
-        if self.tokens >= 1.0:
-            self.tokens -= 1.0
-            return 0.0
-        return (1.0 - self.tokens) / self.rate
+
+    def refill(self, now: float) -> None:
+        """Refill without spending a token before all applicable budgets agree."""
+        self.tokens = min(max(1.0, self.rate), self.tokens + (now - self.updated) * self.rate)
+        self.updated = now
+
+    def set_rate(self, rate: float, now: float) -> None:
+        """Account for elapsed time at the old rate without minting new credit."""
+        self.refill(now)
+        self.rate = rate
+        self.tokens = min(self.tokens, max(1.0, rate))
 
 
 class BrokerRateLimiter:
-    """Enforces per-broker order/data API rate limits via async token buckets.
+    """Enforces per-broker order/data/quote API rate limits via async token buckets.
 
     Args:
-        limits: ``{broker_id: {"order": per_sec, "data": per_sec}}``. A broker or
+        limits: ``{broker_id: {"order": per_sec, "data": per_sec, "quote": per_sec}}``. A broker or
             kind with no positive limit is treated as unlimited (no throttle).
         clock: ``() -> float`` monotonic seconds (injected in tests).
         sleep: ``(seconds) -> Awaitable`` (injected in tests).
@@ -62,7 +65,10 @@ class BrokerRateLimiter:
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], Awaitable[Any]] | None = None,
     ) -> None:
-        self._limits = limits
+        self._limits = {
+            broker_id: {kind: self._finite_rate(rate) for kind, rate in kinds.items()}
+            for broker_id, kinds in limits.items()
+        }
         self._clock = clock or time.monotonic
         self._sleep = sleep or asyncio.sleep
         self._buckets: dict[tuple[str, str], _Bucket] = {}
@@ -85,56 +91,105 @@ class BrokerRateLimiter:
     ) -> BrokerRateLimiter:
         """Build limits from each broker's capability metadata, applying overrides.
 
-        ``overrides[broker_id][kind]`` (kind = ``order``/``data``) wins over the
+        ``overrides[broker_id][kind]`` (kind = ``order``/``data``/``quote``) wins over the
         capability default, so the operator can customise a broker's rate.
+        Malformed/non-finite persisted overrides retain the capability default;
+        they must not make construction fail and disable the whole limiter.
         """
         overrides = overrides or {}
         limits: dict[str, dict[str, float]] = {}
         for broker_id, cap in capabilities.items():
             ov_raw = overrides.get(broker_id, {})
             ov = ov_raw if isinstance(ov_raw, dict) else {}
-            order = ov.get("order", cap.rate_limit_orders_per_sec or 0)
-            data = ov.get("data", cap.rate_limit_data_per_sec or 0)
-            limits[broker_id] = {"order": float(order), "data": float(data)}
+            defaults = {"order": cap.rate_limit_orders_per_sec, "data": cap.rate_limit_data_per_sec}
+            quote = getattr(cap, "rate_limit_quote_per_sec", None)
+            if quote is not None or "quote" in ov:
+                defaults["quote"] = quote
+            limits[broker_id] = {
+                kind: cls._override_rate(ov.get(kind, default), default)
+                for kind, default in defaults.items()
+            }
         # Allow overrides for brokers not in the capability map too. Skip any
         # non-dict values so a documentation key (e.g. a "_comment" string — the
         # workspace.json convention) is tolerated rather than crashing the build.
         for broker_id, ov in overrides.items():
             if not isinstance(ov, dict):
                 continue
-            limits.setdefault(broker_id, {"order": float(ov.get("order", 0)), "data": float(ov.get("data", 0))})
+            limits.setdefault(broker_id, {
+                kind: cls._override_rate(ov.get(kind, 0), 0) for kind in ("order", "data", "quote")
+            })
         return cls(limits, **kwargs)
+
+    @classmethod
+    def _override_rate(cls, value: object, default: float | None) -> float:
+        try:
+            return cls._finite_rate(value)
+        except (TypeError, ValueError, OverflowError):
+            return cls._finite_rate(default or 0)
 
     def _rate(self, broker_id: str, kind: str) -> float:
         return float(self._limits.get(broker_id, {}).get(kind, 0) or 0)
 
-    async def acquire(self, broker_id: str, kind: str = "order") -> None:
-        """Block until a token is available for ``(broker_id, kind)``.
+    @staticmethod
+    def _finite_rate(rate: Any) -> float:
+        value = float(rate)
+        if not math.isfinite(value):
+            raise ValueError("rate limits must be finite")
+        return value
 
-        Returns immediately when no positive limit is configured (unlimited).
-        Safe to call from coroutines running on DIFFERENT event loops in
-        different threads (manual order requests vs background job threads).
+    async def acquire(
+        self,
+        broker_id: str,
+        kind: str = "order",
+        *,
+        before_retry: Callable[[], None] | None = None,
+    ) -> None:
+        """Wait for and consume a token from every applicable budget.
+
+        Quotes (including quote-backed depth) share both quote and generic data
+        limits. Tokens are consumed together only when every bucket is ready.
+        A cancelled sleep holds no reservation and spends no partial budget.
+        Synchronous accounting is shared across threads and event loops; every
+        wake rechecks current rates and competes for a real refilled token.
+        An optional ``before_retry`` callback runs outside the accounting lock
+        after each sleep and may raise to abandon a stale request without
+        spending tokens. Such waits recheck at least once per second, including
+        fractional rates, so retired read grants do not wait through a queue.
         """
-        rate = self._rate(broker_id, kind)
-        if rate <= 0:
-            return
-        key = (broker_id, kind)
-        with self._lock:  # serialise token accounting across threads/loops
-            bucket = self._buckets.get(key)
-            if bucket is None or bucket.rate != rate:
-                bucket = _Bucket(rate, self._clock)
-                self._buckets[key] = bucket
-            wait = bucket.take(self._clock())
-        if wait > 0:
-            await self._sleep(wait)
+        kinds = ("data", "quote") if kind == "quote" else (kind,)
+        while True:
+            with self._lock:
+                now = self._clock()
+                buckets = []
+                wait = 0.0
+                for applicable_kind in kinds:
+                    rate = self._rate(broker_id, applicable_kind)
+                    if rate <= 0:
+                        continue
+                    key = (broker_id, applicable_kind)
+                    bucket = self._buckets.get(key)
+                    if bucket is None:
+                        bucket = _Bucket(rate, now)
+                        self._buckets[key] = bucket
+                    bucket.refill(now)
+                    buckets.append(bucket)
+                    wait = max(wait, (1.0 - bucket.tokens) / rate)
+                if wait <= 0:
+                    for bucket in buckets:
+                        bucket.tokens -= 1.0
+                    return
+            await self._sleep(min(wait, 1.0) if before_retry is not None else wait)
+            if before_retry is not None:
+                before_retry()
 
     def snapshot(self) -> dict[str, dict[str, float]]:
         """Return the current effective per-broker limits (a deep copy).
 
-        ``{broker_id: {"order": per_sec, "data": per_sec}}``. Read by the
+        ``{broker_id: {"order": per_sec, "data": per_sec, "quote": per_sec}}``. Read by the
         rate-limits settings API so the UI shows the live values.
         """
-        return {broker_id: dict(kinds) for broker_id, kinds in self._limits.items()}
+        with self._lock:
+            return {broker_id: dict(kinds) for broker_id, kinds in self._limits.items()}
 
     def apply_override(
         self,
@@ -142,18 +197,28 @@ class BrokerRateLimiter:
         *,
         order: float | None = None,
         data: float | None = None,
+        quote: float | None = None,
     ) -> None:
-        """Update a broker's order/data limit at runtime (0 = unlimited).
+        """Update selected limits at runtime (0 = unlimited), preserving credit.
 
-        Only the supplied kinds change; the rest keep their current value. The
-        next :meth:`acquire` rebuilds the affected bucket automatically because
-        it recreates a bucket whenever the configured rate differs (see the
-        ``bucket.rate != rate`` check), so no bucket bookkeeping is needed here.
+        Refill existing buckets at their old rates before applying new rates.
+        Waiters recheck the updated limits after waking; changing a positive
+        rate must not reset an exhausted bucket to a fresh burst.
         """
+        updates = {
+            kind: self._finite_rate(rate)
+            for kind, rate in (("order", order), ("data", data), ("quote", quote))
+            if rate is not None
+        }
         with self._lock:
+            now = self._clock()
             current = dict(self._limits.get(broker_id, {}))
-            if order is not None:
-                current["order"] = float(order)
-            if data is not None:
-                current["data"] = float(data)
+            for kind, rate in updates.items():
+                key = (broker_id, kind)
+                bucket = self._buckets.get(key)
+                if rate <= 0:
+                    self._buckets.pop(key, None)
+                elif bucket is not None:
+                    bucket.set_rate(rate, now)
+                current[kind] = rate
             self._limits[broker_id] = current

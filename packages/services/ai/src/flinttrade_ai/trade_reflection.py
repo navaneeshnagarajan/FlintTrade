@@ -549,11 +549,11 @@ class TradeReflector:
                 confidence_calibration=str(data.get("confidence_calibration", "")),
             )
 
-        except json.JSONDecodeError as exc:
-            logger.warning("TradeReflector: LLM returned invalid JSON (%s) — using rule fallback", exc)
+        except json.JSONDecodeError:
+            logger.warning("TradeReflector: LLM returned invalid JSON — using rule fallback")
             return self._rule_reflect(trades)
-        except Exception as exc:
-            logger.error("TradeReflector: LLM call failed (%s) — using rule fallback", exc)
+        except Exception:
+            logger.error("TradeReflector: LLM call or response validation failed — using rule fallback")
             return self._rule_reflect(trades)
 
     # ------------------------------------------------------------------

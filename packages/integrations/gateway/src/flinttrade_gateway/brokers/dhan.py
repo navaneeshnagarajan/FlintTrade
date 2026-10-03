@@ -41,6 +41,7 @@ from flinttrade_core.broker_read_port import (
     BalanceSnapshot,
     BrokerBalanceResponseInvalid,
     BrokerReadResponseInvalid,
+    QuoteRequest,
 )
 from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
@@ -318,6 +319,7 @@ class DhanAdapter(BrokerAdapter):
     """
 
     safety_snapshot_requires_serial_reads = True
+    _BROKER_READ_DEPTH_EXCHANGES = frozenset({"NSE", "BSE"})
 
     def __init__(
         self,
@@ -1804,6 +1806,38 @@ class DhanAdapter(BrokerAdapter):
             if rec is not None:
                 out.append(Quote(**M.from_dhan_quote(name, exchange, rec, strict=True)))
         return out
+
+    async def depth(self, session: Session, request: QuoteRequest) -> dict[str, Any]:
+        """Read exact cash-equity depth through the existing quote SDK transport.
+
+        The read owner supplies session authority and the shared quote budget.
+        This in-process capability does not change frozen native HTTP routes,
+        streaming readiness, account lifecycle or derivative lot evidence.
+        """
+        instrument = request.instrument
+        if instrument.exchange not in self._BROKER_READ_DEPTH_EXCHANGES:
+            raise UnsupportedCapabilityError("Dhan read-port depth supports cash equities only", broker_id="dhan")
+        if self._security_resolver is None:
+            raise BrokerReadResponseInvalid from None
+        try:
+            security_id = self._security_resolver(instrument.symbol, instrument.exchange)
+            if (type(security_id) is not str or not security_id.isascii()
+                    or not security_id.isdecimal() or str(int(security_id)) != security_id
+                    or int(security_id) <= 0
+                    or (instrument.instrument_id is not None and instrument.instrument_id != security_id)):
+                raise BrokerReadResponseInvalid from None
+            identity = M.reverse_security_id(self._security_resolver, security_id, instrument.exchange)
+            if (identity.get("symbol") != instrument.symbol
+                    or identity.get("exchange") != instrument.exchange
+                    or identity.get("security_id") != security_id
+                    or identity.get("instrument") != "EQUITY"):
+                raise BrokerReadResponseInvalid from None
+        except (M.DhanMappingError, ValueError, TypeError):
+            raise BrokerReadResponseInvalid from None
+        segment = M.to_dhan_segment(instrument.exchange)
+        response = await self._call(self._client(session).quote_data, {segment: [int(security_id)]})
+        return {"symbol": instrument.symbol, "exchange": instrument.exchange,
+                **M.depth_from_feed(segment, security_id, response)}
 
     async def ltp(self, session: Session, symbols: list[str]) -> dict[str, float]:
         """Last traded prices from the existing quote snapshot, keyed by ``EXCHANGE:SYMBOL``."""
