@@ -1615,9 +1615,13 @@ class LayaRuntime:
         )
 
     def _sidecar_pid(self) -> int:
-        """Pid of the process this runtime started, or the pid file."""
+        """Pid of the live process this runtime started, or the pid file.
+
+        A process that has exited is not trusted, so a sidecar restarted from
+        the command line is recognised by its pid file.
+        """
         process = self._process
-        if process is not None:
+        if process is not None and _process_alive(process):
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
                 return pid
@@ -1638,9 +1642,19 @@ class LayaRuntime:
         run = self._read_run_record()
         if run != (check.token, check.pid):
             return False
-        if self._start_token and self._start_token != check.token:
+        if self._start_token and self._start_token != check.token and self._owns_live_process():
             return False
         return True
+
+    def _owns_live_process(self) -> bool:
+        """True while the process this runtime started is still running.
+
+        A start token belongs to that process. Once it has exited, a sidecar
+        started from the command line has its own token and pid, so the old
+        token must not disqualify it.
+        """
+        process = self._process
+        return process is not None and _process_alive(process)
 
     def _remember_artifact(self, check: ArtifactCheck) -> None:
         self._artifact_check = check
@@ -1707,6 +1721,12 @@ class LayaRuntime:
         match is ``wrong_revision``. The sidecar starts only after the
         launch directory matches the pin.
         """
+        if not _is_pinned_commit(str(policy.revision)):
+            # No download is attempted for a revision that is not a pinned
+            # commit, so the chip must not claim one failed.
+            self._refuse_before_launch(
+                ArtifactCheck(ok=False, reason="unverified", revision=str(policy.revision), sha256="")
+            )
         self._downloading = True
         try:
             self._note_progress(0, 0)
@@ -2096,6 +2116,7 @@ class LayaRuntime:
             with self._lock:
                 self._child_stopped = True
                 self._process = None
+                self._start_token = ""
             engine = process_laya()
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
             engine.set_runtime_reason(LAYA_REASON_STOPPED, self._port)
