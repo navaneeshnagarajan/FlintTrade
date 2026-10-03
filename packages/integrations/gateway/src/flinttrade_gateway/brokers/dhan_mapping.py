@@ -1641,6 +1641,53 @@ def quote_from_feed(segment: str, security_id: str, feed: Any) -> dict[str, Any]
     return rec if isinstance(rec, dict) else None
 
 
+def depth_from_feed(segment: str, security_id: str, feed: object) -> dict[str, Any]:
+    """Strict single-instrument REST depth, including the SDK's outer wrapper.
+
+    Source: https://dhanhq.co/docs/v2/market-quote/ and dhanhq 2.2.0
+    ``DhanHTTP._parse_response``. Missing ladders are never invented; explicit
+    empty arrays and documented zero levels retain their original meaning.
+    """
+    def envelope(value: object) -> dict[str, Any]:
+        record = _response_record(value, field="depth envelope")
+        status = record.get("status")
+        if type(status) is not str or status not in {"success", "failure"}:
+            raise BrokerReadResponseInvalid from None
+        if status == "failure":
+            # Fixed text: provider remarks may contain credentials or arbitrary objects.
+            raise DhanMappingError("Dhan depth request failed")
+        if set(record) - {"status", "data", "remarks"}:
+            raise BrokerReadResponseInvalid from None
+        return _response_record(record.get("data"), field="depth payload")
+
+    data = envelope(feed)
+    if "data" in data:
+        data = envelope(data)
+    if set(data) != {segment}:
+        raise BrokerReadResponseInvalid from None
+    securities = _response_record(data[segment], field="depth segment")
+    if set(securities) != {security_id}:
+        raise BrokerReadResponseInvalid from None
+    quote = _response_record(securities[security_id], field="depth quote")
+    depth = _response_record(quote.get("depth"), field="depth")
+
+    def levels(side: str) -> list[dict[str, Any]]:
+        rows = _response_rows(depth.get(side), field="depth side")
+        copied = []
+        for row in rows:
+            level = {}
+            for field in ("price", "quantity", "orders"):
+                # Check sign before float conversion: tiny negative evidence can
+                # underflow to -0.0, which would otherwise look non-negative.
+                if _response_decimal(row.get(field)) < 0:
+                    raise BrokerReadResponseInvalid from None
+                level[field] = _market_number(row, field, integer=field != "price")
+            copied.append(level)
+        return copied
+
+    return {"bids": levels("buy"), "asks": levels("sell")}
+
+
 def _option_chain_number(value: Any, *, field: str, default: float = 0.0) -> float:
     if value in (None, ""):
         return default
@@ -1962,6 +2009,8 @@ def _scrip_security_identity(row: dict[str, Any], security_id: str, exchange: st
         "security_id": security_id,
         "symbol": symbol,
         "exchange": exchange,
+        # API class and exchange subtype are distinct columns in instruments.md.
+        "instrument": _scrip_field(row, "SEM_INSTRUMENT_NAME", "INSTRUMENT"),
         "instrument_type": _scrip_field(
             row,
             "SEM_EXCH_INSTRUMENT_TYPE",

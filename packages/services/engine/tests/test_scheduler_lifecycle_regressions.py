@@ -629,7 +629,9 @@ async def test_threadsafe_stop_all_runs_on_bound_runtime_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_all_drains_a_timed_out_start_before_late_activation_can_escape() -> None:
+async def test_start_all_drains_a_timed_out_start_before_late_activation_can_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scheduler = StrategyScheduler(client=MagicMock())
     strategy = _TestStrategy(name="aggregate-late-start")
     start_entered = threading.Event()
@@ -638,7 +640,7 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
 
     def delayed_start() -> None:
         start_entered.set()
-        if not release_start.wait(timeout=1.0):
+        if not release_start.wait(timeout=_LIFECYCLE_SETTLE_TIMEOUT):
             raise AssertionError("timed out waiting to release the start hook")
         original_start()
 
@@ -647,12 +649,22 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
     runner.scheduler = _open_time_scheduler()
     runner.client.quotes = AsyncMock(return_value=None)
     runner.lifecycle_timeout = 0.1
+    rollback_delay = scheduler._terminal_drain_timeout(runner) * 2
+    # Only startup should use the short failure budget. The real drain must
+    # have time to settle even when rollback is delayed on a busy CI worker.
+    # Patch its budget before it is captured, not after rollback has entered.
+    monkeypatch.setattr(
+        StrategyScheduler,
+        "_terminal_drain_timeout",
+        staticmethod(lambda _runner: _LIFECYCLE_SETTLE_TIMEOUT),
+    )
 
     rollback_entered = asyncio.Event()
     allow_rollback = asyncio.Event()
     original_runner_stop = runner.stop
 
     async def observed_stop() -> None:
+        runner.lifecycle_timeout = _LIFECYCLE_SETTLE_TIMEOUT
         rollback_entered.set()
         await allow_rollback.wait()
         await original_runner_stop()
@@ -661,12 +673,16 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
 
     start_all = asyncio.create_task(scheduler.start_all())
     try:
-        assert await asyncio.to_thread(start_entered.wait, 1.0)
-        await asyncio.wait_for(rollback_entered.wait(), timeout=1.0)
+        assert await asyncio.to_thread(start_entered.wait, _LIFECYCLE_SETTLE_TIMEOUT)
+        await asyncio.wait_for(rollback_entered.wait(), timeout=_LIFECYCLE_SETTLE_TIMEOUT)
         assert start_all.done() is False
 
+        # Deterministically exceed the unpatched, startup-derived drain budget.
+        await asyncio.sleep(rollback_delay)
+        assert start_all.done() is False
         release_start.set()
         allow_rollback.set()
+        await _assert_settles(start_all, "rollback did not drain the late start hook")
         result = (await asyncio.gather(start_all, return_exceptions=True))[0]
 
         assert isinstance(result, TimeoutError)

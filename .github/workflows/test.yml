@@ -475,8 +475,16 @@ jobs:
         env:
           CI: true
       - name: Run selected fail-closed product journeys (Chromium-only)
-        run: pnpm --dir packages/apps/terminal exec playwright test e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts --config=playwright.config.ts --project=chromium --reporter=github --workers=1 --retries=0
+        run: pnpm --dir packages/apps/terminal exec playwright test e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts e2e/agent-practice.spec.ts --config=playwright.config.ts --project=chromium --reporter=github --workers=1 --retries=0
         env:
           CI: true
+      - name: Upload synthetic browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: terminal-e2e-evidence
+          path: packages/apps/terminal/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
 # No-op marker. A diff that includes this workflow is classified as code so required Test jobs run.

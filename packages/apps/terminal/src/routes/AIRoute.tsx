@@ -98,6 +98,7 @@ const SECTIONS: SectionDef[] = [
 
 // Sections that appear as right-side overlay panels (not full-height)
 const OVERLAY_SECTIONS = new Set<SectionId>([
+  "agent",
   "suggestions",
   "signals",
   "market-sentiment",
@@ -971,9 +972,16 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
 // Section content map (memoised outside render — no closures on state)
 // ---------------------------------------------------------------------------
 
+function PracticeAgentSection() {
+  const mode = useModeStore((state) => state.mode);
+  // AnimatePresence retains the exiting overlay. Subscribe inside that retained
+  // subtree so its agent unmounts immediately, before it can query or show Live.
+  return mode === "practice" ? <AgentPanel /> : null;
+}
+
 const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
-  agent: <AgentPanel />,
+  agent: <PracticeAgentSection />,
   suggestions: <AISuggestionsPanel />,
   signals: null,
   "market-sentiment": <SentimentPanel />,
@@ -1049,13 +1057,15 @@ export default function AIRoute() {
   // Density adaptation:
   // Beginner: Chat only — guided prompts, larger focused input
   // Intermediate: Chat + Signals
-  // Advanced: All sections (chat, signals, sentiment, knowledge, settings)
+  // Advanced: All analysis sections, plus the explicitly opened Practice agent.
+  // Live activation remains unavailable here; Practice evidence is not Live readiness.
   const visibleSectionIds: SectionId[] = useMemo(() => {
     if (level === "beginner") return ["chat", "suggestions"];
     if (level === "intermediate")
       return ["chat", "suggestions", "signals", "market-sentiment", "regime"];
     return [
       "chat",
+      ...(mode === "practice" ? ["agent" as const] : []),
       "suggestions",
       "signals",
       "market-sentiment",
@@ -1064,7 +1074,7 @@ export default function AIRoute() {
       "knowledge",
       "settings",
     ];
-  }, [level]);
+  }, [level, mode]);
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
 
