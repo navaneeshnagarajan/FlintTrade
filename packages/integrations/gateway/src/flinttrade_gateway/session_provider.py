@@ -58,11 +58,13 @@ class AuthenticatingSessionProvider:
         workspace_path: Path | None = None,
         credential_version_for: Callable[[BrokerSelector], CredentialVersion] | None = None,
         compatibility_authority_for: Callable[[], OpenAlgoDefaultCompatibilityAuthorityReceipt] | None = None,
+        coherence_verifier: Callable[[], WorkspaceSnapshot] | None = None,
     ) -> None:
         self._registry = registry
         self._acls = account_acls
         self._credential_version_for = credential_version_for
         self._compatibility_authority_for = compatibility_authority_for
+        self._coherence_verifier = coherence_verifier
         if (workspace_snapshot is None) != (workspace_path is None):
             raise ValueError("workspace binding requires both snapshot and path")
         if workspace_snapshot is not None and workspace_snapshot.version is None:
@@ -76,7 +78,8 @@ class AuthenticatingSessionProvider:
     def current_authority_for(self, selector: BrokerSelector) -> Any:
         if self._workspace_path is None:
             raise RegistrySessionUnavailable
-        current = broker_workspace_version(read_workspace_snapshot(self._workspace_path))
+        snapshot = self._current_snapshot()
+        current = broker_workspace_version(snapshot)
         if current != self.broker_workspace_version:
             raise RegistrySessionUnavailable
         if selector == BrokerSelector("openalgo", "default"):
@@ -90,9 +93,29 @@ class AuthenticatingSessionProvider:
             raise RegistrySessionUnavailable
         return ManagedLookupAuthority(version, current)
 
+    def _current_snapshot(self) -> WorkspaceSnapshot:
+        snapshot = read_workspace_snapshot(self._workspace_path)
+        if "_broker_account_store" in snapshot.config:
+            if self._coherence_verifier is None:
+                raise RegistrySessionUnavailable
+            try:
+                verified = self._coherence_verifier()
+            except Exception:
+                raise RegistrySessionUnavailable from None
+            if (type(verified) is not WorkspaceSnapshot or verified.version is None
+                    or verified.version.instance_id != snapshot.version.instance_id):
+                raise RegistrySessionUnavailable
+            snapshot = verified
+        return snapshot
+
     def __call__(self, request_ctx: RequestContext, adapter_id: str, account_id: str) -> ConnectedRegistrySession:
         selector = BrokerSelector(adapter_id, account_id)
-        allowed_actors = self._acls.get(adapter_id, {}).get(account_id, [])
+        acls = self._acls
+        if self._workspace_path is not None:
+            snapshot = self._current_snapshot()
+            if "_broker_account_store" in snapshot.config:
+                acls = snapshot.config["brokers"]["account_acls"]
+        allowed_actors = acls.get(adapter_id, {}).get(account_id, [])
         if request_ctx.actor_id not in allowed_actors:
             raise SafetyBypassError(
                 f"actor '{request_ctx.actor_id}' is not authorised for "

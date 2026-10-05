@@ -32,6 +32,13 @@ class AccountContractError(ValueError):
         super().__init__("account_contract_invalid")
 
 
+class AccountAuthenticationRejected(ValueError):
+    """An explicit internal driver proof of definite authentication rejection."""
+
+    def __init__(self) -> None:
+        super().__init__("account_authentication_rejected")
+
+
 class AccountMutationKind(StrEnum):
     CONNECT = "connect"
     RECONNECT = "reconnect"

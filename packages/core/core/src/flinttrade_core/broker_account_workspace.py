@@ -417,6 +417,44 @@ class BrokerAccountWorkspace:
 
         return self._operation_locked(None, recover_locked)
 
+    def abandon(self, operation_id: UUID, *, reason: str) -> AccountMutationReceipt:
+        """Decide abandonment from the actual locked witness, never an exception.
+
+        The caller holds the lifecycle disposition fence. An attempted CAS
+        without readable exact decision evidence remains uncertain and owned.
+        """
+        def abandon_locked(snapshot, commit):
+            operation = self._store.operation(operation_id)
+            if operation.receipt is not None:
+                active = self._store.active_operation(self._capability)
+                if (operation.state is AccountOperationStage.COMMITTED and not operation.abandoned
+                        and active is not None and active.operation_id == operation_id):
+                    self._store.abandon(operation_id, committed=True, reason=reason)
+                return operation.receipt
+            marker = self._marker(snapshot)
+            self._assert_snapshot(snapshot, marker)
+            if marker.operation_id == operation_id:
+                material = self._store.recovery_material(self._capability, operation_id)
+                patch = BrokerAccountPatch(
+                    material.request.kind, material.request.selector, material.request.data_roles, material.read_only
+                )
+                witness = self._commit(operation_id, patch, snapshot, commit)
+                self._store.abandon(operation_id, committed=True, reason=reason)
+                return self._apply(operation_id, witness)
+            if operation.workspace_attempted:
+                self._store.mark_workspace_conflicted(operation_id)
+                raise BrokerAccountWorkspaceUnavailable
+            self._coherent(snapshot)
+            self._store.abandon(operation_id, committed=False, reason=reason)
+            unknown = operation.state is AccountOperationStage.AUTHENTICATION_STARTED
+            return self._store.settle(
+                operation_id,
+                state=AccountOperationStage.AUTHENTICATION_UNKNOWN if unknown else AccountOperationStage.REJECTED,
+                reason="authentication_outcome_unknown" if unknown else reason,
+            )
+
+        return self._operation_locked(operation_id, abandon_locked)
+
     def with_current_authority[T](
         self, operation_id: UUID, callback: Callable[[WorkspaceSnapshot, CredentialVersion], T],
     ) -> T:

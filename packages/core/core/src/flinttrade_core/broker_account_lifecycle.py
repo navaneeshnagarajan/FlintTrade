@@ -83,6 +83,7 @@ class _Operation:
     candidates: dict[CleanupTicket, _Candidate] = field(default_factory=dict)
     retirements: dict[object, tuple[object, CleanupTicket]] = field(default_factory=dict)
     retirement_worker: Future | None = None
+    durable_claim_release: Callable[[], None] | None = None
 
 
 @dataclass(repr=False)
@@ -189,12 +190,16 @@ class BrokerAccountLifecycleOwner:
             raise RuntimeError("account_mutation_lease_settled")
         return operation
 
-    def begin(self, operation_id: UUID, selector: BrokerSelector) -> AccountMutationLease:
+    def begin(self, operation_id: UUID, selector: BrokerSelector, *,
+              durable_claim_release: Callable[[], None] | None = None) -> AccountMutationLease:
         """Borrow the one active lane; same exact identity returns its original lease."""
         self._require_process()
         if type(operation_id) is not UUID or operation_id.version != 4 or operation_id.variant != RFC_4122:
             raise ValueError("account_operation_id_invalid")
         _validate_selector(selector)
+        if durable_claim_release is not None and (
+                not callable(durable_claim_release) or inspect.iscoroutinefunction(durable_claim_release)):
+            raise TypeError("account_durable_claim_callback_invalid")
         with self._rebuild_lock:
             require_backend_lease_proof(self._proof)
             with self._condition:
@@ -210,7 +215,8 @@ class BrokerAccountLifecycleOwner:
                 if any(item.operation_id == operation_id for item in self._operations.values()):
                     raise RuntimeError("account_mutation_already_settled")
                 lease = AccountMutationLease()
-                self._operations[lease] = _Operation(operation_id, selector)
+                self._operations[lease] = _Operation(
+                    operation_id, selector, durable_claim_release=durable_claim_release)
                 self._active = lease
                 return lease
 
@@ -409,6 +415,26 @@ class BrokerAccountLifecycleOwner:
                 self._operation(lease).abandoned = True
                 self._condition.notify_all()
 
+    def with_disposition_fence(self, lease: AccountMutationLease, callback: Callable[[], Any]) -> Any:
+        """Serialise a durable decision after volatile publication is revoked.
+
+        This grants no publication/dispatch authority. The coordinator uses it
+        solely to inspect the actual workspace witness before abandonment.
+        """
+        self._require_process()
+        if not callable(callback) or inspect.iscoroutinefunction(callback):
+            raise TypeError("account_publication_callback_invalid")
+        with self._rebuild_lock:
+            require_backend_lease_proof(self._proof)
+            with self._condition:
+                self._operation(lease)
+            result = callback()
+            if inspect.isawaitable(result):
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise TypeError("account_publication_callback_invalid")
+            return result
+
     def retain_worker(self, lease: AccountMutationLease, worker: Future) -> Future:
         """Retain a genuine concurrent future, never an asyncio wrapper/task."""
         self._require_process()
@@ -426,13 +452,17 @@ class BrokerAccountLifecycleOwner:
             self._condition.notify_all()
 
     def run_worker(self, lease: AccountMutationLease, operation: Callable[[], Any], *,
-                   accept_result: Callable[[Any], None] | None = None) -> Future:
+                   accept_result: Callable[[Any], None] | None = None,
+                   before_dispatch: Callable[[], None] | None = None) -> Future:
         """Reserve custody before dispatch; accept late results before real completion.
 
         An async adapter may run in this bridge via asyncio.run. Its existing
         run_blocking_sdk_call shielding must remain intact inside that coroutine.
         """
         self._require_process()
+        if before_dispatch is not None and (
+                not callable(before_dispatch) or inspect.iscoroutinefunction(before_dispatch)):
+            raise TypeError("account_dispatch_callback_invalid")
         with self._rebuild_lock:
             require_backend_lease_proof(self._proof)
             with self._condition:
@@ -442,6 +472,13 @@ class BrokerAccountLifecycleOwner:
                 future = _running_future()
                 owned.workers.add(future)
             future.add_done_callback(lambda _future: self._notify())
+            if before_dispatch is not None:
+                try:
+                    if before_dispatch() is not None:
+                        raise TypeError("account_dispatch_callback_invalid")
+                except BaseException as error:
+                    future.set_exception(error)
+                    return future
             def run() -> Any:
                 require_backend_lease_proof(self._proof)
                 result = operation()
@@ -715,13 +752,15 @@ class BrokerAccountLifecycleOwner:
             future.add_done_callback(finished)
             _launch(future, clean)
 
-    def settle(self, lease: AccountMutationLease) -> bool:
+    def settle(self, lease: AccountMutationLease, *, durable_disposition: bool = False) -> bool:
         """Release the volatile lane only after workers and explicit cleanup finish.
 
         The coordinator alone decides whether its durable claim may be released.
         Do not invoke settlement for authentication-unknown/blocked durable claims.
         """
         self._require_process()
+        if type(durable_disposition) is not bool:
+            raise TypeError("account_durable_disposition_invalid")
         with self._rebuild_lock:
             with self._condition:
                 if (type(lease) is AccountMutationLease and lease in self._operations
@@ -739,6 +778,13 @@ class BrokerAccountLifecycleOwner:
                        or (candidate.worker is not None and not candidate.worker.done())
                        for candidate in operation.candidates.values()):
                     return False
+                if operation.durable_claim_release is not None:
+                    if not durable_disposition:
+                        return False
+                    result = operation.durable_claim_release()
+                    if result is not None:
+                        raise RuntimeError("account_durable_disposition_incomplete")
+                    operation.durable_claim_release = None
                 operation.settled = True
                 operation.workers.clear()
                 if self._active is lease:
@@ -832,6 +878,7 @@ class BrokerAccountLifecycleOwner:
                         not worker.done() for worker in operation.workers)
                     pending = pending or any(not item.complete or (item.worker is not None and not item.worker.done())
                                              for item in operation.candidates.values())
+                    pending = pending or operation.durable_claim_release is not None
                     if not pending:
                         operation.settled = True
                         operation.workers.clear()
@@ -843,6 +890,11 @@ class BrokerAccountLifecycleOwner:
                         if _OWNERS.get(self._key) is self:
                             _OWNERS.pop(self._key)
                     return True
+                if (retirement.done() and retirement.exception() is None and retirement.result() is True
+                        and any(op.durable_claim_release is not None for _, op in operations)
+                        and all(self._generations_drained(op) and all(worker.done() for worker in op.workers)
+                                and all(item.complete for item in op.candidates.values()) for _, op in operations)):
+                    return False
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
