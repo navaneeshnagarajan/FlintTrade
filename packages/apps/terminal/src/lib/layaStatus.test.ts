@@ -3,6 +3,7 @@ import {
   LAYA_CHECKING_DETAIL,
   LAYA_CHECKING_LABEL,
   LAYA_DOWN_PAUSE,
+  LAYA_DOWNLOADING_LABEL,
   LAYA_NOT_QUALIFIED_FOR_LIVE,
   LAYA_START_COMMAND,
   LAYA_START_DOCS_HREF,
@@ -64,7 +65,10 @@ describe("Laya chip status", () => {
     expect(layaReasonTooltip("still_loading", 8000)).toBe(`Still loading. Next: ${LAYA_START_COMMAND}`);
     expect(layaReasonTooltip("downloading", 8000)).toBeNull();
     expect(layaReasonTooltip("download_failed", 8000)).toBe("Check your connection, then Start Laya again.");
-    expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "downloading" })).toBe("Down");
+    expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "downloading" })).toBe(
+      LAYA_DOWNLOADING_LABEL,
+    );
+    expect(layaChipLabel({ mode: "live", practice: "down", live: "down", reason: "downloading" })).toBe("Downloading");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "download_failed" })).toBe("Down");
     expect(layaReasonTooltip("unverified", 8000)).toBe(
       "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
