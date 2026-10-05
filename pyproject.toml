@@ -44,7 +44,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c" }
+kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "9a37488d77dc96442ee2a90ef78462e688cf4856" }
 flinttrade-ai = { workspace = true }
 flinttrade-automation = { workspace = true }
 flinttrade-backtest = { workspace = true }

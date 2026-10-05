@@ -103,19 +103,33 @@ historical Kotak Neo broker-account evidence covers non-funded REST reads only.
 The v3 async SFeed and order-feed lifecycle is now wired and locally tested with
 synthetic SDK clients; it has not yet been proved against a live broker session
 or at market hours. `dhanhq` stays on latest stable 2.2.0. Neo's runtime is the
-exact upstream `main` commit `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`;
+exact upstream `main` commit `9a37488d77dc96442ee2a90ef78462e688cf4856`;
 the separate release baseline is tag `v3.0.7`, peeled to
-`53cccc45fe56a193b30ffce3c03c71c5c0378538`. Both report distribution version
-`kotakneoapi` 3.0.7. The obsolete `neo-api-client` distribution is prohibited,
+`53cccc45fe56a193b30ffce3c03c71c5c0378538`. The runtime reports distribution version
+`kotakneoapi` 3.0.8; explicit `release_version` 3.0.7 identifies the stable
+compatibility baseline. The obsolete `neo-api-client` distribution is prohibited,
 while the upstream Python import namespace intentionally remains
 `neo_api_client`. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
 and fails if a locked SDK is behind upstream metadata; `uv.lock` and
 `brokers.lock` remain the only tracked install/attestation sources.
+The 3.0.8 runtime update is verified offline with synthetic services; the
+20 September 2026 non-funded activation evidence remains historical and does not
+verify this SDK version against a real account. Upstream 3.0.8 changes positions
+to `portfolio/v2/positions`, may read holdings and fallback quotes internally,
+and writes a daily plaintext holdings cache beneath
+`~/.kotak_neo/holdings_cache` (or `NEO_HOLDINGS_CACHE_DIR`). The disposable
+contract gate isolates its home and cache; no live broker request is part of
+this verification. Funded Live place and public native HTTP remain refused.
 `python scripts/check_kotakneo_sdk_contract.py` then builds disposable
 main/release environments, denies network during each probe, checks exclusive
 namespace/provenance/signature ownership, and runs the upstream migration
-scanner from that exact runtime commit. The daily/manual
+scanner from that exact runtime commit. The release-baseline probe uses a
+disposable copy of tracked gateway source with
+only its exact SDK dependency changed to 3.0.7; all other metadata and source
+bytes remain identical. This compatibility copy cannot satisfy production
+runtime attestation, which requires 3.0.8 and the pinned runtime commit.
+The daily/manual
 `broker-sdk-freshness.yml` workflow runs the drift check against official
 upstreams so a newer main commit or stable release tag cannot age silently.
 In-app credential capture and OAuth start/callback remain implemented

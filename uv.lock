@@ -1230,7 +1230,7 @@ requires-dist = [
     { name = "flinttrade-engine", editable = "packages/services/engine" },
     { name = "growwapi", specifier = "==1.5.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "kotakneoapi", git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev=5bb34fae39c4a52a0e6b59d7e2d17090cafc340c" },
+    { name = "kotakneoapi", git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev=9a37488d77dc96442ee2a90ef78462e688cf4856" },
     { name = "packaging", specifier = "==26.2" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "setuptools", specifier = "==84.0.0" },
@@ -1918,8 +1918,8 @@ wheels = [
 
 [[package]]
 name = "kotakneoapi"
-version = "3.0.7"
-source = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev=5bb34fae39c4a52a0e6b59d7e2d17090cafc340c#5bb34fae39c4a52a0e6b59d7e2d17090cafc340c" }
+version = "3.0.8"
+source = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev=9a37488d77dc96442ee2a90ef78462e688cf4856#9a37488d77dc96442ee2a90ef78462e688cf4856" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
     { name = "numpy" },

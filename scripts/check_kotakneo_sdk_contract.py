@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,7 @@ class ContractConfig:
 
     repo_url: str
     version: str
+    release_version: str
     runtime_main_commit: str
     release_tag: str
     release_commit: str
@@ -63,6 +65,7 @@ def load_contract_config(repo: Path = REPO) -> ContractConfig:
     entry = entries[0]
     homepage = entry.get("homepage")
     version = entry.get("version")
+    release_version = entry.get("release_version")
     runtime_main_commit = entry.get("source_commit")
     release_tag = entry.get("release_tag")
     release_commit = entry.get("release_commit")
@@ -70,8 +73,10 @@ def load_contract_config(repo: Path = REPO) -> ContractConfig:
         raise ContractError("brokers.lock Kotak Neo homepage is not the official upstream")
     if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ContractError("brokers.lock Kotak Neo version is malformed")
-    if release_tag != f"v{version}":
-        raise ContractError("brokers.lock Kotak Neo release tag does not match its version")
+    if not isinstance(release_version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", release_version):
+        raise ContractError("brokers.lock Kotak Neo release version is malformed or missing")
+    if release_tag != f"v{release_version}":
+        raise ContractError("brokers.lock Kotak Neo release tag does not match its release version")
     for label, value in (
         ("runtime main commit", runtime_main_commit),
         ("release commit", release_commit),
@@ -81,6 +86,7 @@ def load_contract_config(repo: Path = REPO) -> ContractConfig:
     return ContractConfig(
         repo_url=f"{homepage}.git",
         version=version,
+        release_version=release_version,
         runtime_main_commit=runtime_main_commit,
         release_tag=release_tag,
         release_commit=release_commit,
@@ -106,7 +112,7 @@ def build_tracks(config: ContractConfig) -> tuple[SdkTrack, SdkTrack]:
         SdkTrack(
             f"release-{config.release_tag}",
             config.release_commit,
-            config.version,
+            config.release_version,
             config.repo_url,
             config.release_tag,
         ),
@@ -190,9 +196,7 @@ def build_subprocess_environment(
 
     parent = os.environ if source is None else source
     environment = {
-        key: value
-        for key, value in parent.items()
-        if key in _PASSTHROUGH_ENVIRONMENT and isinstance(value, str)
+        key: value for key, value in parent.items() if key in _PASSTHROUGH_ENVIRONMENT and isinstance(value, str)
     }
     environment.setdefault("PATH", os.defpath)
     home = workspace / "home"
@@ -245,6 +249,7 @@ def build_track_commands(
     requirements: Path,
     *,
     repo: Path = REPO,
+    gateway_project: Path | None = None,
 ) -> list[list[str]]:
     """Build the ordered installation/check commands for one SDK track."""
 
@@ -253,7 +258,7 @@ def build_track_commands(
         repo / "packages/core/core",
         repo / "packages/core/data",
         repo / "packages/services/engine",
-        repo / "packages/integrations/gateway",
+        gateway_project or repo / "packages/integrations/gateway",
     )
     editable_args: list[str] = []
     for path in editable_paths:
@@ -368,6 +373,8 @@ def validate_probe_result(result: Mapping[str, Any], track: SdkTrack) -> None:
         raise ContractError("Kotak Neo SDK created a log or another file in the probe working directory")
     if result.get("contract_ok") is not True:
         raise ContractError("Kotak Neo offline API contract probe did not complete")
+    if result.get("read_contract_ok") is not True:
+        raise ContractError("Kotak Neo offline read contract probe did not complete")
 
 
 def parse_probe_output(stdout: str) -> dict[str, Any]:
@@ -612,6 +619,61 @@ assert neo.place_order(
     transaction_type="B",
 )["nOrdNo"] == "SYNTHETIC"
 
+# Exercise the changed read orchestration against synthetic services. The
+# process-wide network guard is already active and HOME belongs to the
+# disposable contract workspace, including 3.0.8's on-disk holdings cache.
+read_calls = {"holdings": 0, "positions": 0, "quotes": 0}
+position_has_ltp = True
+
+
+class FakePortfolio:
+    def __init__(self, _api_client):
+        pass
+
+    def portfolio_holdings(self):
+        read_calls["holdings"] += 1
+        return {"data": [{"exchangeIdentifier": "SYNTHETIC-TOKEN", "averagePrice": 100.0}]}
+
+
+class FakePositions:
+    def __init__(self, _api_client):
+        pass
+
+    def position_init(self):
+        read_calls["positions"] += 1
+        position = {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2"}
+        if position_has_ltp:
+            position["ltp"] = "120.00"
+        return {"data": [position]}
+
+
+def synthetic_quotes(*, instrument_tokens, quote_type):
+    assert instrument_tokens == [{"exchange_segment": "nse_cm", "instrument_token": "SYNTHETIC-TOKEN"}]
+    assert quote_type == "ltp"
+    read_calls["quotes"] += 1
+    return [{"exchange": "nse_cm", "exchange_token": "SYNTHETIC-TOKEN", "ltp": "120.00"}]
+
+
+neo_module.PortfolioAPI = FakePortfolio
+neo_module.PositionsAPI = FakePositions
+neo.quotes = synthetic_quotes
+assert neo.holdings()["data"][0]["averagePrice"] == 100.0
+position = neo.positions()["data"][0]
+if md.version("kotakneoapi") == "3.0.8":
+    assert position["netQty"] == 2.0
+    assert position["averagePrice"] == 100.0
+    assert position["positionPnl"] == 40.0
+    assert position["pnlCalculationError"] is None
+    assert read_calls == {"holdings": 1, "positions": 1, "quotes": 0}
+    position_has_ltp = False
+    assert neo.positions()["data"][0]["positionPnl"] == 40.0
+    assert read_calls == {"holdings": 1, "positions": 2, "quotes": 1}
+elif md.version("kotakneoapi") == "3.0.7":
+    assert position == {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2", "ltp": "120.00"}
+    assert read_calls == {"holdings": 1, "positions": 1, "quotes": 0}
+else:
+    raise AssertionError("unreviewed Kotak Neo read contract version")
+
 token = WsToken("nse_cm", "11536")
 assert hash(token)
 assert all(inspect.isclass(model) for model in (SFeedScrip, SFeedScripLite, SFeedIndex, OrderUpdate, PositionUpdate))
@@ -672,6 +734,7 @@ print(json.dumps({
     "environment_root": str(Path(os.environ["KOTAK_CONTRACT_ENV"]).resolve()),
     "cwd_files": cwd_files,
     "contract_ok": True,
+    "read_contract_ok": True,
 }, sort_keys=True))
 """
 
@@ -766,6 +829,58 @@ def validate_scanner_result(result: subprocess.CompletedProcess[str], *, expecte
         raise ContractError(f"official Kotak Neo migration scanner exited {result.returncode}")
 
 
+def _release_gateway_project(
+    track: SdkTrack,
+    workspace: Path,
+    *,
+    repo: Path,
+    run: Run,
+    env: Mapping[str, str],
+) -> Path:
+    """Copy tracked gateway source for release-baseline compatibility only.
+
+    The production runtime dependency stays exact. This disposable manifest
+    substitutes only that dependency with the exact historical release SDK;
+    every source byte and other dependency remains the production checkout's.
+    It is never installed into the repository environment or used for runtime
+    attestation, and the surrounding temporary workspace owns its cleanup.
+    """
+    source = repo / "packages/integrations/gateway"
+    text = (source / "pyproject.toml").read_text(encoding="utf-8")
+    runtime_dependency = f'"kotakneoapi=={load_contract_config(repo).version}"'
+    if text.count(runtime_dependency) != 1:
+        raise ContractError("gateway must declare exactly one exact runtime SDK dependency")
+    listed = _run_checked(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--",
+            "packages/integrations/gateway/pyproject.toml",
+            "packages/integrations/gateway/src/",
+        ],
+        run=run,
+        cwd=repo,
+        env=env,
+    ).stdout
+    files = [Path(path) for path in listed.split("\0") if path]
+    manifest = Path("packages/integrations/gateway/pyproject.toml")
+    if manifest not in files or not any(path.is_relative_to("packages/integrations/gateway/src") for path in files):
+        raise ContractError("tracked gateway source and manifest are required for release compatibility")
+    target = workspace / "release-gateway"
+    for relative in files:
+        original = repo / relative
+        if original.is_symlink() or not original.resolve().is_relative_to(source.resolve()):
+            raise ContractError("release compatibility source must be a tracked gateway file")
+        destination = target / relative.relative_to("packages/integrations/gateway")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(original, destination)
+    (target / "pyproject.toml").write_text(
+        text.replace(runtime_dependency, f'"kotakneoapi=={track.version}"'), encoding="utf-8"
+    )
+    return target
+
+
 def _probe_track(
     track: SdkTrack,
     environment: Path,
@@ -776,12 +891,15 @@ def _probe_track(
     base_env: Mapping[str, str],
 ) -> None:
     requirements = workspace / "base-requirements.txt"
-    for command in build_track_commands(track, environment, requirements, repo=repo):
+    gateway_project = (
+        _release_gateway_project(track, workspace, repo=repo, run=run, env=base_env) if track.release_tag else None
+    )
+    for command in build_track_commands(track, environment, requirements, repo=repo, gateway_project=gateway_project):
         _run_checked(command, run=run, cwd=workspace, env=base_env)
 
     probe_cwd = workspace / f"probe-{track.name}"
     probe_cwd.mkdir()
-    probe_env = build_subprocess_environment(probe_cwd / "process", source=base_env)
+    probe_env = build_subprocess_environment(workspace / f"process-{track.name}", source=base_env)
     probe_env.update(
         {
             "KOTAK_CONTRACT_ENV": str(environment),

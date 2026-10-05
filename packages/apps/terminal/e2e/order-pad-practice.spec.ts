@@ -336,8 +336,9 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await expect(page).toHaveURL(/\/trade$/);
   const limitOrderType = page.getByRole("radio", { name: "LIMIT" });
   // Lazy widget imports can schedule immediate work after their network module
-  // resolves. Advance in bounded increments, never reaching the first poll.
-  for (let advanced = 0; advanced < 4_000 && !(await limitOrderType.isVisible()); advanced += 100) {
+  // resolves. Stay below usePositions' three-second stale window: a cold import
+  // must not age the shared cache and add a mount refetch before this journey.
+  for (let advanced = 0; advanced < 2_000 && !(await limitOrderType.isVisible()); advanced += 100) {
     await page.clock.runFor(100);
   }
   await expect(page.getByText("Order Pad", { exact: true }).first()).toBeVisible();
