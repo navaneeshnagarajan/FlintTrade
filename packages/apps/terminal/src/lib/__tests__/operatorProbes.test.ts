@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "@/stores/authStore";
 import {
   INSTALL_PROBE_URL,
+  layaCheckingFromBody,
+  layaManagedFromBody,
+  layaRouteFromBody,
   layaHeartbeatFromBody,
   layaLiveQualifiedFromBody,
   layaPortFromBody,
@@ -59,6 +62,79 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaReasonFromBody({ status: "ok" })).toBeNull();
     expect(layaPortFromBody({ laya_port: 8123 })).toBe(8123);
     expect(layaPortFromBody({ status: "ok" })).toBe(8000);
+    expect(layaCheckingFromBody({ laya_checking: true })).toBe(true);
+    expect(layaCheckingFromBody({ laya_checking: false })).toBe(false);
+    expect(layaCheckingFromBody({ laya_checking: "true" })).toBe(false);
+    expect(layaCheckingFromBody({ status: "ok" })).toBe(false);
+    expect(layaCheckingFromBody(null)).toBe(false);
+    expect(layaRouteFromBody({ laya_route: "ollama" })).toBe("ollama");
+    expect(layaRouteFromBody({ laya_route: "sidecar" })).toBeNull();
+    expect(layaRouteFromBody({ status: "ok" })).toBeNull();
+    expect(layaManagedFromBody({ laya_managed: true })).toBe(true);
+    expect(layaManagedFromBody({ laya_managed: false })).toBe(false);
+    expect(layaManagedFromBody({ laya_managed: "true" })).toBe(false);
+  });
+
+  it("treats a missing laya_checking field as not checking", async () => {
+    const checking = vi.fn(async () => jsonResponse({ status: "ok", laya_checking: true }, 200));
+    await expect(probeLocalPing(asFetch(checking))).resolves.toMatchObject({ layaChecking: true });
+    const sidecar = vi.fn(async () => jsonResponse({ status: "ok", laya: "down" }, 200));
+    await expect(probeLocalPing(asFetch(sidecar))).resolves.toMatchObject({
+      layaChecking: false,
+      layaRoute: null,
+      layaManaged: false,
+    });
+    const ollama = vi.fn(async () => jsonResponse({
+      status: "ok",
+      laya_route: "ollama",
+      laya_managed: true,
+      laya_checking: false,
+    }, 200));
+    await expect(probeLocalPing(asFetch(ollama))).resolves.toMatchObject({
+      layaRoute: "ollama",
+      layaManaged: true,
+      layaChecking: false,
+    });
+  });
+
+  it("confirms backend identity only from a valid successful Laya heartbeat", async () => {
+    for (const body of [
+      { status: "ok", laya: "down" },
+      { status: "ok", laya: "ready", laya_route: "ollama", laya_managed: false },
+      { status: "ok", laya: "down", laya_route: "ollama", laya_managed: true },
+    ]) {
+      await expect(probeLocalPing(asFetch(async () => jsonResponse(body, 200))))
+        .resolves.toMatchObject({ localPing: "ok", layaHeartbeatValid: true });
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { status: "ok" },
+    { status: "ok", laya: "connected" },
+    { status: "error", laya: "ready" },
+    { status: "ok", laya: "ready", laya_route: "unknown" },
+    { status: "ok", laya: "ready", laya_route: null },
+    { status: "ok", laya: "ready", laya_route: "ollama" },
+    { status: "ok", laya: "ready", laya_route: "ollama", laya_managed: "true" },
+  ].map((body) => [body]))("does not invent heartbeat authority from invalid HTTP 200 body %j", async (body) => {
+    await expect(probeLocalPing(asFetch(async () => jsonResponse(body, 200))))
+      .resolves.toMatchObject({ localPing: "ok", layaHeartbeatValid: false });
+  });
+
+  it("does not confirm backend identity after HTTP, JSON, or transport failures", async () => {
+    for (const fetchImpl of [
+      asFetch(async () => jsonResponse({ status: "ok", laya: "ready" }, 503)),
+      asFetch(async () => new Response("not json", { status: 200 })),
+      asFetch(async () => { throw new Error("failed to fetch"); }),
+    ]) {
+      await expect(probeLocalPing(fetchImpl)).resolves.toMatchObject({
+        layaHeartbeatValid: false,
+        laya: null,
+      });
+    }
   });
 
   it("does not present Ready when ping fails or omits Laya", async () => {
