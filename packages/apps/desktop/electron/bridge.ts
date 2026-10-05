@@ -9,6 +9,7 @@ interface IpcRendererLike {
 }
 
 export interface FlintDesktopApi {
+  readonly runtimeVersions?: Readonly<Record<"electron" | "chrome" | "node" | "v8", string | null>>;
   applyShellUpdate(): Promise<Readonly<UpdateSnapshot>>;
   applySourceUpdate(): Promise<Readonly<UpdateSnapshot>>;
   cancelBootstrap(): Promise<boolean>;
@@ -36,8 +37,19 @@ function subscribe<T>(ipcRenderer: IpcRendererLike, channel: string, callback: (
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
-export function createFlintDesktopApi(ipcRenderer: IpcRendererLike): FlintDesktopApi {
+export function createFlintDesktopApi(
+  ipcRenderer: IpcRendererLike,
+  versions: Readonly<Record<string, string | undefined>> = {},
+): FlintDesktopApi {
+  const copyVersion = (key: string): string | null => {
+    const value = versions[key];
+    return typeof value === "string" && /^\d+[0-9A-Za-z.+-]{0,79}$/.test(value) ? value : null;
+  };
   const api: FlintDesktopApi = {
+    runtimeVersions: Object.freeze({
+      electron: copyVersion("electron"), chrome: copyVersion("chrome"),
+      node: copyVersion("node"), v8: copyVersion("v8"),
+    }),
     applyShellUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.update.applyShell) as Promise<Readonly<UpdateSnapshot>>,
     applySourceUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.update.applySource) as Promise<Readonly<UpdateSnapshot>>,
     cancelBootstrap: () => ipcRenderer.invoke(IPC_CHANNELS.bootstrap.cancel) as Promise<boolean>,
