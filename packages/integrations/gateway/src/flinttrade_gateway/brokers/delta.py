@@ -11,6 +11,7 @@ deadman runtime proof exist. Every write requires the router's shared token.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from datetime import UTC, datetime
@@ -209,7 +210,10 @@ class DeltaAdapter(BrokerAdapter):
         """Native bulk cancel. One broker call, so one consumed safety context is enough."""
         del tag, segment
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        return await self.exchange_call(session, "cancel_all_orders", _router_token=_router_token)
+        before = [str(row.get("id")) for row in await self._open_order_rows(session) if row.get("id") is not None]
+        await self.exchange_call(session, "cancel_all_orders", _router_token=_router_token)
+        after = [str(row.get("id")) for row in await self._open_order_rows(session) if row.get("id") is not None]
+        return _ack_summary(before=before, after=after)
 
     async def exit_all_positions(
         self,
@@ -225,7 +229,8 @@ class DeltaAdapter(BrokerAdapter):
         user_id = session.extra.get("user_id")
         if not user_id:
             raise BrokerError("Delta close-all requires the user id captured at login", broker_id=self.broker_id)
-        return await self.exchange_call(
+        before = [str(row.get("product_symbol") or "") for row in await self._open_position_rows(session)]
+        await self.exchange_call(
             session,
             "close_all_positions",
             body={
@@ -235,6 +240,8 @@ class DeltaAdapter(BrokerAdapter):
             },
             _router_token=_router_token,
         )
+        after = [str(row.get("product_symbol") or "") for row in await self._open_position_rows(session)]
+        return _ack_summary(before=before, after=after)
 
     async def place_reducing_order(
         self,
@@ -261,6 +268,9 @@ class DeltaAdapter(BrokerAdapter):
             "reduce_only": "true",
             "time_in_force": "ioc",
         }
+        tag = str(payload.get("emergency_tag") or "")
+        if tag:
+            body["client_order_id"] = tag
         result = await self.exchange_call(session, "place_order", body=body, _router_token=_router_token)
         order_id = _result_id(result)
         if not order_id:
@@ -324,15 +334,20 @@ class DeltaAdapter(BrokerAdapter):
         else:
             for row in open_positions[:_EMERGENCY_BATCH_LIMIT]:
                 size = int(row.get("size") or 0)
+                symbol = str(row.get("product_symbol") or "")
                 writes.append(
                     EmergencyBrokerWrite(
                         parent_verb="exit_all_positions",
                         verb="place_reducing_order",
                         payload={
                             "_op": "place_reducing_order",
-                            "product_symbol": str(row.get("product_symbol") or ""),
+                            "symbol": symbol,
+                            "exchange": "CRYPTO",
+                            "product": "NRML",
+                            "product_symbol": symbol,
                             "expected_position_size": size,
                             "size": abs(size),
+                            "emergency_tag": _emergency_exit_tag(symbol, size),
                         },
                     )
                 )
@@ -649,6 +664,24 @@ class DeltaAdapter(BrokerAdapter):
             if str(row.get("product_symbol") or "") == symbol:
                 return int(row.get("size") or 0)
         return 0
+
+
+def _ack_summary(*, before: list[str], after: list[str]) -> dict[str, Any]:
+    """Return the dispatcher bulk acknowledgement after an authoritative readback."""
+    remaining = [item for item in after if item]
+    still_open = set(remaining)
+    cleared = [item for item in before if item and item not in still_open]
+    return {
+        "errors": [{"order_id": item, "reason": "still_open"} for item in remaining],
+        "total": len(cleared) + len(remaining),
+        "success": len(cleared),
+        "order_ids": cleared,
+    }
+
+
+def _emergency_exit_tag(symbol: str, size: int) -> str:
+    identity = f"{symbol}|{size}".encode()
+    return "fte-delta-" + hashlib.sha256(identity).hexdigest()[:16]
 
 
 def _result_id(result: Any) -> str:

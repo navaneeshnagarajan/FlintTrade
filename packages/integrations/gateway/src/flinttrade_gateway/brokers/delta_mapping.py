@@ -563,6 +563,17 @@ def from_ticker(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _implied_vol(greeks: Mapping[str, Any], quotes: Mapping[str, Any]) -> float:
+    """IV lives on the quote, not inside the greeks object."""
+    if "iv" in greeks:
+        return _float(greeks.get("iv"))
+    ask = quotes.get("ask_iv")
+    bid = quotes.get("bid_iv")
+    if ask not in (None, "") and bid not in (None, ""):
+        return (_float(ask) + _float(bid)) / 2
+    return _float(ask if ask not in (None, "") else bid)
+
+
 def _float(raw: Any) -> float:
     try:
         return float(raw)
@@ -612,14 +623,16 @@ def option_chain_from_tickers(rows: Any, *, underlying: str, expiry: str) -> dic
         bucket[f"{prefix}_ltp"] = _float(row.get("close") or row.get("mark_price"))
         bucket[f"{prefix}_oi"] = int(_float(row.get("oi")))
         bucket[f"{prefix}_volume"] = int(_float(row.get("volume")))
-        bucket[f"{prefix}_iv"] = _float(greeks.get("iv"))
+        bucket[f"{prefix}_iv"] = _implied_vol(greeks, quotes)
         bucket[f"{prefix}_delta"] = _float(greeks.get("delta"))
         bucket[f"{prefix}_gamma"] = _float(greeks.get("gamma"))
         bucket[f"{prefix}_theta"] = _float(greeks.get("theta"))
         bucket[f"{prefix}_vega"] = _float(greeks.get("vega"))
         bucket[f"{prefix}_bid"] = _float(quotes.get("best_bid"))
         bucket[f"{prefix}_ask"] = _float(quotes.get("best_ask"))
-        bucket[f"{prefix}_greeks_complete"] = all(name in greeks for name in ("delta", "gamma", "theta", "vega", "iv"))
+        bucket[f"{prefix}_greeks_complete"] = all(name in greeks for name in ("delta", "gamma", "theta", "vega")) and (
+            "iv" in greeks or "ask_iv" in quotes or "bid_iv" in quotes
+        )
     return {
         "underlying": underlying,
         "underlying_key": underlying,

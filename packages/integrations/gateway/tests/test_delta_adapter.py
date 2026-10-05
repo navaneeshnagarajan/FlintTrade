@@ -324,3 +324,77 @@ async def test_candle_bounds_accept_iso_dates() -> None:
     assert candles.bars[0].close == 2
     assert "start=1767225600" in transport.calls[1][1]
     assert "end=1767312000" in transport.calls[1][1]
+
+
+def test_compact_public_ticker_uses_sy_and_d_rows() -> None:
+    from flinttrade_gateway.brokers.delta_feed import parse_ticker_frame
+
+    tick = parse_ticker_frame({
+        "type": "v2/ticker",
+        "sy": "BTCUSD",
+        "ts": 1775801092453559,
+        "d": [{"s": "BTCUSD", "m": "100.5", "ohlc": [90, 110, 80, 99]}],
+    })
+    assert tick is not None
+    assert tick.symbol == "BTCUSD"
+    assert tick.ltp == 99
+    assert tick.exchange == "CRYPTO"
+
+
+@pytest.mark.asyncio
+async def test_bulk_cancel_readback_matches_dispatcher_summary() -> None:
+    adapter, transport = _adapter([
+        _session_ok(),
+        (200, {"success": True, "result": [{"id": 7, "product_symbol": "BTCUSD", "state": "open"}]}),
+        (200, {"success": True, "result": {"success": True}}),
+        (200, {"success": True, "result": []}),
+    ])
+    session = await adapter.login({"api_key": "key", "api_secret": _SECRET, "environment": "india_testnet"})
+    summary = await adapter.cancel_all_orders(session, _router_token=ROUTER_TOKEN)
+    assert summary == {
+        "errors": [],
+        "total": 1,
+        "success": 1,
+        "order_ids": ["7"],
+    }
+    assert isinstance(summary["success"], int)
+    assert transport.calls[2][1].endswith("/v2/orders/all")
+
+
+@pytest.mark.asyncio
+async def test_reducing_plan_names_symbol_exchange_product_and_tag() -> None:
+    adapter, _transport = _adapter([
+        (200, {"success": True, "result": [{"asset_symbol": "USD", "available_balance": "10"}]}),
+        (200, {"success": True, "result": [{"product_symbol": "BTCUSD", "size": 2}]}),
+    ])
+    session = await adapter.login({"api_key": "key", "api_secret": _SECRET, "environment": "india_testnet"})
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=EmergencyWritePolicy(name="flatten", verbs=("exit_all_positions",)),
+        protected_order_ids=frozenset(),
+        protected_exit_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+    payload = plan.writes[0].payload
+    assert payload["symbol"] == "BTCUSD"
+    assert payload["exchange"] == "CRYPTO"
+    assert payload["product"] == "NRML"
+    assert str(payload["emergency_tag"]).startswith("fte-delta-")
+
+
+def test_option_iv_comes_from_quote_fields() -> None:
+    from flinttrade_gateway.brokers.delta_mapping import option_chain_from_tickers
+
+    chain = option_chain_from_tickers(
+        [{
+            "symbol": "C-BTC-90000-310126",
+            "strike_price": "90000",
+            "greeks": {"delta": "0.4", "gamma": "0", "theta": "0", "vega": "0"},
+            "quotes": {"ask_iv": "0.6", "bid_iv": "0.4"},
+        }],
+        underlying="BTC",
+        expiry="2026-01-31",
+    )
+    strike = chain["strikes"][0]
+    assert strike["ce_iv"] == 0.5
+    assert strike["ce_greeks_complete"] is True

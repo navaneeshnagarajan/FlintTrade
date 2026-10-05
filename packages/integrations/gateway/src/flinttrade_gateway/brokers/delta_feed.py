@@ -68,24 +68,44 @@ def deadman_ack_body(*, heartbeat_id: str, ttl_ms: int) -> dict[str, Any]:
 
 
 def parse_ticker_frame(raw: str | bytes | dict[str, Any]) -> TickEvent | None:
-    """Return a tick for a ticker frame, or None for acks and other channels."""
+    """Return a tick for a ticker frame, or None for acks and other channels.
+
+    India public sockets emit both the verbose ticker and the compact frame
+    whose symbol is ``sy`` and whose market data sits under ``d[]``.
+    """
     message = _load(raw)
-    if message is None or str(message.get("type") or "") not in TICKER_TYPES:
+    if message is None:
         return None
-    symbol = str(message.get("symbol") or message.get("product_symbol") or "").strip()
+    kind = str(message.get("type") or "")
+    compact = _compact_ticker(message)
+    if kind and kind not in TICKER_TYPES:
+        return None
+    if not kind and not compact:
+        return None
+    symbol = str(
+        compact.get("symbol")
+        or message.get("symbol")
+        or message.get("product_symbol")
+        or message.get("sy")
+        or ""
+    ).strip()
     if not symbol:
         return None
     quotes_raw = message.get("quotes")
     quotes: dict[str, Any] = quotes_raw if isinstance(quotes_raw, dict) else {}
+    close = message.get("close")
+    if close in (None, "") and compact.get("close") not in (None, ""):
+        close = compact.get("close")
+    mark = message.get("mark_price") or compact.get("mark_price") or message.get("price")
     return TickEvent(
         symbol=symbol,
         exchange="CRYPTO",
-        ltp=_float(message.get("close") or message.get("mark_price") or message.get("price")),
-        volume=int(_float(message.get("volume") or message.get("size"))),
-        bid=_float(quotes.get("best_bid") or message.get("best_bid")),
-        ask=_float(quotes.get("best_ask") or message.get("best_ask")),
-        oi=int(_float(message.get("oi"))),
-        timestamp=str(message.get("timestamp") or ""),
+        ltp=_float(close or mark),
+        volume=int(_float(message.get("volume") or message.get("size") or compact.get("volume"))),
+        bid=_float(quotes.get("best_bid") or message.get("best_bid") or compact.get("bid")),
+        ask=_float(quotes.get("best_ask") or message.get("best_ask") or compact.get("ask")),
+        oi=int(_float(message.get("oi") or compact.get("oi"))),
+        timestamp=str(message.get("timestamp") or message.get("ts") or compact.get("timestamp") or ""),
     )
 
 
@@ -95,6 +115,34 @@ def parse_private_frame(raw: str | bytes | dict[str, Any]) -> dict[str, Any] | N
     if message is None or str(message.get("type") or "") not in ORDER_TYPES:
         return None
     return message
+
+
+def _compact_ticker(message: dict[str, Any]) -> dict[str, Any]:
+    """Project one documented compact ticker row onto verbose field names."""
+    rows = message.get("d")
+    if not isinstance(rows, list):
+        return {}
+    wanted = str(message.get("sy") or "").strip()
+    row = next(
+        (item for item in rows if isinstance(item, dict) and str(item.get("s") or "") == wanted),
+        None,
+    )
+    if row is None:
+        row = next((item for item in rows if isinstance(item, dict)), None)
+    if not isinstance(row, dict):
+        return {}
+    ohlc = row.get("ohlc")
+    candles = ohlc if isinstance(ohlc, list) else []
+    return {
+        "symbol": str(row.get("s") or wanted or ""),
+        "mark_price": row.get("m"),
+        "close": candles[3] if len(candles) > 3 else None,
+        "volume": row.get("v"),
+        "oi": row.get("oi"),
+        "bid": row.get("b"),
+        "ask": row.get("a"),
+        "timestamp": message.get("ts"),
+    }
 
 
 def _load(raw: str | bytes | dict[str, Any]) -> dict[str, Any] | None:
