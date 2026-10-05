@@ -17,7 +17,7 @@
  *   - Empty custom presets shows the placeholder message
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -194,6 +194,28 @@ function makeWrapper() {
 // ---------------------------------------------------------------------------
 
 describe("PresetSection", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("explains browser-only storage in the public demo", () => {
+    vi.stubEnv("BASE_URL", "/demo-app/");
+    setupQuery([]);
+    render(<PresetSection />, { wrapper: makeWrapper() });
+    expect(screen.getByText(/custom presets are saved only in this browser/)).toBeVisible();
+  });
+
+  it("keeps repeated chart occurrences distinct when forking a preset", () => {
+    setupQuery([{ ...BUILTIN_PRESET, name: "Multi Chart", widgets: ["chart", "chart", "chart", "chart"] }]);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      render(<PresetSection />, { wrapper: makeWrapper() });
+      fireEvent.click(screen.getByRole("button", { name: "Fork Multi Chart" }));
+      expect(screen.getAllByRole("button", { name: "Remove Chart" })).toHaveLength(4);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     setupMutations();
@@ -211,6 +233,7 @@ describe("PresetSection", () => {
       expect(screen.getByText("Workspace Presets")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /import preset/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /create a new workspace preset/i })).toBeInTheDocument();
+      expect(screen.queryByText(/custom presets are saved only in this browser/)).not.toBeInTheDocument();
     });
 
     it("disables New Preset while a form is already open", () => {

@@ -2536,3 +2536,7 @@ Manage workspaces on the Trade desk includes built-in templates and Saved preset
 Saved presets retains create, edit, fork, import, export and delete controls; existing
 `/settings#presets` links open desk management. AI save status appears only on the
 AI page.
+
+In the public demo, custom presets are saved only in the current browser and are
+not synced to an installed account. Export a preset as JSON to keep a portable copy.
+Installed builds continue to save presets through their local FlintTrade backend.

@@ -49,6 +49,7 @@ import {
   type CreatePresetPayload,
 } from "@/services/ftApi";
 import { widgetCatalog } from "@/layout/widgetFactory";
+import { isPublicDemoBuild } from "@/lib/demoSession";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -184,11 +185,11 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
       {/* Selected chips */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
-          {selected.map((id) => {
+          {selected.map((id, index) => {
             const name = widgetCatalog.find((w) => w.id === id)?.name ?? id;
             return (
               <span
-                key={id}
+                key={`${id}-${index}`}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-accent/10 text-accent border border-accent/20"
               >
                 {name}
@@ -759,6 +760,11 @@ export function PresetSection() {
 
   return (
     <div className="space-y-6">
+      {isPublicDemoBuild() && (
+        <p className="text-xs text-text-muted">
+          In this public demo, custom presets are saved only in this browser. They are not synced to an installed account.
+        </p>
+      )}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <SectionTitle>Workspace Presets</SectionTitle>
 
