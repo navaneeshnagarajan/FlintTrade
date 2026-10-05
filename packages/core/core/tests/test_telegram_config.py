@@ -68,9 +68,7 @@ def test_persist_stores_token_in_secret_file_not_workspace(monkeypatch, tmp_path
         resolve_telegram_bot_token,
     )
 
-    state = persist_telegram_config(
-        {"enabled": True, "chat_id": "-100123456", "bot_token": VALID_TOKEN}
-    )
+    state = persist_telegram_config({"enabled": True, "chat_id": "-100123456", "bot_token": VALID_TOKEN})
     assert state == {"enabled": True, "chat_id": "-100123456", "bot_token_set": True}
 
     secret_path = tmp_path / "secrets" / "telegram_bot_token"
@@ -155,9 +153,7 @@ def test_absent_fields_preserve_current_state(monkeypatch, tmp_path: Path) -> No
     assert read_telegram_config()["chat_id"] == "-100123"
 
 
-def test_from_env_resolves_stored_secret_and_never_uses_the_ref_literal(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_from_env_resolves_stored_secret_and_never_uses_the_ref_literal(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
@@ -173,9 +169,7 @@ def test_from_env_resolves_stored_secret_and_never_uses_the_ref_literal(
     assert config.enabled is True
 
 
-def test_from_env_fails_closed_on_a_legacy_ref_with_no_secret_file(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_from_env_fails_closed_on_a_legacy_ref_with_no_secret_file(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)

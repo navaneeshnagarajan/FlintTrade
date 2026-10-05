@@ -33,7 +33,7 @@ Order flow tells you who is in control before price confirms it:
 - **Tape reading:** Consecutive trades printing at the ask = buyers in control. Consecutive trades at the bid = sellers in control.
 - **Imbalance:** When ask-side orders vanish suddenly (pulled) price often jumps — this is a trigger to enter fast.
 
-Use FlintTrade's depth widget (50-level DOM from OpenAlgo) to monitor stacking.
+Use FlintTrade's depth widget (50-level DOM from broker) to monitor stacking.
 
 ## 1-Minute Chart Patterns for Scalpers
 
@@ -75,4 +75,4 @@ A 5-point move on one lot is about ₹325 gross (indicative). At these rates tha
 - Use **LIMIT orders** for entries whenever possible — avoid paying the spread.
 - Use **MARKET orders** for exits if the move is going against you fast.
 - Co-location or low-latency connection is preferable for sub-second execution.
-- OpenAlgo MIS product type for all scalps — never NRML for intraday scalps.
+- broker MIS product type for all scalps — never NRML for intraday scalps.

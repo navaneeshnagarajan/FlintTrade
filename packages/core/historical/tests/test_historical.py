@@ -1,7 +1,7 @@
 """Tests for FlintTrade historical package.
 
 DO NOT RUN — written for pytest. DuckDB tests use in-memory databases.
-API tests mock the OpenAlgo client.
+API tests mock the native broker client.
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
-
 
 
 # ======================================================================
@@ -22,18 +21,21 @@ class TestDateChunking:
 
     def test_single_chunk_within_limit(self):
         from flinttrade_historical.downloader import compute_date_chunks
+
         chunks = compute_date_chunks(date(2026, 1, 1), date(2026, 1, 15), 30)
         assert len(chunks) == 1
         assert chunks[0] == (date(2026, 1, 1), date(2026, 1, 15))
 
     def test_exact_chunk_boundary(self):
         from flinttrade_historical.downloader import compute_date_chunks
+
         chunks = compute_date_chunks(date(2026, 1, 1), date(2026, 1, 30), 30)
         assert len(chunks) == 1
         assert chunks[0] == (date(2026, 1, 1), date(2026, 1, 30))
 
     def test_two_chunks(self):
         from flinttrade_historical.downloader import compute_date_chunks
+
         chunks = compute_date_chunks(date(2026, 1, 1), date(2026, 2, 15), 30)
         assert len(chunks) == 2
         assert chunks[0][0] == date(2026, 1, 1)
@@ -43,23 +45,26 @@ class TestDateChunking:
 
     def test_many_chunks_full_year(self):
         from flinttrade_historical.downloader import compute_date_chunks
+
         chunks = compute_date_chunks(date(2025, 1, 1), date(2025, 12, 31), 30)
         assert len(chunks) >= 12  # ~365/30 = 13
 
     def test_single_day_range(self):
         from flinttrade_historical.downloader import compute_date_chunks
+
         chunks = compute_date_chunks(date(2026, 3, 16), date(2026, 3, 16), 30)
         assert len(chunks) == 1
         assert chunks[0] == (date(2026, 3, 16), date(2026, 3, 16))
 
     def test_daily_interval_large_chunks(self):
         from flinttrade_historical.downloader import compute_date_chunks
+
         chunks = compute_date_chunks(date(2025, 1, 1), date(2025, 12, 31), 365)
         assert len(chunks) == 1
 
 
 class TestHistoricalDownloader:
-    """Test downloader with mocked OpenAlgo client."""
+    """Test downloader with mocked native broker client."""
 
     def _make_downloader(self, bars_per_chunk=10):
         from flinttrade_core.models import OHLCV
@@ -71,8 +76,11 @@ class TestHistoricalDownloader:
             return [
                 OHLCV(
                     timestamp=f"{start_date}T09:{i:02d}:00",
-                    open=100.0 + i, high=101.0 + i, low=99.0 + i,
-                    close=100.5 + i, volume=1000 * (i + 1),
+                    open=100.0 + i,
+                    high=101.0 + i,
+                    low=99.0 + i,
+                    close=100.5 + i,
+                    volume=1000 * (i + 1),
                 )
                 for i in range(bars_per_chunk)
             ]
@@ -101,10 +109,12 @@ class TestHistoricalDownloader:
 
         mock_client = MagicMock()
         # Return same timestamps in overlapping chunks
-        mock_client.history = MagicMock(return_value=[
-            OHLCV(timestamp="2026-03-01T09:15:00", open=100, high=101, low=99, close=100, volume=1000),
-            OHLCV(timestamp="2026-03-01T09:20:00", open=101, high=102, low=100, close=101, volume=2000),
-        ])
+        mock_client.history = MagicMock(
+            return_value=[
+                OHLCV(timestamp="2026-03-01T09:15:00", open=100, high=101, low=99, close=100, volume=1000),
+                OHLCV(timestamp="2026-03-01T09:20:00", open=101, high=102, low=100, close=101, volume=2000),
+            ]
+        )
         dl = HistoricalDownloader(mock_client, chunk_days_intraday=15)
         result = dl.download("TEST", "NSE", "5m", "2026-03-01", "2026-03-31")
         # Despite multiple chunks with same data, should dedup
@@ -128,14 +138,16 @@ class TestHistoricalDownloader:
         assert len(result.errors) == 1
         assert "API down" in result.errors[0]
 
-    def test_download_resolves_async_openalgo_history(self):
+    def test_download_resolves_async_native_broker_history(self):
         from flinttrade_core.models import OHLCV
         from flinttrade_historical.downloader import HistoricalDownloader
 
         mock_client = MagicMock()
-        mock_client.history = AsyncMock(return_value=[
-            OHLCV(timestamp="2026-03-01T09:15:00", open=100, high=101, low=99, close=100, volume=1000),
-        ])
+        mock_client.history = AsyncMock(
+            return_value=[
+                OHLCV(timestamp="2026-03-01T09:15:00", open=100, high=101, low=99, close=100, volume=1000),
+            ]
+        )
 
         dl = HistoricalDownloader(mock_client)
         result = dl.download("RELIANCE", "NSE", "1d", "2026-03-01", "2026-03-01")
@@ -149,7 +161,9 @@ class TestHistoricalDownloader:
         dl.download("X", "NSE", "1d", "2026-01-01", "2026-12-31")
         # "1d" should be normalized to "D" for the API call
         call_args = client.history.call_args
-        assert call_args.kwargs.get("interval", call_args[0][2] if len(call_args[0]) > 2 else None) in ("D", None) or True
+        assert (
+            call_args.kwargs.get("interval", call_args[0][2] if len(call_args[0]) > 2 else None) in ("D", None) or True
+        )
 
     def test_download_batch(self):
         dl, _ = self._make_downloader()
@@ -168,10 +182,11 @@ class TestHistoricalDownloader:
 
     def test_all_exchanges_accepted(self):
         from flinttrade_historical.downloader import SUPPORTED_EXCHANGES
+
         # Base set
         for exch in ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"):
             assert exch in SUPPORTED_EXCHANGES, f"{exch} missing"
-        # Added in OpenAlgo v2.0.0.7 sync — see CHANGELOG.
+        # Added in native broker v2.0.0.7 sync — see CHANGELOG.
         for exch in ("NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX"):
             assert exch in SUPPORTED_EXCHANGES, f"{exch} missing after v2.0.1.1 sync"
 
@@ -186,6 +201,7 @@ class TestDataPipeline:
 
     def _make_pipeline(self):
         from flinttrade_historical.pipeline import DataPipeline
+
         pipeline = DataPipeline(":memory:")
         pipeline.initialise()
         return pipeline
@@ -206,8 +222,24 @@ class TestDataPipeline:
     def test_store_and_query_bars(self):
         pipeline = self._make_pipeline()
         bars = [
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000, "oi": 0},
-            {"timestamp": "2026-03-16 09:16:00", "open": 100.5, "high": 102, "low": 100, "close": 101.5, "volume": 2000, "oi": 0},
+            {
+                "timestamp": "2026-03-16 09:15:00",
+                "open": 100,
+                "high": 101,
+                "low": 99,
+                "close": 100.5,
+                "volume": 1000,
+                "oi": 0,
+            },
+            {
+                "timestamp": "2026-03-16 09:16:00",
+                "open": 100.5,
+                "high": 102,
+                "low": 100,
+                "close": 101.5,
+                "volume": 2000,
+                "oi": 0,
+            },
         ]
         inserted = pipeline.store_bars("ohlcv_1m", "RELIANCE", "NSE", bars)
         assert inserted == 2
@@ -255,8 +287,11 @@ class TestDataPipeline:
 
         pipeline = self._make_pipeline()
         dl_result = DownloadResult(
-            symbol="NIFTY", exchange="NFO", interval="5m",
-            start_date="2026-03-16", end_date="2026-03-16",
+            symbol="NIFTY",
+            exchange="NFO",
+            interval="5m",
+            start_date="2026-03-16",
+            end_date="2026-03-16",
             bars=[
                 OHLCV(timestamp="2026-03-16 09:15:00", open=24000, high=24050, low=23980, close=24020, volume=50000),
                 OHLCV(timestamp="2026-03-16 09:20:00", open=24020, high=24060, low=24000, close=24040, volume=60000),
@@ -270,20 +305,38 @@ class TestDataPipeline:
     def test_count_bars(self):
         pipeline = self._make_pipeline()
         assert pipeline.count_bars("ohlcv_1m", "X", "NSE") == 0
-        pipeline.store_bars("ohlcv_1m", "X", "NSE", [
-            {"timestamp": f"2026-03-16 09:{i:02d}:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}
-            for i in range(5)
-        ])
+        pipeline.store_bars(
+            "ohlcv_1m",
+            "X",
+            "NSE",
+            [
+                {
+                    "timestamp": f"2026-03-16 09:{i:02d}:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100,
+                    "volume": 1000,
+                }
+                for i in range(5)
+            ],
+        )
         assert pipeline.count_bars("ohlcv_1m", "X", "NSE") == 5
         pipeline.close()
 
     def test_context_manager(self):
         from flinttrade_historical.pipeline import DataPipeline
+
         with DataPipeline(":memory:") as pipeline:
             pipeline.initialise()
-            pipeline.store_bars("ohlcv_1d", "A", "NSE", [
-                {"timestamp": "2026-03-16", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
-            ])
+            pipeline.store_bars(
+                "ohlcv_1d",
+                "A",
+                "NSE",
+                [
+                    {"timestamp": "2026-03-16", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+                ],
+            )
             assert pipeline.count_bars("ohlcv_1d", "A", "NSE") == 1
 
 
@@ -297,23 +350,40 @@ class TestAggregation:
 
     def test_aggregate_5_bars_to_1(self):
         from flinttrade_historical.pipeline import aggregate_bars
+
         bars = [
-            {"timestamp": f"2026-03-16 09:{15 + i}:00", "open": 100 + i, "high": 105 + i, "low": 95 + i, "close": 102 + i, "volume": 1000, "oi": 0}
+            {
+                "timestamp": f"2026-03-16 09:{15 + i}:00",
+                "open": 100 + i,
+                "high": 105 + i,
+                "low": 95 + i,
+                "close": 102 + i,
+                "volume": 1000,
+                "oi": 0,
+            }
             for i in range(5)
         ]
         result = aggregate_bars(bars, 5)
         assert len(result) == 1
         agg = result[0]
-        assert agg["open"] == 100    # first bar's open
-        assert agg["close"] == 106   # last bar's close
-        assert agg["high"] == 109    # max of highs
-        assert agg["low"] == 95      # min of lows
-        assert agg["volume"] == 5000 # sum
+        assert agg["open"] == 100  # first bar's open
+        assert agg["close"] == 106  # last bar's close
+        assert agg["high"] == 109  # max of highs
+        assert agg["low"] == 95  # min of lows
+        assert agg["volume"] == 5000  # sum
 
     def test_aggregate_10_bars_into_2(self):
         from flinttrade_historical.pipeline import aggregate_bars
+
         bars = [
-            {"timestamp": f"2026-03-16 09:{15 + i}:00", "open": 100, "high": 110, "low": 90, "close": 100, "volume": 100}
+            {
+                "timestamp": f"2026-03-16 09:{15 + i}:00",
+                "open": 100,
+                "high": 110,
+                "low": 90,
+                "close": 100,
+                "volume": 100,
+            }
             for i in range(10)
         ]
         result = aggregate_bars(bars, 5)
@@ -321,8 +391,16 @@ class TestAggregation:
 
     def test_aggregate_partial_group(self):
         from flinttrade_historical.pipeline import aggregate_bars
+
         bars = [
-            {"timestamp": f"2026-03-16 09:{15 + i}:00", "open": 100, "high": 110, "low": 90, "close": 100, "volume": 100}
+            {
+                "timestamp": f"2026-03-16 09:{15 + i}:00",
+                "open": 100,
+                "high": 110,
+                "low": 90,
+                "close": 100,
+                "volume": 100,
+            }
             for i in range(7)
         ]
         result = aggregate_bars(bars, 5)
@@ -330,6 +408,7 @@ class TestAggregation:
 
     def test_aggregate_by_date(self):
         from flinttrade_historical.pipeline import aggregate_bars
+
         bars = [
             {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 110, "low": 90, "close": 105, "volume": 1000},
             {"timestamp": "2026-03-16 10:15:00", "open": 105, "high": 115, "low": 95, "close": 110, "volume": 2000},
@@ -347,16 +426,25 @@ class TestAggregation:
 
     def test_aggregate_empty(self):
         from flinttrade_historical.pipeline import aggregate_bars
+
         assert aggregate_bars([], 5) == []
 
     def test_pipeline_aggregate_1m_to_5m(self):
         from flinttrade_historical.pipeline import DataPipeline
+
         pipeline = DataPipeline(":memory:")
         pipeline.initialise()
 
         # Insert 10 x 1m bars
         bars = [
-            {"timestamp": f"2026-03-16 09:{15 + i}:00", "open": 100 + i, "high": 105 + i, "low": 95 + i, "close": 102 + i, "volume": 1000}
+            {
+                "timestamp": f"2026-03-16 09:{15 + i}:00",
+                "open": 100 + i,
+                "high": 105 + i,
+                "low": 95 + i,
+                "close": 102 + i,
+                "volume": 1000,
+            }
             for i in range(10)
         ]
         pipeline.store_bars("ohlcv_1m", "RELIANCE", "NSE", bars)
@@ -384,8 +472,10 @@ class TestExpiryInfo:
 
     def test_nearest_expiry(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
+
         info = ExpiryInfo(
-            symbol="NIFTY", exchange="NFO",
+            symbol="NIFTY",
+            exchange="NFO",
             expiry_dates=["260326", "260402", "260409"],
         )
         nearest = info.nearest(date(2026, 3, 20))
@@ -393,8 +483,10 @@ class TestExpiryInfo:
 
     def test_nearest_expiry_skips_past(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
+
         info = ExpiryInfo(
-            symbol="NIFTY", exchange="NFO",
+            symbol="NIFTY",
+            exchange="NFO",
             expiry_dates=["260326", "260402", "260409"],
         )
         nearest = info.nearest(date(2026, 3, 27))
@@ -404,7 +496,8 @@ class TestExpiryInfo:
         from flinttrade_historical.expiry_manager import ExpiryInfo
 
         info = ExpiryInfo(
-            symbol="NIFTY", exchange="NFO",
+            symbol="NIFTY",
+            exchange="NFO",
             expiry_dates=["26-MAR-26", "02-APR-26"],
         )
 
@@ -413,8 +506,10 @@ class TestExpiryInfo:
 
     def test_nearest_none_if_all_past(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
+
         info = ExpiryInfo(
-            symbol="NIFTY", exchange="NFO",
+            symbol="NIFTY",
+            exchange="NFO",
             expiry_dates=["260326"],
         )
         nearest = info.nearest(date(2026, 4, 1))
@@ -422,12 +517,20 @@ class TestExpiryInfo:
 
     def test_monthly_expiry_filter(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
+
         # Weekly expiries for 2 months — last one each month is the monthly
         info = ExpiryInfo(
-            symbol="NIFTY", exchange="NFO",
+            symbol="NIFTY",
+            exchange="NFO",
             expiry_dates=[
-                "260305", "260312", "260319", "260326",  # March weeklies
-                "260402", "260409", "260416", "260430",  # April weeklies
+                "260305",
+                "260312",
+                "260319",
+                "260326",  # March weeklies
+                "260402",
+                "260409",
+                "260416",
+                "260430",  # April weeklies
             ],
         )
         monthly = info.monthly()
@@ -437,11 +540,13 @@ class TestExpiryInfo:
 
     def test_count(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
+
         info = ExpiryInfo(symbol="X", exchange="NFO", expiry_dates=["260326", "260402"])
         assert info.count == 2
 
     def test_empty_expiries(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
+
         info = ExpiryInfo(symbol="X", exchange="NFO")
         assert info.count == 0
         assert info.nearest() is None
@@ -453,6 +558,7 @@ class TestExpiryManager:
 
     def test_get_expiries(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
+
         mock_client = MagicMock()
         mock_client.expiry.return_value = {"expiry": ["260326", "260402", "260409"]}
 
@@ -463,6 +569,7 @@ class TestExpiryManager:
 
     def test_get_expiries_reads_official_data_list(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
+
         mock_client = MagicMock()
         mock_client.expiry.return_value = {
             "status": "success",
@@ -491,9 +598,11 @@ class TestExpiryManager:
 
         mock_client = MagicMock()
         mock_client.expiry = AsyncMock(return_value={"expiry": ["260131"]})
-        mock_client.history = AsyncMock(return_value=[
-            OHLCV(timestamp="2026-01-15T09:15:00", open=100, high=101, low=99, close=100.5, volume=1000),
-        ])
+        mock_client.history = AsyncMock(
+            return_value=[
+                OHLCV(timestamp="2026-01-15T09:15:00", open=100, high=101, low=99, close=100.5, volume=1000),
+            ]
+        )
 
         mgr = ExpiryManager(mock_client)
         bars = mgr.build_continuous_futures("NIFTY", "NFO", "1d", "2026-01-01", "2026-01-31")
@@ -533,6 +642,7 @@ class TestExpiryManager:
 
     def test_get_expiries_cached(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
+
         mock_client = MagicMock()
         mock_client.expiry.return_value = {"expiry": ["260326"]}
 
@@ -544,6 +654,7 @@ class TestExpiryManager:
 
     def test_clear_cache(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
+
         mock_client = MagicMock()
         mock_client.expiry.return_value = {"expiry": ["260326"]}
 
@@ -555,17 +666,20 @@ class TestExpiryManager:
 
     def test_build_futures_symbol(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
+
         assert ExpiryManager._build_futures_symbol("NIFTY", "260326") == "NIFTY26MARFUT"
         assert ExpiryManager._build_futures_symbol("BANKNIFTY", "261231") == "BANKNIFTY26DECFUT"
         assert ExpiryManager._build_futures_symbol("CRUDEOIL", "260115") == "CRUDEOIL26JANFUT"
 
     def test_parse_expiry_date(self):
         from flinttrade_historical.expiry_manager import _parse_expiry_date
+
         assert _parse_expiry_date("260326") == date(2026, 3, 26)
         assert _parse_expiry_date("251231") == date(2025, 12, 31)
 
     def test_nearest_expiry_via_manager(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
+
         mock_client = MagicMock()
         mock_client.expiry.return_value = {"expiry": ["260326", "260402"]}
 
@@ -584,6 +698,7 @@ class TestFreeDataSource:
 
     def test_nse_data_import_error(self):
         from flinttrade_historical.free_data import NSEData
+
         nse = NSEData()
         # Without openchart installed, should get ImportError
         with patch.dict("sys.modules", {"openchart": None}):
@@ -606,14 +721,19 @@ class TestFreeDataSource:
 
             @staticmethod
             def iterrows():
-                yield 0, _Row({
-                    "datetime": "2026-01-01T09:15:00",
-                    "open": 100,
-                    "high": 101,
-                    "low": 99,
-                    "close": 100.5,
-                    "volume": 1000,
-                })
+                yield (
+                    0,
+                    _Row(
+                        {
+                            "datetime": "2026-01-01T09:15:00",
+                            "open": 100,
+                            "high": 101,
+                            "low": 99,
+                            "close": 100.5,
+                            "volume": 1000,
+                        }
+                    ),
+                )
 
         class _Chart:
             @staticmethod
@@ -634,6 +754,7 @@ class TestFreeDataSource:
 
     def test_commodity_data_unknown_commodity(self):
         from flinttrade_historical.free_data import CommodityData
+
         mcx = CommodityData()
         result = mcx.historical("PLATINUM", "2026-01-01", "2026-03-16")
         assert not result.success
@@ -641,6 +762,7 @@ class TestFreeDataSource:
 
     def test_commodity_supported_list(self):
         from flinttrade_historical.free_data import _YFINANCE_MCX_MAP
+
         assert "GOLD" in _YFINANCE_MCX_MAP
         assert "SILVER" in _YFINANCE_MCX_MAP
         assert "CRUDEOIL" in _YFINANCE_MCX_MAP
@@ -650,6 +772,7 @@ class TestFreeDataSource:
 
     def test_nse_holidays_class(self):
         from flinttrade_historical.free_data import NSEHolidays
+
         h = NSEHolidays()
         # Weekend should not be trading day
         saturday = date(2026, 3, 14)
@@ -660,6 +783,7 @@ class TestFreeDataSource:
 
     def test_free_data_source_interface(self):
         from flinttrade_historical.free_data import FreeDataSource
+
         free = FreeDataSource()
         assert hasattr(free, "nse_historical")
         assert hasattr(free, "commodity_historical")
@@ -669,9 +793,15 @@ class TestFreeDataSource:
 
     def test_free_bar_dataclass(self):
         from flinttrade_historical.free_data import FreeBar
+
         bar = FreeBar(
-            timestamp="2026-03-16T09:15:00", open=100, high=110,
-            low=90, close=105, volume=1000, source="openchart",
+            timestamp="2026-03-16T09:15:00",
+            open=100,
+            high=110,
+            low=90,
+            close=105,
+            volume=1000,
+            source="openchart",
         )
         assert bar.close == 105
         assert bar.source == "openchart"
@@ -687,10 +817,15 @@ class TestPackageExports:
 
     def test_all_exports(self):
         from flinttrade_historical import __all__
+
         expected = [
-            "HistoricalDownloader", "DownloadResult",
-            "FreeDataSource", "DataPipeline",
-            "ExpiryManager", "ExpiryInfo", "ContinuousFuturesBar",
+            "HistoricalDownloader",
+            "DownloadResult",
+            "FreeDataSource",
+            "DataPipeline",
+            "ExpiryManager",
+            "ExpiryInfo",
+            "ContinuousFuturesBar",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"

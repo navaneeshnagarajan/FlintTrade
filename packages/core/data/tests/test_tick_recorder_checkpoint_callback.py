@@ -58,9 +58,7 @@ def test_checkpoint_failure_never_reinserts_an_already_committed_batch() -> None
     assert recorder.flush_pending() is True
     assert storage.batches == [[("first",)]]
     assert recorder.pending_tick_count == 0
-    assert recorder.status_snapshot()["checkpoint_error"] == (
-        "Order-flow checkpoint failed (RuntimeError)"
-    )
+    assert recorder.status_snapshot()["checkpoint_error"] == ("Order-flow checkpoint failed (RuntimeError)")
 
     recorder._buffer.append(("second",))
     assert recorder.flush_pending() is True

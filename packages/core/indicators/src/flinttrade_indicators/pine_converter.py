@@ -119,103 +119,103 @@ _SIMPLE_UNARY: dict[str, str] = {
 _TA_FUNCTION_MAP: list[tuple[str, str, list[str]]] = [
     # (pine_name_stem, python_func, required_indicator_imports)
     # ─── moving averages ───────────────────────────────────────────────────
-    ("ta.ema",         "ema",              ["ema"]),
-    ("ta.sma",         "sma",              ["sma"]),
-    ("ta.wma",         "wma",              ["wma"]),
-    ("ta.hma",         "hull",             ["hull"]),
-    ("ta.dema",        "dema",             ["dema"]),
-    ("ta.tema",        "tema",             ["tema"]),
-    ("ta.rma",         "rma",              ["rma"]),
-    ("ta.linreg",      "linreg",           ["linreg"]),
+    ("ta.ema", "ema", ["ema"]),
+    ("ta.sma", "sma", ["sma"]),
+    ("ta.wma", "wma", ["wma"]),
+    ("ta.hma", "hull", ["hull"]),
+    ("ta.dema", "dema", ["dema"]),
+    ("ta.tema", "tema", ["tema"]),
+    ("ta.rma", "rma", ["rma"]),
+    ("ta.linreg", "linreg", ["linreg"]),
     # ─── momentum ──────────────────────────────────────────────────────────
-    ("ta.rsi",         "rsi",              ["rsi"]),
-    ("ta.macd",        "macd",             ["macd"]),
-    ("ta.stoch",       "stochastic",       ["stochastic"]),
-    ("ta.mom",         "mom",              ["mom"]),
-    ("ta.roc",         "roc",              ["roc"]),
-    ("ta.cci",         "cci",              ["cci"]),
-    ("ta.change",      "change",           ["change"]),
-    ("ta.williamsR",   "williams_r",       ["williams_r"]),
-    ("ta.mfi",         "mfi",              ["mfi"]),
+    ("ta.rsi", "rsi", ["rsi"]),
+    ("ta.macd", "macd", ["macd"]),
+    ("ta.stoch", "stochastic", ["stochastic"]),
+    ("ta.mom", "mom", ["mom"]),
+    ("ta.roc", "roc", ["roc"]),
+    ("ta.cci", "cci", ["cci"]),
+    ("ta.change", "change", ["change"]),
+    ("ta.williamsR", "williams_r", ["williams_r"]),
+    ("ta.mfi", "mfi", ["mfi"]),
     # ─── volatility ────────────────────────────────────────────────────────
-    ("ta.atr",         "atr",              ["atr"]),
-    ("ta.bb",          "bollinger_bands",  ["bollinger_bands"]),
-    ("ta.natr",        "natr",             ["natr"]),
-    ("ta.stdev",       "stdev",            ["stdev"]),
-    ("ta.variance",    "variance",         ["variance"]),
-    ("ta.dev",         "dev",              ["dev"]),
+    ("ta.atr", "atr", ["atr"]),
+    ("ta.bb", "bollinger_bands", ["bollinger_bands"]),
+    ("ta.natr", "natr", ["natr"]),
+    ("ta.stdev", "stdev", ["stdev"]),
+    ("ta.variance", "variance", ["variance"]),
+    ("ta.dev", "dev", ["dev"]),
     # ─── statistical series ────────────────────────────────────────────────
-    ("ta.highest",     "highest",          ["highest"]),
-    ("ta.lowest",      "lowest",           ["lowest"]),
-    ("ta.median",      "median",           ["median"]),
+    ("ta.highest", "highest", ["highest"]),
+    ("ta.lowest", "lowest", ["lowest"]),
+    ("ta.median", "median", ["median"]),
     # ─── trend ─────────────────────────────────────────────────────────────
-    ("ta.supertrend",  "supertrend",       ["supertrend"]),
-    ("ta.adx",         "adx",              ["adx"]),
-    ("ta.dmi",         "dmi",              ["dmi"]),
-    ("ta.ichimoku",    "ichimoku",         ["ichimoku"]),
-    ("ta.psar",        "parabolic_sar",    ["parabolic_sar"]),
+    ("ta.supertrend", "supertrend", ["supertrend"]),
+    ("ta.adx", "adx", ["adx"]),
+    ("ta.dmi", "dmi", ["dmi"]),
+    ("ta.ichimoku", "ichimoku", ["ichimoku"]),
+    ("ta.psar", "parabolic_sar", ["parabolic_sar"]),
     # ─── volume ────────────────────────────────────────────────────────────
-    ("ta.obv",         "obv",              ["obv"]),
-    ("ta.vwma",        "vwma",             ["vwma"]),
-    ("ta.cmf",         "cmf",              ["cmf"]),
+    ("ta.obv", "obv", ["obv"]),
+    ("ta.vwma", "vwma", ["vwma"]),
+    ("ta.cmf", "cmf", ["cmf"]),
     # ─── signals ───────────────────────────────────────────────────────────
-    ("ta.crossover",   "crossover",        ["crossover"]),
-    ("ta.crossunder",  "crossunder",       ["crossunder"]),
-    ("ta.pivothigh",   "pivothigh",        ["pivothigh"]),
-    ("ta.pivotlow",    "pivotlow",         ["pivotlow"]),
-    ("ta.valuewhen",   "valuewhen",        ["valuewhen"]),
+    ("ta.crossover", "crossover", ["crossover"]),
+    ("ta.crossunder", "crossunder", ["crossunder"]),
+    ("ta.pivothigh", "pivothigh", ["pivothigh"]),
+    ("ta.pivotlow", "pivotlow", ["pivotlow"]),
+    ("ta.valuewhen", "valuewhen", ["valuewhen"]),
 ]
 
 # Functions that need OHLCV arrays injected (not just the user-supplied args).
 # Maps python function name → argument template using named placeholders.
 _OHLCV_INJECTION: dict[str, str] = {
-    "atr":           "{highs}, {lows}, {closes}, {period}",
-    "natr":          "{highs}, {lows}, {closes}, {period}",
-    "supertrend":    "{highs}, {lows}, {closes}, {period}, {factor}",
-    "adx":           "{highs}, {lows}, {closes}, {period}",
-    "dmi":           "{highs}, {lows}, {closes}, {period}",
-    "ichimoku":      "{highs}, {lows}, {closes}",
+    "atr": "{highs}, {lows}, {closes}, {period}",
+    "natr": "{highs}, {lows}, {closes}, {period}",
+    "supertrend": "{highs}, {lows}, {closes}, {period}, {factor}",
+    "adx": "{highs}, {lows}, {closes}, {period}",
+    "dmi": "{highs}, {lows}, {closes}, {period}",
+    "ichimoku": "{highs}, {lows}, {closes}",
     "parabolic_sar": "{highs}, {lows}",
-    "stochastic":    "{highs}, {lows}, {closes}, {period}",
-    "cci":           "{highs}, {lows}, {closes}, {period}",
-    "mfi":           "{highs}, {lows}, {closes}, {volumes}, {period}",
-    "cmf":           "{highs}, {lows}, {closes}, {volumes}, {period}",
-    "obv":           "{closes}, {volumes}",
-    "vwma":          "{closes}, {volumes}, {period}",
+    "stochastic": "{highs}, {lows}, {closes}, {period}",
+    "cci": "{highs}, {lows}, {closes}, {period}",
+    "mfi": "{highs}, {lows}, {closes}, {volumes}, {period}",
+    "cmf": "{highs}, {lows}, {closes}, {volumes}, {period}",
+    "obv": "{closes}, {volumes}",
+    "vwma": "{closes}, {volumes}, {period}",
 }
 
 # Pine source-variable aliases → Python array names
 _SOURCE_MAP: dict[str, str] = {
-    "close":  "closes",
-    "open":   "opens",
-    "high":   "highs",
-    "low":    "lows",
+    "close": "closes",
+    "open": "opens",
+    "high": "highs",
+    "low": "lows",
     "volume": "volumes",
-    "hl2":    "((highs + lows) / 2.0)",
-    "hlc3":   "((highs + lows + closes) / 3.0)",
-    "ohlc4":  "((opens + highs + lows + closes) / 4.0)",
+    "hl2": "((highs + lows) / 2.0)",
+    "hlc3": "((highs + lows + closes) / 3.0)",
+    "ohlc4": "((opens + highs + lows + closes) / 4.0)",
 }
 
 # Pine input.xxx → Python type coercion
 _INPUT_TYPE_MAP: dict[str, str] = {
-    "input.int":    "int",
-    "input.float":  "float",
-    "input.bool":   "bool",
+    "input.int": "int",
+    "input.float": "float",
+    "input.bool": "bool",
     "input.string": "str",
-    "input.source": "",      # source inputs become array references
-    "input.color":  "str",
-    "input":        "int",   # bare `input()` defaults to int in Pine
+    "input.source": "",  # source inputs become array references
+    "input.color": "str",
+    "input": "int",  # bare `input()` defaults to int in Pine
 }
 
 # Pine keywords → Python equivalents (simple token substitution)
 _KEYWORD_MAP: dict[str, str] = {
-    "true":  "True",
+    "true": "True",
     "false": "False",
-    "na":    "np.nan",
-    "and":   "and",
-    "or":    "or",
-    "not":   "not",
-    "var ":  "",   # Pine `var` keyword (persistent variable) — just strip it
+    "na": "np.nan",
+    "and": "and",
+    "or": "or",
+    "not": "not",
+    "var ": "",  # Pine `var` keyword (persistent variable) — just strip it
 }
 
 
@@ -352,10 +352,10 @@ class PineConverter:
             volumes: Python variable name for volume array (default ``"volumes"``).
         """
         self._arrays = {
-            "highs":   highs,
-            "lows":    lows,
-            "closes":  closes,
-            "opens":   opens,
+            "highs": highs,
+            "lows": lows,
+            "closes": closes,
+            "opens": opens,
             "volumes": volumes,
         }
 
@@ -386,9 +386,7 @@ class PineConverter:
         output_lines: list[str] = []
 
         for raw_line in pine_text.splitlines():
-            converted, line_imports, line_warnings, line_unsupported = (
-                self._convert_line(raw_line)
-            )
+            converted, line_imports, line_warnings, line_unsupported = self._convert_line(raw_line)
             imports.update(line_imports)
             warnings.extend(line_warnings)
             unsupported.extend(line_unsupported)
@@ -415,13 +413,29 @@ class PineConverter:
         supported = [stem for stem, _, _ in _TA_FUNCTION_MAP]
         supported += list(_INPUT_TYPE_MAP.keys())
         supported += [
-            "math.abs", "math.max", "math.min", "math.floor",
-            "math.round", "math.ceil", "math.sqrt", "math.log",
-            "math.exp", "math.pow",
-            "plot", "plotshape", "plotarrow", "plotchar",
-            "alertcondition", "alert",
-            "strategy.entry", "strategy.close", "strategy.exit",
-            "if", "else", "for", "while",
+            "math.abs",
+            "math.max",
+            "math.min",
+            "math.floor",
+            "math.round",
+            "math.ceil",
+            "math.sqrt",
+            "math.log",
+            "math.exp",
+            "math.pow",
+            "plot",
+            "plotshape",
+            "plotarrow",
+            "plotchar",
+            "alertcondition",
+            "alert",
+            "strategy.entry",
+            "strategy.close",
+            "strategy.exit",
+            "if",
+            "else",
+            "for",
+            "while",
             # NOTE: request.security() (multi-timeframe) is NOT supported by
             # this converter — it requires the full PineTS runtime with async
             # data fetching and a ScopeManager for variable scoping.
@@ -433,9 +447,7 @@ class PineConverter:
     # Line-level processing
     # ------------------------------------------------------------------
 
-    def _convert_line(
-        self, line: str
-    ) -> tuple[str, set[str], list[str], list[str]]:
+    def _convert_line(self, line: str) -> tuple[str, set[str], list[str], list[str]]:
         """Convert a single Pine Script line.
 
         Args:
@@ -531,12 +543,10 @@ class PineConverter:
             elif ch == '"' and not in_single:
                 in_double = not in_double
             elif ch == "/" and line[i + 1] == "/" and not in_single and not in_double:
-                return line[:i], line[i + 2:]
+                return line[:i], line[i + 2 :]
         return line, ""
 
-    def _convert_inputs(
-        self, line: str
-    ) -> tuple[str, set[str], list[str]]:
+    def _convert_inputs(self, line: str) -> tuple[str, set[str], list[str]]:
         """Replace ``input.xxx(defval, ...)`` with ``xxx(defval)`` assignments.
 
         Pine Script input() calls appear at the top of a script as parameter
@@ -554,9 +564,7 @@ class PineConverter:
 
         for pine_prefix, py_type in _INPUT_TYPE_MAP.items():
             # Match: optionally `varname = input.xxx(` or just bare `input.xxx(`
-            pattern = re.compile(
-                r"(\w+)\s*=\s*" + re.escape(pine_prefix) + r"\s*\(([^)]*)\)"
-            )
+            pattern = re.compile(r"(\w+)\s*=\s*" + re.escape(pine_prefix) + r"\s*\(([^)]*)\)")
             for m in list(pattern.finditer(line)):
                 varname = m.group(1)
                 args_text = m.group(2)
@@ -565,18 +573,13 @@ class PineConverter:
                     replacement = f"{varname} = {py_type}({default_val})"
                 else:
                     replacement = f"{varname} = {default_val}  # source input"
-                line = line[: m.start()] + replacement + line[m.end():]
-                warnings.append(
-                    f"input '{varname}' converted to Python literal — "
-                    "update value as needed"
-                )
+                line = line[: m.start()] + replacement + line[m.end() :]
+                warnings.append(f"input '{varname}' converted to Python literal — update value as needed")
                 break  # one substitution per iteration; rerun outer loop if needed
 
         return line, imports, warnings
 
-    def _convert_ta_calls(
-        self, line: str
-    ) -> tuple[str, set[str], list[str], list[str]]:
+    def _convert_ta_calls(self, line: str) -> tuple[str, set[str], list[str], list[str]]:
         """Replace ``ta.xxx(...)`` calls with FlintTrade indicator calls.
 
         Iterates over ``_TA_FUNCTION_MAP`` in order.  For each recognised
@@ -603,18 +606,13 @@ class PineConverter:
                 open_paren = m.end() - 1
                 close_paren = _find_matching_paren(line, open_paren)
                 if close_paren == -1:
-                    warnings.append(
-                        f"Could not find closing paren for {pine_stem}() call"
-                    )
+                    warnings.append(f"Could not find closing paren for {pine_stem}() call")
                     break
                 args_text = line[open_paren + 1 : close_paren]
                 raw_args = _extract_call_args(args_text)
                 # Map Pine source args to Python array names, then apply
                 # instance-level custom array names on top of the defaults.
-                mapped_args = [
-                    self._apply_custom_arrays(_map_source(a))
-                    for a in raw_args
-                ]
+                mapped_args = [self._apply_custom_arrays(_map_source(a)) for a in raw_args]
                 py_call = self._build_py_call(py_func, mapped_args)
                 line = line[: m.start()] + py_call + line[close_paren + 1 :]
                 imports.update(func_imports)
@@ -651,10 +649,10 @@ class PineConverter:
         """
         # Map from the hard-coded defaults to the instance's configured names.
         replacements = {
-            "closes":  self._arrays["closes"],
-            "highs":   self._arrays["highs"],
-            "lows":    self._arrays["lows"],
-            "opens":   self._arrays["opens"],
+            "closes": self._arrays["closes"],
+            "highs": self._arrays["highs"],
+            "lows": self._arrays["lows"],
+            "opens": self._arrays["opens"],
             "volumes": self._arrays["volumes"],
         }
         for default, custom in replacements.items():
@@ -689,11 +687,15 @@ class PineConverter:
             period = args[0] if args else "14"
             factor = args[1] if len(args) > 1 else "3.0"
             call_args = template.format(
-                highs=h, lows=lo, closes=c, opens=o, volumes=v,
-                period=period, factor=factor,
+                highs=h,
+                lows=lo,
+                closes=c,
+                opens=o,
+                volumes=v,
+                period=period,
+                factor=factor,
             )
-        elif py_func in {"ema", "sma", "wma", "hull", "dema", "tema", "linreg",
-                          "rsi", "mom", "roc"}:
+        elif py_func in {"ema", "sma", "wma", "hull", "dema", "tema", "linreg", "rsi", "mom", "roc"}:
             # ta.xxx(source, length)
             source = args[0] if args else c
             length = args[1] if len(args) > 1 else "14"
@@ -701,15 +703,15 @@ class PineConverter:
         elif py_func == "macd":
             # ta.macd(source, fast, slow, signal)
             source = args[0] if args else c
-            fast   = args[1] if len(args) > 1 else "12"
-            slow   = args[2] if len(args) > 2 else "26"
+            fast = args[1] if len(args) > 1 else "12"
+            slow = args[2] if len(args) > 2 else "26"
             signal = args[3] if len(args) > 3 else "9"
             call_args = f"{source}, {fast}, {slow}, {signal}"
         elif py_func == "bollinger_bands":
             # ta.bb(source, length, mult)
             source = args[0] if args else c
             length = args[1] if len(args) > 1 else "20"
-            mult   = args[2] if len(args) > 2 else "2.0"
+            mult = args[2] if len(args) > 2 else "2.0"
             call_args = f"{source}, {length}, {mult}"
         elif py_func == "rma":
             # ta.rma(source, length)  — Wilder's RMA (same signature as ema/sma)
@@ -745,14 +747,14 @@ class PineConverter:
         elif py_func in {"pivothigh", "pivotlow"}:
             # ta.pivothigh(source, leftbars, rightbars)
             source = args[0] if args else c
-            left   = args[1] if len(args) > 1 else "5"
-            right  = args[2] if len(args) > 2 else "5"
+            left = args[1] if len(args) > 1 else "5"
+            right = args[2] if len(args) > 2 else "5"
             call_args = f"{source}, {left}, {right}"
         elif py_func == "valuewhen":
             # ta.valuewhen(condition, source, occurrence)
-            cond   = args[0] if args else "condition"
+            cond = args[0] if args else "condition"
             source = args[1] if len(args) > 1 else c
-            occ    = args[2] if len(args) > 2 else "0"
+            occ = args[2] if len(args) > 2 else "0"
             call_args = f"{cond}, {source}, {occ}"
         else:
             # Generic passthrough: join all args as-is
@@ -783,9 +785,7 @@ class PineConverter:
             imports.add("vwap")
         return line, imports
 
-    def _convert_alertcondition(
-        self, line: str
-    ) -> tuple[str, set[str], list[str]]:
+    def _convert_alertcondition(self, line: str) -> tuple[str, set[str], list[str]]:
         """Convert ``alertcondition(cond, ...)`` to a signal boolean variable.
 
         The first argument (the condition expression) is extracted and assigned
@@ -817,8 +817,7 @@ class PineConverter:
             replacement = " " * indent + f"signal = bool({condition})"
             line = line[: m.start()] + replacement + line[close_paren + 1 :]
             warnings.append(
-                f"{fn_name}() converted to 'signal = bool(condition)' — "
-                "verify condition expression is correct"
+                f"{fn_name}() converted to 'signal = bool(condition)' — verify condition expression is correct"
             )
             break
 

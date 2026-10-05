@@ -77,7 +77,7 @@ const SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE =
 
 const ACTIVE_JOB = {
   name: "post_market_analysis",
-  description: "Verify OpenAlgo session at 9:10 AM IST",
+  description: "Verify native broker session at 9:10 AM IST",
   trigger_type: "cron",
   status: "ACTIVE",
   last_run: "2026-09-19T03:40:00+00:00",

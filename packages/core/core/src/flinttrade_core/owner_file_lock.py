@@ -186,11 +186,7 @@ class _WindowsOwnerSafeFileLock(WindowsFileLock):
             parent_stat = lock_path.parent.lstat()
         except OSError as exc:
             raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
-        if (
-            not stat.S_ISDIR(parent_stat.st_mode)
-            or stat.S_ISLNK(parent_stat.st_mode)
-            or _is_reparse_point(parent_stat)
-        ):
+        if not stat.S_ISDIR(parent_stat.st_mode) or stat.S_ISLNK(parent_stat.st_mode) or _is_reparse_point(parent_stat):
             raise UnsafeFileLockPathError("owner-validated lock path is unsafe")
 
         try:
@@ -243,9 +239,7 @@ class _WindowsOwnerSafeFileLock(WindowsFileLock):
             try:
                 descriptor = security.prepare(descriptor)
             except Exception as exc:
-                raise UnsafeFileLockPathError(
-                    "owner-validated lock path is unsafe"
-                ) from exc
+                raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
             descriptor_stat = os.fstat(descriptor)
             _assert_safe_windows_lock_stat(
                 descriptor_stat,
@@ -254,9 +248,7 @@ class _WindowsOwnerSafeFileLock(WindowsFileLock):
             try:
                 security.assert_current_user_owns(descriptor, descriptor_stat)
             except Exception as exc:
-                raise UnsafeFileLockPathError(
-                    "owner-validated lock path is unsafe"
-                ) from exc
+                raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
 
             try:
                 msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
@@ -281,18 +273,14 @@ class _WindowsOwnerSafeFileLock(WindowsFileLock):
             try:
                 security.harden(descriptor)
             except Exception as exc:
-                raise UnsafeFileLockPathError(
-                    "owner-validated lock path is unsafe"
-                ) from exc
+                raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
             descriptor_stat = os.fstat(descriptor)
             _validate_windows_lock_descriptor(descriptor, descriptor_stat, security)
 
             try:
                 current_path_stat = os.lstat(self.lock_file)
             except OSError as exc:
-                raise UnsafeFileLockPathError(
-                    "owner-validated lock path is unsafe"
-                ) from exc
+                raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
             _assert_safe_windows_lock_stat(
                 current_path_stat,
                 expected=descriptor_stat,

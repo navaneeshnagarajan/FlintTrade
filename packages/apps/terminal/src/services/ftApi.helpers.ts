@@ -33,7 +33,7 @@ export function isDemoUserSession(): boolean {
  * Build the standard request headers for every FT-API helper call.
  *
  * Attaches the configured backend ``X-API-Key`` (from
- * :mod:`connectionStore`; FlintTrade key preferred, OpenAlgo key still works
+ * :mod:`connectionStore`; FlintTrade key preferred, broker key still works
  * as a compatibility fallback) and the FlintTrade JWT
  * ``Authorization: Bearer <jwt>`` (from :mod:`authStore`) when present.
  * This ensures server-side guards like :func:`require_live_unlocked` and

@@ -49,15 +49,4 @@ def broker_service_descriptors() -> tuple[ProviderDescriptor, ...]:
                 implemented=True,
             )
         )
-    descriptors.append(
-        ProviderDescriptor(
-            provider_id="broker-bridge:openalgo",
-            display_name="OpenAlgo broker bridge",
-            service_kinds=_BROKER_SERVICE_KINDS,
-            capabilities=(*_COMMON_BROKER_CAPABILITIES, "bridge"),
-            auth_models=("api_key",),
-            connection_requirements=("self_hosted_openalgo",),
-            implemented=True,
-        )
-    )
     return tuple(descriptors)

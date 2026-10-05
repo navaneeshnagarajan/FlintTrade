@@ -83,7 +83,7 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
     A route added without an allowlist entry fails this test.
     """
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     logging.getLogger().setLevel(logging.WARNING)
 
     from flinttrade_core.app import create_flask_app
@@ -174,9 +174,7 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
                             **kwargs,
                         )
                         if rejected.status_code != 401:
-                            failures.append(
-                                f"{label} {method} {rule.rule} bearer={rejected.status_code}"
-                            )
+                            failures.append(f"{label} {method} {rule.rule} bearer={rejected.status_code}")
 
         _probe("no-key")
         monkeypatch.setenv("FLINTTRADE_API_KEY", api_key)

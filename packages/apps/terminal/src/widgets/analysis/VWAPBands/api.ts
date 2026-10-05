@@ -54,6 +54,7 @@ export interface VwapBandsResponse {
 export async function postVwapBands(
   bars: VwapRequestBar[],
   sessionReset = true,
+  signal?: AbortSignal,
 ): Promise<VwapBandsResponse> {
   if (bars.length === 0) {
     throw new Error(
@@ -63,5 +64,5 @@ export async function postVwapBands(
   return postV1<VwapBandsResponse>("indicators/vwap", {
     bars,
     session_reset: sessionReset,
-  });
+  }, signal);
 }

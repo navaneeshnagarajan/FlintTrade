@@ -34,14 +34,10 @@ from flinttrade_core.instrument_lots import (
 logger = logging.getLogger("flinttrade.instrument_lots")
 
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
-NEO_MASTER_URL = (
-    "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/{day}/transformed/{name}.csv"
-)
+NEO_MASTER_URL = "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/{day}/transformed/{name}.csv"
 _NEO_FILES = ("nse_fo", "bse_fo")
 _UNDERLYINGS = ("NIFTY", "BANKNIFTY", "SENSEX")
-_LISTED = re.compile(
-    r"^(NIFTY|BANKNIFTY|SENSEX)(?:-|\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))"
-)
+_LISTED = re.compile(r"^(NIFTY|BANKNIFTY|SENSEX)(?:-|\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))")
 _YY_MONTH = re.compile(r"(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)")
 _MONTHS = {
     "JAN": 1,

@@ -1,6 +1,6 @@
 # Core
 
-> Flask application, OpenAlgo client (45+ endpoints), config and workspace management, authentication service, and the WSGI prefix-stripper.
+> Flask application, native broker read client, config and workspace management, authentication service, and the WSGI prefix-stripper.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -9,7 +9,7 @@
 ## Public surface
 
 - `src/flinttrade_core/app.py — Flask app factory + blueprint registration`
-- `src/flinttrade_core/openalgo_client.py — typed wrapper over OpenAlgo's REST API`
+- `src/flinttrade_core/broker_client.py — read-only native broker client`
 - `src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance`
 - `src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders`
 
@@ -32,6 +32,10 @@ root workspace.
 ```bash
 python -m pytest packages/core/core/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

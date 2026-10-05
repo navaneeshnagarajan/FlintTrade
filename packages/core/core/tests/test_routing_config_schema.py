@@ -22,7 +22,7 @@ def test_accepts_canonical_default() -> None:
 
 
 def test_rejects_non_colon_selector() -> None:
-    bad = {**_brokers(), "execution": {"default": "openalgo"}}  # no colon
+    bad = {**_brokers(), "execution": {"default": "dhan"}}  # no colon
     with pytest.raises(RoutingConfigError):
         RoutingConfig.from_workspace(bad)
 

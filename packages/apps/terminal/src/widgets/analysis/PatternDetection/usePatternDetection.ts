@@ -1,7 +1,7 @@
 /**
  * usePatternDetection — TanStack Query hook for candlestick pattern detection
  * (W4). When connected it fetches the symbol's recent daily bars from the
- * OpenAlgo bridge history and posts them to the detection endpoint, so the
+ * native broker history and posts them to the detection endpoint, so the
  * scan is genuinely live; disconnected callers fall back to the sample scan.
  */
 
@@ -10,6 +10,7 @@ import { getHistory } from "@/services/api";
 import { getCandlestickPatterns } from "@/services/ftApi";
 import type { CandlestickPatternResponse } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
+import { useMarketDataScope, requireCurrentMarketDataScope } from "@/hooks/useDataScope";
 
 function isoDaysAgo(days: number): string {
   const d = new Date();
@@ -22,10 +23,13 @@ export function usePatternDetection(
   exchange: string,
   isConnected = false,
 ) {
+  const scope = useMarketDataScope();
   return useQuery<CandlestickPatternResponse>({
-    queryKey: ["pattern-detection", symbol, exchange],
-    queryFn: async () => {
-      const bars = await getHistory(symbol, exchange, "D", isoDaysAgo(120), isoDaysAgo(0));
+    queryKey: ["pattern-detection", scope, isConnected, symbol, exchange],
+    queryFn: async ({ signal }) => {
+      const bars = await getHistory(symbol, exchange, "D", isoDaysAgo(120), isoDaysAgo(0), signal, scope);
+      requireCurrentMarketDataScope(scope);
+      signal.throwIfAborted();
       const mapped = (bars ?? []).map((b) => ({
         open: b.open,
         high: b.high,
@@ -33,7 +37,10 @@ export function usePatternDetection(
         close: b.close,
         time: new Date(b.timestamp * 1000).toISOString().slice(0, 10),
       }));
-      return getCandlestickPatterns(mapped);
+      const result = await getCandlestickPatterns(mapped, signal);
+      requireCurrentMarketDataScope(scope);
+      signal.throwIfAborted();
+      return result;
     },
     enabled: isConnected && Boolean(symbol),
     refetchInterval: isConnected && isMarketHours() ? 60_000 : false,

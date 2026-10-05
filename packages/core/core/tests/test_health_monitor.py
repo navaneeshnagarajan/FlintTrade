@@ -6,7 +6,6 @@ Run with:
 
 from __future__ import annotations
 
-import socket
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -32,12 +31,9 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 def _monitor(**kwargs) -> HealthMonitor:
     """Create a HealthMonitor with safe defaults for unit tests.
 
-    Suppresses disk/db/websocket checks unless explicitly configured.
+    Suppresses disk/db checks unless explicitly configured.
     """
-    defaults: dict = {
-        "ws_host": "127.0.0.1",
-        "ws_port": 19999,  # unused port — ws check will fail but that's ok
-    }
+    defaults: dict = {}
     defaults.update(kwargs)
     return HealthMonitor(**defaults)
 
@@ -50,7 +46,10 @@ def _monitor(**kwargs) -> HealthMonitor:
 class TestOverall:
     def _check(self, status):
         return HealthCheck(
-            name="x", status=status, message="", metrics={},
+            name="x",
+            status=status,
+            message="",
+            metrics={},
             checked_at=datetime.now(_IST),
         )
 
@@ -101,9 +100,7 @@ class TestHealthCheckToDict:
 class TestHealthReportToDict:
     def test_serialises_overall_and_checks(self):
         ts = datetime.now(_IST)
-        hc = HealthCheck(
-            name="disk", status="healthy", message="ok", metrics={}, checked_at=ts
-        )
+        hc = HealthCheck(name="disk", status="healthy", message="ok", metrics={}, checked_at=ts)
         report = HealthReport(
             overall_status="healthy",
             checks=[hc],
@@ -139,14 +136,10 @@ class TestCheckMemory:
         m = _monitor()
         mock_psutil = MagicMock()
         mock_proc = MagicMock()
-        mock_proc.memory_info.return_value = MagicMock(
-            rss=1024 * 1024 * 512, vms=1024 * 1024 * 1024
-        )
+        mock_proc.memory_info.return_value = MagicMock(rss=1024 * 1024 * 512, vms=1024 * 1024 * 1024)
         mock_proc.memory_percent.return_value = 60.0  # above 50% threshold
         mock_psutil.Process.return_value = mock_proc
-        mock_psutil.virtual_memory.return_value = MagicMock(
-            total=8 * 1024**3, available=2 * 1024**3, percent=75.0
-        )
+        mock_psutil.virtual_memory.return_value = MagicMock(total=8 * 1024**3, available=2 * 1024**3, percent=75.0)
         with patch.dict("sys.modules", {"psutil": mock_psutil}):
             result = m.check_memory()
         assert result.status == "degraded"
@@ -274,28 +267,6 @@ class TestCheckThreadCount:
 # ---------------------------------------------------------------------------
 
 
-class TestCheckWebsocket:
-    def test_reachable_port(self):
-        """Open a local server socket and probe it."""
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind(("127.0.0.1", 0))
-        server.listen(1)
-        _, port = server.getsockname()
-        try:
-            m = HealthMonitor(ws_host="127.0.0.1", ws_port=port)
-            result = m.check_websocket()
-            assert result.status == "healthy"
-            assert result.metrics["reachable"] is True
-        finally:
-            server.close()
-
-    def test_unreachable_port_degraded(self):
-        m = HealthMonitor(ws_host="127.0.0.1", ws_port=19998)
-        result = m.check_websocket()
-        assert result.status == "degraded"
-        assert result.metrics["reachable"] is False
-
-
 # ---------------------------------------------------------------------------
 # check_database
 # ---------------------------------------------------------------------------
@@ -309,6 +280,7 @@ class TestCheckDatabase:
 
     def test_readable_duckdb(self, tmp_path):
         import duckdb
+
         db_path = tmp_path / "test.duckdb"
         conn = duckdb.connect(str(db_path))
         conn.execute("CREATE TABLE t (x INT)")
@@ -370,7 +342,7 @@ class TestCheckAll:
     def test_report_has_eight_checks(self):
         m = _monitor()
         report = m.check_all()
-        assert len(report.checks) == 8
+        assert len(report.checks) == 7
 
     def test_report_timestamp_has_tzinfo(self):
         m = _monitor()
@@ -379,6 +351,7 @@ class TestCheckAll:
 
     def test_to_dict_is_serialisable(self):
         import json
+
         m = _monitor()
         report = m.check_all()
         d = report.to_dict()

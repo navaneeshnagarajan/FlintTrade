@@ -5,8 +5,8 @@
  *         RiskSection, GeneralSection.
  */
 
-import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ vi.mock("@/stores/skillStore", () => {
       invest: { holdingsViewed: 0, sipsCreated: 0, goalsSet: 0 },
       learn: { lessonsCompleted: 0, quizzesPassed: 0, articlesRead: 0 },
       lab: { backtestsRun: 0, strategiesCreated: 0, optimizationsRun: 0 },
-      automate: { flowsCreated: 0, alertsSet: 0, strategiesUploaded: 0 },
+      automate: { alertsSet: 0, strategiesUploaded: 0 },
       ai: { queriesRun: 0, agentsDeployed: 0 },
     },
     getEffectiveLevel: () => "intermediate",
@@ -189,7 +189,6 @@ vi.mock("@/components/ui/badge", () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { ConnectionSection } from "../ConnectionSection";
 import { AppearanceSection } from "../AppearanceSection";
 import { AboutSection } from "../AboutSection";
 import { SecuritySection } from "../SecuritySection";
@@ -205,116 +204,12 @@ import { PracticeSection } from "../PracticeSection";
 import { MonitoringSection } from "../MonitoringSection";
 import { SkillSection } from "../SkillSection";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
-import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
-import { useConnectionStore } from "@/stores/connectionStore";
 
 // ---------------------------------------------------------------------------
 // 1. ConnectionSection
 // ---------------------------------------------------------------------------
 
-describe("ConnectionSection", () => {
-  beforeEach(() => {
-    useConnectionStore.setState(useConnectionStore.getInitialState());
-  });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  function renderConnectionSection(onSaved = vi.fn()) {
-    return render(
-      <ConnectionSection
-        settings={{
-          host: "http://127.0.0.1:5000",
-          port: "5000",
-          wsPort: "8765",
-          apiKeyConfigured: true,
-          apiKeyLast4: "-key",
-        }}
-        onSaved={onSaved}
-      />,
-    );
-  }
-
-  it("renders with host input and section title", () => {
-    renderConnectionSection();
-
-    expect(screen.getByText("Broker Gateway")).toBeInTheDocument();
-    expect(screen.getByLabelText("OpenAlgo-compatible URL")).toBeInTheDocument();
-    expect(screen.getByLabelText("REST port")).toBeInTheDocument();
-    expect(screen.getByLabelText("WebSocket port")).toBeInTheDocument();
-    expect(screen.getByText("Test Connection")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /save connection/i })).toBeInTheDocument();
-  });
-
-  it("suggests OpenAlgo's port 5000 in the gateway URL placeholder, never FlintTrade's 5100", () => {
-    // 5100 is FlintTrade's own backend — pointing the OpenAlgo bridge at it
-    // guarantees a broken connection (item 1).
-    renderConnectionSection();
-
-    expect(screen.getByLabelText("OpenAlgo-compatible URL")).toHaveAttribute(
-      "placeholder",
-      DEFAULT_OPENALGO_HOST,
-    );
-    expect(DEFAULT_OPENALGO_HOST).toContain(":5000");
-    expect(DEFAULT_OPENALGO_HOST).not.toContain(":5001");
-  });
-
-  it("keeps edits local and preserves the saved key in one complete save", async () => {
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({ status: "ok", message: "saved" }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ));
-    vi.stubGlobal("fetch", fetchMock);
-    useConnectionStore.setState({ apiKey: "existing-api-key" });
-    const onSaved = vi.fn();
-    renderConnectionSection(onSaved);
-
-    fireEvent.change(screen.getByLabelText("OpenAlgo-compatible URL"), {
-      target: { value: "https://openalgo.local" },
-    });
-    fireEvent.change(screen.getByLabelText("REST port"), {
-      target: { value: "5010" },
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(useConnectionStore.getState().host).toBe("");
-
-    fireEvent.click(screen.getByRole("button", { name: /save connection/i }));
-
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/ft-api/v1/config/openalgo",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          host: "https://openalgo.local",
-          port: "5010",
-          ws_port: "8765",
-        }),
-      }),
-    );
-    expect(useConnectionStore.getState()).toEqual(expect.objectContaining({
-      host: "https://openalgo.local",
-      apiKey: "existing-api-key",
-      wsUrl: "wss://openalgo.local:8765",
-    }));
-  });
-
-  it("offers a setup wizard entry point that navigates to /setup", () => {
-    renderConnectionSection();
-
-    const listener = vi.fn();
-    window.addEventListener("flinttrade:navigate", listener);
-    try {
-      fireEvent.click(screen.getByRole("button", { name: /open setup wizard/i }));
-      expect(listener).toHaveBeenCalledTimes(1);
-      expect((listener.mock.calls[0][0] as CustomEvent<string>).detail).toBe("/setup");
-    } finally {
-      window.removeEventListener("flinttrade:navigate", listener);
-    }
-  });
-});
 
 // ---------------------------------------------------------------------------
 // 2. AppearanceSection
@@ -509,8 +404,11 @@ describe("Section smoke renders (crash guard)", () => {
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("SkillSection renders", () => {
+  it("SkillSection shows surviving activity counters without the retired flow counter", () => {
     const { container } = render(<SkillSection />);
     expect(container.firstChild).toBeTruthy();
+    expect(screen.getByText("Alerts Set")).toBeInTheDocument();
+    expect(screen.getByText("Strategies Uploaded")).toBeInTheDocument();
+    expect(screen.queryByText("Flows Created")).not.toBeInTheDocument();
   });
 });

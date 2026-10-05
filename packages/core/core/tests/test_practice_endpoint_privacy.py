@@ -26,9 +26,13 @@ _ROUTES = (
 @pytest.fixture
 def endpoint(monkeypatch):
     app = Flask(__name__)
-    app.config.update(TESTING=True, TIME_SCHEDULER=SimpleNamespace(
-        get_market_session=lambda: None, now_ist=lambda: None,
-    ))
+    app.config.update(
+        TESTING=True,
+        TIME_SCHEDULER=SimpleNamespace(
+            get_market_session=lambda: None,
+            now_ist=lambda: None,
+        ),
+    )
     for path, method, function in (
         ("/start", "POST", runtime.start_practice_agent),
         ("/stop", "POST", runtime.stop_practice_agent),
@@ -39,8 +43,11 @@ def endpoint(monkeypatch):
     ):
         app.add_url_rule(path, view_func=function, methods=[method])
     supervisor = SimpleNamespace(
-        start=lambda *_args: {}, stop=lambda *_args: {}, snapshot=lambda *_args: {},
-        history=lambda *_args, **_kwargs: [], owned_run=lambda *_args: {"snapshot": {}},
+        start=lambda *_args: {},
+        stop=lambda *_args: {},
+        snapshot=lambda *_args: {},
+        history=lambda *_args, **_kwargs: [],
+        owned_run=lambda *_args: {"snapshot": {}},
         resolve=lambda *_args: {"snapshot": {}},
         store=SimpleNamespace(events=lambda *_args, **_kwargs: []),
     )
@@ -53,6 +60,7 @@ def endpoint(monkeypatch):
 def _raise(error):
     def fail(*_args, **_kwargs):
         raise error
+
     return fail
 
 
@@ -62,11 +70,13 @@ def _request(client, method, path):
 
 
 @pytest.mark.parametrize("method,path,target,message", _ROUTES)
-@pytest.mark.parametrize("error", [ValueError(_CANARY), RuntimeError(_CANARY), KeyError(_CANARY),
-                                  json.JSONDecodeError(_CANARY, _CANARY, 0)])
+@pytest.mark.parametrize(
+    "error", [ValueError(_CANARY), RuntimeError(_CANARY), KeyError(_CANARY), json.JSONDecodeError(_CANARY, _CANARY, 0)]
+)
 @pytest.mark.parametrize("initialisation", [False, True], ids=["operation", "initialisation"])
-def test_dependency_errors_never_reach_http_responses(endpoint, monkeypatch, method, path, target, message,
-                                                     error, initialisation):
+def test_dependency_errors_never_reach_http_responses(
+    endpoint, monkeypatch, method, path, target, message, error, initialisation
+):
     client, supervisor = endpoint
     if initialisation:
         monkeypatch.setattr(runtime, "get_practice_supervisor", _raise(error))
@@ -87,12 +97,15 @@ def test_event_ownership_lookup_errors_are_private(endpoint, monkeypatch, error)
     assert response.get_json() == {"status": "error", "message": "Practice run evidence is unavailable"}
 
 
-@pytest.mark.parametrize("url,message", [
-    ("/runs?limit=0", "limit must be an integer between 1 and 100"),
-    ("/runs?limit=secret-canary", "limit must be an integer between 1 and 100"),
-    ("/runs/example/events?after=-1", "after must be an integer between 0 and 2147483647"),
-    ("/runs/example/events?limit=1001", "limit must be an integer between 1 and 1000"),
-])
+@pytest.mark.parametrize(
+    "url,message",
+    [
+        ("/runs?limit=0", "limit must be an integer between 1 and 100"),
+        ("/runs?limit=secret-canary", "limit must be an integer between 1 and 100"),
+        ("/runs/example/events?after=-1", "after must be an integer between 0 and 2147483647"),
+        ("/runs/example/events?limit=1001", "limit must be an integer between 1 and 1000"),
+    ],
+)
 def test_invalid_query_retains_actionable_local_message(endpoint, url, message):
     client, _supervisor = endpoint
     response = client.get(url)
@@ -100,12 +113,15 @@ def test_invalid_query_retains_actionable_local_message(endpoint, url, message):
     assert response.get_json() == {"status": "error", "message": message}
 
 
-@pytest.mark.parametrize("body,message", [
-    ({}, "symbols must be a list containing 1 to 20 instrument names"),
-    ({"symbols": ["RELIANCE"], "mode": "live"}, "Practice execution mode cannot be changed"),
-    ({"symbols": ["RELIANCE"], "model_call_limit": 0}, "model_call_limit must be an integer between 1 and 10000"),
-    ({"symbols": ["RELIANCE"], "daily_stop_loss": 0}, "daily_stop_loss must be negative"),
-])
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        ({}, "symbols must be a list containing 1 to 20 instrument names"),
+        ({"symbols": ["RELIANCE"], "mode": "live"}, "Practice execution mode cannot be changed"),
+        ({"symbols": ["RELIANCE"], "model_call_limit": 0}, "model_call_limit must be an integer between 1 and 10000"),
+        ({"symbols": ["RELIANCE"], "daily_stop_loss": 0}, "daily_stop_loss must be negative"),
+    ],
+)
 def test_invalid_config_retains_actionable_local_message(endpoint, body, message):
     client, _supervisor = endpoint
     response = client.post("/start", json=body)
@@ -113,25 +129,60 @@ def test_invalid_config_retains_actionable_local_message(endpoint, body, message
     assert response.get_json() == {"status": "error", "message": message}
 
 
-@pytest.mark.parametrize("path,target,error,message", [
-    ("/start", "start", RuntimeError("The application is shutting down"), "The application is shutting down"),
-    ("/start", "start", RuntimeError("A Practice agent worker is still owned; stop it first"),
-     "A Practice agent worker is still owned; stop it first"),
-    ("/start", "start", RuntimeError("Practice positions and pending orders must be flat before starting"),
-     "Practice positions and pending orders must be flat before starting"),
-    ("/start", "start", RuntimeError("The preceding Practice worker requires reconciliation"),
-     "A Practice run is active or requires reconciliation"),
-    ("/start", "start", RuntimeError("an active run or unresolved interruption already exists"),
-     "A Practice run is active or requires reconciliation"),
-    ("/runs/example/resolve", "resolve", RuntimeError("The worker has not finished; reconciliation cannot release it"),
-     "The worker has not finished; reconciliation cannot release it"),
-    ("/runs/example/resolve", "resolve", RuntimeError("Practice resources have not closed; reconciliation cannot release them"),
-     "Practice resources have not closed; reconciliation cannot release them"),
-    ("/runs/example/resolve", "resolve", RuntimeError("Only a run requiring reconciliation can be resolved"),
-     "Only a run requiring reconciliation can be resolved"),
-    ("/runs/example/resolve", "resolve", RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving"),
-     "Practice positions or pending orders remain; inspect the sandbox before resolving"),
-])
+@pytest.mark.parametrize(
+    "path,target,error,message",
+    [
+        ("/start", "start", RuntimeError("The application is shutting down"), "The application is shutting down"),
+        (
+            "/start",
+            "start",
+            RuntimeError("A Practice agent worker is still owned; stop it first"),
+            "A Practice agent worker is still owned; stop it first",
+        ),
+        (
+            "/start",
+            "start",
+            RuntimeError("Practice positions and pending orders must be flat before starting"),
+            "Practice positions and pending orders must be flat before starting",
+        ),
+        (
+            "/start",
+            "start",
+            RuntimeError("The preceding Practice worker requires reconciliation"),
+            "A Practice run is active or requires reconciliation",
+        ),
+        (
+            "/start",
+            "start",
+            RuntimeError("an active run or unresolved interruption already exists"),
+            "A Practice run is active or requires reconciliation",
+        ),
+        (
+            "/runs/example/resolve",
+            "resolve",
+            RuntimeError("The worker has not finished; reconciliation cannot release it"),
+            "The worker has not finished; reconciliation cannot release it",
+        ),
+        (
+            "/runs/example/resolve",
+            "resolve",
+            RuntimeError("Practice resources have not closed; reconciliation cannot release them"),
+            "Practice resources have not closed; reconciliation cannot release them",
+        ),
+        (
+            "/runs/example/resolve",
+            "resolve",
+            RuntimeError("Only a run requiring reconciliation can be resolved"),
+            "Only a run requiring reconciliation can be resolved",
+        ),
+        (
+            "/runs/example/resolve",
+            "resolve",
+            RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving"),
+            "Practice positions or pending orders remain; inspect the sandbox before resolving",
+        ),
+    ],
+)
 def test_source_owned_conflicts_keep_safe_message_and_status(endpoint, monkeypatch, path, target, error, message):
     client, supervisor = endpoint
     monkeypatch.setattr(supervisor, target, _raise(error))
@@ -156,10 +207,14 @@ def test_initialisation_key_error_matching_run_id_is_not_mistaken_for_missing_ru
     assert response.get_json() == {"status": "error", "message": "Practice reconciliation could not be verified"}
 
 
-@pytest.mark.parametrize("path,target", [("/runs/example/events", "owned_run"),
-                                         ("/runs/example/resolve", "resolve")])
-@pytest.mark.parametrize("message", ["run identifiers and event kinds must be bounded identifier text",
-                                    "credential material is not permitted in run evidence"])
+@pytest.mark.parametrize("path,target", [("/runs/example/events", "owned_run"), ("/runs/example/resolve", "resolve")])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "run identifiers and event kinds must be bounded identifier text",
+        "credential material is not permitted in run evidence",
+    ],
+)
 def test_invalid_run_identifier_keeps_safe_validation_response(endpoint, monkeypatch, path, target, message):
     client, supervisor = endpoint
     monkeypatch.setattr(supervisor, target, _raise(ValueError(message)))
@@ -174,8 +229,10 @@ def test_unexpected_config_validation_failure_is_private(endpoint, monkeypatch, 
     monkeypatch.setattr(runtime, "validate_practice_config", _raise(error))
     response = _request(client, "POST", "/start")
     assert response.status_code == 503
-    assert response.get_json() == {"status": "error", "message":
-                                   "Practice agent dependencies or durable evidence are unavailable"}
+    assert response.get_json() == {
+        "status": "error",
+        "message": "Practice agent dependencies or durable evidence are unavailable",
+    }
 
 
 def test_local_conflict_returns_canonical_text_without_stringifying_exception(endpoint, monkeypatch):

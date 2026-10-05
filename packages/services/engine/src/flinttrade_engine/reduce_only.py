@@ -335,7 +335,7 @@ def contract_key(
     """
     return (
         _norm(mode),
-        _norm(adapter) or "openalgo",
+        _norm(adapter) or "",
         _norm(account) or "default",
         _norm(symbol),
         _norm(exchange),

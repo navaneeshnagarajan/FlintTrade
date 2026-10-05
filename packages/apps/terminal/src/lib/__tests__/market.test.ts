@@ -513,7 +513,7 @@ describe("EXCHANGE_HOURS data", () => {
 });
 
 // ---------------------------------------------------------------------------
-// NSE cash session status — HHMM (Explore/OpenAlgo) and epoch (native)
+// NSE cash session status — HHMM (Explore/native broker) and epoch (native)
 // ---------------------------------------------------------------------------
 
 const EXPLORE_NSE_TIMINGS = [

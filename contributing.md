@@ -1,6 +1,6 @@
 # Contributing to FlintTrade
 
-FlintTrade is an AGPL-3.0, open-source self-hosted trading software project with a native broker-gateway contract, a local sandbox, and optional OpenAlgo-compatible integrations. The repository is built in the open so developers can inspect, test, and improve the code together.
+FlintTrade is an AGPL-3.0, open-source self-hosted trading software project with a native broker-gateway contract and a local sandbox. The repository is built in the open so developers can inspect, test, and improve the code together.
 
 Whether you're fixing a typo, shipping a new broker adapter, translating the UI into Hindi, or rewriting an entire widget — you're welcome here. This guide tells you everything you need to start.
 
@@ -72,7 +72,7 @@ pnpm install                     # JS/TS workspace deps (terminal, site, …)
 ```
 
 Do not copy `.env.example` as a normal native-app setup step. Use the app's
-Setup and Settings UI for broker/OpenAlgo, LLM, notification, and storage
+Setup and Settings UI for native brokers, LLM, notification, and storage
 configuration. Copy `.env.example` to `.env` only for advanced Docker/systemd
 server deployments or contributor experiments that deliberately exercise env
 fallbacks.
@@ -95,8 +95,6 @@ Detailed, platform-specific walkthroughs live under [`docs/setup/`](docs/setup/)
 - [`docs/setup/macos.md`](docs/setup/macos.md)
 - [`docs/setup/linux.md`](docs/setup/linux.md)
 - [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) — the short version
-
-OpenAlgo is optional for local development. See [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) for the helper that clones a local-dev OpenAlgo copy only when you want the OpenAlgo-compatible integration path.
 
 ## How to run tests
 
@@ -211,7 +209,6 @@ Allowed types and examples:
 |---|---|---|
 | `feat` | New user-visible behaviour | `feat(terminal): add sector rotation widget` |
 | `fix` | Bug fix | `fix(engine): rate limiter not resetting after market close` |
-| `docs` | Documentation only | `docs: clarify OpenAlgo port mapping in architecture guide` |
 | `test` | Tests added or refactored, no behaviour change | `test(screener): cover option chain Greeks edge cases` |
 | `chore` | Tooling, dependencies, repo housekeeping | `chore: bump vite to 6.4.2` |
 | `refactor` | Code restructure with no behaviour change | `refactor(ditto): extract margin calculator into its own module` |

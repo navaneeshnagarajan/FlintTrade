@@ -102,6 +102,7 @@ function ContributionTab() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-text-primary">Index Contribution</h3>
+          {response.is_sample_data !== false && <span className="text-xxs text-warning" role="status">Sample data</span>}
           <p className="text-[10px] text-text-muted">
             Weights as of {contribution.weights_as_of}
             

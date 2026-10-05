@@ -35,7 +35,7 @@ Include estimated slippage in all P&L projections. Adjust limit prices 1–2 tic
 A bracket order places a main order with a simultaneous target and stop-loss leg. When one leg fills, the other is cancelled automatically.
 
 - Ideal for intraday scalping where you know your R:R before entry.
-- Not all brokers support bracket orders via OpenAlgo — check broker capabilities.
+- Not all brokers support bracket orders via broker — check broker capabilities.
 
 ## Cover Orders
 
@@ -53,4 +53,4 @@ AMO orders are placed after market hours (15:30–09:00 IST) and queued for the 
 
 - **IOC (Immediate or Cancel):** Fills what it can immediately; cancels the rest. Use for partial fills in large quantity orders.
 - **Day order (default):** Expires at end of session if unfilled.
-- **GTC:** Remains active until filled or manually cancelled. Useful for CNC target orders in delivery portfolios. Verify your broker supports GTC via OpenAlgo.
+- **GTC:** Remains active until filled or manually cancelled. Useful for CNC target orders in delivery portfolios. Verify your broker supports GTC through its native adapter.

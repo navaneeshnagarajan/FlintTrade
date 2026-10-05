@@ -5,7 +5,6 @@ export { useAuthStore } from "./authStore";
 export { useBentoStore } from "./bentoStore";
 export { useBrokerStore } from "./brokerStore";
 export { useConnectionStore } from "./connectionStore";
-export { useFlowStore } from "./flowStore";
 export { useLayoutStore } from "./layoutStore";
 export { useModeStore } from "./modeStore";
 export { useSettingsStore } from "./settingsStore";

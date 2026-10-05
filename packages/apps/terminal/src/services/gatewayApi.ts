@@ -1,17 +1,15 @@
 /**
  * FlintTrade Gateway REST API client.
  * Targets /ft-api/v1, proxied via /ft-api in dev (see vite.config.ts).
- * Handles legacy gateway account management and rate-limit settings only.
- * Broker connection flows live on the native /api/v1/native/accounts surface
- * or inside OpenAlgo; do not re-add direct /v1/auth/* connect calls here.
+ * Handles native broker rate-limit settings.
+ * Broker connection flows use the native /api/v1/native/accounts surface.
  *
  * All requests go through the shared bare-/v1 FT helpers so gateway management
  * calls use the same auth headers and response/error parsing as the rest of the
  * terminal client.
  */
 
-import { accountMutation, FtApiError, getV1, putV1 } from "@/services/ftApi.helpers";
-import type { BrokerInfo, BrokerAccount } from "@/types/broker";
+import { FtApiError, getV1, putV1 } from "@/services/ftApi.helpers";
 
 async function gateway<T>(request: Promise<T>): Promise<T> {
   try {
@@ -27,9 +25,6 @@ async function gateway<T>(request: Promise<T>): Promise<T> {
 export type BrokerRateLimits = Record<string, { order: number; data: number }>;
 
 export const gatewayApi = {
-  listBrokers: () =>
-    gateway(getV1<{ brokers: BrokerInfo[] }>("brokers")).then((r) => r.brokers),
-
   /** Live effective per-broker API rate limits (requests/sec). */
   getRateLimits: () =>
     gateway(getV1<{ limits: BrokerRateLimits }>("rate-limits")).then((r) => r.limits),
@@ -42,18 +37,4 @@ export const gatewayApi = {
       ...(data !== undefined ? { data } : {}),
     })).then((r) => r.limits),
 
-  listAccounts: (signal?: AbortSignal) =>
-    gateway(getV1<{ accounts: BrokerAccount[] }>("accounts", signal)).then((r) => r.accounts),
-
-  removeAccount: (accountId: string, idempotencyKey: string) =>
-    gateway(accountMutation<{ status: string }>("v1", "DELETE",
-      `accounts/${encodeURIComponent(accountId)}`, idempotencyKey)),
-
-  reconnectAccount: (accountId: string, idempotencyKey: string) =>
-    gateway(accountMutation<{ account: BrokerAccount }>("v1", "POST",
-      `accounts/${encodeURIComponent(accountId)}/reconnect`, idempotencyKey, {})),
-
-  setPrimary: (accountId: string, idempotencyKey: string) =>
-    gateway(accountMutation<{ account: BrokerAccount }>("v1", "POST",
-      `accounts/${encodeURIComponent(accountId)}/set-primary`, idempotencyKey, {})),
 };

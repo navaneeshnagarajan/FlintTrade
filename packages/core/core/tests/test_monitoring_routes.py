@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_monitoring_routes.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ _TEST_API_KEY = "test-monitoring-routes-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -29,7 +31,7 @@ def app_client(monkeypatch_module):
     from flinttrade_core.monitoring import TrafficCounter, LatencyTracker
     from flinttrade_core.monitoring_routes import init_monitoring_routes
 
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
 
     traffic = TrafficCounter()
     traffic.record("GET", "/api/v1/health", 200, 12.0)
@@ -53,7 +55,6 @@ def _get(client, url):
 
 
 class TestMonitoringRoutes:
-
     def test_traffic_stats_returns_data(self, app_client):
         resp = _get(app_client, "/api/v1/traffic/stats")
         assert resp.status_code == 200
@@ -114,9 +115,7 @@ class TestPersistentTrafficStore:
         assert data["total_requests"] >= 1
         assert data["window_minutes"] == 60
         assert "p95_latency_ms" in data
-        assert any(
-            row["path"] == "/api/v1/persistent-probe" for row in data["top_paths"]
-        )
+        assert any(row["path"] == "/api/v1/persistent-probe" for row in data["top_paths"])
 
         resp = _get(app_client, "/api/v1/traffic/recent?n=50")
         rows = json.loads(resp.data)["data"]

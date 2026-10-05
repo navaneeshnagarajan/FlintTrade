@@ -31,7 +31,6 @@ from .registry import (
     BrokerRegistry,
     ConnectedRegistrySession,
     ManagedLookupAuthority,
-    OpenAlgoDefaultCompatibilityAuthorityReceipt,
 )
 
 
@@ -57,14 +56,12 @@ class AuthenticatingSessionProvider:
         workspace_snapshot: WorkspaceSnapshot | None = None,
         workspace_path: Path | None = None,
         credential_version_for: Callable[[BrokerSelector], CredentialVersion] | None = None,
-        compatibility_authority_for: Callable[[], OpenAlgoDefaultCompatibilityAuthorityReceipt] | None = None,
         coherence_verifier: Callable[[], WorkspaceSnapshot] | None = None,
         enrollment_required: Callable[[], bool] | None = None,
     ) -> None:
         self._registry = registry
         self._acls = account_acls
         self._credential_version_for = credential_version_for
-        self._compatibility_authority_for = compatibility_authority_for
         self._coherence_verifier = coherence_verifier
         self._enrollment_required = enrollment_required
         self._enrolled = (
@@ -94,10 +91,6 @@ class AuthenticatingSessionProvider:
         current = broker_workspace_version(snapshot)
         if current != self.broker_workspace_version:
             raise RegistrySessionUnavailable
-        if selector == BrokerSelector("openalgo", "default"):
-            if self._compatibility_authority_for is None:
-                raise RegistrySessionUnavailable
-            return self._compatibility_authority_for()
         if self._credential_version_for is None:
             raise RegistrySessionUnavailable
         version = self._credential_version_for(selector)
@@ -182,21 +175,14 @@ class ConnectedSessionClientResolver:
         self._provider = provider
         self._registry = registry
 
-    def openalgo_client(self, session: ConnectedRegistrySession) -> Any:
+    def broker_client(self, session: ConnectedRegistrySession) -> Any:
         if type(session) is not ConnectedRegistrySession:
             raise RegistrySessionUnavailable
         try:
             selector = session.selector
         except (AttributeError, TypeError):
             raise RegistrySessionUnavailable from None
-        if type(selector) is not BrokerSelector or selector.adapter_id != "openalgo":
+        if type(selector) is not BrokerSelector:
             raise RegistrySessionUnavailable
         authority = self._provider.current_authority_for(selector)
-        client = self._registry.client_for_connected_session(session, current_authority=authority)
-        if selector == BrokerSelector("openalgo", "default"):
-            from flinttrade_core.openalgo_client import OpenAlgoClient
-
-            current = self._provider._current_snapshot()
-            if not isinstance(client, OpenAlgoClient) or not client.matches_workspace_openalgo(current):
-                raise RegistrySessionUnavailable
-        return client
+        return self._registry.client_for_connected_session(session, current_authority=authority)

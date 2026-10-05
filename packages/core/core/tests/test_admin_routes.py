@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_admin_routes.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 
@@ -16,6 +17,7 @@ _TEST_API_KEY = "test-admin-routes-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -24,9 +26,10 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def flask_app(monkeypatch_module):
     """Create a Flask app with admin blueprint enabled (FLINTTRADE_DEV=1)."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     monkeypatch_module.setenv("FLINTTRADE_DEV", "1")
     from flinttrade_core.app import create_flask_app
+
     app = create_flask_app()
     app.config["TESTING"] = True
     return app

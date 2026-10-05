@@ -191,7 +191,7 @@ function toFiniteNumber(value: unknown): number | null {
 /**
  * Effective P&L for a single position.
  *
- * OpenAlgo's `pnl` field is wrong for some brokers (CLAUDE.md quirk 4), so for
+ * broker's `pnl` field is wrong for some brokers (CLAUDE.md quirk 4), so for
  * an open position this computes the mark-to-market locally as
  * `(ltp − averagePrice) × quantity` whenever those inputs are genuinely
  * available, and falls back to the broker-supplied `pnl` when the local

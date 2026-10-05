@@ -249,13 +249,13 @@ class TestHandleCommandRouting:
     def test_health_command_with_handler(self):
         bot = self._bot()
         bot.set_handler("get_health", lambda: {
-            "openalgo_connected": True,
+            "broker_connected": True,
             "websocket_connected": True,
             "disk_free_gb": 80.0,
         })
         result = bot.handle_command("/health", chat_id="12345")
         assert "Health" in result.response
-        assert "OpenAlgo" in result.response
+        assert "broker" in result.response
 
     def test_health_command_no_handler_uses_system(self):
         """When no health handler is set, falls back to system disk usage."""
@@ -432,7 +432,7 @@ class TestFormattingHelpers:
     def test_format_health_shows_disk_warning(self):
         from flinttrade_automation.telegram_bot import format_health
         msg = format_health({
-            "openalgo_connected": True,
+            "broker_connected": True,
             "websocket_connected": True,
             "disk_free_gb": 1.5,  # below 2 GB → ❌
         })
@@ -441,7 +441,7 @@ class TestFormattingHelpers:
     def test_format_health_websocket_disconnected(self):
         from flinttrade_automation.telegram_bot import format_health
         msg = format_health({
-            "openalgo_connected": True,
+            "broker_connected": True,
             "websocket_connected": False,
             "disk_free_gb": 50.0,
         })
@@ -450,7 +450,7 @@ class TestFormattingHelpers:
     def test_format_health_uptime_shown(self):
         from flinttrade_automation.telegram_bot import format_health
         msg = format_health({
-            "openalgo_connected": True,
+            "broker_connected": True,
             "websocket_connected": True,
             "disk_free_gb": 30.0,
             "uptime": "2h 15m",
@@ -896,7 +896,7 @@ class TestWiredCommands:
         client.positionbook.side_effect = _pb
         client.orderbook.side_effect = _ob
 
-        # The real OpenAlgoClient exposes run_sync (its own persistent loop); the
+        # The real BrokerClient exposes run_sync (its own persistent loop); the
         # bot MUST use it, not ad-hoc asyncio.run. Run the coroutine faithfully.
         def _run_sync(coro):
             loop = asyncio.new_event_loop()

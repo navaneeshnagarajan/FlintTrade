@@ -588,10 +588,10 @@ describe("FillsWidget (live)", () => {
 
   it("shows an error banner with Retry instead of 'No fills today' when the tradebook fetch fails", async () => {
     mockUseTradebook.mockReturnValue(
-      queryResult({ data: undefined, isError: true, error: new Error("OpenAlgo server error") }),
+      queryResult({ data: undefined, isError: true, error: new Error("native broker server error") }),
     );
     renderFills();
-    expect(await screen.findByText(/Failed to load fills: OpenAlgo server error/)).toBeInTheDocument();
+    expect(await screen.findByText(/Failed to load fills: native broker server error/)).toBeInTheDocument();
     // The journal query resolves async; the empty-state region follows it.
     expect(await screen.findByText("Fills unavailable — retry above")).toBeInTheDocument();
     expect(screen.queryByText("No fills today")).not.toBeInTheDocument();

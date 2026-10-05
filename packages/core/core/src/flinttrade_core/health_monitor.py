@@ -24,9 +24,7 @@ surface in the :attr:`HealthCheck.status` field and :attr:`HealthCheck.message`.
 from __future__ import annotations
 
 import logging
-import socket
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -166,8 +164,6 @@ class HealthMonitor:
     """Comprehensive infrastructure health tracking.
 
     Args:
-        ws_host: WebSocket host to probe (default ``"127.0.0.1"``).
-        ws_port: WebSocket port to probe (default ``8765``).
         data_dirs: Directories to check for free disk space.  Defaults to
             the active workspace directory (resolved at construction via
             :func:`flinttrade_core.workspace.workspace_dir`).  Pass
@@ -185,22 +181,12 @@ class HealthMonitor:
 
     def __init__(
         self,
-        ws_host: str = "127.0.0.1",
-        ws_port: int = 8765,
         data_dirs: list[str | Path] | None = None,
         duckdb_paths: list[str | Path] | None = None,
         cache: Any | None = None,
     ) -> None:
-        self._ws_host = ws_host
-        self._ws_port = ws_port
-        self._data_dirs: list[Path] = (
-            [Path(d) for d in data_dirs]
-            if data_dirs
-            else [_default_data_dir()]
-        )
-        self._duckdb_paths: list[Path] = (
-            [Path(p) for p in duckdb_paths] if duckdb_paths else []
-        )
+        self._data_dirs: list[Path] = [Path(d) for d in data_dirs] if data_dirs else [_default_data_dir()]
+        self._duckdb_paths: list[Path] = [Path(p) for p in duckdb_paths] if duckdb_paths else []
         self._cache = cache
         self._thread_baseline: int | None = None
         self._lock = threading.Lock()
@@ -226,7 +212,6 @@ class HealthMonitor:
             self.check_file_descriptors(),
             self.check_thread_count(),
             self.check_database(),
-            self.check_websocket(),
             self.check_broker_connections(),
             self.check_cache_health(),
         ]
@@ -323,8 +308,8 @@ class HealthMonitor:
             check_path = d if d.exists() else (d.parent if d.parent.exists() else Path.home())
             try:
                 usage = shutil.disk_usage(str(check_path))
-                free_gb = round(usage.free / (1024 ** 3), 2)
-                total_gb = round(usage.total / (1024 ** 3), 2)
+                free_gb = round(usage.free / (1024**3), 2)
+                total_gb = round(usage.total / (1024**3), 2)
                 pct_used = round((usage.used / usage.total) * 100, 1) if usage.total > 0 else 0.0
 
                 if free_gb < _DISK_CRIT_GB:
@@ -412,7 +397,7 @@ class HealthMonitor:
 
             if utilisation >= _FD_WARN_FRACTION:
                 status: Literal["healthy", "degraded", "unhealthy"] = "degraded"
-                msg = f"FD utilisation {pct}% (warn threshold {int(_FD_WARN_FRACTION*100)}%)"
+                msg = f"FD utilisation {pct}% (warn threshold {int(_FD_WARN_FRACTION * 100)}%)"
             else:
                 status = "healthy"
                 msg = f"FD utilisation {pct}% ({open_fds}/{soft})"
@@ -549,37 +534,6 @@ class HealthMonitor:
             message=msg,
             metrics={"readable": readable, "unreadable": unreadable, "files": results},
         )
-
-    def check_websocket(self) -> HealthCheck:
-        """Probe TCP reachability of the OpenAlgo WebSocket port.
-
-        A simple ``socket.connect_ex`` probe — does not perform the WS
-        handshake.  Times out after 1 second.
-
-        Returns:
-            :class:`HealthCheck` with metrics ``host``, ``port``,
-            ``reachable``, ``latency_ms``.
-        """
-        host = self._ws_host
-        port = self._ws_port
-        try:
-            t0 = time.monotonic()
-            with socket.create_connection((host, port), timeout=1.0):
-                pass
-            latency_ms = round((time.monotonic() - t0) * 1000, 2)
-            return HealthCheck(
-                name="websocket",
-                status="healthy",
-                message=f"WebSocket {host}:{port} reachable ({latency_ms}ms)",
-                metrics={"host": host, "port": port, "reachable": True, "latency_ms": latency_ms},
-            )
-        except OSError as exc:
-            return HealthCheck(
-                name="websocket",
-                status="degraded",
-                message=f"WebSocket {host}:{port} unreachable: {exc}",
-                metrics={"host": host, "port": port, "reachable": False, "latency_ms": None},
-            )
 
     def check_broker_connections(self) -> HealthCheck:
         """Check broker session status via the Flask app config.

@@ -39,28 +39,53 @@ def _monotonic_timestamp(previous: datetime | None) -> datetime:
         return previous + timedelta(milliseconds=1)
     return now
 
+
 # observability §6.2 — canonical action catalogue. Every literal logged across
 # packages/ should appear here; gateway.*, mcp.tool.*, audit.*, and the auth
 # lifecycle verbs join the legacy order/position/auth set.
 KNOWN_ACTIONS: frozenset[str] = frozenset(
     {
-        "order.placed", "order.modified", "order.cancelled", "order.rejected",
-        "position.opened", "position.closed", "position.adjusted",
+        "order.placed",
+        "order.modified",
+        "order.cancelled",
+        "order.rejected",
+        "position.opened",
+        "position.closed",
+        "position.adjusted",
         "settings.changed",
-        "auth.login", "auth.logout", "auth.failed_login", "auth.pin_failed",
-        "auth.totp_failed", "auth.rate_limit_hit",
+        "auth.login",
+        "auth.logout",
+        "auth.failed_login",
+        "auth.pin_failed",
+        "auth.totp_failed",
+        "auth.rate_limit_hit",
         "mode.transitioned",
-        "strategy.started", "strategy.stopped", "strategy.errored",
-        "bracket.created", "bracket.exited",
-        "sandbox.session_started", "sandbox.session_reset",
-        "killswitch.engaged", "killswitch.released",
-        "gateway.credential.connect", "gateway.credential.disconnect",
-        "gateway.credential.rotate", "gateway.credential.rotated",
-        "gateway.session.refresh", "gateway.session.expire",
-        "auth.dek_rotated", "auth.password_changed",
-        "auth.totp_regenerated", "auth.backup_codes_regenerated",
-        "audit.frozen", "audit.unfrozen", "audit.chain_break", "audit.chain_restored",
-        "mcp.tool.call", "mcp.tool.result", "mcp.tool.error",
+        "strategy.started",
+        "strategy.stopped",
+        "strategy.errored",
+        "bracket.created",
+        "bracket.exited",
+        "sandbox.session_started",
+        "sandbox.session_reset",
+        "killswitch.engaged",
+        "killswitch.released",
+        "gateway.credential.connect",
+        "gateway.credential.disconnect",
+        "gateway.credential.rotate",
+        "gateway.credential.rotated",
+        "gateway.session.refresh",
+        "gateway.session.expire",
+        "auth.dek_rotated",
+        "auth.password_changed",
+        "auth.totp_regenerated",
+        "auth.backup_codes_regenerated",
+        "audit.frozen",
+        "audit.unfrozen",
+        "audit.chain_break",
+        "audit.chain_restored",
+        "mcp.tool.call",
+        "mcp.tool.result",
+        "mcp.tool.error",
     }
 )
 

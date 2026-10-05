@@ -103,21 +103,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // FlintTrade backend (port 5100) — must be listed before /api
-      // Port 5100 avoids conflict with OpenAlgo multi-instance (5000-5009)
       "/ft-api": {
         target: process.env.VITE_FLINTTRADE_HOST || "http://127.0.0.1:5100",
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/ft-api/, ""),
-      },
-      // OpenAlgo REST API (port 5000)
-      "/api": {
-        target: process.env.VITE_OPENALGO_HOST || "http://127.0.0.1:5000",
-        changeOrigin: true,
-      },
-      "/ws": {
-        target: process.env.VITE_OPENALGO_WS || "ws://127.0.0.1:8765",
-        ws: true,
-        rewrite: (p: string) => p.replace(/^\/ws/, ""),
       },
     },
   },

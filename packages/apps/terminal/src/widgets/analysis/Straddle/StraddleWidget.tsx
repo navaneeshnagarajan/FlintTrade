@@ -10,7 +10,7 @@
  *
  * WHY THE MERGE (read before splitting them again): the implied-move view
  * needs exactly four numbers — spot, ATM strike, ATM CE premium, ATM PE
- * premium — and this widget already computes all four live from
+ * premium — and this widget computes all four from the selected data source's
  * `getOptionChain` + `getQuotes`. The retired widget was static only because
  * nobody connected the two; no backend endpoint was ever required. Both views
  * are rendered from the same `useMemo` derivation, so switching view adds no
@@ -19,7 +19,7 @@
  * The retired widget also shipped a real defect that this merge removes by
  * deletion: it indexed a 2-entry sample array with a 5-entry symbol dropdown,
  * so FINNIFTY silently displayed NIFTY's figures under a FINNIFTY label. Every
- * number here is derived from the selected symbol's own live chain, so a
+ * number here is derived from the selected symbol's own chain, so a
  * symbol/figure mismatch is no longer representable.
  *
  * Features:
@@ -58,6 +58,8 @@ import {
 import type { Quote, Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import { useMarketDataScope } from "@/hooks/useDataScope";
+import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
 import {
   accountAuthorityMatches,
   captureAccountAuthority,
@@ -96,9 +98,37 @@ interface RawOptionChain {
 
 type OverlayName = "Straddle" | "Spot" | "SynFut";
 
+interface ExpirySelection {
+  scopeKey: string;
+  values: string[];
+  selected: string | null;
+  error: string | null;
+}
+
+interface MarketObservation {
+  queryKey: string;
+  chain: RawOptionChain | null;
+  spot: Quote | null;
+  error: string | null;
+  refreshedAt: Date;
+}
+
+interface PositionObservation {
+  authority: AccountAuthorityIdentity;
+  enabled: boolean;
+  values: Position[] | null;
+}
+
 interface ChartPoint {
   time: Time;
   value: number;
+}
+
+interface ChartObservation {
+  queryKey: string;
+  straddle: ChartPoint[];
+  spot: ChartPoint[];
+  synfut: ChartPoint[];
 }
 
 interface StraddleChartProps {
@@ -144,7 +174,7 @@ interface StraddlePanelParams extends Record<string, unknown> {
 }
 
 /**
- * Expected-range figures derived from the live ATM straddle.
+ * Expected-range figures derived from the selected ATM straddle.
  *
  * Log-normal approximation, as carried over from the retired widget:
  *   Implied move = ATM CE premium + ATM PE premium
@@ -172,12 +202,11 @@ export interface ImpliedMoveInputs {
 }
 
 /**
- * Derives the implied-move bands from live ATM straddle inputs.
+ * Derives the implied-move bands from ATM straddle inputs.
  *
  * Fails closed: any missing, non-finite or non-positive input returns `null`,
- * and the view then discloses that no live figures are available rather than
- * substituting a sample. There is deliberately no sample fallback — the
- * retired widget's constant tables were the source of its mislabelling bug.
+ * and the view discloses unavailable quotes. This calculation never substitutes
+ * sample values; Example quotes are supplied and labelled by the selected feed.
  */
 export function computeImpliedMove({
   spot,
@@ -480,23 +509,17 @@ function StraddleChart({
 
   useEffect(() => {
     if (!straddleRef.current) return;
-    if (dataPoints.length > 0) {
-      straddleRef.current.setData(dataPoints as LineData[]);
-    }
+    straddleRef.current.setData(dataPoints as LineData[]);
   }, [dataPoints]);
 
   useEffect(() => {
     if (!spotRef.current) return;
-    if (spotPoints.length > 0) {
-      spotRef.current.setData(spotPoints as LineData[]);
-    }
+    spotRef.current.setData(spotPoints as LineData[]);
   }, [spotPoints]);
 
   useEffect(() => {
     if (!synfutRef.current) return;
-    if (synfutPoints.length > 0) {
-      synfutRef.current.setData(synfutPoints as LineData[]);
-    }
+    synfutRef.current.setData(synfutPoints as LineData[]);
   }, [synfutPoints]);
 
   useEffect(() => {
@@ -523,7 +546,7 @@ function LoadingBody() {
 // Implied-move view (absorbed from the retired ImpliedMove widget)
 // ---------------------------------------------------------------------------
 
-/** Nested 1σ / 2σ zones with the live spot marker. */
+/** Nested 1σ / 2σ zones with the selected spot marker. */
 function RangeBar({ data }: { data: ImpliedMoveData }) {
   const { spot, lowerBound, upperBound, lower2Sigma, upper2Sigma } = data;
 
@@ -608,7 +631,7 @@ interface ImpliedMovePanelProps {
 }
 
 /**
- * The σ-band expected range. Renders figures only when the live chain has
+ * The σ-band expected range. Renders figures only when the selected chain has
  * produced a complete ATM straddle; otherwise it discloses the absence in the
  * same voice as the chart view's empty states. There is no sample fallback.
  */
@@ -623,15 +646,14 @@ function ImpliedMovePanel({ data, expiryLabel }: ImpliedMovePanelProps) {
         <span
           className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
           role="status"
-          aria-label="No live option chain — implied move is unavailable"
-          title="Implied move is computed from the live ATM straddle; no sample figures are ever shown."
+          aria-label="No option quote — implied move is unavailable"
+          title="Implied move needs a usable ATM straddle quote from the selected data source."
         >
-          No live data
+          No quote data
         </span>
-        <span>Implied move needs a live ATM straddle quote</span>
+        <span>Implied move needs an ATM straddle quote</span>
         <span className="text-text-muted/60">
-          Connect a broker and select an expiry — every figure here is derived from the
-          live chain, never sampled
+          Select an expiry with usable option quotes to calculate the range.
         </span>
       </div>
     );
@@ -764,42 +786,64 @@ function StraddleWidget(props: WidgetProps) {
 
   const track = useTrackBehavior();
   const accountReadContext = useAccountReadContext();
+  const marketScope = useMarketDataScope();
+  const isExample = marketScope === "explore:mock";
   const currentContextRef = useRef(accountReadContext);
-  const positionControllerRef = useRef<AbortController | null>(null);
+  const dataControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   currentContextRef.current = accountReadContext;
   const [view, setView] = useState<ViewMode>(() => resolveViewMode(panelView));
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
-  const [expiries, setExpiries]               = useState<string[]>([]);
-  const [selectedExpiry, setSelectedExpiry]   = useState<string | null>(null);
+  const [expirySelection, setExpirySelection] = useState<ExpirySelection | null>(null);
   const [activeOverlays, setActiveOverlays]   = useState<OverlayName[]>(["Straddle"]);
 
-  const [chain, setChain]         = useState<RawOptionChain | null>(null);
-  const [spot, setSpot]           = useState<Quote | null>(null);
-  const [positions, setPositions] = useState<Position[] | null>(null);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [marketObservation, setMarketObservation] = useState<MarketObservation | null>(null);
+  const [positionObservation, setPositionObservation] = useState<PositionObservation | null>(null);
+  const [loadingQueryKey, setLoadingQueryKey] = useState<string | null>(null);
 
   const straddlePointsRef = useRef<ChartPoint[]>([]);
   const spotPointsRef     = useRef<ChartPoint[]>([]);
   const synfutPointsRef   = useRef<ChartPoint[]>([]);
-  const [chartVersion, setChartVersion] = useState(0);
+  const [chartObservation, setChartObservation] = useState<ChartObservation | null>(null);
 
   const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = symDef.exchange;
+  const expiryScopeKey = JSON.stringify([marketScope, symDef.label, exchange]);
+  const currentExpiryScopeRef = useRef(expiryScopeKey);
+  currentExpiryScopeRef.current = expiryScopeKey;
+  const currentExpirySelection = expirySelection?.scopeKey === expiryScopeKey ? expirySelection : null;
+  const expiries = currentExpirySelection?.values ?? [];
+  const selectedExpiry = currentExpirySelection?.selected ?? null;
+  const marketQueryKey = JSON.stringify([expiryScopeKey, selectedExpiry]);
+  const currentMarketQueryRef = useRef(marketQueryKey);
+  currentMarketQueryRef.current = marketQueryKey;
+
+  // Scope tags suppress old observations during the first render after a switch,
+  // before effect cleanup has had a chance to abort requests or clear refs.
+  const observation = marketObservation?.queryKey === marketQueryKey ? marketObservation : null;
+  const chain = observation?.chain ?? null;
+  const spot = observation?.spot ?? null;
+  const error = currentExpirySelection?.error ?? observation?.error ?? null;
+  const lastRefresh = observation?.refreshedAt ?? null;
+  const loading = loadingQueryKey === marketQueryKey;
+  const positions = positionObservation
+    && accountAuthorityMatches(positionObservation.authority, accountReadContext.identity)
+    && positionObservation.enabled === accountReadContext.enabled
+    ? positionObservation.values
+    : null;
 
   useEffect(() => {
     requestIdRef.current += 1;
-    positionControllerRef.current?.abort();
-    positionControllerRef.current = null;
-    setPositions(null);
+    dataControllerRef.current?.abort();
+    dataControllerRef.current = null;
+    setPositionObservation(null);
     return () => {
       requestIdRef.current += 1;
-      positionControllerRef.current?.abort();
-      positionControllerRef.current = null;
+      dataControllerRef.current?.abort();
+      dataControllerRef.current = null;
     };
   }, [
+    marketQueryKey,
     accountReadContext.enabled,
     accountReadContext.identity.accountId,
     accountReadContext.identity.brokerType,
@@ -807,31 +851,38 @@ function StraddleWidget(props: WidgetProps) {
     accountReadContext.identity.scopeKey,
   ]);
 
+  useEffect(() => {
+    setMarketObservation(null);
+    setLoadingQueryKey(null);
+    straddlePointsRef.current = [];
+    spotPointsRef.current = [];
+    synfutPointsRef.current = [];
+    setChartObservation(null);
+  }, [marketQueryKey]);
+
   // fetch expiries
   useEffect(() => {
-    setExpiries([]);
-    setSelectedExpiry(null);
-    setChain(null);
-    setError(null);
-    straddlePointsRef.current = [];
-    spotPointsRef.current     = [];
-    synfutPointsRef.current   = [];
-
-    let cancelled = false;
+    setExpirySelection(null);
+    const controller = new AbortController();
+    const isCurrent = () => !controller.signal.aborted && currentExpiryScopeRef.current === expiryScopeKey;
     (async () => {
       try {
-        const data = await getExpiry(symDef.label, exchange);
-        if (cancelled) return;
+        const data = await getExpiry(symDef.label, exchange, "options", controller.signal, marketScope);
+        if (!isCurrent()) return;
         const list = Array.isArray(data) ? data as string[] : ((data as { expiry?: string[] })?.expiry ?? []);
-        setExpiries(list);
-        if (list.length > 0) setSelectedExpiry(list[0]);
+        setExpirySelection({ scopeKey: expiryScopeKey, values: list, selected: list[0] ?? null, error: null });
       } catch (e) {
-        if (!cancelled) setError(`Expiry load failed: ${(e as Error).message}`);
+        if (isCurrent()) {
+          setExpirySelection({
+            scopeKey: expiryScopeKey, values: [], selected: null,
+            error: `Expiry load failed: ${(e as Error).message}`,
+          });
+        }
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [activeSymbolIdx, symDef.label, exchange]);
+    return () => controller.abort();
+  }, [expiryScopeKey, symDef.label, exchange, marketScope]);
 
   // main data fetch
   const fetchData = useCallback(async () => {
@@ -839,47 +890,39 @@ function StraddleWidget(props: WidgetProps) {
     const context = accountReadContext;
     const identity = captureAccountAuthority(context.identity);
     const requestId = ++requestIdRef.current;
-    positionControllerRef.current?.abort();
-    const controller = context.enabled ? new AbortController() : null;
-    positionControllerRef.current = controller;
+    dataControllerRef.current?.abort();
+    const controller = new AbortController();
+    dataControllerRef.current = controller;
     const isCurrent = () => (
       requestId === requestIdRef.current
-      && !controller?.signal.aborted
+      && !controller.signal.aborted
+      && currentMarketQueryRef.current === marketQueryKey
       && accountAuthorityMatches(identity, currentContextRef.current.identity)
       && context.enabled === currentContextRef.current.enabled
     );
-    setLoading(true);
-    setError(null);
+    setLoadingQueryKey(marketQueryKey);
 
     try {
       const [chainRes, spotRes, posRes] = await Promise.allSettled([
-        getOptionChain(symDef.label, exchange, selectedExpiry),
-        getQuotes(symDef.spotSymbol, symDef.spotExchange),
+        getOptionChain(symDef.label, exchange, selectedExpiry, controller.signal, marketScope),
+        getQuotes(symDef.spotSymbol, symDef.spotExchange, controller.signal, marketScope),
         context.enabled
-          ? getPositionbook(context, controller!.signal)
+          ? getPositionbook(context, controller.signal)
           : Promise.resolve<Position[] | null>(null),
       ]);
 
       if (!isCurrent()) return;
 
-      let newChain: RawOptionChain | null = null;
-      let newSpot: Quote | null  = null;
-
-      if (chainRes.status === "fulfilled") {
-        newChain = chainRes.value as unknown as RawOptionChain;
-        setChain(newChain);
-      } else {
-        setError(`Chain error: ${(chainRes.reason as Error)?.message}`);
-      }
-
-      if (spotRes.status === "fulfilled") {
-        newSpot = spotRes.value;
-        setSpot(newSpot);
-      }
-
-      if (posRes.status === "fulfilled") {
-        setPositions(posRes.value);
-      }
+      const newChain = chainRes.status === "fulfilled" ? chainRes.value as unknown as RawOptionChain : null;
+      const newSpot = spotRes.status === "fulfilled" ? spotRes.value : null;
+      setMarketObservation({
+        queryKey: marketQueryKey, chain: newChain, spot: newSpot, refreshedAt: new Date(),
+        error: chainRes.status === "rejected" ? `Chain error: ${(chainRes.reason as Error)?.message}` : null,
+      });
+      setPositionObservation({
+        authority: identity, enabled: context.enabled,
+        values: posRes.status === "fulfilled" ? posRes.value : null,
+      });
 
       // Accumulate chart data points
       if (newChain && newSpot) {
@@ -906,20 +949,24 @@ function StraddleWidget(props: WidgetProps) {
               appendPoint(synfutPointsRef.current, { time: t, value: synfutVal });
             }
 
-            setChartVersion((v) => v + 1);
+            setChartObservation({
+              queryKey: marketQueryKey,
+              straddle: [...straddlePointsRef.current],
+              spot: [...spotPointsRef.current],
+              synfut: [...synfutPointsRef.current],
+            });
           }
         }
       }
     } finally {
       if (isCurrent()) {
-        setLoading(false);
-        setLastRefresh(new Date());
+        setLoadingQueryKey(null);
       }
-      if (positionControllerRef.current === controller) {
-        positionControllerRef.current = null;
+      if (dataControllerRef.current === controller) {
+        dataControllerRef.current = null;
       }
     }
-  }, [accountReadContext, selectedExpiry, symDef, exchange]);
+  }, [accountReadContext, selectedExpiry, symDef, exchange, marketQueryKey, marketScope]);
 
   // auto-refresh
   useEffect(() => {
@@ -975,7 +1022,7 @@ function StraddleWidget(props: WidgetProps) {
     : null;
   const spotUp = spotChange == null ? null : spotChange >= 0;
 
-  // Implied-move bands — the same four live values the headline already uses,
+  // Implied-move bands — the same four values the headline already uses,
   // so the σ view costs no extra request.
   const impliedMove = useMemo(
     () => computeImpliedMove({ spot: spotLtp, atmStrike, cePremium: ceLtp, pePremium: peLtp }),
@@ -994,16 +1041,10 @@ function StraddleWidget(props: WidgetProps) {
     props.api.updateParameters({ view: next });
   }, [props.api, view]);
 
-  // Stable chart data arrays. The three memos below snapshot mutable refs that
-  // the tick handler appends to in place; `chartVersion` is bumped whenever it
-  // does. That counter is therefore the real dependency, and a ref read is
-  // invisible to the dependency checker, hence the three directives.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  const chartStraddlePoints = useMemo(() => [...straddlePointsRef.current], [chartVersion]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  const chartSpotPoints     = useMemo(() => [...spotPointsRef.current],     [chartVersion]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  const chartSynfutPoints   = useMemo(() => [...synfutPointsRef.current],   [chartVersion]);
+  const currentChart = chartObservation?.queryKey === marketQueryKey ? chartObservation : null;
+  const chartStraddlePoints = currentChart?.straddle ?? [];
+  const chartSpotPoints = currentChart?.spot ?? [];
+  const chartSynfutPoints = currentChart?.synfut ?? [];
 
   const hasChartData = chartStraddlePoints.length > 0;
 
@@ -1024,6 +1065,16 @@ function StraddleWidget(props: WidgetProps) {
             }}
           />
 
+          {isExample && (
+            <span
+              role="status"
+              aria-label="Example option quotes"
+              className="px-1.5 py-0.5 text-xxs text-warning bg-warning/10 border border-warning/30 rounded"
+            >
+              Example data
+            </span>
+          )}
+
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
               <span className="text-xs text-text-muted px-1">No expiries</span>
@@ -1031,7 +1082,9 @@ function StraddleWidget(props: WidgetProps) {
             {expiryButtons.map((exp) => (
               <button
                 key={exp}
-                onClick={() => setSelectedExpiry(exp)}
+                onClick={() => setExpirySelection((current) => current?.scopeKey === expiryScopeKey
+                  ? { ...current, selected: exp }
+                  : current)}
                 className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
                   exp === selectedExpiry
                     ? "bg-accent/15 border-accent/60 text-accent"
@@ -1185,7 +1238,7 @@ function StraddleWidget(props: WidgetProps) {
         ) : !hasChartData ? (
           <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs gap-2">
             <Activity size={20} className="text-accent/40" />
-            <span>Live tracking will start on next tick</span>
+            <span>Tracking will start with the next quote</span>
             <span className="text-xs text-text-muted/60">
               Straddle price will accumulate here during market hours
             </span>

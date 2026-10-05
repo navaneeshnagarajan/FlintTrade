@@ -19,7 +19,6 @@ import { InlineToast } from "@/tools/Settings/shared";
 import { ProfileSection }    from "@/tools/Settings/ProfileSection";
 import { GeneralSection }    from "@/tools/Settings/GeneralSection";
 import { AppearanceSection } from "@/tools/Settings/AppearanceSection";
-import { ConnectionSection } from "@/tools/Settings/ConnectionSection";
 import { BrokerConnect }     from "@/components/account/BrokerConnect";
 import { TradingSection }    from "@/tools/Settings/TradingSection";
 import { RiskSection }       from "@/tools/Settings/RiskSection";
@@ -48,7 +47,7 @@ import { PracticeLaterSetup } from "@/routes/SetupAccountRoute";
 // ---------------------------------------------------------------------------
 
 export default function SettingsRoute() {
-  // Read hash fragment to allow deep-linking: /settings#api, /settings#brokers, etc.
+  // Read hash fragment to allow deep-linking: /settings#brokers, /settings#brokers, etc.
   const sectionFromHash = (): SectionId => {
     const hash = window.location.hash.replace("#", "") as SectionId;
     return SECTIONS.some((s) => s.id === hash) ? hash : "general";
@@ -88,7 +87,7 @@ export default function SettingsRoute() {
     llmCredentialLast4,
     telegram,
     dataPaths,
-    connection,
+
     restarting,
     updateGeneral,
     updateTradingDefaults,
@@ -98,7 +97,7 @@ export default function SettingsRoute() {
     removeLLMCredential,
     updateTelegram,
     updateDataPaths,
-    acceptConnection,
+
     handleRestart,
     retryLlmHydration,
   } = useSettingsState();
@@ -138,7 +137,6 @@ export default function SettingsRoute() {
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;
-      case "api":        return <ConnectionSection settings={connection} onSaved={acceptConnection} />;
       case "brokers":    return <BrokerConnect pollAccounts={false} />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
@@ -235,7 +233,7 @@ export default function SettingsRoute() {
             {/* Route-level hint — dismissible, respects helpPrefs.inlineHints */}
             <RouteBanner
               hintId="settings-broker-gateway-connect"
-              text="Use Brokers to connect broker accounts. Use Broker Gateway for OpenAlgo-compatible bridge URL and API-key settings."
+              text="Use Brokers to connect broker accounts. Broker credentials are stored in your local encrypted vault."
               className="mb-5"
             />
             <PracticeLaterSetup surface="settings" />

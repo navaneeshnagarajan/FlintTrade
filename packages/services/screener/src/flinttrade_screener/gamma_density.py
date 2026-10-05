@@ -2,7 +2,7 @@
 
 Computes the "Gamma Density" view (inspired by Vtrender's Gamma Density chart),
 ported natively onto FlintTrade's own option-chain snapshot and Black-Scholes
-greeks — no OpenAlgo call, no external ``opengreeks`` dependency:
+greeks — no broker call, no external ``opengreeks`` dependency:
 
   * **Density (Γ×OI)** — per-strike dealer gamma exposure = option gamma × open
     interest, summed across CE and PE legs. The headline curve.

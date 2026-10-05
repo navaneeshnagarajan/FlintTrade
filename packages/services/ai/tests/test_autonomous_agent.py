@@ -117,7 +117,7 @@ def make_agent(
     executor = make_gated_executor(passed=(order_status == "success")) if with_executor else None
     return AutonomousTrader(
         llm_client=mock_llm,
-        openalgo_client=mock_broker,
+        broker_client=mock_broker,
         config=config,
         order_executor=executor,
         entry_intent_sink=entry_intent_sink,
@@ -456,8 +456,8 @@ async def test_analyze_all_returns_all_symbols() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_works_with_TYPED_openalgo_client() -> None:
-    """The agent must parse the modern OpenAlgoClient's TYPED Pydantic models
+async def test_fetch_works_with_TYPED_broker_client() -> None:
+    """The agent must parse the modern BrokerClient's TYPED Pydantic models
     (Quote/Depth/list[OHLCV]) — not just dict envelopes. Before the fix it
     only handled dicts, so the live-wired agent set data.error on every
     symbol and could never trade (the control plane was dead on arrival)."""

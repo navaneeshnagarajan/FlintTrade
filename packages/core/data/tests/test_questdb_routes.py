@@ -20,9 +20,7 @@ def _mock_bridge() -> MagicMock:
     bridge.check_health.return_value = True
     bridge.insert_ticks.return_value = 3
     bridge.query.return_value = [{"symbol": "NIFTY", "ltp": 22500.0}]
-    bridge.aggregate_ohlcv.return_value = [
-        {"open": 22000.0, "high": 22500.0, "low": 21900.0, "close": 22400.0}
-    ]
+    bridge.aggregate_ohlcv.return_value = [{"open": 22000.0, "high": 22500.0, "low": 21900.0, "close": 22400.0}]
     bridge.get_latest_tick.return_value = {"symbol": "NIFTY", "ltp": 22500.0}
     return bridge
 
@@ -73,9 +71,7 @@ def test_health_down():
 
 def test_insert_ticks_ok(client):
     """200 with inserted count."""
-    ticks = [
-        {"symbol": "NIFTY", "exchange": "NSE_INDEX", "ltp": 22500.0}
-    ] * 3
+    ticks = [{"symbol": "NIFTY", "exchange": "NSE_INDEX", "ltp": 22500.0}] * 3
     resp = client.post("/api/v1/data/questdb/ticks", json={"ticks": ticks})
     assert resp.status_code == 200
     assert resp.get_json()["data"]["inserted"] == 3

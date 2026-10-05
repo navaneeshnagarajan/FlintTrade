@@ -43,17 +43,16 @@ export function findBrokerAccountMatch<T extends BrokerAccountIdentity>(
  * operator re-selects safely.
  */
 export function migrateBrokerPersist(persistedState: unknown, version: number): unknown {
-  if (version < 1 && persistedState && typeof persistedState === "object") {
-    const state = persistedState as { activeAccountId?: unknown };
-    const active = state.activeAccountId;
-    if (
-      typeof active === "string"
-      && active.length > 0
-      && !active.startsWith("native:")
-      && !active.startsWith("gateway:")
-    ) {
-      return { ...state, activeAccountId: null };
-    }
+  if (!persistedState || typeof persistedState !== "object") return persistedState;
+  const state = persistedState as { activeAccountId?: unknown; accounts?: BrokerAccount[] };
+  if (version < 2) {
+    const accounts = Array.isArray(state.accounts)
+      ? state.accounts.filter((account) => account.source === "native")
+      : [];
+    const active = typeof state.activeAccountId === "string" && state.activeAccountId.startsWith("native:")
+      ? state.activeAccountId
+      : null;
+    return { ...state, accounts, activeAccountId: active };
   }
   return persistedState;
 }
@@ -121,7 +120,7 @@ export const useBrokerStore = create<BrokerState>()(
       }),
       {
         name: "flinttrade:brokers",
-        version: 1,
+        version: 2,
         migrate: migrateBrokerPersist,
         // Only persist non-sensitive display fields. Credentials and session
         // tokens must never be written to localStorage.

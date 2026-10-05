@@ -1675,7 +1675,7 @@ class UpstoxAdapter(BrokerAdapter):
         Upstox's full-quote endpoint returns the L1 quote and the 5-level
         ``depth.buy`` / ``depth.sell`` ladders together. Expose that ladder as a
         first-class read so native-only Depth/DOM widgets do not require the
-        OpenAlgo bridge for market depth.
+        native broker bridge for market depth.
         """
         keys = await self._resolve_keys(session, symbols)
         resp = await self._call(self._client(session).full_quote, ",".join(keys))

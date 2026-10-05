@@ -406,6 +406,7 @@ function IndicesTab() {
                 fabricated: the local SAMPLE constant (disconnected) OR a
                 backend payload flagged is_sample_data (the endpoint is
                 currently a stub even for connected users). */}
+            {!isExplicitlyLive && <span className="text-xxs text-warning" role="status">Sample data</span>}
             
             <div className="flex-1" />
             {isExplicitlyLive && !isLoading && !isError && (

@@ -49,8 +49,8 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadContext: () => ({
     identity: {
       mode: "live",
-      scopeKey: "live:openalgo:default",
-      brokerType: "openalgo",
+      scopeKey: "live:native:dhan:A1",
+      brokerType: "dhan",
       accountId: "default",
     },
     enabled: _isConnected,
@@ -85,7 +85,7 @@ vi.mock("@/services/queryKeys", () => ({
 }));
 
 vi.mock("@/hooks/useDataScope", () => ({
-  useDataScope: () => "live:openalgo:default",
+  useDataScope: () => "live:native:dhan:A1",
 }));
 
 // ---------------------------------------------------------------------------

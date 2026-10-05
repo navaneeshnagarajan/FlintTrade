@@ -57,7 +57,7 @@ NATIVE_ADAPTER_SPECS: MappingProxyType[str, NativeAdapterSpec] = MappingProxyTyp
     }
 )
 
-# broker_id -> native adapter class. ``openalgo`` is intentionally absent: it is
+# broker_id -> native adapter class. ``native_broker`` is intentionally absent: it is
 # the bridge adapter, wired separately in ``build_broker_router``. This stays
 # mutable because the emergency-planner gate test deliberately monkeypatches it.
 NATIVE_ADAPTER_CLASSES: dict[str, type[BrokerAdapter]] = {
@@ -94,7 +94,7 @@ def build_native_adapters(
     cleared and it is connectable, ``attest_ok(broker_id)`` says its SDK is
     installed and pinned-match, and ``has_credentials(broker_id)`` says the vault
     holds creds.
-    Non-native ids (e.g. ``openalgo``) and brokers failing any gate are skipped
+    Non-native ids (e.g. ``native_broker``) and brokers failing any gate are skipped
     — reported via ``on_skip(broker_id, reason)`` — so the result holds exactly
     the natives that are safe to register.
 

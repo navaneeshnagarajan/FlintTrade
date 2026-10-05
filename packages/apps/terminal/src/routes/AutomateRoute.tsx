@@ -10,7 +10,6 @@ import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 
 import AutomateSidebar, { SECTIONS, type SectionId } from "./automate/AutomateSidebar";
-import FlowsSection       from "./automate/FlowsSection";
 import CronSection        from "./automate/CronSection";
 import MonitorsSection    from "./automate/MonitorsSection";
 import LogsSection        from "./automate/LogsSection";
@@ -33,16 +32,16 @@ export default function AutomateRoute() {
   const level = useSkillLevel("automate");
 
   // Density adaptation:
-  // Beginner: Alerts/Monitors + Settings only (hide Flows, Cron, Strategies)
-  // Intermediate: Flows + Schedules + Monitors + Logs + emergency settings
+  // Beginner: Alerts/Monitors + Settings only (hide Schedules and Strategies)
+  // Intermediate: Schedules + Monitors + Logs + emergency settings
   // Advanced: All sections
   // A deep link such as /automate#schedules still opens that section.
   const visibleSectionIds: SectionId[] = (() => {
     const base: SectionId[] = level === "beginner"
       ? ["monitors", "settings"]
       : level === "intermediate"
-        ? ["flows", "schedules", "monitors", "webhooks", "logs", "settings"]
-        : ["flows", "schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
+        ? ["schedules", "monitors", "webhooks", "logs", "settings"]
+        : ["schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
     if (hashedSection && !base.includes(hashedSection)) return [hashedSection, ...base];
     return base;
   })();
@@ -86,7 +85,6 @@ export default function AutomateRoute() {
   ).length;
 
   const sectionContent: Record<SectionId, React.ReactNode> = {
-    flows:      <FlowsSection />,
     schedules:  <CronSection />,
     monitors:   <MonitorsSection />,
     strategies: <StrategiesSection />,
@@ -99,7 +97,7 @@ export default function AutomateRoute() {
     <Page>
       <PageHeader
         title="Automate"
-        description="Flows, schedules, strategy monitors, webhooks and the safety controls that stop them."
+        description="Schedules, strategy monitors, webhooks and the safety controls that stop them."
         meta={
           killSwitchActive ? (
             <span className="flex items-center gap-1.5 rounded-full border border-loss/30 bg-loss/10 px-2.5 py-0.5">
@@ -122,19 +120,7 @@ export default function AutomateRoute() {
           uploadedRunningCount={uploadedRunningCount}
         />
 
-        {activeSection === "flows" ? (
-          <div
-            role="tabpanel"
-            id={`automate-tabpanel-${activeSection}`}
-            aria-labelledby={`automate-tab-${activeSection}`}
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"
-          >
-            <TabTransition tabKey={activeSection} className="flex min-h-0 flex-1 flex-col p-3">
-              {sectionContent[activeSection]}
-            </TabTransition>
-          </div>
-        ) : (
-          <PageBody
+        <PageBody
             role="tabpanel"
             id={`automate-tabpanel-${activeSection}`}
             aria-labelledby={`automate-tab-${activeSection}`}
@@ -143,7 +129,6 @@ export default function AutomateRoute() {
               {sectionContent[activeSection]}
             </TabTransition>
           </PageBody>
-        )}
       </div>
 
       {/* Guided tour — beginner only, first visit */}

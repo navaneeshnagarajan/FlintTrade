@@ -28,12 +28,21 @@ def test_model_limits_have_explicit_bounded_defaults():
     assert config["model_output_limit"] == 512
 
 
-@pytest.mark.parametrize("field,value", [
-    ("model_call_limit", True), ("model_call_limit", 0), ("model_call_limit", 10_001),
-    ("model_call_limit", 1.0), ("model_call_limit", "500"),
-    ("model_output_limit", True), ("model_output_limit", 15), ("model_output_limit", 4097),
-    ("model_output_limit", 512.0), ("model_output_limit", None),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("model_call_limit", True),
+        ("model_call_limit", 0),
+        ("model_call_limit", 10_001),
+        ("model_call_limit", 1.0),
+        ("model_call_limit", "500"),
+        ("model_output_limit", True),
+        ("model_output_limit", 15),
+        ("model_output_limit", 4097),
+        ("model_output_limit", 512.0),
+        ("model_output_limit", None),
+    ],
+)
 def test_model_limits_reject_unbounded_or_coerced_values(field, value):
     with pytest.raises(ValueError, match=field):
         runtime.validate_practice_config({"symbols": ["RELIANCE"], field: value})
@@ -41,18 +50,26 @@ def test_model_limits_reject_unbounded_or_coerced_values(field, value):
 
 @pytest.mark.parametrize("call_limit,output_limit", [(1, 16), (10_000, 4096)])
 def test_model_limits_accept_both_boundaries(call_limit, output_limit):
-    result = runtime.validate_practice_config({
-        "symbols": ["RELIANCE"], "model_call_limit": call_limit, "model_output_limit": output_limit,
-    })
+    result = runtime.validate_practice_config(
+        {
+            "symbols": ["RELIANCE"],
+            "model_call_limit": call_limit,
+            "model_output_limit": output_limit,
+        }
+    )
     assert result["model_call_limit"] == call_limit
     assert result["model_output_limit"] == output_limit
 
 
 def _observed(tmp_path, *, limit=3, output=64, client=None):
     store = AgentRunStore(tmp_path / "model_runs.sqlite")
-    config = runtime.validate_practice_config({
-        "symbols": ["RELIANCE"], "model_call_limit": limit, "model_output_limit": output,
-    })
+    config = runtime.validate_practice_config(
+        {
+            "symbols": ["RELIANCE"],
+            "model_call_limit": limit,
+            "model_output_limit": output,
+        }
+    )
     row = store.create_run(run_id="model-run", mode="practice", config=config)
     run = runtime._Run(row["run_id"], "operator", config, row["created_at"])
     supervisor = SimpleNamespace(store=store)
@@ -61,7 +78,9 @@ def _observed(tmp_path, *, limit=3, output=64, client=None):
     supervisor._model_brake = lambda run, operation: None
     supervisor._event = lambda run, kind, data: runtime.PracticeAgentSupervisor._event(supervisor, run, kind, data)
     run.model_budget = _model().PracticeModelBudget(
-        limit, output, event_sink=lambda kind, data: supervisor._event(run, kind, data),
+        limit,
+        output,
+        event_sink=lambda kind, data: supervisor._event(run, kind, data),
     )
     if client is None:
         client = SimpleNamespace(chat=lambda _messages: LLMResponse(content="HOLD"))
@@ -101,7 +120,9 @@ def test_failed_and_unknown_provider_attempts_still_consume_limit(tmp_path, fail
     def chat(_messages):
         if failure == "raises":
             raise OSError("private-provider-detail")
-        return LLMResponse(content="" if failure == "empty" else "HOLD", error="private-provider-detail" if failure == "error" else "")
+        return LLMResponse(
+            content="" if failure == "empty" else "HOLD", error="private-provider-detail" if failure == "error" else ""
+        )
 
     observed, run, store = _observed(tmp_path, limit=1, client=SimpleNamespace(chat=chat))
     try:
@@ -164,7 +185,9 @@ def test_concurrent_analysis_and_reflection_cannot_overrun_shared_budget(tmp_pat
 
 
 @pytest.mark.parametrize("response_kind", ["reasoning_empty", "http_failure", "success"])
-def test_frozen_production_client_issues_one_request_without_fallback_or_reasoning_retry(tmp_path, monkeypatch, response_kind):
+def test_frozen_production_client_issues_one_request_without_fallback_or_reasoning_retry(
+    tmp_path, monkeypatch, response_kind
+):
     initial = LLMConfig(provider="openai", model="original-model", api_key="synthetic-key", reasoning_max_tokens=8192)
     monkeypatch.setattr(LLMConfig, "from_env", classmethod(lambda cls: initial))
     source = LLMClient(fallback_config=LLMConfig(provider="anthropic", model="fallback-model"))
@@ -175,12 +198,18 @@ def test_frozen_production_client_issues_one_request_without_fallback_or_reasoni
         requests.append(request)
         if response_kind == "http_failure":
             return httpx.Response(503, json={"error": {"message": "private-provider-response"}})
-        message = {"content": "HOLD"} if response_kind == "success" else {"content": "", "reasoning_content": "private reasoning"}
+        message = (
+            {"content": "HOLD"}
+            if response_kind == "success"
+            else {"content": "", "reasoning_content": "private reasoning"}
+        )
         return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "length"}]})
 
     # Exercise the real HTTP transport and LLMClient retry branches, not chat mocks.
     frozen._http._default = httpx.Client(transport=httpx.MockTransport(transport))
-    monkeypatch.setattr(LLMConfig, "from_env", classmethod(lambda cls: LLMConfig(provider="anthropic", model="changed-model")))
+    monkeypatch.setattr(
+        LLMConfig, "from_env", classmethod(lambda cls: LLMConfig(provider="anthropic", model="changed-model"))
+    )
     initial.model = "also-mutated"
     observed, run, store = _observed(tmp_path, client=frozen)
     try:
@@ -278,11 +307,15 @@ def test_frozen_model_override_is_refused_without_transport_io_or_source_mutatio
         source.close()
 
 
-@pytest.mark.parametrize("content", ['{"win_rate":"PRIVATE_REFLECTION_VALUE"}', 'PRIVATE_REFLECTION_VALUE invalid json'])
+@pytest.mark.parametrize(
+    "content", ['{"win_rate":"PRIVATE_REFLECTION_VALUE"}', "PRIVATE_REFLECTION_VALUE invalid json"]
+)
 async def test_malformed_reflection_content_is_not_written_to_logs(tmp_path, caplog, content):
     from flinttrade_ai.trade_reflection import ReflectionConfig, TradeReflector
 
-    observed, run, store = _observed(tmp_path, client=SimpleNamespace(chat=lambda _messages: LLMResponse(content=content)))
+    observed, run, store = _observed(
+        tmp_path, client=SimpleNamespace(chat=lambda _messages: LLMResponse(content=content))
+    )
     run.learning_active = True
     try:
         reflector = TradeReflector(config=ReflectionConfig(min_trades_for_reflection=1), llm_client=observed)

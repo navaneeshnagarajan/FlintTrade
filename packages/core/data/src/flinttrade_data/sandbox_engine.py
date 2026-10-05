@@ -43,17 +43,19 @@ logger = logging.getLogger("flinttrade.data.sandbox_engine")
 # Fills restored from a backup are stored as records. They are not new orders.
 # The marker string lives in flinttrade_core.restored_fills so every scoring
 # reader filters on the same value. Re-exported here for existing imports.
-_IMPORT_KEYS = frozenset({
-    "schema_version",
-    "config",
-    "capital",
-    "positions",
-    "orders",
-    "trades",
-    "pnl_history",
-    "exported_at",
-    "reset_at",
-})
+_IMPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "config",
+        "capital",
+        "positions",
+        "orders",
+        "trades",
+        "pnl_history",
+        "exported_at",
+        "reset_at",
+    }
+)
 
 _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
 
@@ -61,9 +63,7 @@ _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
 # Table name allowlist — prevents SQL injection via dynamic table names
 # ---------------------------------------------------------------------------
 
-_VALID_TABLES = frozenset(
-    {"capital", "sandbox_config", "orders", "trades", "positions", "pnl", "mtm"}
-)
+_VALID_TABLES = frozenset({"capital", "sandbox_config", "orders", "trades", "positions", "pnl", "mtm"})
 
 
 def _validate_table(table: str) -> str:
@@ -270,9 +270,7 @@ class SandboxEngine:
         config: SandboxConfig | None = None,
     ) -> None:
         use_workspace_default = (
-            db_path is None
-            and not os.getenv("SANDBOX_STATE_PATH")
-            and not os.getenv("SANDBOX_DB_PATH")
+            db_path is None and not os.getenv("SANDBOX_STATE_PATH") and not os.getenv("SANDBOX_DB_PATH")
         )
         self._db_path = db_path or _default_db_path()
 
@@ -285,9 +283,7 @@ class SandboxEngine:
 
         self._conn = open_sqlite(self._db_path, durability="normal")
         self._lock = threading.RLock()
-        self._requested_config = _normalise_config(
-            config or SandboxConfig(starting_capital=initial_capital)
-        )
+        self._requested_config = _normalise_config(config or SandboxConfig(starting_capital=initial_capital))
         self._initial_capital = self._requested_config.starting_capital
         self.config = self._requested_config
         self._init_db()
@@ -307,9 +303,7 @@ class SandboxEngine:
                 exc,
             )
         except Exception:
-            logger.exception(
-                "Retired Practice ledger migration failed; source was left untouched"
-            )
+            logger.exception("Retired Practice ledger migration failed; source was left untouched")
 
     # ------------------------------------------------------------------
     # Initialisation
@@ -324,9 +318,7 @@ class SandboxEngine:
     def _init_db(self) -> None:
         """Create tables, indexes, and seed the capital row if missing."""
         ensure_schema(self._conn)
-        capital_row = self._conn.execute(
-            "SELECT initial FROM capital WHERE id = 'default'"
-        ).fetchone()
+        capital_row = self._conn.execute("SELECT initial FROM capital WHERE id = 'default'").fetchone()
         seed_config = self._requested_config
         if capital_row is not None and seed_config == SandboxConfig():
             seed_config = SandboxConfig(starting_capital=float(capital_row[0]))
@@ -379,8 +371,7 @@ class SandboxEngine:
             proposed_margin = self._calculate_used_margin(config=updated)
             if proposed_margin > proposed_current:
                 raise ValueError(
-                    "Practice policy would reduce capital below committed margin "
-                    f"of {proposed_margin:.2f}"
+                    f"Practice policy would reduce capital below committed margin of {proposed_margin:.2f}"
                 )
 
             now = time.time()
@@ -437,9 +428,7 @@ class SandboxEngine:
             - ``available`` — capital available for new orders
             - ``used_margin`` — capital currently tied up in open positions
         """
-        row = self._conn.execute(
-            "SELECT initial, current, used_margin FROM capital WHERE id = 'default'"
-        ).fetchone()
+        row = self._conn.execute("SELECT initial, current, used_margin FROM capital WHERE id = 'default'").fetchone()
 
         if not row:  # Should never happen after _init_db, but guard anyway
             return {
@@ -529,14 +518,9 @@ class SandboxEngine:
             new_current = cap["current"] + amount
 
             if new_current < 0:
-                raise ValueError(
-                    f"Cannot remove {abs(amount):.2f} — current capital is only {cap['current']:.2f}"
-                )
+                raise ValueError(f"Cannot remove {abs(amount):.2f} — current capital is only {cap['current']:.2f}")
             if new_current < cap["used_margin"]:
-                raise ValueError(
-                    "Cannot reduce Practice capital below committed margin "
-                    f"of {cap['used_margin']:.2f}"
-                )
+                raise ValueError(f"Cannot reduce Practice capital below committed margin of {cap['used_margin']:.2f}")
 
             now = time.time()
             self._conn.execute(
@@ -662,8 +646,7 @@ class SandboxEngine:
                         "order_id": "",
                         "status": "REJECTED",
                         "message": (
-                            f"Insufficient capital: need {required_margin:.2f}, "
-                            f"available {cap['available']:.2f}"
+                            f"Insufficient capital: need {required_margin:.2f}, available {cap['available']:.2f}"
                         ),
                     }
 
@@ -676,9 +659,7 @@ class SandboxEngine:
                     return {
                         "order_id": "",
                         "status": "REJECTED",
-                        "message": (
-                            f"Insufficient position: need {quantity}, holding {held}{detail}"
-                        ),
+                        "message": (f"Insufficient position: need {quantity}, holding {held}{detail}"),
                     }
 
             order_id = str(uuid.uuid4())
@@ -808,9 +789,7 @@ class SandboxEngine:
                     elif action == "SELL" and ltp >= limit_price:
                         fill_price = float(limit_price)
                 elif order_type == "SL":
-                    triggered_now = (
-                        action == "BUY" and ltp >= trigger_price
-                    ) or (
+                    triggered_now = (action == "BUY" and ltp >= trigger_price) or (
                         action == "SELL" and ltp <= trigger_price
                     )
                     if triggered_now and not stop_triggered:
@@ -838,9 +817,7 @@ class SandboxEngine:
                 try:
                     rejection_message = ""
                     if action == "BUY":
-                        committed_margin = self._calculate_used_margin(
-                            exclude_order_id=str(order_id)
-                        )
+                        committed_margin = self._calculate_used_margin(exclude_order_id=str(order_id))
                         proposed_margin = self._estimate_margin(
                             quantity=int(quantity),
                             price=fill_price,
@@ -1034,9 +1011,7 @@ class SandboxEngine:
         A contract is restored only when it has at least one restored fill
         and no fill with any other strategy. A later live fill clears it.
         """
-        rows = self._conn.execute(
-            "SELECT symbol, exchange, product, strategy FROM trades"
-        ).fetchall()
+        rows = self._conn.execute("SELECT symbol, exchange, product, strategy FROM trades").fetchall()
         restored: set[tuple[str, str, str]] = set()
         live: set[tuple[str, str, str]] = set()
         for symbol, exchange, product, strategy in rows:
@@ -1180,7 +1155,7 @@ class SandboxEngine:
             - ``total`` — realised + unrealised
         """
         row = self._conn.execute(
-               """SELECT
+            """SELECT
                    COALESCE(SUM(realised_pnl), 0.0),
                    COALESCE(SUM(unrealised_pnl), 0.0)
                FROM positions"""
@@ -1280,9 +1255,7 @@ class SandboxEngine:
                 else:
                     marks[(str(exchange), str(symbol))] = mark
             if missing:
-                raise ValueError(
-                    "Current LTP required before Practice square-off: " + ", ".join(missing)
-                )
+                raise ValueError("Current LTP required before Practice square-off: " + ", ".join(missing))
 
             now = time.time()
             self._conn.execute("BEGIN IMMEDIATE")
@@ -1460,9 +1433,7 @@ class SandboxEngine:
         current = float(capital_data.get("current", initial))
         if not all(math.isfinite(value) for value in (initial, current)) or initial <= 0 or current < 0:
             raise ValueError("Imported capital values are invalid")
-        imported_config = _normalise_config(
-            SandboxConfig(**(config_data or {"starting_capital": initial}))
-        )
+        imported_config = _normalise_config(SandboxConfig(**(config_data or {"starting_capital": initial})))
 
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -1524,9 +1495,7 @@ class SandboxEngine:
                     quantity = int(order.get("quantity", 0))
                     price = float(order.get("price", 0.0))
                     order_id = str(order.get("order_id") or uuid.uuid4())
-                    order_type = str(
-                        order.get("order_type", order.get("pricetype", "MARKET"))
-                    ).strip().upper()
+                    order_type = str(order.get("order_type", order.get("pricetype", "MARKET"))).strip().upper()
                     created_at = _coerce_timestamp(order.get("created_at"), now)
                     fill_time = (
                         _coerce_timestamp(order.get("fill_time"), created_at)
@@ -1547,18 +1516,10 @@ class SandboxEngine:
                         # Every resting kind (LIMIT, SL, SL-M) is marked so a
                         # later tick cannot fill it. A completed order keeps
                         # the strategy it was placed with.
-                        "strategy": (
-                            RESTORED_FROM_BACKUP
-                            if status == "PENDING"
-                            else str(order.get("strategy", ""))
-                        ),
+                        "strategy": (RESTORED_FROM_BACKUP if status == "PENDING" else str(order.get("strategy", ""))),
                         "status": status,
-                        "filled_qty": int(
-                            order.get("filled_qty", quantity if status == "COMPLETE" else 0)
-                        ),
-                        "avg_fill_px": order.get(
-                            "avg_fill_px", price if status == "COMPLETE" else None
-                        ),
+                        "filled_qty": int(order.get("filled_qty", quantity if status == "COMPLETE" else 0)),
+                        "avg_fill_px": order.get("avg_fill_px", price if status == "COMPLETE" else None),
                         "fill_time": fill_time,
                         "created_at": created_at,
                     }
@@ -1783,9 +1744,7 @@ class SandboxEngine:
 
     def total_estimated_charges(self) -> float:
         """Sum of estimated statutory charges across every Practice fill."""
-        row = self._conn.execute(
-            "SELECT COALESCE(SUM(charges), 0.0) FROM trades"
-        ).fetchone()
+        row = self._conn.execute("SELECT COALESCE(SUM(charges), 0.0) FROM trades").fetchone()
         return float(row[0] or 0.0)
 
     def _backfill_fill_charges(self) -> None:
@@ -1986,9 +1945,7 @@ class SandboxEngine:
             ),
         )
 
-    def _get_position(
-        self, symbol: str, exchange: str, product: str
-    ) -> dict[str, Any] | None:
+    def _get_position(self, symbol: str, exchange: str, product: str) -> dict[str, Any] | None:
         """Fetch a single position row or None if not found."""
         row = self._conn.execute(
             """SELECT position_id, net_qty, avg_price, buy_qty, buy_value,
@@ -2051,9 +2008,19 @@ class SandboxEngine:
                     price_source, price_age_s, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?, ?, ?)""",
                 (
-                    pos_id, symbol, exchange, product,
-                    net_qty, avg_price, buy_qty, buy_value,
-                    sell_qty, sell_value, source, age, now,
+                    pos_id,
+                    symbol,
+                    exchange,
+                    product,
+                    net_qty,
+                    avg_price,
+                    buy_qty,
+                    buy_value,
+                    sell_qty,
+                    sell_value,
+                    source,
+                    age,
+                    now,
                 ),
             )
         else:
@@ -2079,15 +2046,9 @@ class SandboxEngine:
                     new_realised = realised_pnl + close_qty * (avg_price - price)
                     new_avg_price = price if new_net_qty > 0 else avg_price
                 else:
-                    new_avg_price = (
-                        ((net_qty * avg_price) + notional) / new_net_qty
-                        if new_net_qty > 0
-                        else price
-                    )
+                    new_avg_price = ((net_qty * avg_price) + notional) / new_net_qty if new_net_qty > 0 else price
                     new_realised = realised_pnl
-                new_unrealised = (
-                    (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
-                )
+                new_unrealised = (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
             else:  # SELL
                 new_sell_qty = sell_qty + quantity
                 new_sell_value = sell_value + notional
@@ -2101,9 +2062,7 @@ class SandboxEngine:
                     new_realised = realised_pnl + close_qty * (price - avg_price)
                 else:
                     new_realised = realised_pnl
-                new_unrealised = (
-                    (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
-                )
+                new_unrealised = (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
 
             self._conn.execute(
                 """UPDATE positions
@@ -2114,10 +2073,14 @@ class SandboxEngine:
                        price_source = ?, price_age_s = ?, updated_at = ?
                    WHERE position_id = ?""",
                 (
-                    new_net_qty, new_avg_price,
-                    new_buy_qty, new_buy_value,
-                    new_sell_qty, new_sell_value,
-                    new_realised, new_unrealised,
+                    new_net_qty,
+                    new_avg_price,
+                    new_buy_qty,
+                    new_buy_value,
+                    new_sell_qty,
+                    new_sell_value,
+                    new_realised,
+                    new_unrealised,
                     *_kept_position_provenance(
                         price_source,
                         price_age_s,
@@ -2210,16 +2173,14 @@ class SandboxEngine:
         normalised_exchange = exchange.strip().upper()
         normalised_product = product.strip().upper()
         is_option = parse_option_symbol(normalised_symbol) is not None
-        is_derivative = (
-            parse_future_symbol(normalised_symbol) is not None
-            or normalised_exchange in {"NFO", "BFO", "MCX", "CDS"}
-        )
+        is_derivative = parse_future_symbol(normalised_symbol) is not None or normalised_exchange in {
+            "NFO",
+            "BFO",
+            "MCX",
+            "CDS",
+        }
         if is_option:
-            leverage = (
-                policy.option_buy_leverage
-                if action.strip().upper() == "BUY"
-                else policy.option_sell_leverage
-            )
+            leverage = policy.option_buy_leverage if action.strip().upper() == "BUY" else policy.option_sell_leverage
         elif is_derivative or normalised_product == "NRML":
             leverage = policy.futures_leverage
         else:

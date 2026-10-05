@@ -71,6 +71,7 @@ def _default_audit_dir() -> str:
 
     return str(audit_log_dir())
 
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -203,9 +204,7 @@ class AuditLogger:
         keys + compact separators give a stable, reproducible canonical form.
         """
         payload = {k: v for k, v in record.items() if k != "hash"}
-        canonical = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False
-        )
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _iter_files(self) -> list[Path]:
@@ -384,12 +383,20 @@ class AuditLogger:
         product: str = "",
         orderid: str = "",
     ) -> None:
-        self._write(self._make_event(
-            "ORDER_PLACED",
-            strategy=strategy, symbol=symbol, exchange=exchange,
-            action=action, quantity=quantity, price=price,
-            pricetype=pricetype, product=product, orderid=orderid,
-        ))
+        self._write(
+            self._make_event(
+                "ORDER_PLACED",
+                strategy=strategy,
+                symbol=symbol,
+                exchange=exchange,
+                action=action,
+                quantity=quantity,
+                price=price,
+                pricetype=pricetype,
+                product=product,
+                orderid=orderid,
+            )
+        )
 
     def log_order_modified(
         self,
@@ -402,11 +409,18 @@ class AuditLogger:
         quantity: str,
         price: str,
     ) -> None:
-        self._write(self._make_event(
-            "ORDER_MODIFIED",
-            strategy=strategy, symbol=symbol, exchange=exchange,
-            orderid=orderid, action=action, quantity=quantity, price=price,
-        ))
+        self._write(
+            self._make_event(
+                "ORDER_MODIFIED",
+                strategy=strategy,
+                symbol=symbol,
+                exchange=exchange,
+                orderid=orderid,
+                action=action,
+                quantity=quantity,
+                price=price,
+            )
+        )
 
     def log_order_cancelled(
         self,
@@ -416,11 +430,15 @@ class AuditLogger:
         symbol: str = "",
         exchange: str = "",
     ) -> None:
-        self._write(self._make_event(
-            "ORDER_CANCELLED",
-            strategy=strategy, orderid=orderid,
-            symbol=symbol, exchange=exchange,
-        ))
+        self._write(
+            self._make_event(
+                "ORDER_CANCELLED",
+                strategy=strategy,
+                orderid=orderid,
+                symbol=symbol,
+                exchange=exchange,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Safety events
@@ -436,11 +454,17 @@ class AuditLogger:
         exchange: str = "",
         strategy: str = "",
     ) -> None:
-        self._write(self._make_event(
-            "SAFETY_CHECK",
-            layer=layer, verdict=verdict, reason=reason,
-            symbol=symbol, exchange=exchange, strategy=strategy,
-        ))
+        self._write(
+            self._make_event(
+                "SAFETY_CHECK",
+                layer=layer,
+                verdict=verdict,
+                reason=reason,
+                symbol=symbol,
+                exchange=exchange,
+                strategy=strategy,
+            )
+        )
 
     def log_kill_switch(self, *, activated: bool, reason: str = "") -> None:
         event_type = "KILL_SWITCH_ACTIVATED" if activated else "KILL_SWITCH_RESET"
@@ -534,9 +558,7 @@ class AuditLogger:
                     raise RuntimeError("idempotent audit event identity is ambiguous")
                 path, record = matches[0]
                 stored_fields = {
-                    key: value
-                    for key, value in record.items()
-                    if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
+                    key: value for key, value in record.items() if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
                 }
                 _, stored_canonical = self._canonical_event_fields(stored_fields)
                 if record.get("event_type") != event_type or stored_canonical != canonical_fields:
@@ -569,6 +591,7 @@ class AuditLogger:
         is refused rather than repaired. The ID returned by
         :meth:`log_idempotent_event` identifies the event, not its record hash.
         """
+
         def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             result: dict[str, Any] = {}
             for key, value in pairs:
@@ -591,7 +614,10 @@ class AuditLogger:
             detached, canonical_fields = self._canonical_event_fields(dict(fields))
             identity = json.dumps(
                 {"event_type": event_type, "event_id": event_id, "fields": detached},
-                sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
             )
             if len(identity.encode("utf-8")) > MAX_IDEMPOTENT_EVENT_INPUT_BYTES:
                 return False
@@ -629,11 +655,16 @@ class AuditLogger:
                         if record.get("event_id") == event_id:
                             matches += 1
                             stored_fields = {
-                                key: value for key, value in record.items()
+                                key: value
+                                for key, value in record.items()
                                 if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
                             }
                             _, stored_canonical = self._canonical_event_fields(stored_fields)
-                            if matches != 1 or record["event_type"] != event_type or stored_canonical != canonical_fields:
+                            if (
+                                matches != 1
+                                or record["event_type"] != event_type
+                                or stored_canonical != canonical_fields
+                            ):
                                 return False
                         previous = record["hash"]
                         expected_seq += 1
@@ -731,14 +762,22 @@ class AuditLogger:
                 try:
                     lines = self._read_lines(path)
                 except (OSError, gzip.BadGzipFile) as exc:
-                    return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
-                            "break": {"file": path.name, "reason": f"unreadable: {exc}"}}
+                    return {
+                        "ok": False,
+                        "checked": checked,
+                        "anchored_at_genesis": anchored_at_genesis,
+                        "break": {"file": path.name, "reason": f"unreadable: {exc}"},
+                    }
                 for idx, line in enumerate(lines):
                     try:
                         rec = json.loads(line)
                     except json.JSONDecodeError:
-                        return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
-                                "break": {"file": path.name, "line": idx, "reason": "invalid JSON"}}
+                        return {
+                            "ok": False,
+                            "checked": checked,
+                            "anchored_at_genesis": anchored_at_genesis,
+                            "break": {"file": path.name, "line": idx, "reason": "invalid JSON"},
+                        }
                     is_chained = isinstance(rec, dict) and bool(rec.get("hash"))
                     if prev is None:
                         if not is_chained:
@@ -756,9 +795,12 @@ class AuditLogger:
                     elif int(rec.get("seq", -1)) != expected_seq:
                         reason = f"seq gap: expected {expected_seq}, found {rec.get('seq')}"
                     if reason is not None:
-                        return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
-                                "break": {"file": path.name, "line": idx,
-                                          "seq": rec.get("seq"), "reason": reason}}
+                        return {
+                            "ok": False,
+                            "checked": checked,
+                            "anchored_at_genesis": anchored_at_genesis,
+                            "break": {"file": path.name, "line": idx, "seq": rec.get("seq"), "reason": reason},
+                        }
                     prev = str(rec["hash"])
                     expected_seq += 1
                     checked += 1

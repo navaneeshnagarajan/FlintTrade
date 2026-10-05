@@ -37,20 +37,8 @@ pnpm --filter @flinttrade/terminal exec vitest run -t "test name"
 
 Boundary rule: data enters through ONE path only, never duplicated across stores.
 
-## Vite Proxy (dev mode)
-- `/api` → OpenAlgo REST (port 5000)
-- `/ft-api` → FlintTrade Python backend (port 5100)
-- `/ws` → OpenAlgo WebSocket (port 8765)
-- `api.ts` uses empty base in dev (relative paths hit proxy), full host in production
-
-## Key Files
-- `src/layout/widgetFactory.tsx` — authoritative widget registry
-- `src/services/api.ts` — OpenAlgo REST client with rate limiting
-- `src/services/websocket.ts` — WebSocket client (authenticate → subscribe → parse nested data)
-- `src/stores/connectionStore.ts` — host/apiKey/wsUrl (reads env vars on init)
-
 ## Multi-exchange support
-- 10 exchange codes: NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX
+- 7 native trading segments: NSE, BSE, NFO, BFO, CDS, BCD, MCX; indices are quote-only
 - MCX different hours (9:00-23:55), lot sizes per commodity
 - CDS decimal strikes (USDINR 85.50)
 - Crypto (Delta Exchange): 24/7, fractional lots, INR settlement

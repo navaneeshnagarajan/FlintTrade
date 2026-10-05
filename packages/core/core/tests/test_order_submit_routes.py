@@ -19,66 +19,78 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_ALLOWED_SUBMIT_ROUTES = frozenset({
-    ("POST", "/api/v1/orders/place"),
-    ("POST", "/api/v1/orders/<broker>/place"),
-    ("POST", "/api/v1/positions/exit-all"),
-    ("POST", "/api/v1/orders/bracket"),
-})
+_ALLOWED_SUBMIT_ROUTES = frozenset(
+    {
+        ("POST", "/api/v1/orders/place"),
+        ("POST", "/api/v1/orders/<broker>/place"),
+        ("POST", "/api/v1/positions/exit-all"),
+        ("POST", "/api/v1/orders/bracket"),
+    }
+)
 
 _RESTORE_ROUTE = ("POST", "/v1/sandbox/import")
 
-_REMOVED_DIRECT_PLACE_ROUTES = frozenset({
-    ("POST", "/api/v1/orders/place-smart"),
-    ("POST", "/api/v1/orders/open-position"),
-    ("POST", "/api/v1/orders/close-position"),
-})
+_REMOVED_DIRECT_PLACE_ROUTES = frozenset(
+    {
+        ("POST", "/api/v1/orders/place-smart"),
+        ("POST", "/api/v1/orders/open-position"),
+        ("POST", "/api/v1/orders/close-position"),
+    }
+)
 
-_SUBMIT_ATTRS = frozenset({
-    "place_order",
-    "place_smart_order",
-    "open_position",
-    "close_position",
-    "square_off_all",
-    "check_pending_fills",
-    "exit_all_positions",
-    "place_basket_order",
-    "place_split_order",
-    "place_reducing_order",
-    "place_conditional_trigger",
-    "place_multi_order",
-    "place_leg",
-    "_place_leg",
-})
+_SUBMIT_ATTRS = frozenset(
+    {
+        "place_order",
+        "place_smart_order",
+        "open_position",
+        "close_position",
+        "square_off_all",
+        "check_pending_fills",
+        "exit_all_positions",
+        "place_basket_order",
+        "place_split_order",
+        "place_reducing_order",
+        "place_conditional_trigger",
+        "place_multi_order",
+        "place_leg",
+        "_place_leg",
+    }
+)
 _SANDBOX_TICK_RECEIVERS = frozenset({"sandbox", "engine"})
-_PLACE_VERBS = frozenset({
-    "exit_all_positions",
-    "place_conditional_trigger",
-    "place_multi_order",
-    "place_reducing_order",
-})
+_PLACE_VERBS = frozenset(
+    {
+        "exit_all_positions",
+        "place_conditional_trigger",
+        "place_multi_order",
+        "place_reducing_order",
+    }
+)
 _VERB_CALLEES = frozenset({"_gated_verb_write", "execute_gated"})
-_ADMIT_NAMES = frozenset({
-    "_admit_place",
-    "_laya_place_response",
-    "_record_reduce_only",
-    "_prepare_live_reduce_only",
-    "_prove_exit_all_reduce_only",
-    "_laya_automate_block",
-})
+_ADMIT_NAMES = frozenset(
+    {
+        "_admit_place",
+        "_laya_place_response",
+        "_record_reduce_only",
+        "_prepare_live_reduce_only",
+        "_prove_exit_all_reduce_only",
+        "_laya_automate_block",
+    }
+)
 _GTT_CHECK = "_gtt_contract_refusal"
 _BLOCKED_DHAN_URLS = ("/forever/orders", "/super/orders")
 _BLOCKED_DHAN_CALLS = frozenset({"place_forever", "place_super_order"})
 _ADMIT_ATTRS = frozenset({"admit", "admit_reduce_only"})
-_DB_RECEIVERS = frozenset({
-    "conn",
-    "_conn",
-    "_db",
-    "db",
-    "cursor",
-    "session",
-    "connection",
-})
+_DB_RECEIVERS = frozenset(
+    {
+        "conn",
+        "_conn",
+        "_db",
+        "db",
+        "cursor",
+        "session",
+        "connection",
+    }
+)
 
 # Attribute calls the route table resolves onto a real order helper.
 _FOLLOW_ATTR: dict[tuple[str, str], tuple[str, str, str]] = {
@@ -91,11 +103,6 @@ _FOLLOW_ATTR: dict[tuple[str, str], tuple[str, str, str]] = {
         "flinttrade_engine.split_orders",
         "SplitOrderExecutor",
         "execute_split",
-    ),
-    ("bridge", "execute"): (
-        "flinttrade_automation.voice_order_bridge",
-        "VoiceOrderBridge",
-        "execute",
     ),
     ("svc", "place_bracket"): (
         "flinttrade_engine.bracket_order",
@@ -118,20 +125,22 @@ _FOLLOW_ATTR: dict[tuple[str, str], tuple[str, str, str]] = {
         "route",
     ),
 }
-_SELF_FOLLOW_ATTRS = frozenset({
-    "execute",
-    "execute_split",
-    "dispatch",
-    "route",
-    "route_order",
-    "_handle_place_order",
-    "_handle_order",
-    "_handle_exit",
-    "_handle_cancel",
-    "_handle_modify",
-    "_handle_status",
-    "_call_dispatcher",
-})
+_SELF_FOLLOW_ATTRS = frozenset(
+    {
+        "execute",
+        "execute_split",
+        "dispatch",
+        "route",
+        "route_order",
+        "_handle_place_order",
+        "_handle_order",
+        "_handle_exit",
+        "_handle_cancel",
+        "_handle_modify",
+        "_handle_status",
+        "_call_dispatcher",
+    }
+)
 
 
 def _unwrap(func: object) -> object:
@@ -246,11 +255,7 @@ def _is_submit_call(node: ast.Call) -> bool:
     if node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value in _PLACE_VERBS:
         return True
     for keyword in node.keywords:
-        if (
-            keyword.arg == "verb"
-            and isinstance(keyword.value, ast.Constant)
-            and keyword.value.value in _PLACE_VERBS
-        ):
+        if keyword.arg == "verb" and isinstance(keyword.value, ast.Constant) and keyword.value.value in _PLACE_VERBS:
             return True
     return False
 
@@ -338,10 +343,7 @@ def _call_name(node: ast.Call) -> str:
 
 
 def _tree_calls_gtt_check(tree: ast.AST) -> bool:
-    return any(
-        isinstance(node, ast.Call) and _call_name(node) == _GTT_CHECK
-        for node in ast.walk(tree)
-    )
+    return any(isinstance(node, ast.Call) and _call_name(node) == _GTT_CHECK for node in ast.walk(tree))
 
 
 def _reaches_gtt_check(func: object) -> bool:
@@ -417,22 +419,14 @@ def test_only_admitted_routes_can_submit_an_order(monkeypatch: pytest.MonkeyPatc
 
     assert set(submitters) == _ALLOWED_SUBMIT_ROUTES
     missing_admit = sorted(
-        f"{method} {rule}"
-        for (method, rule), view in submitters.items()
-        if not _reaches_admit(view)
+        f"{method} {rule}" for (method, rule), view in submitters.items() if not _reaches_admit(view)
     )
     assert missing_admit == []
-    restore_view = next(
-        view
-        for method, rule, view in _mounted_rules(app)
-        if (method, rule) == _RESTORE_ROUTE
-    )
+    restore_view = next(view for method, rule, view in _mounted_rules(app) if (method, rule) == _RESTORE_ROUTE)
     assert restore_view is not None
     assert not _reaches_submit(restore_view)
     missing_gtt = sorted(
-        f"{method} {rule}"
-        for (method, rule), view in submitters.items()
-        if not _reaches_gtt_check(view)
+        f"{method} {rule}" for (method, rule), view in submitters.items() if not _reaches_gtt_check(view)
     )
     assert missing_gtt == []
 

@@ -93,9 +93,7 @@ _YY_MONTH = re.compile(
 )
 _ISO_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 # Desk label: underlying, strike, CE/PE. No thousands separator.
-_DESK_OPTION = re.compile(
-    r"^(?P<underlying>[A-Z][A-Z0-9&]*)\s+(?P<strike>\d+(?:\.\d+)?)\s+(?P<option_type>CE|PE)$"
-)
+_DESK_OPTION = re.compile(r"^(?P<underlying>[A-Z][A-Z0-9&]*)\s+(?P<strike>\d+(?:\.\d+)?)\s+(?P<option_type>CE|PE)$")
 
 
 @dataclass(frozen=True)
@@ -139,9 +137,7 @@ def _resolve_as_of(as_of: date | None) -> date:
 
 def _unexpired(contracts: tuple[ContractLot, ...], as_of: date) -> tuple[ContractLot, ...]:
     """Drop contracts whose expiry date is before ``as_of``."""
-    return tuple(
-        contract for contract in contracts if contract.expiry is None or contract.expiry >= as_of
-    )
+    return tuple(contract for contract in contracts if contract.expiry is None or contract.expiry >= as_of)
 
 
 def _cell(row: Mapping[str, object], *names: str) -> str:
@@ -250,9 +246,7 @@ def contracts_from_rows(
         for security_id, _name, _when, lot, _series in items:
             previous = seen_ids.get(security_id)
             if previous is not None and previous != lot:
-                raise ValueError(
-                    f"Scrip master disagrees on the lot size for {underlying} {when}"
-                )
+                raise ValueError(f"Scrip master disagrees on the lot size for {underlying} {when}")
             seen_ids[security_id] = lot
             if security_id not in ids:
                 ids.append(security_id)
@@ -373,10 +367,7 @@ def desk_contract_name(symbol: str) -> str:
         return ""
     spaced = _DESK_OPTION.fullmatch(text)
     if spaced is not None:
-        return (
-            f"{spaced.group('underlying')} {_plain_strike(spaced.group('strike'))} "
-            f"{spaced.group('option_type')}"
-        )
+        return f"{spaced.group('underlying')} {_plain_strike(spaced.group('strike'))} {spaced.group('option_type')}"
     from flinttrade_core.symbol_utils import parse_option_symbol  # noqa: PLC0415
 
     option = parse_option_symbol(text.replace(" ", ""))
@@ -401,10 +392,7 @@ def _listed_symbol(
 
 def missing_lot_refusal(contract: str) -> str:
     """Refusal when the instrument master has no lot for this contract."""
-    return (
-        f"Not placed. The lot size for {contract} isn't in the instrument master, "
-        "so this order can't be sized."
-    )
+    return f"Not placed. The lot size for {contract} isn't in the instrument master, so this order can't be sized."
 
 
 def contract_quantity_message(
@@ -457,11 +445,7 @@ def lot_size_from_master(
     if dated:
         return dated[0].lot_size
     key = underlying.strip().upper().replace(" ", "")
-    undated = [
-        contract
-        for contract in contracts
-        if contract.underlying == key and contract.expiry is None
-    ]
+    undated = [contract for contract in contracts if contract.underlying == key and contract.expiry is None]
     if not undated:
         return None
     return undated[0].lot_size

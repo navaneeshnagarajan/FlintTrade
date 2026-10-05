@@ -110,16 +110,9 @@ def store(tmp_path: Path) -> StateStore:
 
 
 def test_schema_creates_all_tables_and_trigger(store: StateStore) -> None:
-    names = {
-        r[0]
-        for r in store._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-    }
+    names = {r[0] for r in store._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {"capital", "orders", "positions", "pnl", "mtm"} <= names
-    trig = store._conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='trigger' AND name='mtm_cap'"
-    ).fetchone()
+    trig = store._conn.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='mtm_cap'").fetchone()
     assert trig is not None
 
 
@@ -143,12 +136,11 @@ def test_mtm_cap_trigger_prunes_beyond_retention(store: StateStore) -> None:
     )
     # a fresh row whose id is a 1000-multiple → trigger fires, deletes id < 101000-100000
     conn.execute(
-        "INSERT INTO mtm (id, position_id, tick_ts, ltp, qty, unrealised) "
-        "VALUES (101000, 'p1', 2.0, 101.0, 50, 50.0)"
+        "INSERT INTO mtm (id, position_id, tick_ts, ltp, qty, unrealised) VALUES (101000, 'p1', 2.0, 101.0, 50, 50.0)"
     )
     remaining = {r[0] for r in conn.execute("SELECT id FROM mtm").fetchall()}
-    assert 1 not in remaining        # pruned
-    assert 101000 in remaining       # kept
+    assert 1 not in remaining  # pruned
+    assert 101000 in remaining  # kept
 
 
 def test_mtm_trigger_does_not_prune_within_window(store: StateStore) -> None:
@@ -227,7 +219,7 @@ def test_reset_archives_and_clears(tmp_path: Path) -> None:
 
     s = StateStore(tmp_path / "sandbox" / "state.sqlite")
     try:
-        assert s.get_positions(open_only=False) == []       # positions cleared
+        assert s.get_positions(open_only=False) == []  # positions cleared
         assert s._conn.execute("SELECT COUNT(*) FROM mtm").fetchone()[0] == 0
         assert s.get_orders() == []
         assert s._conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
@@ -257,7 +249,7 @@ def test_reset_atomic_rollback_on_fsync_failure(tmp_path: Path, monkeypatch) -> 
 
     s = StateStore(tmp_path / "sandbox" / "state.sqlite")
     try:
-        assert len(s.get_positions(open_only=False)) == 1     # rows intact
+        assert len(s.get_positions(open_only=False)) == 1  # rows intact
         assert s._conn.execute("SELECT COUNT(*) FROM mtm").fetchone()[0] == 1
         assert len(s.get_orders()) == 2
     finally:
@@ -273,7 +265,7 @@ def test_reset_idempotent_same_day(tmp_path: Path) -> None:
     assert Path(second["archived_to"]).read_text() == first_archive
     s = StateStore(tmp_path / "sandbox" / "state.sqlite")
     try:
-        assert s.get_positions(open_only=False) == []   # still clear, no error
+        assert s.get_positions(open_only=False) == []  # still clear, no error
         assert s._conn.execute("SELECT net_pnl, total_trades FROM pnl").fetchone() == (1200.0, 1)
     finally:
         s.close()
@@ -320,25 +312,20 @@ def test_legacy_engine_sandbox_migrates_into_existing_pristine_sqlite(
     assert not legacy.exists()
     assert Path(result["archive_path"]).exists()
     with sqlite3.connect(target) as conn:
-        capital = conn.execute(
-            "SELECT initial, current, used_margin FROM capital WHERE id = 'default'"
-        ).fetchone()
+        capital = conn.execute("SELECT initial, current, used_margin FROM capital WHERE id = 'default'").fetchone()
         assert capital == (250_000.0, 250_100.0, 1_500.0)
-        assert conn.execute(
-            "SELECT starting_capital FROM sandbox_config WHERE id = 'default'"
-        ).fetchone() == (250_000.0,)
+        assert conn.execute("SELECT starting_capital FROM sandbox_config WHERE id = 'default'").fetchone() == (
+            250_000.0,
+        )
         assert conn.execute(
             "SELECT filled_qty, avg_fill_px, strategy FROM orders WHERE order_id = 'old-order'"
         ).fetchone() == (2, 101.0, "legacy")
-        assert conn.execute(
-            "SELECT price FROM trades WHERE trade_id = 'old-trade'"
-        ).fetchone() == (101.0,)
-        assert conn.execute(
-            "SELECT realised_pnl, unrealised_pnl FROM positions"
-        ).fetchone() == (10.0, 2.0)
-        assert conn.execute(
-            "SELECT net_pnl, total_trades FROM pnl WHERE session_date = '2026-07-14'"
-        ).fetchone() == (12.0, 1)
+        assert conn.execute("SELECT price FROM trades WHERE trade_id = 'old-trade'").fetchone() == (101.0,)
+        assert conn.execute("SELECT realised_pnl, unrealised_pnl FROM positions").fetchone() == (10.0, 2.0)
+        assert conn.execute("SELECT net_pnl, total_trades FROM pnl WHERE session_date = '2026-07-14'").fetchone() == (
+            12.0,
+            1,
+        )
 
 
 def test_legacy_engine_sandbox_conflict_keeps_both_databases(tmp_path: Path) -> None:
@@ -354,9 +341,7 @@ def test_legacy_engine_sandbox_conflict_keeps_both_databases(tmp_path: Path) -> 
 
     assert legacy.exists()
     with sqlite3.connect(target) as conn:
-        assert conn.execute("SELECT order_id FROM orders").fetchall() == [
-            ("current-order",)
-        ]
+        assert conn.execute("SELECT order_id FROM orders").fetchall() == [("current-order",)]
 
 
 def test_legacy_funds_only_customisation_is_migrated(tmp_path: Path) -> None:
@@ -377,9 +362,11 @@ def test_legacy_funds_only_customisation_is_migrated(tmp_path: Path) -> None:
 
     assert result["status"] == "migrated"
     with sqlite3.connect(target) as conn:
-        assert conn.execute(
-            "SELECT initial, current, used_margin FROM capital"
-        ).fetchone() == (250_000.0, 250_100.0, 1_500.0)
+        assert conn.execute("SELECT initial, current, used_margin FROM capital").fetchone() == (
+            250_000.0,
+            250_100.0,
+            1_500.0,
+        )
 
 
 def test_legacy_negative_position_is_preserved_for_manual_recovery(
@@ -410,10 +397,7 @@ def test_migration_marker_does_not_match_a_replacement_database(
     _seed_legacy_duckdb(legacy)
     with duckdb.connect(str(legacy)) as conn:
         conn.execute("UPDATE sandbox_orders SET order_id = 'replacement-order'")
-        conn.execute(
-            "UPDATE sandbox_trades SET trade_id = 'replacement-trade', "
-            "order_id = 'replacement-order'"
-        )
+        conn.execute("UPDATE sandbox_trades SET trade_id = 'replacement-trade', order_id = 'replacement-order'")
 
     with pytest.raises(LegacySandboxConflict, match="both contain session state"):
         migrate_legacy_sandbox(legacy, target, archive_dir)

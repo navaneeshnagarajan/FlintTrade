@@ -10,7 +10,7 @@
  * path that produced it, and the widget multiplies by 100 for display. Without
  * the scale detection below, a percentage-points payload renders at 100×.
  *
- * IMPORTANT: per-strike implied volatility is NOT carried in the OpenAlgo
+ * IMPORTANT: per-strike implied volatility is NOT carried in the broker
  * `optionchain` feed (that payload has only ltp/bid/ask/oi). IV lives in the
  * dedicated IV-smile endpoint, so the curves must come from `getFtIVSmile` —
  * never derived from the raw chain.

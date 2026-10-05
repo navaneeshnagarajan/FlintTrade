@@ -4,7 +4,7 @@
  * Tests for the merged Positions widget — the position book's THREE views.
  * Covers the gated write path (per-row Convert, per-row square-off, the typed
  * exit-all flow, exact displayed-account authority and the fail-closed product
- * check), the Excel export, and the two absorbed views: netting/grouping/totals
+ * check), and the two absorbed views: netting/grouping/totals
  * (from the retired Net Position widget) and the treemap/grouping/chart-open
  * contract (from the retired Position Heat Map widget).
  *
@@ -40,9 +40,8 @@ const mockUsePositions = vi.fn();
 const mockUseBrokerConnected = vi.fn();
 const mockConnectionState = vi.hoisted(() => ({
   apiKey: "",
-  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  //  models a normally-loaded app; the hydration
   // fail-closed window is covered by brokerTargets/api tests.
-  openAlgoHydrated: true,
 }));
 const mockModeState = vi.hoisted(() => ({
   mode: "live",
@@ -117,8 +116,8 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
             }
           : {
               mode,
-              scopeKey: "live:openalgo:test",
-              brokerType: "openalgo",
+              scopeKey: "live:native:upstox:U1",
+              brokerType: "dhan",
               accountId: "default",
             });
     return {
@@ -164,10 +163,6 @@ vi.mock("@/stores/modeStore", () => ({
     typeof selector === "function" ? selector(mockModeState) : mockModeState,
 }));
 
-const mockDownloadExcel = vi.fn();
-vi.mock("@/services/ftApi.data", () => ({
-  downloadExcel: (...args: unknown[]) => mockDownloadExcel(...args),
-}));
 
 // Square-off goes through the existing gated placeOrder path (services/api →
 // /ft-api/api/v1/orders/place → SafetySystem → gate_order → BrokerRouter).
@@ -790,57 +785,6 @@ describe("PositionsWidget", () => {
     expect(screen.queryByText("Live only")).toBeNull();
   });
 
-  // ── Excel export ─────────────────────────────────────────────────────────
-
-  it("does not show the export button when there are no positions", () => {
-    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
-    render(<PositionsWidget {...defaultProps} />);
-    expect(screen.queryByRole("button", { name: /export positions to excel/i })).toBeNull();
-  });
-
-  it("exports the positions and emits a success notification", async () => {
-    mockDownloadExcel.mockResolvedValue(2);
-    mockUsePositions.mockReturnValue(
-      queryResult({
-        data: [
-          { symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 },
-          { symbol: "BANKNIFTY", pnl: -200, quantity: 25, ltp: 200, average_price: 190 },
-        ],
-      }),
-    );
-    render(<PositionsWidget {...defaultProps} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /export positions to excel/i }));
-
-    await vi.waitFor(() => expect(mockDownloadExcel).toHaveBeenCalledTimes(1));
-    // Exports the mapped rows under the "Positions" sheet.
-    expect(mockDownloadExcel.mock.calls[0][1]).toBe("Positions");
-    expect(mockDownloadExcel.mock.calls[0][0]).toHaveLength(2);
-    await vi.waitFor(() =>
-      expect(mockEmitNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ category: "system", title: "Positions exported" }),
-      ),
-    );
-  });
-
-  it("emits an alert notification when the export fails", async () => {
-    mockDownloadExcel.mockRejectedValue(new Error("backend down"));
-    mockUsePositions.mockReturnValue(
-      queryResult({
-        data: [{ symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 }],
-      }),
-    );
-    render(<PositionsWidget {...defaultProps} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /export positions to excel/i }));
-
-    await vi.waitFor(() =>
-      expect(mockEmitNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ category: "alert", title: "Export failed", body: "backend down" }),
-      ),
-    );
-  });
-
   // ── Convert + exit-all safety actions ───────────────────────────────────
 
   describe("position actions", () => {
@@ -1404,13 +1348,13 @@ describe("PositionsWidget", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("keeps native-only convert and exit-all off an OpenAlgo position book", () => {
-      mockConnectionState.apiKey = "openalgo-key";
+    it("refuses all writes when the displayed book differs from the selected native account", () => {
+      mockConnectionState.apiKey = "dhan-key";
       mockReadState.identity = {
         mode: "live",
-        scopeKey: "live:openalgo:book-scope",
-        brokerType: "openalgo",
-        accountId: "default",
+        scopeKey: "live:native:dhan:DIFFERENT",
+        brokerType: "dhan",
+        accountId: "DIFFERENT",
       };
       mockBrokerState.accounts = [{
         broker: "dhan",
@@ -1424,7 +1368,7 @@ describe("PositionsWidget", () => {
 
       render(<PositionsWidget {...defaultProps} />);
 
-      expect(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
       expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();

@@ -21,34 +21,27 @@ connecting a broker or enabling Live mode.
 
 - **Terminal app** — React 19, TypeScript, FlexLayout, FDC3, Zustand,
   TanStack Query, and shadcn/ui components for a local workspace.
+
 - **Backend services** — Python 3.12 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
-- **Gateway integration** — adapter contracts, capability metadata, encrypted
-  credential storage, WebSocket bridges, the community-tested
-  OpenAlgo-compatible bridge (the working operator broker path on this line),
-  and evidence-gated native adapter paths whose HTTP connect and read
-  surfaces are frozen until Task 9D and Task 7C.2.
+
 - **Safety model** — Practice, Connected (read), and Live, with Example for sample data, server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
+
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
   backtest services, and a Rust/PyO3 tick-processing engine.
+
 - **Developer tooling** — the cross-platform `scripts/ft.py` runner (with make
   as its POSIX alias), pytest/Vitest/Playwright suites, packaging scripts, CI
   notes, and package-level documentation.
 
 ## Supported brokers
 
-FlintTrade supports the recommended OpenAlgo-compatible bridge plus a first-party
-native broker gateway that is **not usable on this unreleased line**. Native
-adapters remain catalogued and evidence-gated (Dhan, Upstox, and Kotak Neo
-are marked connectable; Kotak Neo is Connected (read) / API smoke only —
-Live place fail-closed; INDmoney and Groww stay disabled),
-but native HTTP mutations return `503`
-until Task 9D and native HTTP account and market-data reads return `409`
-until Task 7C.2. Catalogue and vault-backed account-list GETs stay
-metadata only. Use OpenAlgo for a working broker session. Setup → Brokers
-and Settings → Brokers will fail rather than connect. See
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
+Broker connections use five native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney and Groww. Availability remains evidence-gated. Native broker HTTP
+mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
+cannot currently be established through the terminal. Practice uses the local
+sandbox. Funded Live placement remains unproven and fail-closed.
 
 ## Supported versions
 
@@ -235,12 +228,6 @@ in release CI when its complete Apple secret sets are configured. See
 [docs/DESKTOP.md](docs/DESKTOP.md) for the source-bootstrap,
 update, install and uninstall contracts.
 
-> OpenAlgo is the working operator broker path. Configure it from Setup →
-> OpenAlgo Bridge or Settings → Broker Gateway when you want a live broker
-> session. FlintTrade's sandbox and backend do not require OpenAlgo.
-> Native broker HTTP is frozen until Task 9D and Task 7C.2 — Setup → Brokers
-> and Settings → Brokers will fail rather than start a native session.
-
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. Unlike the one-line
@@ -301,17 +288,6 @@ python scripts/ft.py dev
 
 ### Advanced server and Docker modes
 
-Docker, Nginx, and systemd assets support long-running self-host/server
-deployments of the web app (beyond the simple `python scripts/ft.py start`
-quickstart). `make docker-up` starts the app stack — backend, a one-shot
-terminal build, and Nginx, which serves the UI at http://localhost:8080
-(override with `FLINTTRADE_HTTP_PORT`/`FLINTTRADE_HTTPS_PORT`). A `.env`
-file is optional for the app stack; only the observability profile
-(`docker compose --profile monitoring up`, or `make docker-up-monitoring`)
-requires real GlitchTip secrets in `.env`. In those modes, `.env.example` is
-a dev/server fallback template only; in-app Setup and Settings remain the
-preferred way to configure OpenAlgo.
-
 Architecture, per-OS install/uninstall, and the CI release matrix are documented
 in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
 
@@ -320,30 +296,6 @@ in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
 ## For developers
 
 ### Architecture
-
-```mermaid
-flowchart LR
-    subgraph FT["FlintTrade"]
-        UI["Terminal<br/>React 19 + TypeScript<br/>FlexLayout workspace"]
-        BE["Python backend<br/>Strategy engine, AI,<br/>backtest, screener"]
-        TE["ticks<br/>Rust + PyO3"]
-        UI <-->|"/ft-api/v1/"| BE
-        BE <--> TE
-    end
-
-    BG["Broker gateway<br/>native adapters"]
-    OA["OpenAlgo-compatible<br/>optional integration<br/>port 5000"]
-    BR["Broker API"]
-
-    BE <-->|"native broker contract"| BG
-    BE <-->|"REST + WebSocket"| OA
-    BG <-->|"broker auth"| BR
-    OA <-->|"broker auth"| BR
-```
-
-FlintTrade runs its own backend, native sandbox, and broker gateway contract.
-OpenAlgo remains the working operator broker path. Native HTTP connect and
-reads are frozen until Task 9D and Task 7C.2.
 
 ### Package map
 
@@ -356,16 +308,16 @@ and 1 Rust/PyO3 tick engine.
 | `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and FlexLayout terminal |
 | `packages/apps/desktop` | Electron 44 + TypeScript | Sandboxed desktop shell; verifies tools, builds managed local source, supervises the source guardian, and loads only its selected loopback origin |
-| `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
-| `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
+| `packages/core/core` | Python | Flask backend, auth, workspace, native broker reads, route registration |
+| `packages/core/data` | Python | Local tick storage, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |
 | `packages/core/historical` | Python | OHLCV downloader, free-data sources, DuckDB/Parquet pipeline, expiry manager |
 | `packages/core/indicators` | Python | Pure-NumPy batch indicators (110 exports), streaming classes, Pine conversion |
 | `packages/core/ticks` | Rust + PyO3 | High-performance tick processing for tick-level backtests |
 | `packages/integrations/gateway` | Python | Native broker gateway, adapter pattern, credential vault, WebSocket bridge |
-| `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks, visual flow builder |
+| `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
-| `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis, voice-order intent extraction |
+| `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis |
 | `packages/services/backtest` | Python | Event-driven simulator, 94 strategy template modules, walk-forward optimiser |
 | `packages/services/ditto` | Python | Multi-account mirroring, margin calculator, trailing stop-loss |
 | `packages/services/engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |
@@ -400,7 +352,7 @@ each dependency does, exact-version sources, and the terminal's About screen.
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Repo layout, dev setup, adding widgets and strategies |
 | [Architecture](docs/ARCHITECTURE.md) | Diagrams, data flow, mode system, auth, WSGI |
 | [Technology stack](docs/TECH_STACK.md) | Dependency purposes, version sources, and app build information |
-| [API Reference](docs/API.md) | FlintTrade `/ft-api/v1/` endpoints plus broker/OpenAlgo-compatible bridge routes |
+| [API Reference](docs/API.md) | FlintTrade `/ft-api/v1/` endpoints plus native brokers-compatible bridge routes |
 | [Disclaimer](disclaimer.md) | Beta-stage, no-advice, trading-risk, and user-responsibility notice |
 | [Changelog](changelog.md) | Release notes by version |
 | [Security](security.md) | Disclosure policy, supported versions, threat model |
@@ -412,16 +364,8 @@ each dependency does, exact-version sources, and the terminal's About screen.
 
 ## Independence & attribution
 
-FlintTrade is native-first and **independently built**: its backend, native
-gateway contract, safety/gating layer, and most application code are original
-work — it is not a fork of another trading application. It interoperates with
-[OpenAlgo](https://github.com/marketcalls/openalgo) through an optional bridge
-adapter rather than bundling its source. Reference projects were studied for
-inspiration; where a specific widget or module was adapted from an open-source
-project it is marked in-source with an "Adapted from:" header, and its licence
-and attribution are preserved in [notice](notice). Reducing the remaining
-adapted surface to fully-original implementations is ongoing. See
-[docs/REFERENCES.md](docs/REFERENCES.md) for the full influence notes.
+FlintTrade owns its backend, native gateway and safety layer. Required attribution
+for adapted modules is retained in [notice](notice) and in source headers.
 
 ## License
 

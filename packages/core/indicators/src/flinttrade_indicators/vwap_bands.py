@@ -108,8 +108,8 @@ def _compute_session_vwap(
     vwap_out = np.full(n, math.nan)
     sigma_out = np.full(n, math.nan)
 
-    cum_tv = 0.0   # cumulative typical_price × volume
-    cum_v = 0.0    # cumulative volume
+    cum_tv = 0.0  # cumulative typical_price × volume
+    cum_v = 0.0  # cumulative volume
     cum_var = 0.0  # cumulative (tp - vwap)² × volume
 
     for i in range(n):

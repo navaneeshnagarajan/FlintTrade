@@ -70,7 +70,8 @@ def test_failed_resolution_keeps_reconciliation_fence_without_phantom_event(tran
     supervisor, run = transition_runtime
     store = supervisor.store
     supervisor.app.config["DATA_SANDBOX_ENGINE"] = SimpleNamespace(
-        get_positions=lambda: [], get_all_orders=lambda: [],
+        get_positions=lambda: [],
+        get_all_orders=lambda: [],
     )
     supervisor.run = run
     run.cleanup_complete = True

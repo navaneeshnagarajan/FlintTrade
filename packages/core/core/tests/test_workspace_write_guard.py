@@ -135,9 +135,7 @@ def _keyword_matches(call: ast.Call, name: str, expression: str) -> bool:
 def _broker_dependency_chain_violations(source: str) -> list[str]:
     """Return deviations from the shared read/write dependency composition."""
     tree = ast.parse(source)
-    functions = {
-        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
-    }
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
     public = functions.get("configure_broker_router")
     if public is None:
         return ["configure_broker_router count"]
@@ -265,16 +263,13 @@ def configure_broker_router(app):
             "read owner rate_limiter",
         ),
         (
-            "        rate_limiter=dependencies.rate_limiter,\n"
-            "        workspace_path=target_workspace,\n",
+            "        rate_limiter=dependencies.rate_limiter,\n        workspace_path=target_workspace,\n",
             "        rate_limiter=dependencies.rate_limiter,\n",
             "read owner workspace_path",
         ),
         (
-            "        rate_limiter=dependencies.rate_limiter,\n"
-            "        workspace_path=target_workspace,\n",
-            "        rate_limiter=dependencies.rate_limiter,\n"
-            "        workspace_path=other_workspace,\n",
+            "        rate_limiter=dependencies.rate_limiter,\n        workspace_path=target_workspace,\n",
+            "        rate_limiter=dependencies.rate_limiter,\n        workspace_path=other_workspace,\n",
             "read owner workspace_path",
         ),
         (
@@ -284,8 +279,7 @@ def configure_broker_router(app):
         ),
         (
             "    return _configure_broker_writes(app, dependencies)\n",
-            "    _configure_broker_writes(app, dependencies)\n"
-            "    return _configure_broker_writes(app, dependencies)\n",
+            "    _configure_broker_writes(app, dependencies)\n    return _configure_broker_writes(app, dependencies)\n",
             "write dependency call count",
         ),
     ],
@@ -320,11 +314,14 @@ def _nonpython_authority_write(source):
     return bool(direct or copied_workspace or literal_write)
 
 
-@pytest.mark.parametrize("source", [
-    'restic -r "$RESTIC_REPOSITORY" backup "$WORKSPACE_DIR"',
-    'restic -r "$RESTIC_REPOSITORY" restore "$SNAPSHOT" --target "$TARGET_DIR"',
-    'cp -r "$STATE_DIR"/. "$ARCHIVE_DIR/"',
-])
+@pytest.mark.parametrize(
+    "source",
+    [
+        'restic -r "$RESTIC_REPOSITORY" backup "$WORKSPACE_DIR"',
+        'restic -r "$RESTIC_REPOSITORY" restore "$SNAPSHOT" --target "$TARGET_DIR"',
+        'cp -r "$STATE_DIR"/. "$ARCHIVE_DIR/"',
+    ],
+)
 def test_nonpython_guard_detects_existing_command_shapes(source):
     assert _nonpython_authority_write(source)
 

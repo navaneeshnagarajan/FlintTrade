@@ -545,7 +545,7 @@ def pivot_client(tmp_path_factory):
     """Flask test client for pivot routes."""
     import os
 
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
     import flinttrade_screener.pivot_routes  # noqa: F401 — ensure blueprint loaded
 

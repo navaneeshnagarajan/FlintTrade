@@ -27,7 +27,6 @@ import {
 const mockGetPositionbook = vi.hoisted(() => vi.fn());
 const mockPlaceOrder = vi.hoisted(() => vi.fn());
 const mockPost = vi.hoisted(() => vi.fn());
-const mockDownloadExcel = vi.hoisted(() => vi.fn());
 const mockListBrokerAccounts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api", () => ({
@@ -38,9 +37,6 @@ vi.mock("@/services/api", () => ({
 }));
 vi.mock("@/services/ftApi.helpers", () => ({
   postWithMode: mockPost,
-}));
-vi.mock("@/services/ftApi.data", () => ({
-  downloadExcel: mockDownloadExcel,
 }));
 vi.mock("@/services/brokerAccountsApi", () => ({
   listBrokerAccounts: mockListBrokerAccounts,
@@ -83,7 +79,6 @@ describe("PositionsWidget production query/account state", () => {
     mockGetPositionbook.mockReset();
     mockPlaceOrder.mockReset();
     mockPost.mockReset();
-    mockDownloadExcel.mockReset();
     mockListBrokerAccounts.mockReset();
     mockListBrokerAccounts.mockImplementation(async () => useBrokerStore.getState().accounts);
     setAccountRuntime();

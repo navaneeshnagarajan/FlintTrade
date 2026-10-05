@@ -130,11 +130,13 @@ def build_version_inventory(*, source_root: Path | None = None) -> dict[str, Any
     packages = []
     for name in _PACKAGE_NAMES:
         installed, _ = _installed_metadata(name)
-        packages.append({
-            "name": name,
-            "installed": installed,
-            "configured": sanitise_version(package_pins.get(name, {}).get("version")),
-        })
+        packages.append(
+            {
+                "name": name,
+                "installed": installed,
+                "configured": sanitise_version(package_pins.get(name, {}).get("version")),
+            }
+        )
     brokers = []
     for name in _BROKER_NAMES:
         installed, installed_commit = _installed_metadata(name, include_commit=True)

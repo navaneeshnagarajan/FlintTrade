@@ -46,11 +46,17 @@ class _PracticeInputError(ValueError):
 def validate_practice_config(body: Any) -> dict[str, Any]:
     """Validate JSON without truthiness defaults, coercion or non-finite values."""
     defaults: dict[str, Any] = {
-        "exchange": "NSE", "product": "MIS", "max_position_size": 1,
-        "stop_loss_pct": 2.0, "take_profit_pct": 4.0,
-        "daily_stop_loss": -10_000.0, "max_trades_per_symbol": 5,
-        "cycle_interval_sec": 60, "entry_rationale": "",
-        "model_call_limit": 500, "model_output_limit": 512,
+        "exchange": "NSE",
+        "product": "MIS",
+        "max_position_size": 1,
+        "stop_loss_pct": 2.0,
+        "take_profit_pct": 4.0,
+        "daily_stop_loss": -10_000.0,
+        "max_trades_per_symbol": 5,
+        "cycle_interval_sec": 60,
+        "entry_rationale": "",
+        "model_call_limit": 500,
+        "model_output_limit": 512,
     }
     if type(body) is not dict or set(body) - (set(defaults) | {"symbols", "mode"}):
         raise _PracticeInputError("Provide an object containing only supported Practice agent parameters")
@@ -79,7 +85,11 @@ def validate_practice_config(body: Any) -> dict[str, Any]:
         if type(value) is not str or value.strip().upper() not in choices:
             raise _PracticeInputError(f"{key} must be one of {', '.join(sorted(choices))}")
         result[key] = value.strip().upper()
-    for key, maximum in (("max_position_size", 1_000_000), ("max_trades_per_symbol", 1000), ("cycle_interval_sec", 3600)):
+    for key, maximum in (
+        ("max_position_size", 1_000_000),
+        ("max_trades_per_symbol", 1000),
+        ("cycle_interval_sec", 3600),
+    ):
         if type(result[key]) is not int or not 1 <= result[key] <= maximum:
             raise _PracticeInputError(f"{key} must be an integer between 1 and {maximum}")
     for key in ("stop_loss_pct", "take_profit_pct", "daily_stop_loss"):
@@ -91,8 +101,9 @@ def validate_practice_config(body: Any) -> dict[str, Any]:
         except (OverflowError, ValueError) as exc:
             raise _PracticeInputError(f"{key} must be a finite number") from exc
         if not math.isfinite(value) or (value >= 0 if key == "daily_stop_loss" else not 0 < value <= 100):
-            raise _PracticeInputError(f"{key} must be negative" if key == "daily_stop_loss"
-                                      else f"{key} must be above 0 and at most 100")
+            raise _PracticeInputError(
+                f"{key} must be negative" if key == "daily_stop_loss" else f"{key} must be above 0 and at most 100"
+            )
         result[key] = value
     return result
 
@@ -116,10 +127,8 @@ def _known_error(exc: Exception, messages: dict[str, str], status: int, fallback
 
 
 _IDENTIFIER_ERRORS = {
-    "run identifiers and event kinds must be bounded identifier text":
-        "run identifiers and event kinds must be bounded identifier text",
-    "credential material is not permitted in run evidence":
-        "credential material is not permitted in run evidence",
+    "run identifiers and event kinds must be bounded identifier text": "run identifiers and event kinds must be bounded identifier text",
+    "credential material is not permitted in run evidence": "credential material is not permitted in run evidence",
 }
 
 
@@ -219,8 +228,9 @@ class _ObservedLLM:
                 raise RuntimeError("configured_model_unavailable")
             return response
         except Exception:
-            self.supervisor._event(self.run, "model_unavailable", {"code": "configured_model_unavailable",
-                                                                 "operation": operation})
+            self.supervisor._event(
+                self.run, "model_unavailable", {"code": "configured_model_unavailable", "operation": operation}
+            )
             if operation == "analysis":
                 self.run.model_error = "configured_model_unavailable"
                 self.run.stop.set()
@@ -269,8 +279,11 @@ class PracticeAgentSupervisor:
     def _require_ownership(self, *, accepting: bool = True) -> None:
         from .backend_instance import require_backend_lease_proof  # noqa: PLC0415
 
-        if (not self._lease.is_locked or self.app.config.get("BACKEND_LEASE_PROOF") is not self._backend_proof
-                or (accepting and self.app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True)):
+        if (
+            not self._lease.is_locked
+            or self.app.config.get("BACKEND_LEASE_PROOF") is not self._backend_proof
+            or (accepting and self.app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True)
+        ):
             raise RuntimeError("Practice runtime ownership is unavailable")
         require_backend_lease_proof(self._backend_proof)
 
@@ -278,11 +291,16 @@ class PracticeAgentSupervisor:
         trader = run.trader
         snapshot = {
             **run.snapshot,
-            "enabled": _enabled(), "mode": "practice", "run_id": run.run_id,
-            "status": run.status, "agent_status": run.status,
+            "enabled": _enabled(),
+            "mode": "practice",
+            "run_id": run.run_id,
+            "status": run.status,
+            "agent_status": run.status,
             "running": run.status in {"starting", "waiting", "running", "stopping"},
-            "actor_id": "autonomous-trader", "started_at": run.created_at,
-            "params": dict(run.config), "error": run.error,
+            "actor_id": "autonomous-trader",
+            "started_at": run.created_at,
+            "params": dict(run.config),
+            "error": run.error,
             "stop_failure": str(getattr(trader, "stop_failure", "") or ""),
             "shutdown_complete": run.cleanup_complete,
             "model_usage": run.model_budget.snapshot() if run.model_budget is not None else {},
@@ -291,14 +309,18 @@ class PracticeAgentSupervisor:
         # calls publish the last immutable state with fresh lifecycle fields.
         if trader is not None and threading.current_thread() is run.thread:
             state = trader.state
-            snapshot.update({
-                "cycle_count": state.cycle_count, "daily_pnl": state.daily_pnl,
-                "active_positions": dict(state.active_positions),
-                "position_details": {key: dict(value) for key, value in state.position_details.items()},
-                "trade_counts": dict(state.trade_counts),
-                "last_signals": {key: str(value) for key, value in state.last_signals.items()},
-                "squared_off": state.squared_off, "stop_loss_hit": state.stop_loss_hit,
-            })
+            snapshot.update(
+                {
+                    "cycle_count": state.cycle_count,
+                    "daily_pnl": state.daily_pnl,
+                    "active_positions": dict(state.active_positions),
+                    "position_details": {key: dict(value) for key, value in state.position_details.items()},
+                    "trade_counts": dict(state.trade_counts),
+                    "last_signals": {key: str(value) for key, value in state.last_signals.items()},
+                    "squared_off": state.squared_off,
+                    "stop_loss_hit": state.stop_loss_hit,
+                }
+            )
         return snapshot
 
     def _persist(self, run: _Run, status: str, *, error: str = "") -> None:
@@ -352,9 +374,13 @@ class PracticeAgentSupervisor:
             raise PracticeAgentError("practice_runtime_unavailable") from None
         try:
             row = self.store.get_run(run.run_id)
-            if (not self._lease.is_locked or row is None or row["mode"] != "practice"
-                    or row["status"] not in {"starting", "waiting", "running", "stopping"}
-                    or row["config"].get("owner") != run.owner):
+            if (
+                not self._lease.is_locked
+                or row is None
+                or row["mode"] != "practice"
+                or row["status"] not in {"starting", "waiting", "running", "stopping"}
+                or row["config"].get("owner") != run.owner
+            ):
                 raise RuntimeError("Practice evidence ownership changed")
         except Exception:
             run.evidence_failed = True
@@ -366,8 +392,12 @@ class PracticeAgentSupervisor:
         if kill_code is not None:
             self._safety_brake(run, kill_code, "entry")
             return True
-        if (run.stop.is_set() or self.shutdown_requested.is_set() or run.data_error
-                or self.app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True):
+        if (
+            run.stop.is_set()
+            or self.shutdown_requested.is_set()
+            or run.data_error
+            or self.app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True
+        ):
             return True
         with self.app.app_context():
             if not _enabled():
@@ -376,9 +406,11 @@ class PracticeAgentSupervisor:
             if trader is None:
                 return True
             current_sessions = self._session_identities(trader)
-            return (len(current_sessions) != len(trader.config.symbols)
-                    or current_sessions != run.cycle_sessions
-                    or trader._is_square_off_time())  # noqa: SLF001
+            return (
+                len(current_sessions) != len(trader.config.symbols)
+                or current_sessions != run.cycle_sessions
+                or trader._is_square_off_time()
+            )  # noqa: SLF001
 
     def _safety_brake(self, run: _Run, code: str, operation: str) -> None:
         """Stop new work and durably record the first safe admission reason."""
@@ -440,14 +472,17 @@ class PracticeAgentSupervisor:
             row = self.store.create_run(run_id=run_id, mode="practice", config={**config, "owner": owner})
             run = _Run(run_id, owner, config, row["created_at"])
             run.model_budget = PracticeModelBudget(
-                config["model_call_limit"], config["model_output_limit"],
+                config["model_call_limit"],
+                config["model_output_limit"],
                 event_sink=lambda kind, data: self._event(run, kind, data),
             )
             run.llm = llm
             self.run = run
             try:
                 run.adapter = PracticeAgentAdapter(
-                    self.app, token, event_sink=lambda kind, data: self._event(run, kind, data),
+                    self.app,
+                    token,
+                    event_sink=lambda kind, data: self._event(run, kind, data),
                     stop_check=lambda: self._entry_brake(run),
                 )
                 run.adapter.validate_session()
@@ -460,8 +495,11 @@ class PracticeAgentSupervisor:
                     run.adapter.close()
                 self._close_llm(run)
                 run.cleanup_complete = True
-                self._persist(run, "reconciliation_required" if run.evidence_failed else "failed",
-                              error="Practice worker could not start")
+                self._persist(
+                    run,
+                    "reconciliation_required" if run.evidence_failed else "failed",
+                    error="Practice worker could not start",
+                )
                 raise
             return dict(run.snapshot)
 
@@ -490,16 +528,31 @@ class PracticeAgentSupervisor:
         if rows:
             row = rows[0]
             result = dict(row["snapshot"])
-            result.update({
-                "run_id": row["run_id"], "mode": "practice", "status": row["status"],
-                "agent_status": row["status"], "error": row["error"] or "", "running": False,
-                "enabled": _enabled(), "actor_id": "autonomous-trader",
-                "started_at": row["created_at"],
-                "params": {key: value for key, value in row["config"].items() if key != "owner"},
-            })
+            result.update(
+                {
+                    "run_id": row["run_id"],
+                    "mode": "practice",
+                    "status": row["status"],
+                    "agent_status": row["status"],
+                    "error": row["error"] or "",
+                    "running": False,
+                    "enabled": _enabled(),
+                    "actor_id": "autonomous-trader",
+                    "started_at": row["created_at"],
+                    "params": {key: value for key, value in row["config"].items() if key != "owner"},
+                }
+            )
             return result
-        return {"mode": "practice", "status": "idle", "agent_status": "idle", "enabled": _enabled(),
-                "running": False, "actor_id": "autonomous-trader", "params": {}, "started_at": ""}
+        return {
+            "mode": "practice",
+            "status": "idle",
+            "agent_status": "idle",
+            "enabled": _enabled(),
+            "running": False,
+            "actor_id": "autonomous-trader",
+            "params": {},
+            "started_at": "",
+        }
 
     def history(self, owner: str, *, limit: int) -> list[dict[str, Any]]:
         return [row for row in self.store.list_runs(limit=limit) if row["config"].get("owner") == owner]
@@ -519,21 +572,42 @@ class PracticeAgentSupervisor:
                 raise RuntimeError("The worker has not finished; reconciliation cannot release it")
             if self.run is not None and self.run.run_id == run_id and not self.run.cleanup_complete:
                 raise RuntimeError("Practice resources have not closed; reconciliation cannot release them")
-            if (row["status"] in _ACTIVE and row["status"] != "reconciliation_required"
-                    and self.run is not None and self.run.run_id == run_id and self.run.evidence_failed):
+            if (
+                row["status"] in _ACTIVE
+                and row["status"] != "reconciliation_required"
+                and self.run is not None
+                and self.run.run_id == run_id
+                and self.run.evidence_failed
+            ):
                 # Storage may have recovered since the worker's terminal event
                 # failed. Re-establish the durable uncertainty before resolving.
-                row = self.store.transition_run(run_id, status="reconciliation_required",
-                                                snapshot=self.run.snapshot, error=self.run.error)
+                row = self.store.transition_run(
+                    run_id, status="reconciliation_required", snapshot=self.run.snapshot, error=self.run.error
+                )
             if row["status"] != "reconciliation_required":
                 raise RuntimeError("Only a run requiring reconciliation can be resolved")
             if not _sandbox_flat(self.app):
                 raise RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving")
-            snapshot = {**row["snapshot"], "status": "stopped", "agent_status": "stopped", "running": False,
-                        "shutdown_complete": True, "error": "", "stop_failure": "",
-                        "active_positions": {}, "position_details": {}, "squared_off": True}
-            result = self.store.transition_run(run_id, status="stopped", snapshot=snapshot, error=None,
-                                               event_kind="reconciliation_resolved", event_data={"flat": True})
+            snapshot = {
+                **row["snapshot"],
+                "status": "stopped",
+                "agent_status": "stopped",
+                "running": False,
+                "shutdown_complete": True,
+                "error": "",
+                "stop_failure": "",
+                "active_positions": {},
+                "position_details": {},
+                "squared_off": True,
+            }
+            result = self.store.transition_run(
+                run_id,
+                status="stopped",
+                snapshot=snapshot,
+                error=None,
+                event_kind="reconciliation_resolved",
+                event_data={"flat": True},
+            )
             if self.run is not None and self.run.run_id == run_id:
                 self.run.status = "stopped"
                 self.run.snapshot = snapshot
@@ -548,13 +622,21 @@ class PracticeAgentSupervisor:
         from .agent_routes import _build_learning_memory, _build_skills_workspace, _build_vault  # noqa: PLC0415
 
         scheduler = self.app.config["TIME_SCHEDULER"]
-        trader_config = {key: value for key, value in run.config.items()
-                         if key not in {"model_call_limit", "model_output_limit"}}
+        trader_config = {
+            key: value for key, value in run.config.items() if key not in {"model_call_limit", "model_output_limit"}
+        }
         return AutonomousTrader(
-            llm_client=_ObservedLLM(self, run, llm), openalgo_client=run.adapter, order_executor=run.adapter,
-            config=AgentConfig(**trader_config), vault=_build_vault(), memory=_build_learning_memory(),
-            skill_registry=self.app.config.get("SKILL_REGISTRY"), skills_workspace=_build_skills_workspace(),
-            market_session_provider=lambda exchange, symbol, day: scheduler.get_market_session(exchange, on=day, symbol=symbol),
+            llm_client=_ObservedLLM(self, run, llm),
+            broker_client=run.adapter,
+            order_executor=run.adapter,
+            config=AgentConfig(**trader_config),
+            vault=_build_vault(),
+            memory=_build_learning_memory(),
+            skill_registry=self.app.config.get("SKILL_REGISTRY"),
+            skills_workspace=_build_skills_workspace(),
+            market_session_provider=lambda exchange, symbol, day: scheduler.get_market_session(
+                exchange, on=day, symbol=symbol
+            ),
             clock=scheduler.now_ist,
         )
 
@@ -569,7 +651,9 @@ class PracticeAgentSupervisor:
             raise RuntimeError("Practice sandbox requires reconciliation")
         self._event(run, "session_flat", {"daily_pnl": run.trader.state.daily_pnl})
         if run.model_budget is not None and run.model_budget.exhausted:
-            self._event(run, "session_learning_skipped", {"reason": "model_limit_exhausted", **run.model_budget.snapshot()})
+            self._event(
+                run, "session_learning_skipped", {"reason": "model_limit_exhausted", **run.model_budget.snapshot()}
+            )
             run.settlement_failed = False
             return
         learning_brake = self._model_brake(run, "reflection")
@@ -694,8 +778,12 @@ class PracticeAgentSupervisor:
                     run.trader.request_stop(square_off=True)
                 # Never retry uncertain writes. Ordinary errors may still close
                 # known positions, using the original, freshly validated session.
-                if (run.trader is not None and not run.adapter.reconciliation_required
-                        and not run.evidence_failed and not run.settlement_failed):
+                if (
+                    run.trader is not None
+                    and not run.adapter.reconciliation_required
+                    and not run.evidence_failed
+                    and not run.settlement_failed
+                ):
                     try:
                         asyncio.run(self._settle_session(run, "Worker stopping after failure"))
                     except Exception:
@@ -713,10 +801,16 @@ class PracticeAgentSupervisor:
                     terminal = "reconciliation_required"
                     error = "Practice learning cleanup did not complete"
                 try:
-                    if (not _sandbox_flat(self.app) or run.adapter.reconciliation_required or run.evidence_failed
-                            or (run.trader is not None and (run.trader.state.active_positions or run.trader.stop_failure))):
+                    if (
+                        not _sandbox_flat(self.app)
+                        or run.adapter.reconciliation_required
+                        or run.evidence_failed
+                        or (run.trader is not None and (run.trader.state.active_positions or run.trader.stop_failure))
+                    ):
                         terminal = "reconciliation_required"
-                        error = error or "Practice positions, pending orders or dispatch evidence require reconciliation"
+                        error = (
+                            error or "Practice positions, pending orders or dispatch evidence require reconciliation"
+                        )
                 except Exception:
                     terminal = "reconciliation_required"
                     error = "Practice flat state could not be verified"
@@ -816,22 +910,25 @@ def start_practice_agent() -> tuple[Any, int]:
     if app.extensions.get(_EXTENSION + "_shutdown"):
         return _error("The application is shutting down", 409)
     scheduler = app.config.get("TIME_SCHEDULER")
-    if not callable(getattr(scheduler, "get_market_session", None)) or not callable(getattr(scheduler, "now_ist", None)):
+    if not callable(getattr(scheduler, "get_market_session", None)) or not callable(
+        getattr(scheduler, "now_ist", None)
+    ):
         return _error("Market calendar is unavailable", 503)
     try:
         snapshot = get_practice_supervisor(app).start(token, owner, config)
     except RuntimeError as exc:
-        return _known_error(exc, {
-            "The application is shutting down": "The application is shutting down",
-            "A Practice agent worker is still owned; stop it first":
-                "A Practice agent worker is still owned; stop it first",
-            "Practice positions and pending orders must be flat before starting":
-                "Practice positions and pending orders must be flat before starting",
-            "The preceding Practice worker requires reconciliation":
-                "A Practice run is active or requires reconciliation",
-            "an active run or unresolved interruption already exists":
-                "A Practice run is active or requires reconciliation",
-        }, 409, "Practice agent dependencies or durable evidence are unavailable")
+        return _known_error(
+            exc,
+            {
+                "The application is shutting down": "The application is shutting down",
+                "A Practice agent worker is still owned; stop it first": "A Practice agent worker is still owned; stop it first",
+                "Practice positions and pending orders must be flat before starting": "Practice positions and pending orders must be flat before starting",
+                "The preceding Practice worker requires reconciliation": "A Practice run is active or requires reconciliation",
+                "an active run or unresolved interruption already exists": "A Practice run is active or requires reconciliation",
+            },
+            409,
+            "Practice agent dependencies or durable evidence are unavailable",
+        )
     except Exception:
         return _error("Practice agent dependencies or durable evidence are unavailable", 503)
     return jsonify({"status": "success", "data": snapshot}), 202
@@ -842,7 +939,9 @@ def stop_practice_agent() -> tuple[Any, int]:
     if denied is not None:
         return denied
     body = request.get_json(silent=True)
-    if body is not None and (type(body) is not dict or set(body) - {"square_off"} or body.get("square_off", True) is not True):
+    if body is not None and (
+        type(body) is not dict or set(body) - {"square_off"} or body.get("square_off", True) is not True
+    ):
         return _error("Practice agent stop always requires square-off", 400)
     try:
         result = get_practice_supervisor(current_app._get_current_object()).stop(owner)  # noqa: SLF001
@@ -922,16 +1021,17 @@ def resolve_practice_run(run_id: str) -> tuple[Any, int]:
     except ValueError as exc:
         return _known_error(exc, _IDENTIFIER_ERRORS, 400, "Practice reconciliation could not be verified")
     except RuntimeError as exc:
-        return _known_error(exc, {
-            "The worker has not finished; reconciliation cannot release it":
-                "The worker has not finished; reconciliation cannot release it",
-            "Practice resources have not closed; reconciliation cannot release them":
-                "Practice resources have not closed; reconciliation cannot release them",
-            "Only a run requiring reconciliation can be resolved":
-                "Only a run requiring reconciliation can be resolved",
-            "Practice positions or pending orders remain; inspect the sandbox before resolving":
-                "Practice positions or pending orders remain; inspect the sandbox before resolving",
-        }, 409, "Practice reconciliation could not be verified")
+        return _known_error(
+            exc,
+            {
+                "The worker has not finished; reconciliation cannot release it": "The worker has not finished; reconciliation cannot release it",
+                "Practice resources have not closed; reconciliation cannot release them": "Practice resources have not closed; reconciliation cannot release them",
+                "Only a run requiring reconciliation can be resolved": "Only a run requiring reconciliation can be resolved",
+                "Practice positions or pending orders remain; inspect the sandbox before resolving": "Practice positions or pending orders remain; inspect the sandbox before resolving",
+            },
+            409,
+            "Practice reconciliation could not be verified",
+        )
     except Exception:
         return _error("Practice reconciliation could not be verified", 503)
 

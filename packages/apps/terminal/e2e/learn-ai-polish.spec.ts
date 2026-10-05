@@ -19,7 +19,7 @@ test("Learn teaches built-in Practice and its Trade link preserves the selected 
   await page.getByRole("tab", { name: "Practice Trading" }).click();
   const practice = page.getByTestId("practice-trading");
   await expect(practice).toContainText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.");
-  await expect(practice).not.toContainText(/OpenAlgo|sandbox|Kotak|funded unlock/i);
+  await expect(practice).not.toContainText(/sandbox|Kotak|funded unlock/i);
   await expect(practice.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
   await page.screenshot({ path: "test-results/learn-practice.png", fullPage: true });
   await practice.getByRole("link", { name: "Open Trade desk" }).click();

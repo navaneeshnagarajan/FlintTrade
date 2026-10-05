@@ -389,7 +389,7 @@ def _restore_env():
 @pytest.fixture(scope="module")
 def route_client(_restore_env):
     """Flask test client with a pre-seeded economic calendar provider."""
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
     from flinttrade_screener.economic_calendar import EconomicCalendarProvider
     import flinttrade_screener.economic_routes as _mod

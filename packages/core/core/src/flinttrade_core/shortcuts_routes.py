@@ -163,9 +163,7 @@ def _load_overrides(user_id: str, conn: Any) -> dict[str, list[str]]:
     return result
 
 
-def _save_overrides(
-    user_id: str, overrides: dict[str, list[str]], conn: Any
-) -> None:
+def _save_overrides(user_id: str, overrides: dict[str, list[str]], conn: Any) -> None:
     """Upsert shortcut overrides for a user in DuckDB.
 
     Existing rows are replaced; overrides not in the payload are untouched.
@@ -201,9 +199,7 @@ def _delete_overrides(user_id: str, conn: Any) -> int:
     Returns:
         Number of rows deleted.
     """
-    result = conn.execute(
-        "SELECT COUNT(*) FROM shortcuts WHERE user_id = ?", [user_id]
-    ).fetchone()
+    result = conn.execute("SELECT COUNT(*) FROM shortcuts WHERE user_id = ?", [user_id]).fetchone()
     count = result[0] if result else 0
     conn.execute("DELETE FROM shortcuts WHERE user_id = ?", [user_id])
     return count

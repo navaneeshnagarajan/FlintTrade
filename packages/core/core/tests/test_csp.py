@@ -107,6 +107,8 @@ class TestApplySecurityHeaders:
             resp = client.get("/test")
         pp = resp.headers.get("Permissions-Policy", "")
         assert "geolocation=()" in pp
+        assert "microphone=(self)" in pp
+        assert "camera=()" in pp
 
     def test_does_not_override_existing_header(self):
         app = Flask(__name__)
@@ -115,6 +117,7 @@ class TestApplySecurityHeaders:
         @app.route("/custom")
         def _custom():
             from flask import make_response
+
             r = make_response("ok")
             r.headers["X-Frame-Options"] = "SAMEORIGIN"
             return r
@@ -135,13 +138,15 @@ class TestCspReportHandler:
         csp_report_handler({})
 
     def test_does_not_raise_on_full_report(self):
-        csp_report_handler({
-            "blocked-uri": "https://evil.example.com",
-            "violated-directive": "script-src 'self'",
-            "document-uri": "https://app.example.com",
-            "source-file": "app.js",
-            "line-number": 42,
-        })
+        csp_report_handler(
+            {
+                "blocked-uri": "https://evil.example.com",
+                "violated-directive": "script-src 'self'",
+                "document-uri": "https://app.example.com",
+                "source-file": "app.js",
+                "line-number": 42,
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

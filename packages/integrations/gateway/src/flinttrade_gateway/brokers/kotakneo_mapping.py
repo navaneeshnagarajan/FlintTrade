@@ -35,7 +35,7 @@ EXCHANGE_TO_KOTAK = {
     "CDS": "cde_fo",
     "BCD": "bcs-fo",
     "MCX": "mcx_fo",
-    # OpenAlgo/terminal index convention: NEO has no separate index segment —
+    # native broker/terminal index convention: NEO has no separate index segment —
     # index quotes ride the cash segments. Without these entries the
     # ex.lower() fallback emitted the invalid segment "nse_index".
     "NSE_INDEX": "nse_cm",
@@ -1254,7 +1254,7 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
 
     Quantity is kept in raw traded units (shares/contracts), NOT divided by
     ``lotSz`` — FlintTrade reports total quantity across every adapter (Dhan /
-    OpenAlgo do the same), so a lots-based F&O display would be an adapter-level
+    native broker do the same), so a lots-based F&O display would be an adapter-level
     inconsistency; that normalisation, if ever wanted, belongs at the Position
     layer. Average price is per-unit and follows the documented denominator
     (``Positions.md`` §"Avg Price Fields"): ``amount / (qty * multiplier *

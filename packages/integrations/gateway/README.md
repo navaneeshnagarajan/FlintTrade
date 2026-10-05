@@ -1,10 +1,6 @@
 # Gateway
 
-> FlintTrade's broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter,
-> the OpenAlgo-compatible primary bridge, evidence-gated native adapters, an encrypted
-> credential vault, and the WebSocket bridge. OpenAlgo stays the preferred
-> community-tested path; native adapters are promoted per broker only after live
-> verification.
+> FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, BROKER_CATALOG (5 brokers), an encrypted credential vault, and the WebSocket bridge.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -15,7 +11,7 @@
 - `src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG`
 - `src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification`
 - `src/flinttrade_gateway/registry.py — BrokerRegistry over the 35-broker catalogue`
-- `src/flinttrade_gateway/brokers/ — the OpenAlgo bridge plus native per-broker adapters (Dhan, Upstox, INDmoney, Kotak Neo, Groww, …) against the BrokerAdapter ABC`
+- `src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww) against the BrokerAdapter ABC`
 - `src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault`
 - `src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients`
 
@@ -38,6 +34,10 @@ root workspace.
 ```bash
 python -m pytest packages/integrations/gateway/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

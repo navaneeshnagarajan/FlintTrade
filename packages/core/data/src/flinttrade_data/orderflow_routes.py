@@ -45,9 +45,11 @@ def _ist_time_label(timestamp: int | float) -> str:
     """Format an epoch timestamp in IST regardless of the host timezone."""
     return datetime.fromtimestamp(timestamp, tz=_IST).strftime("%H:%M:%S")
 
+
 # ---------------------------------------------------------------------------
 # Lazy import of the live aggregator — optional dependency
 # ---------------------------------------------------------------------------
+
 
 def _get_live_aggregator():  # type: ignore[return]
     """Return the shared OrderFlowAggregator singleton, or None if unavailable.
@@ -59,6 +61,7 @@ def _get_live_aggregator():  # type: ignore[return]
     """
     try:
         from flask import current_app  # noqa: PLC0415
+
         return current_app.config.get("ORDERFLOW_AGGREGATOR")
     except Exception:
         return None
@@ -144,15 +147,17 @@ def _generate_synthetic_buckets(
         total_volume = sum(c["buy_volume"] + c["sell_volume"] for c in cells.values())
         delta = sum(c["buy_volume"] - c["sell_volume"] for c in cells.values())
 
-        buckets.append({
-            "time_label": time_label,
-            "cells": cells,
-            "poc_price": poc_price,
-            "total_volume": total_volume,
-            "delta": delta,
-            "quality": "sample",
-            "provenance": "synthetic",
-        })
+        buckets.append(
+            {
+                "time_label": time_label,
+                "cells": cells,
+                "poc_price": poc_price,
+                "total_volume": total_volume,
+                "delta": delta,
+                "quality": "sample",
+                "provenance": "synthetic",
+            }
+        )
 
     return buckets
 
@@ -160,6 +165,7 @@ def _generate_synthetic_buckets(
 # ---------------------------------------------------------------------------
 # Live aggregator → bucket format converter
 # ---------------------------------------------------------------------------
+
 
 def _exact_multiple_ratio(requested: int | float, source: int | float) -> int | None:
     """Return the positive integer ratio when ``requested`` exactly represents ``source``."""
@@ -304,13 +310,9 @@ def _live_buckets_to_response(
         cell[1] += int(bucket.sell_volume)
         quality = getattr(bucket, "quality", "unknown")
         provenance = getattr(bucket, "provenance", "unknown")
-        group_qualities[bin_start].add(
-            quality if quality in {"exact", "estimated"} else "unknown"
-        )
+        group_qualities[bin_start].add(quality if quality in {"exact", "estimated"} else "unknown")
         group_provenances[bin_start].add(
-            provenance
-            if provenance in {"trade_tick", "cumulative_quote_delta", "mixed"}
-            else "unknown"
+            provenance if provenance in {"trade_tick", "cumulative_quote_delta", "mixed"} else "unknown"
         )
 
     result: list[dict[str, Any]] = []
@@ -338,15 +340,17 @@ def _live_buckets_to_response(
                 max_vol = total
                 poc_price = price_level
 
-        result.append({
-            "time_label": time_label,
-            "cells": cells,
-            "poc_price": poc_price,
-            "total_volume": total_volume,
-            "delta": delta,
-            "quality": _summarise_quality(group_qualities[bin_start]),
-            "provenance": _summarise_provenance(group_provenances[bin_start]),
-        })
+        result.append(
+            {
+                "time_label": time_label,
+                "cells": cells,
+                "poc_price": poc_price,
+                "total_volume": total_volume,
+                "delta": delta,
+                "quality": _summarise_quality(group_qualities[bin_start]),
+                "provenance": _summarise_provenance(group_provenances[bin_start]),
+            }
+        )
 
     return result
 
@@ -403,10 +407,12 @@ def orderflow_endpoint() -> tuple[Any, int]:
     if bins <= 0:
         return jsonify({"status": "error", "message": "bins must be positive"}), 400
     if not is_arithmetic_safe_tick_size(tick_size):
-        return jsonify({
-            "status": "error",
-            "message": "tick_size must be a finite arithmetic-safe number",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "tick_size must be a finite arithmetic-safe number",
+            }
+        ), 400
 
     symbol_upper = symbol
     is_live = False
@@ -470,23 +476,25 @@ def orderflow_endpoint() -> tuple[Any, int]:
         quality = "sample"
         provenance = "synthetic"
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "buckets": buckets,
-            "symbol": symbol_upper,
-            "exchange": exchange,
-            "interval": effective_interval,
-            "tick_size": effective_tick_size,
-            "requested_interval": interval,
-            "requested_tick_size": tick_size,
-            "source_interval": source_interval,
-            "source_tick_size": source_tick_size,
-            "is_live": is_live,
-            "is_sample_data": is_sample_data,
-            "live_state": live_state,
-            "freshness": freshness,
-            "quality": quality,
-            "provenance": provenance,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "buckets": buckets,
+                "symbol": symbol_upper,
+                "exchange": exchange,
+                "interval": effective_interval,
+                "tick_size": effective_tick_size,
+                "requested_interval": interval,
+                "requested_tick_size": tick_size,
+                "source_interval": source_interval,
+                "source_tick_size": source_tick_size,
+                "is_live": is_live,
+                "is_sample_data": is_sample_data,
+                "live_state": live_state,
+                "freshness": freshness,
+                "quality": quality,
+                "provenance": provenance,
+            },
+        }
+    ), 200

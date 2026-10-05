@@ -65,14 +65,18 @@ def _order(symbol: str, action: str, quantity: int, price: float = 100.0) -> dic
 
 
 def _seed(engine: object, positions: list[dict[str, object]], orders: list[dict[str, object]] | None = None) -> None:
-    engine.import_data(json.dumps({
-        "schema_version": 2,
-        "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
-        "positions": positions,
-        "orders": orders or [],
-        "trades": [],
-        "pnl_history": [],
-    }))
+    engine.import_data(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
+                "positions": positions,
+                "orders": orders or [],
+                "trades": [],
+                "pnl_history": [],
+            }
+        )
+    )
 
 
 @pytest.mark.unit
@@ -80,30 +84,35 @@ def test_practice_close_of_a_long_and_a_short_succeeds_while_laya_is_down() -> N
     from flinttrade_data.sandbox_engine import SandboxEngine
 
     engine = SandboxEngine(db_path=":memory:")
-    _seed(engine, [
-        {
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "product": "MIS",
-            "net_qty": 10,
-            "avg_price": 100.0,
-            "buy_qty": 10,
-            "buy_value": 1000.0,
-        },
-        {
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "product": "MIS",
-            "net_qty": -8,
-            "avg_price": 200.0,
-            "sell_qty": 8,
-            "sell_value": 1600.0,
-        },
-    ])
+    _seed(
+        engine,
+        [
+            {
+                "symbol": "INFY",
+                "exchange": "NSE",
+                "product": "MIS",
+                "net_qty": 10,
+                "avg_price": 100.0,
+                "buy_qty": 10,
+                "buy_value": 1000.0,
+            },
+            {
+                "symbol": "TCS",
+                "exchange": "NSE",
+                "product": "MIS",
+                "net_qty": -8,
+                "avg_price": 200.0,
+                "sell_qty": 8,
+                "sell_value": 1600.0,
+            },
+        ],
+    )
     client = _practice_app(engine).test_client()
     assert process_laya().status is DecisionStatus.DOWN
 
-    long_close = client.post("/api/v1/orders/place", json=_order("INFY", "SELL", 10, 110.0), headers=_headers("practice"))
+    long_close = client.post(
+        "/api/v1/orders/place", json=_order("INFY", "SELL", 10, 110.0), headers=_headers("practice")
+    )
     short_close = client.post("/api/v1/orders/place", json=_order("TCS", "BUY", 8, 190.0), headers=_headers("practice"))
     assert long_close.status_code == 200, long_close.get_json()
     assert short_close.status_code == 200, short_close.get_json()
@@ -117,15 +126,20 @@ def test_oversized_practice_close_while_down_is_refused() -> None:
     from flinttrade_data.sandbox_engine import SandboxEngine
 
     engine = SandboxEngine(db_path=":memory:")
-    _seed(engine, [{
-        "symbol": "INFY",
-        "exchange": "NSE",
-        "product": "MIS",
-        "net_qty": 10,
-        "avg_price": 100.0,
-        "buy_qty": 10,
-        "buy_value": 1000.0,
-    }])
+    _seed(
+        engine,
+        [
+            {
+                "symbol": "INFY",
+                "exchange": "NSE",
+                "product": "MIS",
+                "net_qty": 10,
+                "avg_price": 100.0,
+                "buy_qty": 10,
+                "buy_value": 1000.0,
+            }
+        ],
+    )
     client = _practice_app(engine).test_client()
     response = client.post(
         "/api/v1/orders/place",
@@ -147,26 +161,30 @@ def test_a_second_practice_exit_is_refused_while_one_is_pending() -> None:
     engine = SandboxEngine(db_path=":memory:")
     _seed(
         engine,
-        [{
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "product": "MIS",
-            "net_qty": 10,
-            "avg_price": 100.0,
-            "buy_qty": 10,
-            "buy_value": 1000.0,
-        }],
-        [{
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "product": "MIS",
-            "action": "SELL",
-            "quantity": 4,
-            "price": 120.0,
-            "order_type": "LIMIT",
-            "status": "PENDING",
-            "filled_qty": 0,
-        }],
+        [
+            {
+                "symbol": "INFY",
+                "exchange": "NSE",
+                "product": "MIS",
+                "net_qty": 10,
+                "avg_price": 100.0,
+                "buy_qty": 10,
+                "buy_value": 1000.0,
+            }
+        ],
+        [
+            {
+                "symbol": "INFY",
+                "exchange": "NSE",
+                "product": "MIS",
+                "action": "SELL",
+                "quantity": 4,
+                "price": 120.0,
+                "order_type": "LIMIT",
+                "status": "PENDING",
+                "filled_qty": 0,
+            }
+        ],
     )
     client = _practice_app(engine).test_client()
     for quantity in (7, 6):
@@ -189,15 +207,20 @@ def test_two_concurrent_closes_cannot_flip_the_position() -> None:
     from flinttrade_data.sandbox_engine import SandboxEngine
 
     engine = SandboxEngine(db_path=":memory:")
-    _seed(engine, [{
-        "symbol": "TCS",
-        "exchange": "NSE",
-        "product": "MIS",
-        "net_qty": -10,
-        "avg_price": 200.0,
-        "sell_qty": 10,
-        "sell_value": 2000.0,
-    }])
+    _seed(
+        engine,
+        [
+            {
+                "symbol": "TCS",
+                "exchange": "NSE",
+                "product": "MIS",
+                "net_qty": -10,
+                "avg_price": 200.0,
+                "sell_qty": 10,
+                "sell_value": 2000.0,
+            }
+        ],
+    )
     app = _practice_app(engine)
     barrier = threading.Barrier(2)
     statuses: list[int] = []
@@ -289,12 +312,12 @@ def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_stays_reduce_on
     app.config["REDUCE_ONLY_LIVE_BOOKS"] = readable
     client = app.test_client()
     headers = _headers("live", unlocked=True)
-    over = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 7, 0), headers=headers)
+    over = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 7, 0), headers=headers)
     assert over.status_code == 403
     assert over.get_json()["code"] == "laya_denied"
     safety.check_order.assert_not_called()
 
-    inside = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    inside = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
     assert inside.status_code == 403
     assert "L1_ORDER" in inside.get_json()["message"]
     safety.check_order.assert_called_once()
@@ -306,7 +329,7 @@ def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_stays_reduce_on
     app.config["REDUCE_ONLY_LIVE_BOOKS"] = unreadable
     safety.check_order.reset_mock()
     assert process_laya().status is DecisionStatus.DOWN
-    closed = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
+    closed = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
     assert closed.status_code == 403
     assert closed.get_json().get("code") != "laya_denied"
     assert "L1_ORDER" in closed.get_json()["message"]
@@ -369,7 +392,7 @@ def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refuse
     headers = _headers("live", unlocked=True)
     for quantity in (6, 7):
         refused = client.post(
-            "/api/v1/orders/openalgo/place",
+            "/api/v1/orders/dhan/place",
             json=_order("INFY", "SELL", quantity, 0),
             headers=headers,
         )
@@ -410,24 +433,26 @@ def test_successful_reduce_only_reservation_releases_when_the_fill_lands(
     monkeypatch.setattr(order_routes, "_admit_and_route_live_order", lambda *_a, **_k: (True, "OID-1"))
     client = app.test_client()
     headers = _headers("live", unlocked=True)
-    first = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 4, 0), headers=headers)
+    first = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 4, 0), headers=headers)
     assert first.status_code == 200, first.get_json()
 
-    blocked = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    blocked = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
     assert blocked.status_code == 409
     assert blocked.get_json()["code"] == "exit_pending"
 
     state["net"] = 6
-    state["orders"] = [{
-        "symbol": "INFY",
-        "exchange": "NSE",
-        "product": "MIS",
-        "action": "SELL",
-        "quantity": 4,
-        "status": "COMPLETE",
-        "order_id": "OID-1",
-    }]
-    remainder = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    state["orders"] = [
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 4,
+            "status": "COMPLETE",
+            "order_id": "OID-1",
+        }
+    ]
+    remainder = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
     assert remainder.status_code == 200, remainder.get_json()
 
 
@@ -444,17 +469,17 @@ def test_reduce_only_reservation_is_scoped_to_the_broker_adapter(
     client = app.test_client()
     headers = _headers("live", unlocked=True)
     body = _order("INFY", "SELL", 4, 0)
-    first = client.post("/api/v1/orders/openalgo/place", json=body, headers=headers)
-    other = client.post("/api/v1/orders/dhan/place", json=body, headers=headers)
+    first = client.post("/api/v1/orders/dhan/place", json=body, headers=headers)
+    other = client.post("/api/v1/orders/upstox/place", json=body, headers=headers)
     assert first.status_code == 200, first.get_json()
     assert other.status_code == 200, other.get_json()
-    same = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    same = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
     assert same.status_code == 409
     assert same.get_json()["code"] == "exit_pending"
 
 
 @pytest.mark.unit
-def test_typed_openalgo_position_rows_can_prove_a_reduce_only_exit(
+def test_typed_dhan_position_rows_can_prove_a_reduce_only_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Attribute rows from a broker position book are not dropped."""
@@ -467,7 +492,7 @@ def test_typed_openalgo_position_rows_can_prove_a_reduce_only_exit(
         net_qty = 10
 
     async def _read(_source: object, *names: str) -> list[object]:
-        if "positionbook" in names:
+        if "positions" in names:
             return [_Position()]
         return []
 
@@ -478,7 +503,7 @@ def test_typed_openalgo_position_rows_can_prove_a_reduce_only_exit(
     app = _live_app(safety)
     client = app.test_client()
     closed = client.post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_order("INFY", "SELL", 10, 0),
         headers=_headers("live", unlocked=True),
     )

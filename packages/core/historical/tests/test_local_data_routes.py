@@ -59,9 +59,7 @@ class TestBarsQuery:
         assert isinstance(data["bars"][0]["timestamp"], str)
 
     def test_date_window(self, client):
-        resp = client.get(
-            "/v1/historify/bars?symbol=RELIANCE&exchange=NSE&interval=1d&start=2026-07-02&end=2026-07-02"
-        )
+        resp = client.get("/v1/historify/bars?symbol=RELIANCE&exchange=NSE&interval=1d&start=2026-07-02&end=2026-07-02")
         data = resp.get_json()["data"]
         assert data["count"] == 1
         assert data["bars"][0]["close"] == 107.0
@@ -99,6 +97,7 @@ class TestBhavcopyDownloader:
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text("header\n")
                 return str(out)
+
             return _saver
 
         dl = BhavcopyDownloader(tmp_path / "bc", savers={"equity": make_saver("equity")})
@@ -136,10 +135,13 @@ class TestBhavcopyDownloader:
 class TestBhavcopyRoute:
     def test_400_on_bad_dates_or_segments(self, client):
         assert client.post("/v1/historify/bhavcopy/download", json={"start": "x", "end": "y"}).status_code == 400
-        assert client.post(
-            "/v1/historify/bhavcopy/download",
-            json={"start": "2026-07-06", "end": "2026-07-06", "segments": ["bogus"]},
-        ).status_code == 400
+        assert (
+            client.post(
+                "/v1/historify/bhavcopy/download",
+                json={"start": "2026-07-06", "end": "2026-07-06", "segments": ["bogus"]},
+            ).status_code
+            == 400
+        )
 
     def test_400_on_oversized_range(self, client):
         resp = client.post(
@@ -158,6 +160,7 @@ class TestBhavcopyRoute:
                 out = tmp_path / f"cm{d.strftime('%d%b%Y').upper()}bhav.csv"
                 out.write_text("header\n")
                 return str(out)
+
             return {"equity": _save, "fo": _save, "index": _save, "full": _save}
 
         monkeypatch.setattr("flinttrade_historical.bhavcopy._default_savers", fake_savers)

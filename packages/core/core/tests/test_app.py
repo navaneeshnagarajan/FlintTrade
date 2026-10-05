@@ -26,7 +26,7 @@ def client(monkeypatch_module):
     """Return a Flask test client for the FlintTrade app."""
     from flinttrade_core.app import create_flask_app
 
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     app = create_flask_app()
     app.config["TESTING"] = True
     with app.test_client() as c:
@@ -48,11 +48,16 @@ def client(monkeypatch_module):
 def monkeypatch_module():
     """Module-scoped monkeypatch for environment variables."""
     import os
+
     original_env = dict(os.environ)
-    yield type("MonkeyPatch", (), {
-        "setenv": lambda self, k, v: os.environ.update({k: v}),
-        "delenv": lambda self, k, **kw: os.environ.pop(k, None),
-    })()
+    yield type(
+        "MonkeyPatch",
+        (),
+        {
+            "setenv": lambda self, k, v: os.environ.update({k: v}),
+            "delenv": lambda self, k, **kw: os.environ.pop(k, None),
+        },
+    )()
     os.environ.clear()
     os.environ.update(original_env)
 
@@ -325,10 +330,17 @@ class TestSuccessfulComputation:
             json={
                 "bars": bars,
                 "indicators": [
-                    "ema_20", "sma_50", "rsi_14", "macd",
-                    "bollinger_bands_20", "atr_14",
-                    "williams_r_14", "cci_20",
-                    "keltner_channels_20", "obv", "vwma_20",
+                    "ema_20",
+                    "sma_50",
+                    "rsi_14",
+                    "macd",
+                    "bollinger_bands_20",
+                    "atr_14",
+                    "williams_r_14",
+                    "cci_20",
+                    "keltner_channels_20",
+                    "obv",
+                    "vwma_20",
                 ],
             },
         )

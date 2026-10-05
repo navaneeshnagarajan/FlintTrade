@@ -29,10 +29,13 @@ const mockDepthData = {
   ],
 };
 
-const getDepthMock = vi.fn((_symbol: string, _exchange: string) => Promise.resolve(mockDepthData));
+const getDepthMock = vi.fn((..._args: unknown[]) => Promise.resolve(mockDepthData));
+const authority = vi.hoisted(() => ({ scope: "live:native:dhan:A1" }));
+
+vi.mock("@/hooks/useDataScope", () => ({ useMarketDataScope: () => authority.scope }));
 
 vi.mock("@/services/api", () => ({
-  getDepth: (symbol: string, exchange: string) => getDepthMock(symbol, exchange),
+  getDepth: (...args: unknown[]) => getDepthMock(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -60,6 +63,7 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authority.scope = "live:native:dhan:A1";
 });
 
 // ---------------------------------------------------------------------------
@@ -74,7 +78,7 @@ describe("useDepthData", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(getDepthMock).toHaveBeenCalledWith("NIFTY", "NSE_INDEX");
+    expect(getDepthMock).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", expect.any(AbortSignal), authority.scope);
     expect(result.current.data).toEqual(mockDepthData);
   });
 

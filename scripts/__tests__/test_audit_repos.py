@@ -25,12 +25,12 @@ from scripts.audit_repos import (  # noqa: E402
 def sample_repos() -> dict[str, dict]:
     """Sample repo data for testing."""
     return {
-        "openalgo": {
+        "sample-gateway": {
             "status": "integrated",
             "target_package": "gateway",
             "absorbed_patterns": ["REST API", "WebSocket"],
             "last_examined": "2026-03-24",
-            "upstream_url": "https://github.com/marketcalls/openalgo",
+            "upstream_url": "https://github.com/marketcalls/sample-gateway",
             "notes": "Submodule. Adapter pattern.",
         },
         "FinRL": {
@@ -41,12 +41,12 @@ def sample_repos() -> dict[str, dict]:
             "upstream_url": "https://github.com/AI4Finance-Foundation/FinRL",
             "notes": "Deep RL framework",
         },
-        "openalgo-chatbot": {
+        "sample-chatbot": {
             "status": "examined",
             "target_package": "ai",
             "absorbed_patterns": ["ChromaDB RAG"],
             "last_examined": "2026-03-22",
-            "upstream_url": "https://github.com/marketcalls/openalgo-chatbot",
+            "upstream_url": "https://github.com/marketcalls/sample-chatbot",
             "notes": "RAG patterns",
         },
     }
@@ -59,13 +59,13 @@ class TestFilterRepos:
         """Filter repos by status returns only matching repos."""
         result = filter_repos(sample_repos, status="integrated")
         assert len(result) == 1
-        assert "openalgo" in result
+        assert "sample-gateway" in result
 
     def test_filter_by_package(self, sample_repos: dict) -> None:
         """Filter repos by package returns only matching repos."""
         result = filter_repos(sample_repos, package="ai")
         assert len(result) == 1
-        assert "openalgo-chatbot" in result
+        assert "sample-chatbot" in result
 
     def test_filter_no_match(self, sample_repos: dict) -> None:
         """Filter with no matches returns empty dict."""
@@ -86,9 +86,9 @@ class TestFormatTable:
     def test_table_has_all_repos(self, sample_repos: dict) -> None:
         """Table output includes all repo names."""
         output = format_table(sample_repos)
-        assert "openalgo" in output
+        assert "sample-gateway" in output
         assert "FinRL" in output
-        assert "openalgo-chatbot" in output
+        assert "sample-chatbot" in output
 
 
 class TestFormatSummary:

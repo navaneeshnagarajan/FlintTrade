@@ -498,12 +498,8 @@ class StorageManager:
                 observed_row = conn.execute("SELECT COALESCE(MAX(ingest_seq), 0) FROM ticks").fetchone()
                 observed_high_water = int(observed_row[0]) if observed_row is not None else 0
                 stored_high_water = _metadata_high_water(existing_metadata.get(_TICK_HIGH_WATER_KEY))
-                stored_pruned_high_water = _metadata_high_water(
-                    existing_metadata.get(_TICK_PRUNED_HIGH_WATER_KEY)
-                )
-                stored_prune_cutoff = _metadata_prune_cutoff(
-                    existing_metadata.get(_TICK_PRUNED_BEFORE_KEY)
-                )
+                stored_pruned_high_water = _metadata_high_water(existing_metadata.get(_TICK_PRUNED_HIGH_WATER_KEY))
+                stored_prune_cutoff = _metadata_prune_cutoff(existing_metadata.get(_TICK_PRUNED_BEFORE_KEY))
                 recovered_pruned_high_water = (
                     stored_pruned_high_water
                     if stored_pruned_high_water is not None
@@ -520,9 +516,7 @@ class StorageManager:
                     recovered_prune_cutoff = _NO_PRUNE_CUTOFF
                 if recovered_prune_cutoff is None:
                     recovered_prune_cutoff = (
-                        _UNCERTAIN_PRUNE_CUTOFF
-                        if existing_metadata or observed_high_water > 0
-                        else _NO_PRUNE_CUTOFF
+                        _UNCERTAIN_PRUNE_CUTOFF if existing_metadata or observed_high_water > 0 else _NO_PRUNE_CUTOFF
                     )
                 if not had_store_identity or not lineage_metadata_complete:
                     new_store_id = str(uuid.uuid4())

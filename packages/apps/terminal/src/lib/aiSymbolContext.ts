@@ -1,6 +1,6 @@
 import { EXCHANGES, type ExchangeValue } from "@/lib/tradingConstants";
 
-// OpenAlgo symbols preserve punctuation such as M&M; keep the allowlist tight
+// Listed instruments can contain punctuation such as M&M; restrict the allowed characters
 // but include the characters that real NSE/BSE symbols already use.
 const SYMBOL_PATTERN = /^[A-Z0-9_&.-]{1,32}$/;
 const KNOWN_EXCHANGES = new Set<string>(EXCHANGES.map(({ value }) => value));

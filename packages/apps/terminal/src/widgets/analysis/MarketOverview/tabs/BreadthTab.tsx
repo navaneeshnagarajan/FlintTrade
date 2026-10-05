@@ -345,6 +345,7 @@ function BreadthTab() {
       {/* Toolbar */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <span className="text-xs font-semibold text-text-primary">Market Breadth (NSE)</span>
+        {isSample && <SampleBadge title="Showing sample breadth data; native snapshot provenance is unavailable." />}
         
         <div className="flex-1" />
         <span className="text-xxs text-text-muted tabular-nums">{lastUpdated}</span>

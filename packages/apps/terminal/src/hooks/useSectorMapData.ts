@@ -1,13 +1,14 @@
 /**
  * useSectorMapData
  *
- * Fetches live sector/stock data via OpenAlgo's multiquotes API.
+ * Fetches live sector/stock data via broker's multiquotes API.
  * - Explore mode: returns null (widget falls back to synthetic demo data)
  * - Practice/Live mode: fetches LTP + change for predefined sectoral stocks
  * - Refreshes every 30s during market hours, every 120s otherwise
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import { useModeStore } from "@/stores/modeStore";
 import { isMarketHours } from "@/lib/market";
@@ -133,12 +134,13 @@ export function useSectorMapData(): {
   refetch: () => void;
 } {
   const mode = useModeStore((s) => s.mode);
+  const scope = useMarketDataScope();
   const isLive = mode === "practice" || mode === "live";
 
   const query = useQuery<SectorStockData[]>({
-    queryKey: ["sectormap-quotes"],
-    queryFn: async () => {
-      const raw = await getMultiQuotes(ALL_SYMBOLS);
+    queryKey: ["sectormap-quotes", scope],
+    queryFn: async ({ signal }) => {
+      const raw = await getMultiQuotes(ALL_SYMBOLS, signal, scope);
       return quotesToStockData(normaliseMultiQuotes(raw));
     },
     enabled: isLive,

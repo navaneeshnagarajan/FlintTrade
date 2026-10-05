@@ -276,3 +276,29 @@ class TestStateRootResolution:
         assert s.state_file == injected / "unit_test" / "state.json"
         assert s.state_file.exists()
         assert not (tmp_path / "workspace" / "strategies").exists()
+
+
+def test_checkpoint_refuses_path_escape(tmp_path: Path):
+    with pytest.raises(ValueError, match="filesystem component"):
+        _TestStrategy(strategy_id="../escape", state_root=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_checkpoint_metadata_cannot_be_overridden(tmp_path: Path):
+    class HostilePayload(_TestStrategy):
+        def get_state_dict(self):
+            return {"strategy_id": "foreign", "lifecycle_state": "ACTIVE", "count": 4}
+
+    strategy = HostilePayload(strategy_id="actual", state_root=tmp_path)
+    strategy.save_state()
+    checkpoint = strategy.load_state()
+    assert checkpoint["strategy_id"] == "actual"
+    assert checkpoint["lifecycle_state"] == "STOPPED"
+    assert checkpoint["count"] == 4
+    assert list(strategy._state_dir.iterdir()) == [strategy.state_file]
+
+
+def test_non_object_checkpoint_is_refused(strategy):
+    strategy._state_dir.mkdir(parents=True)
+    strategy.state_file.write_text('[1, 2, 3]', encoding="utf-8")
+    assert strategy.load_state() is None

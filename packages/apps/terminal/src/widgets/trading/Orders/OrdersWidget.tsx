@@ -155,8 +155,7 @@ export function toOrderRow(o: RawOrderRecord): OrderRow {
 
 /** Brokers whose modify contract is a full replacement and needs disclosure. */
 const FULL_REPLACEMENT_DISCLOSURE_BROKERS = new Set([
-  "openalgo",
-  "dhan",
+    "dhan",
   "upstox",
   "kotakneo",
 ]);

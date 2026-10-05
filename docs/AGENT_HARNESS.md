@@ -8,18 +8,16 @@ admission and the real `SandboxEngine`. It does not place real-money orders.
 
 - Use a full, authenticated Practice session. Explore, setup tokens, expired
   sessions and a contradictory mode header cannot start this runtime.
+
 - Enable `ai.autonomous_agent.enabled` in the workspace. Configure an LLM using
   the existing AI settings and establish the configured market-data accounts.
+
 - Laya must satisfy the normal Practice admission requirements. A configured
   chat model is not Laya readiness, and Practice readiness is not Live approval.
+
 - The canonical calendar, rate limiter, sandbox and backend ownership must be
   available. The harness does not remove native-account setup/read-port guards.
-- The current complete market-input route is a working OpenAlgo connection.
-  Native saved-session reconnection/account setup remains behind the existing
-  lifecycle cutover. Dhan cash-equity depth is implemented on the in-process
-  read port, but this does not establish a working native setup/reconnection
-  route. The harness refuses unavailable required inputs rather than
-  pretending a native session is ready.
+
 - Start with an empty Practice position book and no pending Practice orders.
   Existing manual exposure is not silently adopted by an agent.
 

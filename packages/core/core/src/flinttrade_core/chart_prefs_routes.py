@@ -1,14 +1,4 @@
-"""Chart preferences API backed by FlintTrade's local preference store.
-
-Endpoint
---------
-GET/POST /api/v1/chart
-
-The terminal historically exposed ``getChartPreferences`` and
-``updateChartPreferences`` through an OpenAlgo-style ``/chart`` helper. The
-data is owned by FlintTrade, so this route bridges those exports to the
-existing :class:`flinttrade_core.chart_prefs.ChartPreferences` store.
-"""
+"""Local chart preferences shared by terminal workspaces at /api/v1/chart."""
 
 from __future__ import annotations
 
@@ -50,10 +40,7 @@ def _user_id() -> str:
     namespace is a convenience, not an auth boundary).
     """
     raw = (
-        request.headers.get("X-User-Id")
-        or request.headers.get("X-User-ID")
-        or request.args.get("user_id")
-        or "default"
+        request.headers.get("X-User-Id") or request.headers.get("X-User-ID") or request.args.get("user_id") or "default"
     )
     candidate = str(raw).strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", candidate):
@@ -64,13 +51,9 @@ def _user_id() -> str:
 def _load_payload(user_id: str) -> dict[str, Any]:
     prefs = _store()
     indicator_sets = {
-        name: prefs.load_indicator_set(user_id, name) or []
-        for name in prefs.list_indicator_sets(user_id)
+        name: prefs.load_indicator_set(user_id, name) or [] for name in prefs.list_indicator_sets(user_id)
     }
-    layouts = {
-        name: prefs.load_layout(user_id, name) or {}
-        for name in prefs.list_layouts(user_id)
-    }
+    layouts = {name: prefs.load_layout(user_id, name) or {} for name in prefs.list_layouts(user_id)}
     return {
         "user_id": user_id,
         "theme": prefs.get_theme(user_id) or {},

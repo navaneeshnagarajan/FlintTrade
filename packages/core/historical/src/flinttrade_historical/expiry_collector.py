@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from flinttrade_core.openalgo_client import OpenAlgoClient
+from flinttrade_core.broker_client import BrokerClient
 
 from .downloader import HistoricalDownloader
 from .expiry_manager import ExpiryManager, _dated_expiries, _parse_expiry_date
@@ -85,7 +85,7 @@ class ExpiryDataCollector:
 
     def __init__(
         self,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         data_dir: str = "~/.flinttrade/expiry_data",
     ) -> None:
         self.data_dir = Path(data_dir).expanduser()
@@ -129,7 +129,10 @@ class ExpiryDataCollector:
 
         logger.info(
             "Found %d past expiries for %s:%s within %d months",
-            len(past), exchange, symbol, months,
+            len(past),
+            exchange,
+            symbol,
+            months,
         )
         return past
 
@@ -178,23 +181,28 @@ class ExpiryDataCollector:
             )
 
             for bar in download.bars:
-                result.records.append(ExpiryDataRecord(
-                    timestamp=bar.timestamp,
-                    open=bar.open,
-                    high=bar.high,
-                    low=bar.low,
-                    close=bar.close,
-                    volume=bar.volume,
-                    symbol=symbol,
-                    expiry=expiry,
-                ))
+                result.records.append(
+                    ExpiryDataRecord(
+                        timestamp=bar.timestamp,
+                        open=bar.open,
+                        high=bar.high,
+                        low=bar.low,
+                        close=bar.close,
+                        volume=bar.volume,
+                        symbol=symbol,
+                        expiry=expiry,
+                    )
+                )
 
             if download.errors:
                 result.errors.extend(download.errors)
 
             logger.info(
                 "Downloaded %d bars for %s expiry %s (%d days before)",
-                result.total_bars, symbol, expiry, days_before,
+                result.total_bars,
+                symbol,
+                expiry,
+                days_before,
             )
         except Exception as exc:
             result.errors.append(str(exc))
@@ -305,13 +313,18 @@ class ExpiryDataCollector:
             sym_results: list[ExpiryDataResult] = []
             for exp in expiries:
                 r = self.download_expiry_data(
-                    sym, exp, days_before=days_before, exchange=exchange,
+                    sym,
+                    exp,
+                    days_before=days_before,
+                    exchange=exchange,
                 )
                 sym_results.append(r)
             results[sym] = sym_results
             logger.info(
                 "Collected %d expiries for %s (%d total bars)",
-                len(sym_results), sym, sum(r.total_bars for r in sym_results),
+                len(sym_results),
+                sym,
+                sum(r.total_bars for r in sym_results),
             )
 
         return results

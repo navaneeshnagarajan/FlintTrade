@@ -53,14 +53,8 @@ Alert thresholds:
 | Liquidity | High for Nifty/BankNifty | High |
 | Event risk | Lower | Higher (RBI, results season) |
 
-## Execution via OpenAlgo
+## Execution via broker
 
-```python
-# Short ATM straddle example
-placeorder(symbol="NIFTY26APR25000CE", exchange="NFO", action="SELL",
-           product="MIS", quantity=50, price_type="MARKET")
-placeorder(symbol="NIFTY26APR25000PE", exchange="NFO", action="SELL",
-           product="MIS", quantity=50, price_type="MARKET")
-```
+Orders must be emitted through FlintTrade's strategy runtime and admitted by the safety gate before BrokerRouter dispatch. Select an explicit native broker account; unsupported order varieties must be refused.
 
-Always use `MIS` product for intraday straddles — auto-squared off by broker.
+Always use `MIS` product for intraday straddles — auto-squared off by the native broker adapter.

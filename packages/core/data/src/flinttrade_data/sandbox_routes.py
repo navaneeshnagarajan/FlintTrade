@@ -152,17 +152,19 @@ def get_status() -> Response:
     except Exception:  # pragma: no cover - defensive
         trades_count = 0
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "capital": capital.get("current", 0.0),
-            "initial_capital": capital.get("initial", 0.0),
-            "pnl": pnl.get("net", pnl.get("total", 0.0)),
-            "gross_pnl": pnl.get("gross", pnl.get("total", 0.0)),
-            "charges": pnl.get("charges", 0.0),
-            "trades_count": trades_count,
-        },
-    })
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "capital": capital.get("current", 0.0),
+                "initial_capital": capital.get("initial", 0.0),
+                "pnl": pnl.get("net", pnl.get("total", 0.0)),
+                "gross_pnl": pnl.get("gross", pnl.get("total", 0.0)),
+                "charges": pnl.get("charges", 0.0),
+                "trades_count": trades_count,
+            },
+        }
+    )
 
 
 @data_sandbox_bp.route("/capital/adjust", methods=["POST"])
@@ -212,10 +214,12 @@ def cancel_order(order_id: str) -> Response:
         return err
     result = engine.cancel_order(order_id)
     accepted = result["status"] == "CANCELLED"
-    return jsonify({
-        "status": "success" if accepted else "error",
-        "data": {"order": result},
-    }), (200 if accepted else 400)
+    return jsonify(
+        {
+            "status": "success" if accepted else "error",
+            "data": {"order": result},
+        }
+    ), (200 if accepted else 400)
 
 
 @data_sandbox_bp.route("/order/<order_id>", methods=["PATCH"])
@@ -239,10 +243,12 @@ def modify_order(order_id: str) -> Response:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
     result = engine.modify_order(order_id, **changes)
     accepted = result["status"] == "PENDING"
-    return jsonify({
-        "status": "success" if accepted else "error",
-        "data": {"order": result},
-    }), (200 if accepted else 400)
+    return jsonify(
+        {
+            "status": "success" if accepted else "error",
+            "data": {"order": result},
+        }
+    ), (200 if accepted else 400)
 
 
 @data_sandbox_bp.route("/orders/cancel-all", methods=["POST"])
@@ -251,10 +257,12 @@ def cancel_all_orders() -> Response:
     engine, err = _engine_required()
     if err:
         return err
-    return jsonify({
-        "status": "success",
-        "data": {"result": engine.cancel_pending_orders()},
-    })
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"result": engine.cancel_pending_orders()},
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +337,12 @@ def get_pnl_history() -> Response:
     engine, err = _engine_required()
     if err:
         return err
-    return jsonify({
-        "status": "success",
-        "data": {"pnl_history": engine.get_pnl_history()},
-    })
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"pnl_history": engine.get_pnl_history()},
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +362,15 @@ def reset_sandbox() -> Response:
         return err
 
     backup = engine.reset()
-    return jsonify({
-        "status": "success",
-        "data": {
-            "message": "Sandbox reset — all paper trades cleared",
-            "backup": backup,
-        },
-    })
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "message": "Sandbox reset — all paper trades cleared",
+                "backup": backup,
+            },
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

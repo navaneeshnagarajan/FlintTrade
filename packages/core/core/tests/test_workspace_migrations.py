@@ -98,9 +98,7 @@ def _wait_for_process_marker(marker: Path, process: subprocess.Popen[str], timeo
     while not marker.exists():
         if process.poll() is not None:
             stdout, stderr = process.communicate()
-            raise AssertionError(
-                f"lock contender exited before entering (code {process.returncode}): {stdout}{stderr}"
-            )
+            raise AssertionError(f"lock contender exited before entering (code {process.returncode}): {stdout}{stderr}")
         if time.monotonic() >= deadline:
             raise AssertionError("timed out waiting for lock contender to enter")
         time.sleep(0.01)
@@ -108,7 +106,7 @@ def _wait_for_process_marker(marker: Path, process: subprocess.Popen[str], timeo
 
 def test_fresh_install_no_migration(tmp_path):
     """Workspace already at current version: returned as-is, file untouched."""
-    cfg = {**_CURRENT_AUTHORITY, "version": "1.3.0", "brokers": {"registered": ["openalgo:default"]}}
+    cfg = {**_CURRENT_AUTHORITY, "version": "1.4.0", "brokers": {"registered": []}}
     path = _seed(tmp_path, cfg)
     mtime_before = path.stat().st_mtime_ns
 
@@ -125,7 +123,7 @@ def test_legacy_010_alpha_full_migration_persists(tmp_path):
     result = run_migrations(tmp_path)
 
     assert result["version"] == WORKSPACE_VERSION
-    assert result["brokers"]["execution"]["default"] == "openalgo:default"
+    assert result["brokers"]["execution"]["default"] == ""
     assert result["compliance"]["personal_use_mode"] is True
     assert json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8")) == result
     assert (tmp_path / "workspace.0.1.0-alpha.bak.json").exists()
@@ -137,13 +135,13 @@ def test_052_to_100_preserves_manual_edits(tmp_path):
         tmp_path,
         {
             "version": "0.5.2",
-            "brokers": {"execution": {"default": "openalgo:zerodha"}},
+            "brokers": {"execution": {"default": "upstox:personal"}},
         },
     )
 
     result = run_migrations(tmp_path)
 
-    assert result["brokers"]["execution"]["default"] == "openalgo:zerodha"
+    assert result["brokers"]["execution"]["default"] == "upstox:personal"
     assert "ticks" in result["brokers"]["data"]
 
 
@@ -311,7 +309,7 @@ def test_default_lmstudio_migration_finishes_a_postcommit_staged_secret(
     }
     current = {
         **_CURRENT_AUTHORITY,
-        "version": "1.3.0",
+        "version": "1.4.0",
         "llm": {
             "provider": "ollama",
             "host": "",
@@ -345,7 +343,7 @@ def test_current_workspace_never_deletes_an_unjournalled_prefixed_file(tmp_path)
     }
     current = {
         **_CURRENT_AUTHORITY,
-        "version": "1.3.0",
+        "version": "1.4.0",
         "llm": {
             "provider": "ollama",
             "host": "",
@@ -377,7 +375,7 @@ def test_staged_lmstudio_recovery_rejects_a_file_that_no_longer_matches_its_jour
     }
     current = {
         **_CURRENT_AUTHORITY,
-        "version": "1.3.0",
+        "version": "1.4.0",
         "llm": {
             "provider": "ollama",
             "host": "",
@@ -421,11 +419,7 @@ def test_lmstudio_staging_does_not_depend_on_unlinking_an_empty_placeholder(
     original_unlink = Path.unlink
 
     def reject_empty_stage_placeholder(self, *args, **kwargs):
-        if (
-            self.name.startswith(".llm_api_key.lmstudio-retirement.")
-            and self.exists()
-            and self.stat().st_size == 0
-        ):
+        if self.name.startswith(".llm_api_key.lmstudio-retirement.") and self.exists() and self.stat().st_size == 0:
             raise PermissionError("empty stage placeholder cannot be removed")
         return original_unlink(self, *args, **kwargs)
 
@@ -464,9 +458,7 @@ def test_lmstudio_stage_rename_failure_cleans_the_journal_and_preserves_the_secr
         source_path = Path(source)
         destination_path = Path(destination)
         native_replace_calls.append((source_path, destination_path))
-        if source_path == secret_path and destination_path.name.startswith(
-            ".llm_api_key.lmstudio-retirement."
-        ):
+        if source_path == secret_path and destination_path.name.startswith(".llm_api_key.lmstudio-retirement."):
             raise PermissionError("secret staging rename failed")
         return real_replace(source, destination)
 
@@ -489,8 +481,7 @@ def test_lmstudio_stage_rename_failure_cleans_the_journal_and_preserves_the_secr
         run_migrations(tmp_path)
 
     assert any(
-        source == secret_path
-        and destination.name.startswith(".llm_api_key.lmstudio-retirement.")
+        source == secret_path and destination.name.startswith(".llm_api_key.lmstudio-retirement.")
         for source, destination in native_replace_calls
     )
     assert json.loads(workspace_path.read_text(encoding="utf-8"))["llm"]["provider"] == "lmstudio"
@@ -807,7 +798,7 @@ def test_concurrent_lock_blocks_second_caller(tmp_path):
 
 def test_workspace_load_waits_for_active_writer(tmp_path):
     """Routine reads wait for a valid writer instead of failing transiently."""
-    expected = {**_CURRENT_AUTHORITY, "version": "1.3.0", "value": "preserved"}
+    expected = {**_CURRENT_AUTHORITY, "version": "1.4.0", "value": "preserved"}
     _seed(tmp_path, expected)
     started = threading.Event()
     outcomes: list[dict | BaseException] = []
@@ -1033,5 +1024,39 @@ def test_fresh_install_round_trip(tmp_path):
     on_disk = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
     assert on_disk["version"] == WORKSPACE_VERSION
     assert on_disk["compliance"]["personal_use_mode"] is True
-    assert on_disk["brokers"]["execution"]["default"] == "openalgo:default"
+    assert on_disk["brokers"]["execution"]["default"] == ""
     assert run_migrations(tmp_path) == result
+
+
+def test_retirement_scrubs_nested_bridge_authority_without_selecting_an_account(tmp_path):
+    """Retired saved credentials and selectors cannot return through nested roles."""
+    from flinttrade_core.workspace_migrations import default_workspace_config
+
+    config = default_workspace_config()
+    config["version"] = "1.3.0"
+    config.update(_CURRENT_AUTHORITY)
+    config["openalgo"] = {"api_key": "retired-synthetic-key", "host": "https://retired.invalid"}
+    config["brokers"].update(
+        {
+            "registered": ["openalgo:default", "upstox:U1"],
+            "execution": {"default": "openalgo:default", "by_segment": {"NFO": "openalgo:default", "EQ": "upstox:U1"}},
+            "data": {"quote": "openalgo:default", "historical": "upstox:U1"},
+            "account_acls": {
+                "openalgo": {"default": ["operator"]},
+                "openalgo:default": ["operator"],
+                "upstox:U1": ["operator"],
+            },
+            "failover": {"order": ["openalgo:default", "upstox:U1"]},
+        }
+    )
+    _seed(tmp_path, config)
+    migrated = run_migrations(tmp_path)
+    assert "openalgo" not in migrated
+    brokers = migrated["brokers"]
+    assert brokers["registered"] == ["upstox:U1"]
+    assert brokers["execution"]["default"] == ""
+    assert brokers["execution"]["by_segment"] == {"NFO": "", "EQ": "upstox:U1"}
+    assert brokers["data"]["quote"] == ""
+    assert brokers["data"]["historical"] == "upstox:U1"
+    assert brokers["account_acls"] == {"upstox:U1": ["operator"]}
+    assert brokers["failover"]["order"] == ["upstox:U1"]

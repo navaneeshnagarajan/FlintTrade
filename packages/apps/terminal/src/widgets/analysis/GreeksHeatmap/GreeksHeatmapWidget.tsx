@@ -20,7 +20,7 @@
  * alignment — the strike set quoted across every expiry on screen — under both
  * projections.
  *
- * DATA HONESTY: greeks are NOT in the OpenAlgo option-chain feed, so when a
+ * DATA HONESTY: greeks are NOT in the broker option-chain feed, so when a
  * broker is connected the widget fetches the live IV smile (`getFtIVSmile`) once
  * per expiry and derives the aligned matrix client-side via the shared
  * Black–Scholes module (`@/lib/optionsMath`, through `greeksHeatmapTransform`),
@@ -592,10 +592,8 @@ function GreeksHeatmapWidget(props: WidgetProps) {
   // days-to-expiry and thus non-degenerate time-decay greeks) and derive the
   // aligned greek grid client-side. Only runs once a broker is connected.
   //
-  // NB (honest approximation): OpenAlgo's option-chain feed takes no expiry, so
-  // every per-expiry request reads the SAME (nearest) IV snapshot. The rows
-  // therefore share one IV surface and differ only by time-decay (dte) — this
-  // is a greeks-by-time view, not a true per-expiry IV term structure.
+  // Expiry rows use the IV snapshot supplied by the native analytics endpoint.
+  // A time-decay grid alone does not establish an observed term structure.
   const { data: liveRows, isError, error, isPending } = useQuery({
     queryKey: ["greeks-matrix", symbol, symDef.exchange],
     queryFn: async () => {

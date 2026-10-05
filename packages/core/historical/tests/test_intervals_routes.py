@@ -52,11 +52,11 @@ class TestIntervalsRoute:
 
     def test_known_broker_returns_intervals(self, client) -> None:  # type: ignore[no-untyped-def]
         """Known broker returns a non-empty interval list with is_known_broker=True."""
-        response = client.get("/api/v1/intervals?broker=zerodha")
+        response = client.get("/api/v1/intervals?broker=dhan")
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "success"
-        assert data["broker"] == "zerodha"
+        assert data["broker"] == "dhan"
         assert isinstance(data["intervals"], list)
         assert len(data["intervals"]) > 0
         assert data["is_known_broker"] is True
@@ -68,15 +68,15 @@ class TestIntervalsRoute:
         data = response.get_json()
         assert data["is_known_broker"] is False
         assert isinstance(data["intervals"], list)
-        assert len(data["intervals"]) > 0
+        assert data["intervals"] == []
 
     def test_multi_broker_intersection(self, client) -> None:  # type: ignore[no-untyped-def]
-        """?brokers=zerodha,icici returns intersection of their intervals."""
-        response = client.get("/api/v1/intervals?brokers=zerodha,icici")
+        """?brokers=dhan,icici returns intersection of their intervals."""
+        response = client.get("/api/v1/intervals?brokers=dhan,icici")
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "success"
         assert isinstance(data["intervals"], list)
-        # 1m is in zerodha but NOT in icici (icici min is 1m actually, but the
+        # 1m is in dhan but NOT in icici (icici min is 1m actually, but the
         # intersection should always be non-empty for two real brokers)
         assert data["count"] == len(data["intervals"])

@@ -232,11 +232,9 @@ const FEATURES: FeatureInfo[] = [
   { name: "P&L Tracker", status: "live", route: "/trade" },
   { name: "AI Advisor Chat", status: "live", route: "/ai" },
   { name: "Backtest Lab", status: "live", route: "/lab" },
-  { name: "Flow Builder", status: "live", route: "/automate" },
   { name: "Strategy Builder", status: "live", route: "/automate" },
   { name: "Investor Dashboard", status: "live", route: "/invest" },
   { name: "Learn Center", status: "live", route: "/learn" },
-  { name: "Voice Trading", status: "locked", route: "/trade" },
   { name: "Telegram Kill Switch", status: "locked", route: "/automate" },
   { name: "Multi-account Mirroring", status: "locked", route: "/settings" },
   { name: "AI Swarm Intelligence", status: "locked", route: "/ai" },
@@ -252,12 +250,12 @@ FlintTrade Dependency Graph
 ===========================
 
 terminal (React)
-  +-- api.ts ------> OpenAlgo REST (port 5000)
-  +-- websocket.ts -> OpenAlgo WS (port 8765)
+  +-- api.ts ------> Native broker reads
+  +-- websocket.ts -> Native REST polling
   +-- ft-api -------> core/app.py (port 5100)
 
 core
-  +-- openalgo_client -> OpenAlgo REST API
+  +-- BrokerRouter → native broker adapter
   +-- config ----------> workspace.json + .env fallback
   +-- security --------> rate limiting, threat detection
   +-- monitoring ------> health, traffic, latency
@@ -266,14 +264,14 @@ gateway
   +-- core (config, models)
   +-- native adapter contract + routing
   +-- Dhan direct scaffold (SDK calls gated)
-  +-- OpenAlgo-compatible bridge shims
+  +-- Native broker adapters
 
 engine
-  +-- core (OpenAlgo client, models)
+  +-- core (Broker models, models)
   +-- data (audit logger)
 
 screener
-  +-- core (OpenAlgo client)
+  +-- core (Broker models)
   +-- historical (OHLCV data)
 
 backtest-engine
@@ -286,7 +284,7 @@ ai
   +-- data (context for RAG)
 
 integration
-  +-- core (OpenAlgo client)
+  +-- core (Broker models)
   +-- engine (order router)
 
 automation
@@ -295,7 +293,7 @@ automation
   +-- integration (webhooks)
 
 ditto
-  +-- core (OpenAlgo client)
+  +-- core (Broker models)
   +-- engine (safety system)
 
 data

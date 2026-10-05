@@ -15,8 +15,19 @@ from flask import Flask
 pytestmark = pytest.mark.unit
 
 PACKAGES = (
-    "flask", "werkzeug", "waitress", "pydantic", "httpx", "websockets",
-    "numpy", "pandas", "duckdb", "pyarrow", "cryptography", "sentry-sdk", "flinttrade-ticks",
+    "flask",
+    "werkzeug",
+    "waitress",
+    "pydantic",
+    "httpx",
+    "websockets",
+    "numpy",
+    "pandas",
+    "duckdb",
+    "pyarrow",
+    "cryptography",
+    "sentry-sdk",
+    "flinttrade-ticks",
 )
 BROKERS = ("dhanhq", "upstox-python-sdk", "kotakneoapi", "growwapi")
 CONFIGURED_COMMIT = "a" * 40
@@ -77,11 +88,14 @@ def test_inventory_separates_runtime_installed_and_configured_metadata(tmp_path,
     mod = _inventory_module()
     _write_manifests(tmp_path)
     requested = _install_metadata(
-        monkeypatch, tmp_path,
-        direct_url=json.dumps({
-            "url": "https://private-user:private-token@private-host.test/private/path",
-            "vcs_info": {"vcs": "git", "commit_id": INSTALLED_COMMIT, "requested_revision": "private-branch"},
-        }),
+        monkeypatch,
+        tmp_path,
+        direct_url=json.dumps(
+            {
+                "url": "https://private-user:private-token@private-host.test/private/path",
+                "vcs_info": {"vcs": "git", "commit_id": INSTALLED_COMMIT, "requested_revision": "private-branch"},
+            }
+        ),
     )
     monkeypatch.setattr(mod.platform, "python_version", lambda: "3.12.14")
     monkeypatch.setattr(mod.sqlite3, "sqlite_version", "3.46.1")
@@ -92,8 +106,11 @@ def test_inventory_separates_runtime_installed_and_configured_metadata(tmp_path,
     assert result["packages"] == [{"name": name, "installed": "4.5.6", "configured": "1.2.3"} for name in PACKAGES]
     assert [row["name"] for row in result["brokers"]] == list(BROKERS)
     assert _by_name(result["brokers"])["kotakneoapi"] == {
-        "name": "kotakneoapi", "installed": "4.5.6", "configured": "3.0.7",
-        "source_commit": CONFIGURED_COMMIT, "installed_commit": INSTALLED_COMMIT,
+        "name": "kotakneoapi",
+        "installed": "4.5.6",
+        "configured": "3.0.7",
+        "source_commit": CONFIGURED_COMMIT,
+        "installed_commit": INSTALLED_COMMIT,
     }
     assert set(requested) == set(PACKAGES + BROKERS)
     assert len(requested) == len(PACKAGES + BROKERS)
@@ -110,7 +127,9 @@ def test_missing_distributions_do_not_fall_back_to_configured_versions(tmp_path,
     assert all(row["installed_commit"] is None for row in result["brokers"])
 
 
-@pytest.mark.parametrize("contents", [None, "not valid = [", 'package = "wrong"\nbroker = "wrong"', "package = [7]\nbroker = [7]"])
+@pytest.mark.parametrize(
+    "contents", [None, "not valid = [", 'package = "wrong"\nbroker = "wrong"', "package = [7]\nbroker = [7]"]
+)
 def test_missing_or_malformed_manifests_leave_configured_values_unavailable(tmp_path, monkeypatch, contents):
     mod = _inventory_module()
     _install_metadata(monkeypatch, tmp_path)
@@ -123,14 +142,20 @@ def test_missing_or_malformed_manifests_leave_configured_values_unavailable(tmp_
     assert all(row["installed"] == "4.5.6" for row in result["packages"] + result["brokers"])
 
 
-@pytest.mark.parametrize("direct_url", [
-    "invalid json", "[]", "null", '{"vcs_info": []}',
-    json.dumps({"vcs_info": {"vcs": "git", "commit_id": "private-token"}}),
-    json.dumps({"vcs_info": {"vcs": "git", "commit_id": "a" * 40 + "\n"}}),
-    json.dumps({"vcs_info": {"vcs": "hg", "commit_id": INSTALLED_COMMIT}}),
-    json.dumps({"vcs_info": {"vcs": "git", "requested_revision": INSTALLED_COMMIT}}),
-    json.dumps({"url": "file:///private/path", "dir_info": {"editable": True}}),
-])
+@pytest.mark.parametrize(
+    "direct_url",
+    [
+        "invalid json",
+        "[]",
+        "null",
+        '{"vcs_info": []}',
+        json.dumps({"vcs_info": {"vcs": "git", "commit_id": "private-token"}}),
+        json.dumps({"vcs_info": {"vcs": "git", "commit_id": "a" * 40 + "\n"}}),
+        json.dumps({"vcs_info": {"vcs": "hg", "commit_id": INSTALLED_COMMIT}}),
+        json.dumps({"vcs_info": {"vcs": "git", "requested_revision": INSTALLED_COMMIT}}),
+        json.dumps({"url": "file:///private/path", "dir_info": {"editable": True}}),
+    ],
+)
 def test_installed_provenance_only_exposes_full_git_commit_ids(tmp_path, monkeypatch, direct_url):
     mod = _inventory_module()
     _install_metadata(monkeypatch, tmp_path, direct_url=direct_url)
@@ -142,7 +167,9 @@ def test_installed_provenance_only_exposes_full_git_commit_ids(tmp_path, monkeyp
 def test_invalid_versions_and_configured_commits_are_not_returned(tmp_path, monkeypatch):
     mod = _inventory_module()
     _install_metadata(monkeypatch, tmp_path, versions={"flask": "https://private-host.test/version"})
-    (tmp_path / "uv.lock").write_text('[[package]]\nname = "flask"\nversion = "file:///private/path"\n', encoding="utf-8")
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "flask"\nversion = "file:///private/path"\n', encoding="utf-8"
+    )
     (tmp_path / "brokers.lock").write_text(
         '[[broker]]\nname = "kotakneoapi"\nversion = "/private/path"\nsource_commit = "private-token"\n',
         encoding="utf-8",
@@ -159,8 +186,7 @@ def test_ambiguous_manifest_entries_are_unavailable(tmp_path, monkeypatch):
     _install_metadata(monkeypatch, tmp_path)
     for filename, table, name in (("uv.lock", "package", "flask"), ("brokers.lock", "broker", "kotakneoapi")):
         (tmp_path / filename).write_text(
-            f'[[{table}]]\nname = "{name}"\nversion = "1.0"\n'
-            f'[[{table}]]\nname = "{name}"\nversion = "2.0"\n',
+            f'[[{table}]]\nname = "{name}"\nversion = "1.0"\n[[{table}]]\nname = "{name}"\nversion = "2.0"\n',
             encoding="utf-8",
         )
     result = mod.build_version_inventory(source_root=tmp_path)
@@ -258,24 +284,36 @@ def test_ollama_version_snapshot_preserves_operation_receipt_and_ownership(tmp_p
         raise AssertionError("About must not call lifecycle, installation, ownership or custom probes")
 
     for name in (
-        "_probe", "status", "_status_snapshot", "_refresh_operation_status", "_installation_status",
-        "_verified_executable", "_listener_is_owned", "_read_process_owner_record", "start",
-        "_load_runtime_state", "_load_operation_state",
+        "_probe",
+        "status",
+        "_status_snapshot",
+        "_refresh_operation_status",
+        "_installation_status",
+        "_verified_executable",
+        "_listener_is_owned",
+        "_read_process_owner_record",
+        "start",
+        "_load_runtime_state",
+        "_load_operation_state",
     ):
         monkeypatch.setattr(runtime, name, forbidden, raising=False)
     before_state = copy.deepcopy(vars(runtime))
+
     def files_snapshot():
         return {
             path.relative_to(tmp_path).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
-            for path in tmp_path.rglob("*") if path.is_file()
+            for path in tmp_path.rglob("*")
+            if path.is_file()
         }
 
     before_files = files_snapshot()
     owner_before = ollama._MANAGED_RUNTIME_OWNER
     body = b'{"version":"0.34.0"}'
-    connection = _ProbeSocket([
-        b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
-    ])
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
+        ]
+    )
     connections = []
 
     def connect(address, *, timeout):
@@ -310,15 +348,19 @@ def test_ollama_snapshot_without_managed_port_does_not_probe(tmp_path, monkeypat
     assert runtime.version_snapshot() == {"configured": "v0.35.0", "reported": None, "status": "unavailable"}
 
 
-@pytest.mark.parametrize("reported", [None, "http://private-host/version", "/private/path", "private-host.test", {"secret": "private"}])
+@pytest.mark.parametrize(
+    "reported", [None, "http://private-host/version", "/private/path", "private-host.test", {"secret": "private"}]
+)
 def test_ollama_snapshot_sanitises_version_values(tmp_path, monkeypatch, reported):
     import flinttrade_core.ollama_runtime as ollama
 
     runtime = _bare_ollama_runtime(tmp_path, target="file:///private/path")
     body = json.dumps({"version": reported}).encode()
-    connection = _ProbeSocket([
-        b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
-    ])
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
+        ]
+    )
     monkeypatch.setattr(ollama.socket, "create_connection", lambda *args, **kwargs: connection)
     assert runtime.version_snapshot() == {"configured": None, "reported": None, "status": "unavailable"}
 
@@ -354,9 +396,11 @@ def test_ollama_snapshot_only_requests_version_and_never_follows_redirects(tmp_p
     import flinttrade_core.ollama_runtime as ollama
 
     runtime = _bare_ollama_runtime(tmp_path)
-    connection = _ProbeSocket([
-        b"HTTP/1.1 302 Found\r\nLocation: https://private-host.test/secret\r\nContent-Length: 0\r\n\r\n",
-    ])
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 302 Found\r\nLocation: https://private-host.test/secret\r\nContent-Length: 0\r\n\r\n",
+        ]
+    )
     connections = []
 
     def connect(address, *, timeout):
@@ -383,10 +427,14 @@ def test_ollama_snapshot_uses_one_total_deadline_for_slow_reads(tmp_path, monkey
     def tick():
         now[0] += 0.3
 
-    connection = _ProbeSocket([
-        b"HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\n{",
-        b'"version":', b'"0.35.0"}',
-    ], tick=tick)
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\n{",
+            b'"version":',
+            b'"0.35.0"}',
+        ],
+        tick=tick,
+    )
     monkeypatch.setattr(ollama.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(ollama.socket, "create_connection", lambda *args, **kwargs: connection)
     assert runtime.version_snapshot()["status"] == "not_responding"
@@ -409,9 +457,11 @@ def test_ollama_versions_route_is_authenticated_uncached_and_observational(tmp_p
     if configured_runtime:
         app.config["OLLAMA_RUNTIME"] = runtime
     body = b'{"version":"0.35.0"}'
-    connection = _ProbeSocket([
-        b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
-    ])
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
+        ]
+    )
 
     def connect(address, *, timeout):
         assert configured_runtime, "An absent runtime must not be probed"
@@ -425,7 +475,8 @@ def test_ollama_versions_route_is_authenticated_uncached_and_observational(tmp_p
     assert response.headers["Cache-Control"] == "no-store"
     assert response.get_json() == (
         {"configured": "v0.35.0", "reported": "0.35.0", "status": "reported"}
-        if configured_runtime else {"configured": None, "reported": None, "status": "unavailable"}
+        if configured_runtime
+        else {"configured": None, "reported": None, "status": "unavailable"}
     )
     assert not is_public_route("GET", "/api/v1/versions/ollama")
     assert not is_public_route("HEAD", "/api/v1/versions/ollama")
@@ -443,6 +494,7 @@ def test_backend_versions_route_prevents_caching(tmp_path, monkeypatch):
     _install_metadata(monkeypatch, tmp_path, missing=PACKAGES + BROKERS)
     app = Flask(__name__)
     app.register_blueprint(health_bp)
+
     def forbidden(*args, **kwargs):
         raise AssertionError("Backend metadata must never access the network")
 
@@ -481,17 +533,29 @@ def test_packaged_layout_route_keeps_installed_metadata_without_checkout_pins(tm
     assert "private" not in json.dumps(result)
 
 
-@pytest.mark.parametrize("body", [
-    b'{"version": 7}', b'{"version": true}', b'{"version": null}', b'{}',
-    b'[]', b'null', b'not-json', b'{"version": "private-host.test"}', b'{"version": ""}',
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"version": 7}',
+        b'{"version": true}',
+        b'{"version": null}',
+        b"{}",
+        b"[]",
+        b"null",
+        b"not-json",
+        b'{"version": "private-host.test"}',
+        b'{"version": ""}',
+    ],
+)
 def test_successful_ollama_response_without_a_string_version_is_unavailable(tmp_path, monkeypatch, body):
     import flinttrade_core.ollama_runtime as ollama
 
     runtime = _bare_ollama_runtime(tmp_path)
-    connection = _ProbeSocket([
-        b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
-    ])
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
+        ]
+    )
     monkeypatch.setattr(ollama.socket, "create_connection", lambda *args, **kwargs: connection)
     assert runtime.version_snapshot() == {"configured": "v0.35.0", "reported": None, "status": "unavailable"}
     assert len(connection.sent) == 1
@@ -518,21 +582,27 @@ def test_ollama_raw_response_reports_only_a_sanitised_string_version(tmp_path, m
 
     runtime = _bare_ollama_runtime(tmp_path)
     body = b'{"version":"0.34.0","hostname":"private-host","path":"/private/path"}'
-    connection = _ProbeSocket([
-        b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
-    ])
+    connection = _ProbeSocket(
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body,
+        ]
+    )
     monkeypatch.setattr(ollama.socket, "create_connection", lambda *args, **kwargs: connection)
     assert runtime.version_snapshot() == {"configured": "v0.35.0", "reported": "0.34.0", "status": "reported"}
 
 
-@pytest.mark.parametrize("release_version, expected_release", [
-    ("3.0.7", "3.0.7"),
-    ("file:///private/release", None),
-])
+@pytest.mark.parametrize(
+    "release_version, expected_release",
+    [
+        ("3.0.7", "3.0.7"),
+        ("file:///private/release", None),
+    ],
+)
 def test_broker_runtime_and_release_versions_remain_separate(tmp_path, monkeypatch, release_version, expected_release):
     mod = _inventory_module()
     _install_metadata(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         versions={"kotakneoapi": "3.0.8"},
         direct_url=json.dumps({"vcs_info": {"vcs": "git", "commit_id": INSTALLED_COMMIT}}),
     )

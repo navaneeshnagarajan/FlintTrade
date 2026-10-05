@@ -272,7 +272,7 @@ def _migrate_legacy_model_file(legacy: Path, new: Path) -> None:
 
 
 def _run_async(coro: Any) -> Any:
-    """Run an async OpenAlgo client call from the synchronous signal cycle."""
+    """Run an async broker client call from the synchronous signal cycle."""
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
@@ -281,7 +281,7 @@ def _run_async(coro: Any) -> Any:
 
 
 def _normalise_history_rows(rows: Any) -> list[dict[str, Any]]:
-    """Convert OpenAlgo history models/responses into plain indicator rows."""
+    """Convert broker history models/responses into plain indicator rows."""
     if isinstance(rows, dict):
         rows = rows.get("data", [])
     if not isinstance(rows, list):
@@ -409,9 +409,7 @@ class SignalPipeline:
 
     def __init__(
         self,
-        openalgo_host: str | None = None,
-        openalgo_api_key: str | None = None,
-        openalgo_client: Any | None = None,
+        broker_client: Any | None = None,
         model_path: str = "",
         instruments: list[dict] | None = None,
         interval: str = "5m",
@@ -422,25 +420,9 @@ class SignalPipeline:
         clock: Callable[[], datetime] | None = None,
         market_session_provider: MarketSessionProvider | None = None,
     ) -> None:
-        from flinttrade_core.config import Settings
         from flinttrade_core.workspace import workspace_dir
 
-        settings = Settings.from_env()
-        overrides: dict[str, Any] = {}
-        if openalgo_host:
-            overrides["openalgo_host"] = openalgo_host.rstrip("/")
-        if openalgo_api_key is not None:
-            overrides["openalgo_api_key"] = openalgo_api_key
-        if overrides:
-            settings = settings.model_copy(update=overrides)
-        # Keep the FULL workspace/env Settings (incl. openalgo_port) — the
-        # fallback client in fetch_bars previously rebuilt a partial Settings
-        # from host+key only, silently reverting the workspace REST-port
-        # override (U20) to :5000.
-        self._settings = settings
-        self.host = settings.openalgo_host.rstrip("/")
-        self.api_key = settings.openalgo_api_key
-        self._openalgo_client = openalgo_client
+        self._broker_client = broker_client
         default_model_path = workspace_dir() / "models" / "signal_model.joblib"
         if not model_path:
             _migrate_legacy_model_file(
@@ -582,17 +564,17 @@ class SignalPipeline:
             self._symbol_generators[(exchange, symbol)] = generator
 
     def fetch_bars(self, symbol: str, exchange: str, lookback_days: int = 30) -> list[dict]:
-        """Fetch OHLCV bars from OpenAlgo history API."""
-        from flinttrade_core.openalgo_client import OpenAlgoClient
+        """Fetch OHLCV bars from broker history API."""
+        from flinttrade_core.broker_client import BrokerClient
 
         end = datetime.now()
         start = end - timedelta(days=lookback_days)
-        client = self._openalgo_client
+        client = self._broker_client
         close_client = False
         if client is None:
             # Full Settings (host, key, AND rest/ws ports) from __init__ — a
-            # partial rebuild here dropped the workspace openalgo.port override.
-            client = OpenAlgoClient(self._settings)
+            # partial rebuild here dropped the workspace broker.port override.
+            client = BrokerClient()
             close_client = True
 
         # Fetch AND close on ONE loop. Running close on a second fresh loop
@@ -619,9 +601,9 @@ class SignalPipeline:
                 rows = _run_async(_fetch_and_close())
             else:
                 # Shared/injected client: marshal onto its owner loop when it
-                # is a real OpenAlgoClient (isinstance-guarded inside — test
+                # is a real BrokerClient (isinstance-guarded inside — test
                 # fakes fall back to a plain fresh loop).
-                from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+                from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
                 rows = client_call_sync(client, _fetch_and_close())
         except Exception as exc:

@@ -8,7 +8,6 @@ HEALTHY=true
 
 # Source .env
 [ -f "$FLINTTRADE_DIR/.env" ] && { set -a; source "$FLINTTRADE_DIR/.env"; set +a; }
-OPENALGO_PORT="${OPENALGO_PORT:-5000}"
 FLINTTRADE_BACKEND_PORT="${FLINTTRADE_BACKEND_PORT:-5100}"
 FLINTTRADE_HEALTH_STRICT="${FLINTTRADE_HEALTH_STRICT:-1}"
 
@@ -43,13 +42,6 @@ elif [ "$FLINTTRADE_HEALTH_STRICT" = "1" ]; then
     fail "FlintTrade backend not responding on port $FLINTTRADE_BACKEND_PORT"
 else
     warn "FlintTrade backend not responding on port $FLINTTRADE_BACKEND_PORT"
-fi
-
-# 1b. Optional OpenAlgo integration
-if curl -sf "http://127.0.0.1:$OPENALGO_PORT/api/v1/ping" >/dev/null 2>&1; then
-    ok "OpenAlgo integration responding on port $OPENALGO_PORT"
-else
-    warn "OpenAlgo integration not responding on port $OPENALGO_PORT (optional)"
 fi
 
 # 2. Disk space

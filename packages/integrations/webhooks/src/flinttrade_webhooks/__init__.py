@@ -1,4 +1,4 @@
-"""FlintTrade integration package — webhooks, flow builder, alerting, Excel."""
+"""FlintTrade integration package — signed webhooks and alerting."""
 
 from flinttrade_core.version import APP_VERSION
 
@@ -6,41 +6,11 @@ __version__ = APP_VERSION
 
 from .alert_trigger_log import AlertTriggerLog, TriggerEvent
 from .alerter import Alert, AlertChannel, Alerter, AlertType
-from .excel_bridge import ExcelBridge, ExcelBridgeError
-from .flow_builder import (
-    ActionType,
-    ConditionType,
-    ExitType,
-    FlowBuilder,
-    FlowDefinition,
-    FlowNode,
-    NodeType,
-    SignalSource,
-    ValidationResult,
-)
-from .flow_routes import flows_bp, init_flow_routes
-from .flow_store import FlowFileStore, FlowStoreError
-from .voice_orders import VoiceCommand, VoiceOrderParser, voice_bp
 from .webhook_receiver import WebhookConfig, WebhookLogEntry, WebhookPayload, WebhookReceiver
 from .webhook_routes import init_webhook_routes, webhook_bp
 from .webhook_secret_store import WebhookSecretStore
 
 __all__ = [
-    # Flow builder
-    "FlowBuilder",
-    "FlowDefinition",
-    "FlowNode",
-    "NodeType",
-    "SignalSource",
-    "ConditionType",
-    "ActionType",
-    "ExitType",
-    "ValidationResult",
-    # Flow store + routes (saved FlowBuilder workflows)
-    "FlowFileStore",
-    "FlowStoreError",
-    "flows_bp",
-    "init_flow_routes",
     # Alerter
     "Alerter",
     "Alert",
@@ -49,13 +19,6 @@ __all__ = [
     # Alert trigger log
     "AlertTriggerLog",
     "TriggerEvent",
-    # Voice orders
-    "VoiceOrderParser",
-    "VoiceCommand",
-    "voice_bp",
-    # Excel
-    "ExcelBridge",
-    "ExcelBridgeError",
     # Webhook receiver
     "WebhookConfig",
     "WebhookLogEntry",

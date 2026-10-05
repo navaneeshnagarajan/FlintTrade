@@ -22,8 +22,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from types import UnionType
 from typing import Annotated, Any, Callable, TypeAliasType, Union, get_args, get_origin, get_type_hints
 
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import Quote
-from flinttrade_core.openalgo_client import OpenAlgoClient
 
 from .strategy import BaseStrategy, StrategyState
 
@@ -312,7 +312,7 @@ class TimeScheduler:
             ...
     """
 
-    def __init__(self, client: OpenAlgoClient | None = None) -> None:
+    def __init__(self, client: BrokerClient | None = None) -> None:
         self._client = client
         self._holidays: dict[str, list[str]] = {}  # year -> list of "YYYY-MM-DD"
         self._calendar_days: dict[date, _CalendarDay] = {}
@@ -524,7 +524,7 @@ class TimeScheduler:
         exchange: str = "NSE",
     ) -> list[str]:
         """Cache a normalised holiday payload already fetched by another owner."""
-        from flinttrade_core.openalgo_client import (  # noqa: PLC0415
+        from flinttrade_core.broker_client import (  # noqa: PLC0415
             normalise_holiday_dates,
             normalise_market_calendar,
         )
@@ -591,9 +591,9 @@ class TimeScheduler:
         return values
 
     def load_holidays(self, year: str | None = None) -> list[str]:
-        """Fetch holidays from OpenAlgo and cache them.
+        """Fetch holidays from broker and cache them.
 
-        ``OpenAlgoClient.holidays()`` is an async method. This synchronous
+        ``BrokerClient.holidays()`` is an async method. This synchronous
         helper runs it to completion using asyncio, so it can be called from
         non-async startup code (e.g. app initialisation, tests).
 
@@ -602,7 +602,7 @@ class TimeScheduler:
         y = year or str(self.now_ist().year)
 
         if self._client is None:
-            logger.warning("No OpenAlgo client — cannot fetch holidays")
+            logger.warning("No broker client — cannot fetch holidays")
             return []
 
         try:
@@ -618,7 +618,7 @@ class TimeScheduler:
                 )
                 return []
             # One-owner-loop rule for the shared client's pooled connections.
-            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+            from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
             data = client_call_sync(
                 self._client,
@@ -650,11 +650,11 @@ class TimeScheduler:
 
 
 async def get_latest_quote(
-    client: OpenAlgoClient,
+    client: BrokerClient,
     symbol: str,
     exchange: str,
 ) -> Quote | None:
-    """Fetch the latest quote from OpenAlgo. Returns None on failure."""
+    """Fetch the latest quote from broker. Returns None on failure."""
     try:
         return await client.quotes(symbol, exchange)
     except Exception as exc:
@@ -672,7 +672,7 @@ class StrategyRunner:
 
     Flow per tick:
     1. Check market open + not deploy-frozen
-    2. Fetch live quote via OpenAlgoClient
+    2. Fetch live quote via BrokerClient
     3. Call strategy.on_tick(quote)
     4. Check should_square_off — trigger auto square-off if needed
     """
@@ -680,7 +680,7 @@ class StrategyRunner:
     def __init__(
         self,
         strategy: BaseStrategy,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         scheduler: TimeScheduler | None = None,
         tick_interval_seconds: float = 1.0,
         symbol: str = "",
@@ -1304,7 +1304,7 @@ class StrategyScheduler:
 
     def __init__(
         self,
-        client: OpenAlgoClient | None = None,
+        client: BrokerClient | None = None,
         time_scheduler: TimeScheduler | None = None,
     ) -> None:
         self.client = client
@@ -1322,7 +1322,7 @@ class StrategyScheduler:
     def register(
         self,
         strategy: BaseStrategy,
-        client: OpenAlgoClient | None = None,
+        client: BrokerClient | None = None,
         tick_interval: float = 1.0,
         symbol: str = "",
     ) -> StrategyRunner:

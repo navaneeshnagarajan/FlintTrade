@@ -15,21 +15,15 @@ from __future__ import annotations
 
 import logging
 import math
-import secrets
 import threading
-import time
 from functools import wraps
 from typing import Any
 
-from flask import Blueprint, current_app, g, jsonify, redirect, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from flinttrade_core.broker_account_cutover import guard_broker_account_http, mutation_admission_for
 
 from .adapter import BROKER_CATALOG
-from .exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
-from .log_safety import account_ref
-from .models import AuthFlowType
-from .monday_read_smoke import monday_read_connectable
 
 logger = logging.getLogger("flinttrade.gateway.auth")
 
@@ -128,20 +122,8 @@ def _credential_store() -> Any:
     return current_app.config["CREDENTIAL_STORE"]
 
 
-def _oauth_states() -> dict[str, Any]:
-    """Return the OAUTH_STATES dict from the current app config."""
-    return current_app.config["OAUTH_STATES"]
 
 
-def _purge_expired_states() -> None:
-    """Remove OAuth states older than _OAUTH_STATE_TTL seconds."""
-    now = time.time()
-    states = _oauth_states()
-    expired = [
-        k for k, v in states.items() if now - v.get("timestamp", 0) > _OAUTH_STATE_TTL
-    ]
-    for key in expired:
-        del states[key]
 
 
 # ---------------------------------------------------------------------------
@@ -202,170 +184,16 @@ def list_accounts() -> Any:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-def _reject_legacy_native_connect(broker: str) -> Any | None:
-    """Reject native broker ids on the legacy gateway connect surface.
-
-    The G40 contract is one broker catalogue with two account surfaces:
-    bridge-only brokers use the OpenAlgo-backed ``/v1`` gateway, and native
-    broker ids use ``/api/v1/native/accounts`` so credentials land in the
-    encrypted native vault and sessions are established transactionally.
-    Bridge-only brokers (native=False) are unaffected.
-    """
-    info = BROKER_CATALOG.get(broker)
-    if info is None or not info.native:
-        return None
-    if not monday_read_connectable(broker, info.connectable):
-        message = f"'{broker}' is not yet available for native connect (coming soon)."
-    else:
-        message = f"'{broker}' uses FlintTrade native connect; use /api/v1/native/accounts."
-    return jsonify({
-        "status": "error",
-        "message": message,
-        "data": {
-            "native_connect_blockers": list(info.native_connect_blockers),
-        },
-    }), 400
 
 
-def _reject_legacy_native_account_operation(account_id: str) -> Any | None:
-    """Reject legacy account operations when an existing account is native.
-
-    Legacy gateway operations such as reconnect and set-primary receive only an
-    ``account_id``. If an old native row exists in the gateway registry, these
-    routes must not reactivate or promote it outside the native account surface.
-    """
-    try:
-        accounts = _registry().list_accounts()
-    except Exception:
-        logger.exception("Failed to inspect account %s before broker gate", account_ref(account_id))
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
-    for account in accounts:
-        if str(account.account_id) == str(account_id):
-            return _reject_legacy_native_connect(str(account.broker))
-    return None
 
 
-@gateway_bp.route("/accounts", methods=["POST"])
-def add_account() -> Any:
-    """Add a new broker account.
-
-    Request body (JSON):
-        broker (str): Canonical broker name.
-        label (str): Human-readable label for this account.
-        credentials (dict): Broker-specific credentials.
-        account_id (str, optional): Caller-supplied account ID; defaults to
-            a random token when omitted.
-
-    Returns:
-        JSON with ``status`` and ``account`` info on success, or an error
-        with the appropriate HTTP status code.
-    """
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    broker: str = body.get("broker", "")
-    label: str = body.get("label", "")
-    credentials: dict[str, Any] = body.get("credentials", {})
-    account_id: str = body.get("account_id") or secrets.token_hex(8)
-
-    if not broker:
-        return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
-    native_reject = _reject_legacy_native_connect(broker)
-    if native_reject is not None:
-        return native_reject
-
-    try:
-        info = _registry().add_account(account_id, broker, label, credentials)
-        return jsonify({"status": "success", "account": info.model_dump()}), 201
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    except AuthFlowError:
-        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
-    except CredentialError:
-        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
-    except Exception:
-        logger.exception("Failed to add account broker=%r", broker)
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@gateway_bp.route("/accounts/<account_id>", methods=["DELETE"])
-def remove_account(account_id: str) -> Any:
-    """Remove a broker account from the registry.
-
-    Args:
-        account_id: Path parameter — the account to remove.
-
-    Returns:
-        JSON with ``status`` on success, or an error response.
-    """
-    try:
-        _registry().remove_account(account_id)
-        return jsonify({"status": "success"}), 200
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
-    except Exception:
-        logger.exception("Failed to remove account %s", account_ref(account_id))
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@gateway_bp.route("/accounts/<account_id>/reconnect", methods=["POST"])
-def reconnect_account(account_id: str) -> Any:
-    """Re-authenticate an existing account.
-
-    Uses credentials stored in the CredentialStore when no body credentials
-    are provided.
-
-    Args:
-        account_id: Path parameter — the account to reconnect.
-
-    Returns:
-        JSON with ``status`` and updated ``account`` info.
-    """
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    credentials: dict[str, Any] | None = body.get("credentials") or None
-
-    native_reject = _reject_legacy_native_account_operation(account_id)
-    if native_reject is not None:
-        return native_reject
-
-    try:
-        info = _registry().reconnect_account(
-            account_id,
-            credentials=credentials,
-            credential_store=_credential_store() if credentials is None else None,
-        )
-        return jsonify({"status": "success", "account": info.model_dump()})
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
-    except AuthFlowError:
-        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
-    except CredentialError:
-        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
-    except Exception:
-        logger.exception("Failed to reconnect account %s", account_ref(account_id))
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@gateway_bp.route("/accounts/<account_id>/set-primary", methods=["POST"])
-def set_primary(account_id: str) -> Any:
-    """Designate an account as the primary for order routing.
-
-    Args:
-        account_id: Path parameter — the account to promote.
-
-    Returns:
-        JSON with ``status`` on success, or an error response.
-    """
-    native_reject = _reject_legacy_native_account_operation(account_id)
-    if native_reject is not None:
-        return native_reject
-
-    try:
-        _registry().set_primary(account_id)
-        return jsonify({"status": "success"})
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
-    except Exception:
-        logger.exception("Failed to set primary account %s", account_ref(account_id))
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -373,114 +201,8 @@ def set_primary(account_id: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-@gateway_bp.route("/auth/oauth/start", methods=["POST"])
-def oauth_start() -> Any:
-    """Initiate an OAuth redirect flow for a broker.
-
-    Request body (JSON):
-        broker (str): Canonical broker name with ``oauth_redirect`` flow.
-        label (str, optional): Human-readable label for the new account.
-        account_id (str, optional): Account ID to associate with the callback.
-
-    Returns:
-        JSON with ``redirect_url`` and ``state`` on success.
-    """
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    broker: str = body.get("broker", "")
-    label: str = body.get("label", "")
-    account_id: str = body.get("account_id", "")
-
-    if not broker:
-        return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
-
-    if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    native_reject = _reject_legacy_native_connect(broker)
-    if native_reject is not None:
-        return native_reject
-
-    broker_info = BROKER_CATALOG[broker]
-    if broker_info.auth_flow != AuthFlowType.oauth_redirect:
-        return jsonify({
-            "status": "error",
-            "message": f"Broker '{broker}' does not use OAuth redirect flow",
-        }), 400
-
-    # Generate CSRF state token
-    state = secrets.token_urlsafe(32)
-
-    # Prune expired states before adding a new one
-    _purge_expired_states()
-
-    _oauth_states()[state] = {
-        "broker": broker,
-        "label": label,
-        "account_id": account_id,
-        "timestamp": time.time(),
-    }
-
-    # Build redirect URL (template may be None for some OAuth brokers)
-    oauth_template = broker_info.oauth_url_template or ""
-    redirect_url = oauth_template.replace("{state}", state) if oauth_template else ""
-
-    return jsonify({
-        "status": "success",
-        "redirect_url": redirect_url,
-        "state": state,
-    })
 
 
-@gateway_bp.route("/auth/oauth/callback", methods=["GET"])
-def oauth_callback() -> Any:
-    """Handle the OAuth callback from a broker.
-
-    Query parameters:
-        state (str): The CSRF state token generated by :func:`oauth_start`.
-        code (str): The authorisation code from the broker.
-
-    Returns:
-        A redirect to ``/setup?auth=success`` on success, or
-        ``/setup?auth=error`` on any failure.
-    """
-    unavailable = guard_broker_account_http()
-    if unavailable is not None:
-        return unavailable
-    state: str = request.args.get("state", "")
-    code: str = request.args.get("code", "")
-
-    states = _oauth_states()
-
-    if not state or state not in states:
-        logger.warning("OAuth callback with invalid/missing state %r", state)
-        return redirect("/setup?auth=error")
-
-    # Consume the state to prevent replay attacks
-    state_data = states.pop(state)
-    broker: str = state_data["broker"]
-    label: str = state_data["label"]
-    account_id: str = state_data["account_id"] or secrets.token_hex(8)
-
-    native_reject = _reject_legacy_native_connect(broker)
-    if native_reject is not None:
-        return redirect("/setup?auth=error")
-
-    try:
-        # Authenticate via the registry/adapter
-        credentials = {"code": code}
-        _registry().add_account(account_id, broker, label, credentials)
-        _credential_store().store(
-            account_id,
-            broker,
-            label,
-            credentials,
-        )
-        return redirect("/setup?auth=success")
-    except (BrokerNotFoundError, AuthFlowError, CredentialError):
-        logger.warning("OAuth callback auth failure")
-        return redirect("/setup?auth=error")
-    except Exception:
-        logger.exception("OAuth callback unexpected error")
-        return redirect("/setup?auth=error")
 
 
 # ---------------------------------------------------------------------------
@@ -488,48 +210,6 @@ def oauth_callback() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@gateway_bp.route("/auth/credentials", methods=["POST"])
-def submit_credentials() -> Any:
-    """Submit credentials directly for TOTP or API-key brokers.
-
-    Request body (JSON):
-        broker (str): Canonical broker name.
-        label (str): Human-readable account label.
-        account_id (str, optional): Account ID; generated if omitted.
-        credentials (dict): Key-value credentials (client_id, password,
-            totp, api_key, etc.).
-
-    Returns:
-        JSON with ``status`` and ``account`` info on success.
-    """
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    broker: str = body.get("broker", "")
-    label: str = body.get("label", "")
-    account_id: str = body.get("account_id") or secrets.token_hex(8)
-    credentials: dict[str, Any] = body.get("credentials", {})
-
-    if not broker:
-        return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
-
-    if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": f"Broker not found: {broker}"}), 404
-    native_reject = _reject_legacy_native_connect(broker)
-    if native_reject is not None:
-        return native_reject
-
-    try:
-        info = _registry().add_account(account_id, broker, label, credentials)
-        _credential_store().store(account_id, broker, label, credentials)
-        return jsonify({"status": "success", "account": info.model_dump()}), 201
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    except AuthFlowError:
-        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
-    except CredentialError:
-        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
-    except Exception:
-        logger.error("Failed to submit broker auth material for broker=%r", broker)
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -537,106 +217,8 @@ def submit_credentials() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@gateway_bp.route("/auth/otp/request", methods=["POST"])
-def otp_request() -> Any:
-    """Request an OTP from a broker (SMS-based flow).
-
-    Request body (JSON):
-        broker (str): Canonical broker name.
-        mobile (str): Registered mobile number for OTP delivery.
-
-    Returns:
-        JSON with ``status`` on success.
-    """
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    broker: str = body.get("broker", "")
-
-    if not broker:
-        return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
-
-    if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    native_reject = _reject_legacy_native_connect(broker)
-    if native_reject is not None:
-        return native_reject
-
-    broker_info = BROKER_CATALOG[broker]
-    if broker_info.auth_flow != AuthFlowType.otp_sms:
-        return jsonify({
-            "status": "error",
-            "message": "Broker does not use OTP SMS flow",
-        }), 400
-
-    # OTP dispatch is broker-specific; the adapter handles the actual call.
-    # For the blueprint layer we validate inputs and delegate.
-    try:
-        credentials = {"action": "request_otp", **{k: v for k, v in body.items() if k != "broker"}}
-        # Use the registry to get/create a session — the adapter's authenticate
-        # handles "request_otp" action for OTP brokers.
-        _registry().add_account(
-            body.get("account_id") or secrets.token_hex(8),
-            broker,
-            body.get("label", ""),
-            credentials,
-        )
-        return jsonify({"status": "success", "message": "OTP sent"})
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    except AuthFlowError:
-        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
-    except Exception:
-        logger.exception("OTP request failed for broker=%r", broker)
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@gateway_bp.route("/auth/otp/verify", methods=["POST"])
-def otp_verify() -> Any:
-    """Verify an OTP submitted by the user.
-
-    Request body (JSON):
-        broker (str): Canonical broker name.
-        account_id (str): Account to authenticate.
-        otp (str): The one-time password received via SMS.
-        credentials (dict, optional): Additional credentials if needed.
-
-    Returns:
-        JSON with ``status`` and ``account`` info on success.
-    """
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    broker: str = body.get("broker", "")
-    account_id: str = body.get("account_id") or secrets.token_hex(8)
-    otp: str = body.get("otp", "")
-    credentials: dict[str, Any] = body.get("credentials", {})
-
-    if not broker:
-        return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
-    if not otp:
-        return jsonify({"status": "error", "message": "Missing required field: otp"}), 400
-
-    if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-
-    # otp_verify is a fully connect-completing entrypoint that does not depend
-    # on a prior otp_request (it takes broker/account_id from its own body), so
-    # it must enforce the same legacy-native rejection itself.
-    native_reject = _reject_legacy_native_connect(broker)
-    if native_reject is not None:
-        return native_reject
-
-    try:
-        full_credentials = {"otp": otp, **credentials}
-        info = _registry().add_account(account_id, broker, body.get("label", ""), full_credentials)
-        _credential_store().store(account_id, broker, body.get("label", ""), full_credentials)
-        return jsonify({"status": "success", "account": info.model_dump()}), 201
-    except BrokerNotFoundError:
-        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    except AuthFlowError:
-        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
-    except CredentialError:
-        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
-    except Exception:
-        logger.exception("OTP verify failed for broker=%r account=%s", broker, account_ref(account_id))
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -767,7 +349,7 @@ def update_rate_limits() -> Any:
             app,
             previous_dependencies=previous_dependencies,
             registry=registry,
-            openalgo_client=client,
+            broker_client=client,
         ):
             return jsonify({"status": "error", "message": "Broker routing unavailable"}), 503
         limiter = _live_rate_limiter()

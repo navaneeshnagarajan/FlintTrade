@@ -10,7 +10,7 @@ def parse_selector(selector: str) -> tuple[str, str]:
     """Split a canonical ``'adapter_id:account_id'`` selector on the FIRST colon.
 
     The selector is the principal's account binding (identity X7). Account ids
-    may themselves contain colons (e.g. an OpenAlgo sub-account ``zerodha:sub``),
+    may themselves contain colons (e.g. an broker sub-account ``zerodha:sub``),
     so only the first colon is the delimiter — everything after it is the
     account id.
 

@@ -75,9 +75,7 @@ class TestListOverrides:
             client:  Flask test client.
             limiter: Mock limiter with pre-loaded overrides.
         """
-        limiter.list_overrides.return_value = [
-            {"user_id": "nav", "endpoint": "orders", "user_rate": 5}
-        ]
+        limiter.list_overrides.return_value = [{"user_id": "nav", "endpoint": "orders", "user_rate": 5}]
         resp = client.get("/admin/rate-limits/overrides")
         data = resp.get_json()
         assert len(data["overrides"]) == 1

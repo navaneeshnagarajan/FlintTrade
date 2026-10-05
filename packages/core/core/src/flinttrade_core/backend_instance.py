@@ -43,7 +43,11 @@ class BackendLeaseProof:
     """Opaque, process-bound live capability; never serialised or reconstructed."""
 
     def __init__(
-        self, seal: object, *, lease: BackendInstanceLease | None = None, guardian_fd: int | None = None,
+        self,
+        seal: object,
+        *,
+        lease: BackendInstanceLease | None = None,
+        guardian_fd: int | None = None,
     ) -> None:
         if seal is not _PROOF_SEAL:
             raise BackendLeaseUnavailable
@@ -188,7 +192,9 @@ class BackendLeaseHandoff:
             raise BackendLeaseUnavailable
         with self._guard:
             if (
-                self._consumed or os.getpid() == self._owner_pid or os.getppid() != self._owner_pid
+                self._consumed
+                or os.getpid() == self._owner_pid
+                or os.getppid() != self._owner_pid
                 or workspace_dir().resolve() != self._workspace_path
             ):
                 raise BackendLeaseUnavailable
@@ -324,9 +330,7 @@ class BackendInstanceLease:
             self._released = True
             self._recovery_owner = None
             with _RETAINED_FAILED_LEASES_LOCK:
-                _RETAINED_FAILED_LEASES[:] = [
-                    retained for retained in _RETAINED_FAILED_LEASES if retained is not self
-                ]
+                _RETAINED_FAILED_LEASES[:] = [retained for retained in _RETAINED_FAILED_LEASES if retained is not self]
 
 
 _LIVE_BACKEND_LEASES: WeakSet[BackendInstanceLease] = WeakSet()

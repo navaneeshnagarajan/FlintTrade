@@ -85,7 +85,7 @@ describe("AccountStatusPanel", () => {
     renderPanel();
 
     expect(await screen.findByText("Upstox main")).toBeInTheDocument();
-    expect(screen.getByText(/Upstox · Native/i)).toBeInTheDocument();
+    expect(screen.getByText(/Upstox\s*·\s*Native/i)).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /re-authenticate upstox main/i });
     expect(link).toHaveAttribute("href", "/settings#brokers");
   });

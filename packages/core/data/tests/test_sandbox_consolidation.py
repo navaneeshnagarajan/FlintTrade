@@ -263,9 +263,7 @@ def test_square_off_is_all_or_nothing_and_uses_current_ltp() -> None:
         assert len(engine.get_positions()) == 2
         assert len(engine.get_trades()) == 2
 
-        assert engine.square_off_all(
-            {"NSE:INFY": 1_010.0, "NSE:TCS": 1_990.0}
-        ) == 2
+        assert engine.square_off_all({"NSE:INFY": 1_010.0, "NSE:TCS": 1_990.0}) == 2
         assert engine.get_positions() == []
         assert len(engine.get_trades()) == 4
         assert engine.get_pnl()["realised"] == pytest.approx(50.0)
@@ -280,32 +278,21 @@ def test_pre_merge_sqlite_schema_is_migrated_in_place(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy-state.sqlite"
     with sqlite3.connect(db_path) as connection:
         connection.executescript(_PRE_MERGE_SCHEMA)
-        connection.execute(
-            "INSERT INTO capital VALUES ('default', 750000, 750000, 0, 1)"
-        )
+        connection.execute("INSERT INTO capital VALUES ('default', 750000, 750000, 0, 1)")
 
     engine = sandbox_mod.SandboxEngine(db_path=str(db_path))
     try:
-        order_columns = {
-            row[1] for row in engine._conn.execute("PRAGMA table_info(orders)").fetchall()
-        }
-        pnl_columns = {
-            row[1] for row in engine._conn.execute("PRAGMA table_info(pnl)").fetchall()
-        }
+        order_columns = {row[1] for row in engine._conn.execute("PRAGMA table_info(orders)").fetchall()}
+        pnl_columns = {row[1] for row in engine._conn.execute("PRAGMA table_info(pnl)").fetchall()}
         tables = {
-            row[0]
-            for row in engine._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
+            row[0] for row in engine._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         }
         assert {"trigger_price", "pricetype", "strategy", "fill_time"} <= order_columns
         assert "total_trades" in pnl_columns
         assert {"trades", "sandbox_config"} <= tables
         assert engine.get_capital()["initial"] == 750_000.0
         assert engine.config.starting_capital == 750_000.0
-        assert engine.place_order(
-            "INFY", "NSE", "BUY", 1, 1_500.0, order_type="LIMIT"
-        )["status"] == "PENDING"
+        assert engine.place_order("INFY", "NSE", "BUY", 1, 1_500.0, order_type="LIMIT")["status"] == "PENDING"
     finally:
         engine.close()
 
@@ -412,9 +399,7 @@ def test_limit_sell_and_stop_limit_respect_executable_tick_prices() -> None:
     engine = sandbox_mod.SandboxEngine(db_path=":memory:")
     try:
         engine.place_order("INFY", "NSE", "BUY", 10, 1_500.0)
-        limit_sell = engine.place_order(
-            "INFY", "NSE", "SELL", 4, 1_550.0, order_type="LIMIT"
-        )
+        limit_sell = engine.place_order("INFY", "NSE", "SELL", 4, 1_550.0, order_type="LIMIT")
         assert engine.check_pending_fills({"NSE:INFY": 1_540.0}) == []
         assert engine.check_pending_fills({"NSE:INFY": 1_560.0}) == [limit_sell["order_id"]]
 
@@ -451,9 +436,7 @@ def test_stop_limit_remains_triggered_until_its_limit_becomes_executable() -> No
         assert triggered["status"] == "PENDING"
         assert triggered["stop_triggered"] is True
 
-        assert engine.check_pending_fills({"NSE:INFY": 99.0}) == [
-            stop_limit["order_id"]
-        ]
+        assert engine.check_pending_fills({"NSE:INFY": 99.0}) == [stop_limit["order_id"]]
         assert engine.get_orders()[0]["avg_fill_px"] == pytest.approx(105.0)
     finally:
         engine.close()
@@ -560,17 +543,19 @@ def test_version_one_import_synthesises_the_trade_ledger() -> None:
         "schema_version": 1,
         "capital": {"initial": 100_000.0, "current": 100_000.0},
         "positions": [],
-        "orders": [{
-            "order_id": "OLD-1",
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "action": "BUY",
-            "quantity": 2,
-            "price": 1_500.0,
-            "product": "MIS",
-            "status": "COMPLETE",
-            "created_at": "2026-07-14T10:00:00+00:00",
-        }],
+        "orders": [
+            {
+                "order_id": "OLD-1",
+                "symbol": "INFY",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": 2,
+                "price": 1_500.0,
+                "product": "MIS",
+                "status": "COMPLETE",
+                "created_at": "2026-07-14T10:00:00+00:00",
+            }
+        ],
     }
     try:
         stats = engine.import_data(json.dumps(payload))

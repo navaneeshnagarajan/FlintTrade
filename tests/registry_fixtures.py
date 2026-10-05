@@ -62,21 +62,3 @@ class RegistryFixture:
 
     def close(self):
         self.store.close()
-
-
-def exact_openalgo_adapter(fixture, client, *, account="test-account", **kwargs):
-    """Formatting/adapter tests still cross the real sealed-client boundary."""
-    from flinttrade_gateway.brokers._base import Session
-    from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter
-    from flinttrade_gateway.session_provider import AuthenticatingSessionProvider, ConnectedSessionClientResolver
-
-    fixture.publish("openalgo", account, Session("test-key", 4102444800.0, account, "openalgo"), client=client)
-    provider = AuthenticatingSessionProvider(
-        fixture.registry,
-        {"openalgo": {account: ["test-actor"]}},
-        workspace_snapshot=read_workspace_snapshot(fixture.path),
-        workspace_path=fixture.path,
-        credential_version_for=lambda selector: fixture.store.selector_state(selector).version,
-    )
-    adapter = OpenAlgoAdapter(session_clients=ConnectedSessionClientResolver(provider, fixture.registry), **kwargs)
-    return adapter, fixture.session("openalgo", account)

@@ -28,8 +28,12 @@ def lifecycle_api():
     # A missing foundation is a behavioural RED, rather than a collection error.
     if importlib.util.find_spec("flinttrade_core.broker_account_lifecycle") is None:
         from types import SimpleNamespace
-        return SimpleNamespace(BrokerAccountLifecycleOwner=lambda *_args, **_kwargs: pytest.fail("runtime custody missing"))
+
+        return SimpleNamespace(
+            BrokerAccountLifecycleOwner=lambda *_args, **_kwargs: pytest.fail("runtime custody missing")
+        )
     from flinttrade_core import broker_account_lifecycle
+
     return broker_account_lifecycle
 
 
@@ -41,7 +45,8 @@ def owner_factory(lifecycle_api, tmp_path, monkeypatch, backend_lease_factory):
 
     def make(*, retire=lambda timeout: True, lock=None):
         owner = lifecycle_api.BrokerAccountLifecycleOwner(
-            tmp_path, proof, retire_generations=retire, rebuild_lock=lock or threading.RLock())
+            tmp_path, proof, retire_generations=retire, rebuild_lock=lock or threading.RLock()
+        )
         owners.append(owner)
         return owner
 
@@ -57,17 +62,25 @@ def native_authority(tmp_path):
     harden_directory(path)
     workspace = compare_and_swap_workspace(path, None, lambda config: None)
     store = CredentialStore(path / "vault.db", "synthetic-password")
-    store.put_credentials(SELECTOR, "dhan", "Synthetic", {"token": "synthetic"},
-                          expected=store.selector_state(SELECTOR).version)
-    yield ManagedSessionAuthority(store.selector_state(SELECTOR).version,
-                                 workspace.version, broker_workspace_version(workspace))
+    store.put_credentials(
+        SELECTOR, "dhan", "Synthetic", {"token": "synthetic"}, expected=store.selector_state(SELECTOR).version
+    )
+    yield ManagedSessionAuthority(
+        store.selector_state(SELECTOR).version, workspace.version, broker_workspace_version(workspace)
+    )
     store.close()
 
 
 def _prepare(registry, owner, authority, session=None):
     session = session or Session("synthetic-secret", time.time() + 3600, "broker-reported", "dhan")
-    receipt = owner.prepare_session_candidate(SELECTOR, session, expected_registry=registry.snapshot_selector(SELECTOR),
-                                             authority=authority, broker="dhan", label="Synthetic")
+    receipt = owner.prepare_session_candidate(
+        SELECTOR,
+        session,
+        expected_registry=registry.snapshot_selector(SELECTOR),
+        authority=authority,
+        broker="dhan",
+        label="Synthetic",
+    )
     return receipt, session
 
 
@@ -241,6 +254,7 @@ def test_unsupported_cleanup_is_quarantined_without_reflection(owner_factory):
     class Candidate:
         def close(self):
             pytest.fail("generic close must not run")
+
         extra = {"client": object()}
 
     owner.retain_candidate(lease, Candidate(), None)
@@ -275,7 +289,9 @@ def test_registry_retirement_transfer_is_exact_and_cleanup_releases_reservation(
     prepared, session = _prepare(registry, publication, native_authority)
     receipt = publication.abandon_prepared_candidate(prepared)
     cleaned = []
-    ticket = owner.retain_retirement(lease, publication, receipt, cleanup=lambda payload: cleaned.append(payload.session))
+    ticket = owner.retain_retirement(
+        lease, publication, receipt, cleanup=lambda payload: cleaned.append(payload.session)
+    )
     assert owner.retain_retirement(lease, publication, receipt) is ticket
     with pytest.raises(RegistryCapabilityError):
         publication.claim_retired_candidate(receipt)
@@ -460,9 +476,11 @@ def test_retirement_callback_requires_exact_boolean_completion(owner_factory):
 
 @pytest.mark.parametrize("disposition", ["abandon", "publish_conflict"])
 @pytest.mark.parametrize("explicit_cleanup", [False, True])
-def test_retired_unpublished_session_moves_one_cleanup_ticket(owner_factory, native_authority,
-                                                             disposition, explicit_cleanup):
+def test_retired_unpublished_session_moves_one_cleanup_ticket(
+    owner_factory, native_authority, disposition, explicit_cleanup
+):
     from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+
     make, _ = owner_factory
     owner = make()
     lease = owner.begin(uuid4(), SELECTOR)
@@ -487,8 +505,9 @@ def test_retired_unpublished_session_moves_one_cleanup_ticket(owner_factory, nat
 
 
 @pytest.mark.parametrize("registry_refusal_first", [False, True])
-def test_owner_wide_reservation_refuses_cleanup_of_an_older_live_session(owner_factory, native_authority,
-                                                                       registry_refusal_first):
+def test_owner_wide_reservation_refuses_cleanup_of_an_older_live_session(
+    owner_factory, native_authority, registry_refusal_first
+):
     make, _ = owner_factory
     owner = make()
     registry, publication = create_owned_registry()
@@ -547,6 +566,7 @@ def test_failed_retirement_acceptance_rolls_back_the_owner_move(owner_factory, n
         def fail_after_accept(payload):
             accept(payload)
             raise RuntimeError("synthetic acceptance failure")
+
         return original(receipt, fail_after_accept)
 
     with monkeypatch.context() as patch:
@@ -593,27 +613,32 @@ def _fence_dependent_reads(lock, available, completed):
         def close(self, *, timeout):
             if not timeout:
                 return completed.is_set()
+
             def completion():
                 acquired = lock.acquire(timeout=0.1)
                 available.append(acquired)
                 if acquired:
                     lock.release()
                     completed.set()
+
             thread = threading.Thread(target=completion)
             thread.start()
             thread.join(0.3)
             return completed.is_set()
+
     return Reads()
 
 
 def test_actual_enrolled_configure_drains_outside_the_outer_fence(owner_factory, monkeypatch):
     from types import SimpleNamespace
     import flinttrade_core.app as app_api
+
     _, proof = owner_factory
     app = Flask("actual-configure-unlocked-drain")
     lock = threading.RLock()
-    app.config.update(BACKEND_LEASE_PROOF=proof, BROKER_ROUTER_REBUILD_LOCK=lock,
-                      BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.5)
+    app.config.update(
+        BACKEND_LEASE_PROOF=proof, BROKER_ROUTER_REBUILD_LOCK=lock, BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.5
+    )
     registry, publication = create_owned_registry()
     app.config["REGISTRY"] = registry
     app.extensions["flinttrade.registry_publication_owner"] = publication
@@ -621,7 +646,8 @@ def test_actual_enrolled_configure_drains_outside_the_outer_fence(owner_factory,
     available = []
     completed = threading.Event()
     app.extensions["flinttrade_broker_dependencies"] = SimpleNamespace(
-        read_owner=_fence_dependent_reads(lock, available, completed))
+        read_owner=_fence_dependent_reads(lock, available, completed)
+    )
     built = []
 
     def stop_after_drain(*_args, **_kwargs):
@@ -638,41 +664,16 @@ def test_actual_enrolled_configure_drains_outside_the_outer_fence(owner_factory,
         assert owner.close_and_drain(1.0)
 
 
-def test_actual_openalgo_wrapper_drains_outside_its_outer_fence(owner_factory, monkeypatch, tmp_path):
-    from types import SimpleNamespace
-    import flinttrade_core.app as app_api
-    _, proof = owner_factory
-    monkeypatch.setenv("FLINTTRADE_API_KEY", "synthetic-backend-key")
-    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
-    app = app_api.create_flask_app(backend_lease_proof=proof)
-    app.config["TESTING"] = True
-    app.config["AUTH_SERVICE"].is_setup = lambda: False
-    lock = app.config["BROKER_ROUTER_REBUILD_LOCK"]
-    app.config["BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS"] = 0.5
-    owner = app_api.broker_account_lifecycle_owner_for(app, proof.workspace_path)
-    available = []
-    completed = threading.Event()
-    app.extensions["flinttrade_broker_dependencies"] = SimpleNamespace(
-        read_owner=_fence_dependent_reads(lock, available, completed))
-    monkeypatch.setattr(app_api, "configure_broker_router", lambda *_args: True)
-    try:
-        response = app.test_client().post("/v1/config/openalgo", json={"api_key": "synthetic-new-key"},
-                                          headers={"X-API-Key": "synthetic-backend-key"})
-        assert response.status_code == 200
-        assert available == [True]
-    finally:
-        completed.set()
-        assert owner.close_and_drain(1.0)
-
-
 def test_enrolled_configure_revalidates_original_generation_after_unlocked_drain(owner_factory, monkeypatch):
     from types import SimpleNamespace
     import flinttrade_core.app as app_api
+
     _, proof = owner_factory
     app = Flask("exact-rebuild-generation")
     lock = threading.RLock()
-    app.config.update(BACKEND_LEASE_PROOF=proof, BROKER_ROUTER_REBUILD_LOCK=lock,
-                      BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.5)
+    app.config.update(
+        BACKEND_LEASE_PROOF=proof, BROKER_ROUTER_REBUILD_LOCK=lock, BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.5
+    )
     registry, publication = create_owned_registry()
     app.config["REGISTRY"] = registry
     app.extensions["flinttrade.registry_publication_owner"] = publication
@@ -681,6 +682,7 @@ def test_enrolled_configure_revalidates_original_generation_after_unlocked_drain
     built = []
 
     raced = []
+
     class Reads:
         def close(self, *, timeout):
             if not timeout:
@@ -703,6 +705,7 @@ def test_enrolled_configure_revalidates_original_generation_after_unlocked_drain
 
 def test_rotation_admission_refuses_an_active_account_mutation(owner_factory):
     from flinttrade_core.native_rotation import _rotation_admission
+
     make, _ = owner_factory
     app = Flask("rotation-admission-owner-lane")
     lock = threading.RLock()
@@ -748,8 +751,9 @@ def test_owner_issued_rebuild_cannot_escape_its_mutation_publication_scope(owner
     make, _ = owner_factory
     owner = make()
     lease = owner.begin(uuid4(), SELECTOR)
-    token = owner.publish_if_current(lease, lambda: owner.begin_rebuild(
-        retire_generations=lambda _: True, publication_current=lambda: True))
+    token = owner.publish_if_current(
+        lease, lambda: owner.begin_rebuild(retire_generations=lambda _: True, publication_current=lambda: True)
+    )
     owner.abandon(lease)
     try:
         with pytest.raises(RuntimeError, match="account_rebuild_publication_revoked"):
@@ -793,6 +797,7 @@ def test_failed_retirement_acceptance_cannot_report_clean_mid_transfer(owner_fac
             accept(payload)
             observed.append(owner.close_and_drain(0.0))
             raise RuntimeError("synthetic acceptance failure")
+
         return original(receipt, fail_after_accept)
 
     with monkeypatch.context() as patch:
@@ -808,6 +813,7 @@ def test_failed_retirement_acceptance_cannot_report_clean_mid_transfer(owner_fac
 
 def test_enrolled_caller_process_fence_precedes_the_shared_rebuild_lock(owner_factory, monkeypatch):
     import flinttrade_core.app as app_api
+
     _, proof = owner_factory
     app = Flask("enrolled-caller-process-fence")
     app.config["BACKEND_LEASE_PROOF"] = proof
@@ -816,10 +822,13 @@ def test_enrolled_caller_process_fence_precedes_the_shared_rebuild_lock(owner_fa
     class InheritedFence:
         def __enter__(self):
             pytest.fail("foreign process entered inherited rebuild fence")
+
         def __exit__(self, *_args):
             pass
+
         def acquire(self, **_kwargs):
             pytest.fail("foreign process acquired inherited rebuild fence")
+
         def release(self):
             pass
 
@@ -836,11 +845,13 @@ def test_enrolled_caller_process_fence_precedes_the_shared_rebuild_lock(owner_fa
 def test_enrolled_rebuild_admission_is_bounded_by_the_app_budget(owner_factory):
     from concurrent.futures import ThreadPoolExecutor
     import flinttrade_core.app as app_api
+
     _, proof = owner_factory
     app = Flask("bounded-rebuild-admission")
     lock = threading.RLock()
-    app.config.update(BACKEND_LEASE_PROOF=proof, BROKER_ROUTER_REBUILD_LOCK=lock,
-                      BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.01)
+    app.config.update(
+        BACKEND_LEASE_PROOF=proof, BROKER_ROUTER_REBUILD_LOCK=lock, BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.01
+    )
     owner = app_api.broker_account_lifecycle_owner_for(app, proof.workspace_path)
     held = threading.Event()
     release = threading.Event()
@@ -868,6 +879,7 @@ def test_enrolled_rebuild_admission_is_bounded_by_the_app_budget(owner_factory):
 # fragments above are unchanged; these tests fill the documented coverage gaps.
 def test_reconstructed_rotation_constructor_checks_refresh_admission():
     from flinttrade_core.native_rotation import NativeRotationAdmission
+
     allowed = [False]
     admission = NativeRotationAdmission(refresh_admission=lambda: allowed[0])
     with pytest.raises(RuntimeError, match="account lifecycle admission"):
@@ -882,6 +894,7 @@ def test_reconstructed_rotation_constructor_checks_refresh_admission():
 async def test_reconstructed_revoke_both_before_wait_and_loop_release(owner_factory):
     from types import SimpleNamespace
     import flinttrade_core.app as app_api
+
     _, proof = owner_factory
     app = Flask("reconstructed-loop-release")
     app.config["BACKEND_LEASE_PROOF"] = proof
@@ -1066,8 +1079,10 @@ def test_reconstructed_publication_rejects_async_callbacks(owner_factory, callba
 
     callback = object() if callback_kind == "noncallable" else asynchronous
     if callback_kind == "awaitable_result":
+
         def callback():
             return asynchronous()
+
     with pytest.raises(TypeError, match="publication_callback_invalid"):
         owner.publish_if_current(lease, callback)
     assert owner.settle(lease)
@@ -1079,8 +1094,9 @@ def test_reconstructed_foreign_workspace_cannot_compose_owner(owner_factory, tmp
     with pytest.raises(RuntimeError, match="authority_invalid"):
         owner.assert_bound(tmp_path / "foreign", proof)
     with pytest.raises(RuntimeError, match="authority_invalid"):
-        lifecycle_api.BrokerAccountLifecycleOwner(tmp_path / "foreign", proof,
-                                                 retire_generations=lambda _: True, rebuild_lock=threading.RLock())
+        lifecycle_api.BrokerAccountLifecycleOwner(
+            tmp_path / "foreign", proof, retire_generations=lambda _: True, rebuild_lock=threading.RLock()
+        )
 
 
 def test_reconstructed_creator_cleanup_survives_backend_revocation(owner_factory):
@@ -1100,6 +1116,7 @@ def test_reconstructed_real_fork_refuses_before_inherited_locks(owner_factory):
     import os
     import select
     import signal
+
     if not hasattr(os, "fork"):
         pytest.skip("requires actual process fork")
     make, _ = owner_factory
@@ -1123,8 +1140,12 @@ def test_reconstructed_real_fork_refuses_before_inherited_locks(owner_factory):
     if pid == 0:
         os.close(read_fd)
         try:
-            for action in (owner.snapshot, lambda: owner.close_and_drain(0.0),
-                           lambda: owner.settle(lease), owner.current_rebuild):
+            for action in (
+                owner.snapshot,
+                lambda: owner.close_and_drain(0.0),
+                lambda: owner.settle(lease),
+                owner.current_rebuild,
+            ):
                 try:
                     action()
                 except RuntimeError as error:
@@ -1152,6 +1173,7 @@ def test_reconstructed_real_fork_refuses_before_inherited_locks(owner_factory):
 
 def test_reconstructed_runtime_intent_checks_thread_proof_and_generation(owner_factory):
     from concurrent.futures import ThreadPoolExecutor
+
     make, proof = owner_factory
     owner = make()
     current = [True]
@@ -1177,8 +1199,9 @@ def test_reconstructed_escaped_intent_refuses_without_mutation_abandonment(owner
     make, _ = owner_factory
     owner = make()
     lease = owner.begin(uuid4(), SELECTOR)
-    token = owner.publish_if_current(lease, lambda: owner.begin_rebuild(
-        retire_generations=lambda _: True, publication_current=lambda: True))
+    token = owner.publish_if_current(
+        lease, lambda: owner.begin_rebuild(retire_generations=lambda _: True, publication_current=lambda: True)
+    )
     try:
         with pytest.raises(RuntimeError, match="rebuild_publication_revoked"):
             owner.publish_rebuild_if_current(token, lambda: pytest.fail("escaped current mutation intent published"))
@@ -1203,6 +1226,7 @@ def test_reconstructed_runtime_intent_rejects_invalid_callbacks(owner_factory, c
 def test_reconstructed_app_shutdown_keeps_worker_and_remaining_rotation_budget(owner_factory):
     import flinttrade_core.app as app_api
     from flinttrade_core.native_rotation import NativeRotationAdmission
+
     make, _ = owner_factory
     owner = make()
     lease = owner.begin(uuid4(), SELECTOR)
@@ -1244,6 +1268,7 @@ def test_reconstructed_app_shutdown_keeps_worker_and_remaining_rotation_budget(o
 def test_reconstructed_app_composition_is_explicit_and_uses_existing_fence(owner_factory):
     import flinttrade_core.app as app_api
     from flinttrade_core.native_rotation import _rotation_admission
+
     _, proof = owner_factory
     app = Flask("reconstructed-inert-owner")
     lock = threading.RLock()
@@ -1259,74 +1284,6 @@ def test_reconstructed_app_composition_is_explicit_and_uses_existing_fence(owner
     assert owner.publish_if_current(lease, lambda: app_api._account_publication_allowed(app)) is True
     assert owner.settle(lease)
     assert owner.close_and_drain(1.0)
-
-
-def test_reconstructed_borrowed_openalgo_retirement_is_not_disposal_authority(owner_factory, tmp_path):
-    make, _ = owner_factory
-    owner = make()
-    selector = BrokerSelector("openalgo", "default")
-    lease = owner.begin(uuid4(), selector)
-    registry, publication = create_owned_registry()
-    workspace = compare_and_swap_workspace(tmp_path, None, lambda _: None)
-    authority = publication.seal_openalgo_default_compatibility_authority(workspace)
-
-    class BorrowedClient:
-        def close(self):
-            pytest.fail("borrowed OpenAlgo client disposed")
-
-    client = BorrowedClient()
-    session = Session("synthetic", time.time() + 3600, "raw", "openalgo")
-    prepared = publication.prepare_openalgo_default_compatibility_candidate(
-        session, expected_registry=registry.snapshot_selector(selector), authority=authority,
-        client=client, broker=None, label="Synthetic")
-    receipt = publication.abandon_prepared_candidate(prepared)
-    with pytest.raises(RegistryCapabilityError):
-        owner.retain_retirement(lease, publication, receipt,
-                                cleanup=lambda _: pytest.fail("borrowed cleanup inferred"))
-    payload = publication.claim_retired_candidate(receipt)
-    assert payload.client is client
-    assert payload.managed is False
-    publication.release_retired_candidate(payload)
-    assert owner.settle(lease)
-
-
-@pytest.mark.parametrize("managed_first", [False, True])
-def test_reconstructed_registry_refuses_managed_borrowed_raw_alias(tmp_path, managed_first):
-    registry, publication = create_owned_registry()
-    workspace = compare_and_swap_workspace(tmp_path, None, lambda _: None)
-    authority = publication.seal_openalgo_default_compatibility_authority(workspace)
-    selector = BrokerSelector("openalgo", "default")
-    session = Session("synthetic", time.time() + 3600, "raw", "openalgo")
-    managed_selector = BrokerSelector("openalgo", "Synthetic")
-    store = CredentialStore(tmp_path / "alias-vault.db", "synthetic-password")
-    try:
-        store.put_credentials(managed_selector, "openalgo", "Synthetic", {"token": "synthetic"},
-                              expected=store.selector_state(managed_selector).version)
-        native_authority = ManagedSessionAuthority(store.selector_state(managed_selector).version,
-                                                   workspace.version, broker_workspace_version(workspace))
-    finally:
-        store.close()
-
-    def borrowed():
-        return publication.prepare_openalgo_default_compatibility_candidate(
-            session, expected_registry=registry.snapshot_selector(selector), authority=authority,
-            client=object(), broker=None, label="Synthetic")
-
-    def managed():
-        return publication.prepare_session_candidate(
-            managed_selector, session, expected_registry=registry.snapshot_selector(managed_selector),
-            authority=native_authority, broker="openalgo", label="Synthetic")
-
-    first, second = (managed, borrowed) if managed_first else (borrowed, managed)
-    prepared = first()
-    with pytest.raises(RegistrySessionUnavailable):
-        second()
-    receipt = publication.abandon_prepared_candidate(prepared)
-    payload = publication.claim_retired_candidate(receipt)
-    with pytest.raises(RegistrySessionUnavailable):
-        second()
-    publication.release_retired_candidate(payload)
-    assert second()
 
 
 def test_reconstructed_duplicate_retirement_rejects_different_registry_owner(owner_factory, native_authority):

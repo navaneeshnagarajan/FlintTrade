@@ -6,8 +6,8 @@ GET /api/v1/holidays        — NSE/exchange market holidays for a given year
 GET /api/v1/market/timings  — Standard (and special) session open/close times
 
 Uses :mod:`flinttrade_engine.market_hours` for local special-session data
-and :class:`flinttrade_core.openalgo_client.OpenAlgoClient` for live
-exchange holiday data from OpenAlgo.
+and :class:`flinttrade_core.broker_client.BrokerClient` for live
+exchange holiday data from native broker.
 
 Register in ``create_flask_app()``::
 
@@ -28,14 +28,14 @@ logger = logging.getLogger("flinttrade.historical.holidays_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import (
+    from flinttrade_core.broker_client import (
         client_call_sync,
         client_close_sync,
         normalise_holiday_dates,
-        resolve_openalgo_client,
+        resolve_broker_client,
     )
 except Exception:  # pragma: no cover
-    resolve_openalgo_client = None  # type: ignore[assignment,misc]
+    resolve_broker_client = None  # type: ignore[assignment,misc]
     client_call_sync = None  # type: ignore[assignment,misc]
     client_close_sync = None  # type: ignore[assignment,misc]
     normalise_holiday_dates = None  # type: ignore[assignment,misc]
@@ -71,7 +71,7 @@ def get_holidays() -> tuple[Any, int]:
         JSON ``{"status": "success", "exchange": "NSE", "year": 2026,
         "holidays": ["2026-01-01", ...]}``.
 
-    On OpenAlgo failure the endpoint falls back to an empty list with a
+    On native broker failure the endpoint falls back to an empty list with a
     ``"source": "fallback"`` field so callers can detect degraded mode.
     """
     exchange: str = request.args.get("exchange", "NSE").upper()
@@ -91,12 +91,12 @@ def get_holidays() -> tuple[Any, int]:
             400,
         )
 
-    # Try OpenAlgo first for live/official holiday data
+    # Try native broker first for live/official holiday data
     try:
-        if resolve_openalgo_client is None:
-            raise ImportError("OpenAlgo client resolver not available")
+        if resolve_broker_client is None:
+            raise ImportError("native broker client resolver not available")
 
-        client, close_client = resolve_openalgo_client()
+        client, close_client = resolve_broker_client()
         try:
             raw = client_call_sync(client, client.holidays(year=str(year)))
         finally:
@@ -120,7 +120,7 @@ def get_holidays() -> tuple[Any, int]:
             200,
         )
     except Exception as exc:
-        logger.warning("OpenAlgo holidays fetch failed: %s — returning empty list", exc)
+        logger.warning("native broker holidays fetch failed: %s — returning empty list", exc)
         return (
             jsonify(
                 {

@@ -25,6 +25,7 @@ vi.mock("@/stores/modeStore", () => ({
     { getState: () => modeState },
   ),
 }));
+import { useBrokerStore } from "@/stores/brokerStore";
 import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 import {
   getStrategies,
@@ -66,6 +67,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
   beforeEach(() => {
+    useBrokerStore.setState({ accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected", label: "Upstox", connected_at: null, error_message: null, is_primary: true }], activeAccountId: "native:upstox:U1" });
     authState.token = "";
     modeState.mode = "practice";
     setConnectedReadPosture(false);
@@ -571,12 +573,12 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       l4_pnl: {
         pause_pct: 3,
         kill_pct: 6,
-        selector: "openalgo:default",
+        selector: "upstox:U1",
         opening_risk_capital: 100000,
         is_paused: false,
         is_killed: false,
         accounts: [{
-          selector: "openalgo:default",
+          selector: "upstox:U1",
           session_key: "2026-07-13",
           opening_risk_capital: 100000,
           is_paused: false,
@@ -608,10 +610,10 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       max_net_vega: 400,
       daily_loss_pause_pct: 3,
       daily_loss_kill_pct: 6,
-      daily_loss_selector: "openalgo:default",
+      daily_loss_selector: "upstox:U1",
       opening_risk_capital: 100000,
       daily_loss_accounts: [{
-        selector: "openalgo:default",
+        selector: "upstox:U1",
         session_key: "2026-07-13",
         opening_risk_capital: 100000,
         is_paused: false,
@@ -625,7 +627,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       emergency_result: emergencyResult,
     });
     expect(fetchSpy.mock.calls[0]![0]).toContain(
-      "/api/v1/safety/config?broker=openalgo&account_id=default",
+      "/api/v1/safety/config?broker=upstox&account_id=U1",
     );
   });
 
@@ -664,7 +666,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result.kill_switch_reason).toBe("");
     expect(result.flatten_complete).toBe(true);
     expect(result.emergency_result).toBeNull();
-    expect(fetchSpy.mock.calls[0]![0]).not.toContain("broker=openalgo");
+    expect(fetchSpy.mock.calls[0]![0]).not.toContain("broker=dhan");
   });
 
   it("updateSafetyConfig() binds explicit opening capital to the selected account", async () => {
@@ -677,8 +679,8 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(url).toContain("/api/v1/safety/config");
     expect(JSON.parse(String(init.body))).toEqual({
       opening_risk_capital: 100000,
-      broker: "openalgo",
-      account_id: "default",
+      broker: "upstox",
+      account_id: "U1",
     });
   });
 
@@ -697,7 +699,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({
       status: "success",
       data: {
-        selector: "openalgo:default",
+        selector: "upstox:U1",
         session_key: "2026-07-13",
         opening_risk_capital: 100000,
         is_paused: false,
@@ -708,7 +710,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     await resetDailyPnLState();
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/safety/l4?broker=openalgo&account_id=default");
+    expect(url).toContain("/api/v1/safety/l4?broker=upstox&account_id=U1");
     expect(init.method).toBe("DELETE");
   });
 

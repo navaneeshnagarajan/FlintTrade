@@ -57,7 +57,6 @@ import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { brokerSessionDarkened } from "@/lib/operatorIncident";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import { useOperatorMarketSession } from "@/hooks/useOperatorMarketSession";
-import { ping } from "@/services/api";
 import {
   operatorMarketLabel,
   type MarketSessionInfo,
@@ -420,15 +419,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     setToolsOpen(false);
   }, []);
 
-  // Maintain broker connection status from either OpenAlgo bridge ping or a
-  // live native/gateway broker session. This store still drives older widgets.
-  //
-  // Explore mode has NO broker: ping() there returns a demo mock that always
-  // resolves, so treating a resolved ping as "connected" reported the gateway
-  // as connected and fired a repeating "Broker gateway connected — live market
-  // data and order routing are available" notification every poll. In Explore
-  // the status is purely whatever real broker is connected (none), never the
-  // demo ping.
+  // The connected indicator follows confirmed native sessions.
   useEffect(() => {
     if (mode === "explore" || moneyPathClosed) {
       // Explore is broker-free. A leftover native session must not paint
@@ -437,17 +428,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
       setStatus("disconnected");
       return;
     }
-    const check = async () => {
-      try {
-        await ping();
-        setStatus("connected");
-      } catch {
-        setStatus(directBrokerConnected ? "connected" : "disconnected");
-      }
-    };
-    check();
-    const id = setInterval(check, 10_000);
-    return () => clearInterval(id);
+    setStatus(directBrokerConnected ? "connected" : "disconnected");
   }, [mode, directBrokerConnected, moneyPathClosed, setStatus]);
 
   const barStyle: React.CSSProperties = {

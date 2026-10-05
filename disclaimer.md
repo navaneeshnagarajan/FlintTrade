@@ -14,7 +14,7 @@ Trading F&O, commodities, crypto, equities, and automated strategies can result 
 
 ## Beta Software
 
-FlintTrade currently changes quickly. Some modules use sample data, some integrations require external services, and live broker support depends on the configured native adapter or optional OpenAlgo-compatible server. Treat every release before `1.0.0` as experimental unless a release note explicitly says otherwise.
+FlintTrade currently changes quickly. Some modules use sample data, some integrations require external services, and live broker support depends on the configured native adapter. Treat every release before `1.0.0` as experimental unless a release note explicitly says otherwise.
 
 ## User Responsibility
 

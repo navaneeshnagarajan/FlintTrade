@@ -495,14 +495,14 @@ function ConditionScannerWidget(props: WidgetProps) {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Radar size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Condition Scanner</span>
-        {view === "scans" && run && run.is_sample_data === false && (
+        {view === "scans" && run && (
           <span
             className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
             role="status"
-            aria-label="Scan ran on live broker data"
-            title="Live — the backend scanned real OHLCV from the connected broker."
+            aria-label={run.is_sample_data === false ? "Scan ran on live broker data" : "Scan uses sample or unknown source data"}
+            title={run.is_sample_data === false ? "Live — the backend scanned real OHLCV from the connected broker." : "Sample data — this scan does not have proven native market provenance."}
           >
-            Live
+            {run.is_sample_data === false ? "Live" : "Sample data"}
           </span>
         )}
         <div className="flex-1" />
@@ -601,12 +601,18 @@ function ConditionScannerWidget(props: WidgetProps) {
         </TooltipProvider>
       </nav>
 
-      {/* Live provenance only. Sample disclosure is the Mode honesty bar. */}
+      {/* A scan or sector fallback discloses its source in every mode. */}
       {view === "scans" ? (
         run && run.is_sample_data === false ? (
           <div className="flex-none px-2 py-1 bg-profit/5 border-b border-profit/20">
             <span className="text-xxs text-profit" role="status">
               Live scan — the backend scanned real broker OHLCV
+            </span>
+          </div>
+        ) : run ? (
+          <div className="flex-none px-2 py-1 bg-warning/5 border-b border-warning/20">
+            <span className="text-xxs text-warning" role="status">
+              Sample scan — native market provenance is unavailable
             </span>
           </div>
         ) : null
@@ -616,7 +622,13 @@ function ConditionScannerWidget(props: WidgetProps) {
             Live sectors — derived from NIFTY 50 quotes, refreshed every minute
           </span>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex-none px-2 py-1 bg-warning/5 border-b border-warning/20">
+          <span className="text-xxs text-warning" role="status">
+            Sample data — illustrative sector movers; native quotes unavailable
+          </span>
+        </div>
+      )}
 
       {/* Selected-scan conditions */}
       {view === "scans" && selectedScan && (

@@ -8,7 +8,6 @@
 import {
   Monitor,
   Palette,
-  Wifi,
   TrendingUp,
   ShieldAlert,
   Keyboard,
@@ -41,7 +40,6 @@ export type SectionId =
   | "general"
   | "appearance"
   | "ticker"
-  | "api"
   | "brokers"
   | "trading"
   | "risk"
@@ -101,7 +99,6 @@ export const SECTION_GROUPS: readonly { id: SectionGroupId; label: string }[] = 
  * it against that origin.
  */
 export const DEMO_HIDDEN_SECTIONS: readonly SectionId[] = [
-  "api",       // OpenAlgo host + API key
   "brokers",   // broker account credentials
   "llm",       // LLM provider API keys
   "telegram",  // bot token
@@ -120,7 +117,6 @@ export function buildSections(desktopShell: boolean, publicDemo: boolean = isPub
     { id: "skill",      label: "Skill & Experience", icon: GraduationCap,  group: "preferences" },
     { id: "presets",    label: "Workspace Presets",  icon: LayoutTemplate, group: "preferences" },
     { id: "brokers",    label: "Brokers",            icon: Landmark,       group: "trading" },
-    { id: "api",        label: "Broker Gateway",     icon: Wifi,           group: "trading" },
     { id: "trading",    label: "Trading Defaults",   icon: TrendingUp,     group: "trading" },
     { id: "risk",       label: "Risk Limits",        icon: ShieldAlert,    group: "trading" },
     { id: "leverage",   label: "Leverage",           icon: Scale,          group: "trading" },

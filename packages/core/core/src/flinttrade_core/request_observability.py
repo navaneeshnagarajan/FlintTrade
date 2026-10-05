@@ -60,9 +60,10 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
             return "/api/v1/ditto/accounts/{account_id}"
         case ("POST", ["", "api", "v1", "native", "postbacks", adapter_id]) if adapter_id:
             return "/api/v1/native/postbacks/{adapter_id}"
-        case ("POST", ["", "admin", "credentials", "rotation", broker, action]) if (
-            broker and action in {"schedule", "rotate-now"}
-        ):
+        case ("POST", ["", "admin", "credentials", "rotation", broker, action]) if broker and action in {
+            "schedule",
+            "rotate-now",
+        }:
             return "/admin/credentials/rotation/{broker}/" + action
         case ("PUT", ["", "v1", "rate-limits"]):
             return "/v1/rate-limits"
@@ -105,7 +106,6 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
         ("/v1/auth/reset-password-otp", "/v1/auth/reset-password-otp"),
         ("/v1/auth/reset-password", "/v1/auth/reset-password"),
         ("/v1/config/llm", "/v1/config/llm"),
-        ("/v1/config/openalgo", "/v1/config/openalgo"),
         ("/v1/test-connection", "/v1/test-connection"),
     ):
         if _exact_or_descendant(clean, prefix):

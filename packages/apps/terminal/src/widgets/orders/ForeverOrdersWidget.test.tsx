@@ -24,10 +24,9 @@ beforeAll(() => {
 
 let mockMode = "live";
 const mockConnectionState = vi.hoisted(() => ({
-  apiKey: "test-openalgo-key",
-  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  apiKey: "test-dhan-key",
+  //  models a normally-loaded app; the hydration
   // fail-closed window is covered by brokerTargets/api tests.
-  openAlgoHydrated: true,
 }));
 const mockBrokerState = vi.hoisted(() => ({
   accounts: [] as Array<{
@@ -57,6 +56,8 @@ vi.mock("@/stores/connectionStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: string }>,
     selector: string | null,
@@ -169,7 +170,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lotSizeResponse = null;
   mockMode = "live";
-  mockConnectionState.apiKey = "test-openalgo-key";
+  mockConnectionState.apiKey = "test-dhan-key";
   mockBrokerState.accounts = [
     {
       account_id: "D1",
@@ -558,7 +559,7 @@ describe("ForeverOrdersWidget", () => {
 
   it("maps the 501 unsupported-broker refusal honestly", async () => {
     listStatus = 501;
-    listMessage = "broker adapter 'openalgo' does not support the 'forever_orders' listing";
+    listMessage = "broker adapter 'dhan' does not support the 'forever_orders' listing";
     renderWidget();
     await waitFor(() =>
       expect(screen.getByText("Not available for this broker.")).toBeInTheDocument(),

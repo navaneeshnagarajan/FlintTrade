@@ -203,13 +203,9 @@ class TestSupertrend:
             if np.isnan(st[i]):
                 continue
             if direction[i]:  # uptrend: ST should be support (below close)
-                assert st[i] <= close[i] + 1e-9, (
-                    f"Bar {i}: uptrend but ST={st[i]:.2f} > close={close[i]:.2f}"
-                )
+                assert st[i] <= close[i] + 1e-9, f"Bar {i}: uptrend but ST={st[i]:.2f} > close={close[i]:.2f}"
             else:  # downtrend: ST should be resistance (above close)
-                assert st[i] >= close[i] - 1e-9, (
-                    f"Bar {i}: downtrend but ST={st[i]:.2f} < close={close[i]:.2f}"
-                )
+                assert st[i] >= close[i] - 1e-9, f"Bar {i}: downtrend but ST={st[i]:.2f} < close={close[i]:.2f}"
 
     def test_supertrend_short_series_returns_nan(self):
         from flinttrade_indicators.trend import supertrend

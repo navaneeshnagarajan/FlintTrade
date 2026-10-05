@@ -1,6 +1,6 @@
 """Track expired option chains for backtesting and analysis (ExpiryTrack).
 
-Captures option chain snapshots before expiry using OpenAlgo's ``optionchain``
+Captures option chain snapshots before expiry using native broker's ``optionchain``
 endpoint and stores them in DuckDB for historical analysis.
 
 Adapts patterns from MarketCalls/ExpiryFlow:
@@ -33,7 +33,7 @@ from typing import Any, Callable
 
 import duckdb
 
-from flinttrade_core.openalgo_client import OpenAlgoClient
+from flinttrade_core.broker_client import BrokerClient
 
 logger = logging.getLogger("flinttrade.historical.expiry_tracker")
 
@@ -103,6 +103,7 @@ def _default_db_path() -> Path:
     _migrate_legacy_expiry_db(_legacy_db_path(), new)
     return new
 
+
 # Any object exposing one of these is treated as a client, not a provider.
 _CHAIN_METHOD_NAMES = ("get_option_chain", "option_chain", "optionchain")
 
@@ -140,6 +141,7 @@ def _expiry_aliases(expiry: str) -> tuple[str, ...]:
         raw,
     )
     return tuple(dict.fromkeys(values))
+
 
 # ---------------------------------------------------------------------------
 # Rate limiter (adapted from ExpiryFlow's DataApiRateLimiter)
@@ -184,13 +186,9 @@ class SnapshotRateLimiter:
                 self._day_count = 0
                 self._day_start = now
             if self._max_per_day > 0 and self._day_count >= self._max_per_day:
-                raise RuntimeError(
-                    f"Daily API limit reached ({self._max_per_day} requests)"
-                )
+                raise RuntimeError(f"Daily API limit reached ({self._max_per_day} requests)")
             # Enforce per-second limit
-            self._second_timestamps = [
-                t for t in self._second_timestamps if now - t < 1.0
-            ]
+            self._second_timestamps = [t for t in self._second_timestamps if now - t < 1.0]
             if len(self._second_timestamps) >= self._max_per_second:
                 sleep_time = 1.0 - (now - self._second_timestamps[0])
                 if sleep_time > 0:
@@ -225,10 +223,7 @@ CREATE TABLE IF NOT EXISTS expired_option_chains (
 );
 """
 
-_INDEX_OPTION_CHAIN = (
-    "CREATE INDEX IF NOT EXISTS idx_expired_oc_sym_exp "
-    "ON expired_option_chains (symbol, expiry_date)"
-)
+_INDEX_OPTION_CHAIN = "CREATE INDEX IF NOT EXISTS idx_expired_oc_sym_exp ON expired_option_chains (symbol, expiry_date)"
 
 _SCHEMA_DOWNLOAD_METADATA = """
 CREATE TABLE IF NOT EXISTS download_metadata (
@@ -243,13 +238,9 @@ CREATE TABLE IF NOT EXISTS download_metadata (
 );
 """
 
-_SCHEMA_DOWNLOAD_SEQ = (
-    "CREATE SEQUENCE IF NOT EXISTS download_metadata_id_seq START 1"
-)
+_SCHEMA_DOWNLOAD_SEQ = "CREATE SEQUENCE IF NOT EXISTS download_metadata_id_seq START 1"
 
-_SCHEMA_MIGRATIONS = (
-    "CREATE TABLE IF NOT EXISTS _migrations (name VARCHAR PRIMARY KEY)"
-)
+_SCHEMA_MIGRATIONS = "CREATE TABLE IF NOT EXISTS _migrations (name VARCHAR PRIMARY KEY)"
 
 
 # ---------------------------------------------------------------------------
@@ -267,9 +258,9 @@ class ExpiryTracker:
     - Migration tracking
 
     Args:
-        client: OpenAlgo client for fetching live option chain data, OR a
+        client: native broker client for fetching live option chain data, OR a
             zero-argument callable returning the CURRENT client (e.g.
-            ``flinttrade_core.openalgo_client.get_openalgo_client``). Passing a
+            ``flinttrade_core.broker_client.get_broker_client``). Passing a
             provider keeps the tracker resolving the authoritative shared
             client across startup fallback and settings hot-reload. Normal hot
             reload reconfigures that object in place rather than closing it.
@@ -280,7 +271,7 @@ class ExpiryTracker:
 
     def __init__(
         self,
-        client: OpenAlgoClient | Callable[[], Any] | None = None,
+        client: BrokerClient | Callable[[], Any] | None = None,
         db_path: str = "",
         rate_limiter: SnapshotRateLimiter | None = None,
     ) -> None:
@@ -321,17 +312,11 @@ class ExpiryTracker:
         """
         self.connection.execute(_SCHEMA_MIGRATIONS)
         self.connection.execute(_SCHEMA_OPTION_CHAIN)
-        table_info = self.connection.execute(
-            "PRAGMA table_info('expired_option_chains')"
-        ).fetchall()
+        table_info = self.connection.execute("PRAGMA table_info('expired_option_chains')").fetchall()
         columns = {row[1] for row in table_info}
         if "snapshot_id" not in columns:
-            self.connection.execute(
-                "ALTER TABLE expired_option_chains ADD COLUMN snapshot_id VARCHAR"
-            )
-            table_info = self.connection.execute(
-                "PRAGMA table_info('expired_option_chains')"
-            ).fetchall()
+            self.connection.execute("ALTER TABLE expired_option_chains ADD COLUMN snapshot_id VARCHAR")
+            table_info = self.connection.execute("PRAGMA table_info('expired_option_chains')").fetchall()
         legacy_groups = self.connection.execute(
             """SELECT DISTINCT symbol, exchange, expiry_date, captured_at
                FROM expired_option_chains
@@ -339,10 +324,13 @@ class ExpiryTracker:
                ORDER BY symbol, exchange, expiry_date, captured_at"""
         ).fetchall()
         for symbol, exchange, expiry_date, captured_at in legacy_groups:
-            legacy_snapshot_id = "legacy-" + uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"flinttrade:expiry-snapshot:{symbol}:{exchange}:{expiry_date}:{captured_at}",
-            ).hex
+            legacy_snapshot_id = (
+                "legacy-"
+                + uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"flinttrade:expiry-snapshot:{symbol}:{exchange}:{expiry_date}:{captured_at}",
+                ).hex
+            )
             self.connection.execute(
                 """UPDATE expired_option_chains
                    SET snapshot_id = ?
@@ -353,12 +341,8 @@ class ExpiryTracker:
         snapshot_column = next(row for row in table_info if row[1] == "snapshot_id")
         if not snapshot_column[3]:
             self.connection.execute("DROP INDEX IF EXISTS idx_expired_oc_sym_exp")
-            self.connection.execute(
-                "ALTER TABLE expired_option_chains ALTER COLUMN snapshot_id SET NOT NULL"
-            )
-        self.connection.execute(
-            "INSERT OR IGNORE INTO _migrations VALUES ('expired_option_chains_snapshot_id_v1')"
-        )
+            self.connection.execute("ALTER TABLE expired_option_chains ALTER COLUMN snapshot_id SET NOT NULL")
+        self.connection.execute("INSERT OR IGNORE INTO _migrations VALUES ('expired_option_chains_snapshot_id_v1')")
         self.connection.execute(
             "INSERT OR IGNORE INTO _migrations VALUES ('expired_option_chains_snapshot_id_backfill_v2')"
         )
@@ -378,7 +362,7 @@ class ExpiryTracker:
     ) -> int:
         """Fetch the current option chain and store it as a snapshot.
 
-        Uses the OpenAlgo ``optionchain`` endpoint to get CE/PE data for
+        Uses the native broker ``optionchain`` endpoint to get CE/PE data for
         all strikes at the given expiry.
 
         Args:
@@ -392,8 +376,8 @@ class ExpiryTracker:
         self.last_capture_error = None
         client = self._resolve_client()
         if client is None:
-            self.last_capture_error = "No OpenAlgo client configured"
-            logger.error("No OpenAlgo client configured — cannot capture snapshot")
+            self.last_capture_error = "No native broker client configured"
+            logger.error("No native broker client configured — cannot capture snapshot")
             return 0
 
         try:
@@ -421,9 +405,19 @@ class ExpiryTracker:
                 now = latest[0] + timedelta(microseconds=1)
 
             insert_rows = [
-                (now, snapshot_id, r["symbol"], r["exchange"], r["expiry_date"],
-                 r["strike"], r["option_type"], r["oi"], r["volume"],
-                 r["ltp"], r["iv"])
+                (
+                    now,
+                    snapshot_id,
+                    r["symbol"],
+                    r["exchange"],
+                    r["expiry_date"],
+                    r["strike"],
+                    r["option_type"],
+                    r["oi"],
+                    r["volume"],
+                    r["ltp"],
+                    r["iv"],
+                )
                 for r in rows
             ]
 
@@ -435,13 +429,13 @@ class ExpiryTracker:
                 insert_rows,
             )
 
-            self._record_download(
-                symbol, exchange, canonical_expiry, len(insert_rows)
-            )
+            self._record_download(symbol, exchange, canonical_expiry, len(insert_rows))
 
         logger.info(
             "Captured %d option chain rows for %s expiry %s",
-            len(insert_rows), symbol, expiry,
+            len(insert_rows),
+            symbol,
+            expiry,
         )
         return len(insert_rows)
 
@@ -459,20 +453,18 @@ class ExpiryTracker:
         candidate = self._client
         if candidate is None:
             return None
-        if callable(candidate) and not any(
-            callable(getattr(candidate, name, None)) for name in _CHAIN_METHOD_NAMES
-        ):
+        if callable(candidate) and not any(callable(getattr(candidate, name, None)) for name in _CHAIN_METHOD_NAMES):
             try:
                 return candidate()
             except Exception as exc:  # noqa: BLE001 - capture reports "no client"
-                logger.warning("OpenAlgo client provider failed for ExpiryTracker: %s", exc)
+                logger.warning("native broker client provider failed for ExpiryTracker: %s", exc)
                 return None
         return candidate
 
     def _fetch_option_chain(self, client: Any, symbol: str, exchange: str, expiry: str) -> Any:
-        """Call the given broker/OpenAlgo client using supported chain shapes."""
+        """Call the given broker/native broker client using supported chain shapes."""
         if client is None:
-            raise RuntimeError("No OpenAlgo client configured")
+            raise RuntimeError("No native broker client configured")
 
         payload = {
             "symbol": symbol,
@@ -553,16 +545,16 @@ class ExpiryTracker:
         exchange: str,
         expiry: str,
     ) -> list[dict[str, Any]]:
-        """Parse OpenAlgo optionchain response into flat rows.
+        """Parse native broker optionchain response into flat rows.
 
-        OpenAlgo returns the option chain in various formats depending on
+        native broker returns the option chain in various formats depending on
         broker. This method handles the common shapes:
         - List of dicts with ``strike_price``, ``call_oi``, ``put_oi``, etc.
         - Dict with ``data`` key containing the list.
         """
         records: list[dict[str, Any]] = []
 
-        # Unwrap typed clients, OpenAlgo envelopes, and gateway/native shapes.
+        # Unwrap typed clients, native broker envelopes, and gateway/native shapes.
         data_map = ExpiryTracker._as_mapping(data)
         if data_map is not None:
             chain_list = data_map.get(
@@ -593,38 +585,42 @@ class ExpiryTracker:
             pe = ExpiryTracker._as_mapping(entry_map.get("pe")) or {}
 
             # CE row
-            records.append({
-                "symbol": symbol,
-                "exchange": exchange,
-                "expiry_date": expiry,
-                "strike": strike,
-                "option_type": "CE",
-                "oi": ExpiryTracker._get_int(ce, ("oi", "open_interest"))
-                or ExpiryTracker._get_int(entry_map, ("call_oi", "ce_oi")),
-                "volume": ExpiryTracker._get_int(ce, ("volume",))
-                or ExpiryTracker._get_int(entry_map, ("call_volume", "ce_volume")),
-                "ltp": ExpiryTracker._get_number(ce, ("ltp", "last_price"))
-                or ExpiryTracker._get_number(entry_map, ("call_ltp", "ce_ltp")),
-                "iv": ExpiryTracker._get_number(ce, ("iv", "implied_volatility"))
-                or ExpiryTracker._get_number(entry_map, ("call_iv", "ce_iv")),
-            })
+            records.append(
+                {
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "expiry_date": expiry,
+                    "strike": strike,
+                    "option_type": "CE",
+                    "oi": ExpiryTracker._get_int(ce, ("oi", "open_interest"))
+                    or ExpiryTracker._get_int(entry_map, ("call_oi", "ce_oi")),
+                    "volume": ExpiryTracker._get_int(ce, ("volume",))
+                    or ExpiryTracker._get_int(entry_map, ("call_volume", "ce_volume")),
+                    "ltp": ExpiryTracker._get_number(ce, ("ltp", "last_price"))
+                    or ExpiryTracker._get_number(entry_map, ("call_ltp", "ce_ltp")),
+                    "iv": ExpiryTracker._get_number(ce, ("iv", "implied_volatility"))
+                    or ExpiryTracker._get_number(entry_map, ("call_iv", "ce_iv")),
+                }
+            )
 
             # PE row
-            records.append({
-                "symbol": symbol,
-                "exchange": exchange,
-                "expiry_date": expiry,
-                "strike": strike,
-                "option_type": "PE",
-                "oi": ExpiryTracker._get_int(pe, ("oi", "open_interest"))
-                or ExpiryTracker._get_int(entry_map, ("put_oi", "pe_oi")),
-                "volume": ExpiryTracker._get_int(pe, ("volume",))
-                or ExpiryTracker._get_int(entry_map, ("put_volume", "pe_volume")),
-                "ltp": ExpiryTracker._get_number(pe, ("ltp", "last_price"))
-                or ExpiryTracker._get_number(entry_map, ("put_ltp", "pe_ltp")),
-                "iv": ExpiryTracker._get_number(pe, ("iv", "implied_volatility"))
-                or ExpiryTracker._get_number(entry_map, ("put_iv", "pe_iv")),
-            })
+            records.append(
+                {
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "expiry_date": expiry,
+                    "strike": strike,
+                    "option_type": "PE",
+                    "oi": ExpiryTracker._get_int(pe, ("oi", "open_interest"))
+                    or ExpiryTracker._get_int(entry_map, ("put_oi", "pe_oi")),
+                    "volume": ExpiryTracker._get_int(pe, ("volume",))
+                    or ExpiryTracker._get_int(entry_map, ("put_volume", "pe_volume")),
+                    "ltp": ExpiryTracker._get_number(pe, ("ltp", "last_price"))
+                    or ExpiryTracker._get_number(entry_map, ("put_ltp", "pe_ltp")),
+                    "iv": ExpiryTracker._get_number(pe, ("iv", "implied_volatility"))
+                    or ExpiryTracker._get_number(entry_map, ("put_iv", "pe_iv")),
+                }
+            )
 
         return records
 
@@ -738,9 +734,7 @@ class ExpiryTracker:
         results: dict[str, int] = {}
         for expiry in expiries:
             if skip_existing and self.has_snapshot(symbol, expiry, exchange):
-                logger.info(
-                    "Skipping %s %s — snapshot already exists", symbol, expiry
-                )
+                logger.info("Skipping %s %s — snapshot already exists", symbol, expiry)
                 results[expiry] = 0
                 continue
             try:
@@ -751,9 +745,7 @@ class ExpiryTracker:
                 logger.error("Rate limit hit during bulk capture: %s", exc)
                 break
             except Exception as exc:  # noqa: BLE001
-                logger.error(
-                    "Failed to capture %s %s: %s", symbol, expiry, exc
-                )
+                logger.error("Failed to capture %s %s: %s", symbol, expiry, exc)
                 results[expiry] = 0
         return results
 

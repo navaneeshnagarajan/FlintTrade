@@ -18,6 +18,7 @@ class TestToIstNaive:
 
     def test_unix_seconds_to_ist(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         # 2026-03-16 03:45:00 UTC = 2026-03-16 09:15:00 IST
         ts = datetime(2026, 3, 16, 3, 45, 0, tzinfo=timezone.utc).timestamp()
         result = _to_ist_naive(ts)
@@ -25,40 +26,47 @@ class TestToIstNaive:
 
     def test_unix_milliseconds_to_ist(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         ts_ms = datetime(2026, 3, 16, 3, 45, 0, tzinfo=timezone.utc).timestamp() * 1000
         result = _to_ist_naive(ts_ms)
         assert result == "2026-03-16 09:15:00"
 
     def test_aware_datetime_to_ist(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         dt = datetime(2026, 3, 16, 3, 45, 0, tzinfo=timezone.utc)
         result = _to_ist_naive(dt)
         assert result == "2026-03-16 09:15:00"
 
     def test_naive_datetime_treated_as_ist(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         dt = datetime(2026, 3, 16, 9, 15, 0)
         result = _to_ist_naive(dt)
         assert result == "2026-03-16 09:15:00"
 
     def test_iso_string_utc(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         result = _to_ist_naive("2026-03-16T03:45:00+00:00")
         assert result == "2026-03-16 09:15:00"
 
     def test_iso_string_naive(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         result = _to_ist_naive("2026-03-16 09:15:00")
         assert result == "2026-03-16 09:15:00"
 
     def test_date_only_string(self):
         from flinttrade_historical.normaliser import _to_ist_naive
+
         result = _to_ist_naive("2026-03-16")
         assert result == "2026-03-16 00:00:00"
 
     def test_invalid_string_raises(self):
         from flinttrade_historical.normaliser import _to_ist_naive
         import pytest
+
         with pytest.raises(ValueError):
             _to_ist_naive("not-a-date")
 
@@ -73,36 +81,43 @@ class TestValidateBar:
 
     def test_valid_bar(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": 100, "high": 105, "low": 98, "close": 102, "volume": 1000, "oi": 0}
         assert _validate_bar(bar) == ""
 
     def test_high_less_than_low(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": 100, "high": 90, "low": 98, "close": 95, "volume": 1000, "oi": 0}
         assert "high" in _validate_bar(bar).lower()
 
     def test_negative_price(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": -1, "high": 10, "low": -2, "close": 5, "volume": 100, "oi": 0}
         assert "negative" in _validate_bar(bar).lower()
 
     def test_negative_volume(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": 100, "high": 105, "low": 98, "close": 102, "volume": -1, "oi": 0}
         assert "volume" in _validate_bar(bar).lower()
 
     def test_negative_oi(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": 100, "high": 105, "low": 98, "close": 102, "volume": 100, "oi": -5}
         assert "oi" in _validate_bar(bar).lower()
 
     def test_price_exceeds_maximum(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": 2_000_000, "high": 2_100_000, "low": 1_900_000, "close": 2_000_000, "volume": 10}
         assert "maximum" in _validate_bar(bar).lower()
 
     def test_high_less_than_open(self):
         from flinttrade_historical.normaliser import _validate_bar
+
         bar = {"open": 110, "high": 105, "low": 98, "close": 102, "volume": 100, "oi": 0}
         assert _validate_bar(bar) != ""
 
@@ -117,6 +132,7 @@ class TestNormaliseColumns:
 
     def test_openchart_column_names(self):
         from flinttrade_historical.normaliser import _normalise_columns
+
         raw = {"Timestamp": "2026-03-16", "Open": 100, "High": 105, "Low": 98, "Close": 102, "Volume": 1000}
         mapped = _normalise_columns(raw)
         assert "timestamp" in mapped
@@ -128,12 +144,14 @@ class TestNormaliseColumns:
 
     def test_lowercase_passthrough(self):
         from flinttrade_historical.normaliser import _normalise_columns
+
         raw = {"timestamp": "2026-03-16", "open": 100, "high": 105, "low": 98, "close": 102, "volume": 1000}
         mapped = _normalise_columns(raw)
         assert mapped["timestamp"] == "2026-03-16"
 
     def test_oi_aliases(self):
         from flinttrade_historical.normaliser import _normalise_columns
+
         assert _normalise_columns({"OI": 50})["oi"] == 50
         assert _normalise_columns({"OpenInterest": 50})["oi"] == 50
         assert _normalise_columns({"open_interest": 50})["oi"] == 50
@@ -152,6 +170,7 @@ class TestOHLCVNormaliserNormalise:
 
     def test_basic_normalise(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [self._make_bar()]
         result = OHLCVNormaliser().normalise(bars)
         assert result.success
@@ -160,12 +179,14 @@ class TestOHLCVNormaliserNormalise:
 
     def test_empty_input(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         result = OHLCVNormaliser().normalise([])
         assert not result.success
         assert result.total_bars == 0
 
     def test_symbol_and_exchange_annotated(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [self._make_bar()]
         result = OHLCVNormaliser().normalise(bars, symbol="RELIANCE", exchange="NSE")
         assert result.bars[0].symbol == "RELIANCE"
@@ -173,6 +194,7 @@ class TestOHLCVNormaliserNormalise:
 
     def test_invalid_bar_dropped_by_default(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar(),
             {"timestamp": "2026-03-16 09:20:00", "open": 100, "high": 90, "low": 99, "close": 95, "volume": 1000},
@@ -184,6 +206,7 @@ class TestOHLCVNormaliserNormalise:
 
     def test_invalid_bar_kept_when_drop_invalid_false(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             {"timestamp": "2026-03-16 09:20:00", "open": 100, "high": 90, "low": 99, "close": 95, "volume": 1000},
         ]
@@ -194,6 +217,7 @@ class TestOHLCVNormaliserNormalise:
 
     def test_missing_timestamp_drops_bar(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [{"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}]
         result = OHLCVNormaliser().normalise(bars)
         assert result.total_bars == 0
@@ -201,6 +225,7 @@ class TestOHLCVNormaliserNormalise:
 
     def test_bars_sorted_oldest_first(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar("2026-03-16 09:20:00"),
             self._make_bar("2026-03-16 09:15:00"),
@@ -211,13 +236,17 @@ class TestOHLCVNormaliserNormalise:
 
     def test_openchart_column_names(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
-        bars = [{"Timestamp": "2026-03-16 09:15:00", "Open": 100, "High": 101, "Low": 99, "Close": 100.5, "Volume": 1000}]
+
+        bars = [
+            {"Timestamp": "2026-03-16 09:15:00", "Open": 100, "High": 101, "Low": 99, "Close": 100.5, "Volume": 1000}
+        ]
         result = OHLCVNormaliser().normalise(bars)
         assert result.success
         assert result.bars[0].close == 100.5
 
     def test_forward_fill_zero_close(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar("2026-03-16 09:15:00", c=100),
             {"timestamp": "2026-03-16 09:20:00", "open": 100, "high": 101, "low": 99, "close": 0, "volume": 0},
@@ -228,6 +257,7 @@ class TestOHLCVNormaliserNormalise:
 
     def test_no_forward_fill_zero_close_dropped(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar("2026-03-16 09:15:00", c=100),
             # close=0 with open=0 fails high>=open — but high=0, open=0 is ok, low=0 ok
@@ -247,6 +277,7 @@ class TestIntradayCutoff:
 
     def test_bars_before_cutoff_kept(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar("2026-03-16 09:15:00"),
             self._make_bar("2026-03-16 15:29:59"),
@@ -256,6 +287,7 @@ class TestIntradayCutoff:
 
     def test_bars_after_cutoff_dropped_for_intraday(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar("2026-03-16 09:15:00"),
             self._make_bar("2026-03-16 15:30:00"),  # After cutoff
@@ -267,12 +299,14 @@ class TestIntradayCutoff:
 
     def test_cutoff_not_applied_for_daily(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [self._make_bar("2026-03-16")]
         result = OHLCVNormaliser().normalise(bars, interval="D")
         assert result.total_bars == 1
 
     def test_cutoff_disabled(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         bars = [
             self._make_bar("2026-03-16 15:30:00"),
         ]
@@ -290,10 +324,12 @@ class TestNormaliseDataframe:
 
     def test_dataframe_with_index_as_timestamp(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         try:
             import pandas as pd
         except ImportError:
             import pytest
+
             pytest.skip("pandas not installed")
 
         df = pd.DataFrame(
@@ -313,16 +349,19 @@ class TestNormaliseDataframe:
 
     def test_empty_dataframe(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         try:
             import pandas as pd
         except ImportError:
             import pytest
+
             pytest.skip("pandas not installed")
         result = OHLCVNormaliser().normalise_dataframe(pd.DataFrame())
         assert not result.success
 
     def test_none_dataframe(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
+
         result = OHLCVNormaliser().normalise_dataframe(None)
         assert not result.success
 
@@ -338,8 +377,17 @@ class TestNormaliseProviderBars:
     def test_provider_bars_normalised(self):
         from flinttrade_historical.normaliser import OHLCVNormaliser
         from flinttrade_historical.data_provider import ProviderBar
+
         bars = [
-            ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100.5, volume=1000, source="openchart"),
+            ProviderBar(
+                timestamp="2026-03-16 09:15:00",
+                open=100,
+                high=101,
+                low=99,
+                close=100.5,
+                volume=1000,
+                source="openchart",
+            ),
         ]
         result = OHLCVNormaliser().normalise_provider_bars(bars, interval="5m")
         assert result.success
@@ -356,12 +404,16 @@ class TestConvenienceFunction:
 
     def test_basic_call(self):
         from flinttrade_historical.normaliser import normalise
-        bars = [{"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000}]
+
+        bars = [
+            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000}
+        ]
         result = normalise(bars)
         assert result.success
 
     def test_kwargs_forwarded(self):
         from flinttrade_historical.normaliser import normalise
+
         bars = [{"timestamp": "2026-03-16 15:30:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}]
         # With cutoff disabled, the bar should survive
         result = normalise(bars, interval="5m", apply_intraday_cutoff=False)

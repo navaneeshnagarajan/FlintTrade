@@ -60,7 +60,7 @@ describe("BreadthTab", () => {
   it("shows sample badge when broker is disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<BreadthTab />);
-    expect(screen.queryByTitle(/sample/i)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Showing sample breadth data/)).toHaveTextContent("Sample");
   });
 
   it("keeps the sample badge while connected until real live data arrives", () => {
@@ -68,7 +68,7 @@ describe("BreadthTab", () => {
     global.fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
     mockUseBrokerConnected.mockReturnValue(true);
     render(<BreadthTab />);
-    expect(screen.queryByTitle(/sample/i)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Showing sample breadth data/)).toHaveTextContent("Sample");
   });
 
   it("hides the sample badge once the backend returns real (non-sample) data", async () => {
@@ -137,7 +137,7 @@ describe("BreadthTab", () => {
     // The payload really was adopted…
     expect(await screen.findByText("47")).toBeTruthy();
     // …and it is still badged Sample, because the backend never claimed otherwise.
-    expect(screen.queryByTitle(/sample/i)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Showing sample breadth data/)).toHaveTextContent("Sample");
   });
 
   it("charts REAL accumulated history when /breadth/history reports live points", async () => {
@@ -184,7 +184,7 @@ describe("BreadthTab", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     render(<BreadthTab />);
     // Badge persists because the data is the backend's sample, not live.
-    expect(screen.queryByTitle(/sample/i)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Showing sample breadth data/)).toHaveTextContent("Sample");
   });
 
   it("renders A/D ratio section with Advances and Declines labels", () => {
@@ -248,7 +248,7 @@ describe("BreadthTab", () => {
     expect(screen.getAllByText("NSE 500").length).toBeGreaterThan(0);
     expect(screen.getAllByText("BSE 500").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Nifty 50").length).toBeGreaterThan(0);
-    expect(screen.queryByTitle(/no live per-index breadth source/i)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/no live per-index breadth source/i)).toHaveTextContent("Sample");
   });
 
   // -------------------------------------------------------------------------
@@ -264,7 +264,7 @@ describe("BreadthTab", () => {
     expect(screen.getByText("BANKBARODA")).toBeTruthy();
     // …under a Sample chip.
     const heading = screen.getByText("Top Movers");
-    expect(heading.querySelector("span")).toBeNull();
+    expect(heading.querySelector("span")).toHaveTextContent("Sample");
   });
 
   it("renders live movers with a Live chip when the quote sweep is healthy", () => {

@@ -579,7 +579,7 @@ describe("ChartWidget", () => {
     const view = render(<ChartWidget />);
     await waitFor(() => expect(apiMocks.getQuotes).toHaveBeenCalledTimes(1));
 
-    dataScopeState.value = "live:openalgo:default";
+    dataScopeState.value = "live:native:dhan:A1";
     view.rerender(<ChartWidget params={{}} />);
 
     await waitFor(() => expect(apiMocks.getQuotes).toHaveBeenCalledTimes(2));
@@ -698,7 +698,7 @@ describe("ChartWidget", () => {
     });
     expect(await screen.findByText("101.25")).toBeInTheDocument();
 
-    dataScopeState.value = "live:openalgo:new-connection";
+    dataScopeState.value = "live:native:upstox:U2";
     view.rerender(<ChartWidget params={{ dataScope: dataScopeState.value }} />);
 
     await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledTimes(2));

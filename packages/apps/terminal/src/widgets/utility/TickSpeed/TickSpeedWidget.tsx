@@ -1,18 +1,16 @@
 /**
- * TickSpeedWidget — WebSocket tick delivery speed and feed-health monitor.
+ * TickSpeedWidget — tick delivery speed preview and feed-health monitor.
  *
- * When the live WS feed is up the metrics are MEASURED, not simulated:
- *   - Ticks per second — counted directly from the shared WS service tick
- *     stream over a rolling 1-second window.
- *   - Last tick — real age of the most recent tick (WS diagnostics.tickAgeMs),
+ * With an admitted feed, metrics are measured from the local interest registry:
+ *   - Ticks per second — counted over a rolling 1-second window.
+ *   - Last tick — real age of the most recent published tick,
  *     the honest signal for a stale/frozen feed.
- *   - Reconnections — real cumulative reconnect count from WS diagnostics.
+ *   - Reconnections — cumulative feed diagnostic count.
  *   - Connection quality — derived from the measured tick rate.
  *
  * Mini spark chart: measured tick-rate trend over the last 5 minutes.
  *
- * When the feed is DOWN, a clearly-badged "Sample" preview is shown (the
- * isConnected guard + visible badge required by the no-fabricated-data rule).
+ * With no admitted feed, the visible Example badge identifies preview metrics.
  * Round-trip latency and dropped-tick % are intentionally NOT shown — neither
  * is measurable from the browser without server sequence numbers, so we do not
  * invent them.
@@ -69,7 +67,7 @@ const QUALITY_DOT: Record<Quality, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Sample preview shown only behind the "Sample" badge (feed down)
+// Illustrative preview shown only behind the Example metrics badge.
 // ---------------------------------------------------------------------------
 
 const SAMPLE_METRICS: TickMetrics = {
@@ -154,8 +152,8 @@ function MetricRow({ label, value, unit, valueClass }: {
 
 function TickSpeedWidget() {
   const track = useTrackBehavior();
-  // The tick feed rides the WebSocket, so wsConnected — not the REST ping
-  // status — is the honest "is the feed live?" signal for this widget.
+  // No network streaming transport is currently active. Keep preview metrics
+  // explicitly labelled until an admitted feed supplies connection authority.
   const wsConnected = useConnectionStore((s) => s.wsConnected);
 
   const [metrics, setMetrics] = useState<TickMetrics>(SAMPLE_METRICS);
@@ -170,7 +168,7 @@ function TickSpeedWidget() {
 
   useEffect(() => {
     if (!wsConnected) {
-      // Feed down — show the clearly-badged sample preview.
+      // Feed unavailable — show the explicitly labelled Example preview.
       setSpark(simulateSpark());
       setMetrics(SAMPLE_METRICS);
       return;
@@ -178,7 +176,7 @@ function TickSpeedWidget() {
 
     const ws = getWsService();
     if (!ws) {
-      // Store says connected but the WS singleton is absent — show an honest
+      // A missing local registry means there is no observation source — show an
       // empty state rather than fabricated numbers.
       setSpark(emptySpark());
       setMetrics({ ticksPerSec: 0, lastTickAgeMs: -1, reconnectCount: 0, quality: "poor" });
@@ -239,7 +237,11 @@ function TickSpeedWidget() {
           ? <Wifi size={12} className="text-profit" aria-label="Connected" />
           : <WifiOff size={12} className="text-text-muted" aria-label="Disconnected" />
         }
-        
+        {!wsConnected && (
+          <span className="text-xxs text-accent" role="status" aria-label="Illustrative Example metrics; no admitted feed">
+            Example
+          </span>
+        )}
       </div>
 
       {/* Metrics */}

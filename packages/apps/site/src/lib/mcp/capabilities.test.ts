@@ -52,12 +52,12 @@ describe('docs index generation', () => {
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`29 ${'analysis'}`);
   });
 
-  it('keeps broker catalogue count pins aligned at 37', () => {
+  it('keeps broker catalogue count pins aligned at 5', () => {
     const claude = readFileSync(resolve(process.cwd(), '../../../CLAUDE.md'), 'utf8');
     const agents = readFileSync(resolve(process.cwd(), '../../../AGENTS.md'), 'utf8');
 
-    expect(claude).toContain('`BROKER_CATALOG` (37 brokers)');
-    expect(agents).toContain('37 brokers');
+    expect(claude).toContain('`BROKER_CATALOG` (5 brokers)');
+    expect(agents).toContain('5 brokers');
     expect(claude).not.toContain('`BROKER_CATALOG` (35 brokers)');
     expect(agents).not.toContain('35 brokers');
   });
@@ -78,11 +78,10 @@ describe('docs index generation', () => {
 
     expect(pageSource).toContain('<strong>71</strong>');
     expect(pageSource).not.toContain('<strong>84</strong>');
-    expect(pageSource).toContain('OpenAlgo is the working broker path');
+    expect(pageSource).toContain('Broker connections use the native gateway.');
     expect(pageSource).toContain('Native broker HTTP is frozen until Task 9D and Task 7C.2');
     expect(pageSource).toContain('adapters stay evidence-gated behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>84</strong>');
-    expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
     expect(pageSource).not.toContain('verified native brokers');
   });
 

@@ -103,6 +103,7 @@ def _make_app(svc: MagicMock | None, testing: bool = True) -> Flask:
     flask_app.config["TESTING"] = testing
     if svc is not None:
         flask_app.config["BRACKET_SERVICE"] = svc
+    flask_app.config["BROKER_ROUTER"] = SimpleNamespace(default_selector="dhan:default")
     flask_app.register_blueprint(bracket_bp)
     return flask_app
 
@@ -358,19 +359,10 @@ class TestPrincipalDerivation:
         assert principal.adapter_id == "dhan"
         assert principal.account_id == "acct-7"
 
-    def test_account_only_defaults_adapter(self, client, service) -> None:
-        """An account_id without a broker targets the default openalgo adapter.
-
-        Args:
-            client:  Flask test client.
-            service: Mock service backing the client.
-        """
-        client.post(
-            "/api/v1/orders/bracket", json={**_BRACKET_BODY, "account_id": "acct-9"}
-        )
-        principal = self._placed_principal(service)
-        assert principal.adapter_id == "openalgo"
-        assert principal.account_id == "acct-9"
+    def test_account_only_requires_explicit_native_adapter(self, client, service) -> None:
+        response = client.post("/api/v1/orders/bracket", json={**_BRACKET_BODY, "account_id": "acct-9"})
+        assert response.status_code == 503
+        service.place_bracket.assert_not_called()
 
     def test_default_selector_from_router_config(self, service) -> None:
         """Without body fields, ``brokers.execution.default`` sets the target."""
@@ -382,15 +374,13 @@ class TestPrincipalDerivation:
         assert principal.adapter_id == "dhan"
         assert principal.account_id == "acct-live"
 
-    def test_malformed_default_selector_falls_back(self, service) -> None:
-        """A selector without a colon is ignored — fallback is openalgo:default."""
+    def test_malformed_default_selector_fails_closed(self, service) -> None:
         flask_app = _make_app(service)
         flask_app.config["BROKER_ROUTER"] = SimpleNamespace(default_selector="no-colon-here")
-        with flask_app.test_client() as c:
-            c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
-        principal = self._placed_principal(service)
-        assert principal.adapter_id == "openalgo"
-        assert principal.account_id == "default"
+        with flask_app.test_client() as client:
+            response = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        assert response.status_code == 503
+        service.place_bracket.assert_not_called()
 
     def test_identity_comes_from_session_jwt(self, client, service, pinned_jwt_secret) -> None:
         """actor_id/jti on the principal come from the verified session JWT.

@@ -438,21 +438,15 @@ class PluginLoader:
     def _validate_class(cls: type, py_file: Path) -> None:
         """Validate that *cls* is a proper PluginInterface subclass."""
         if not (isinstance(cls, type) and issubclass(cls, PluginInterface)):
-            raise PluginError(
-                f"{py_file.name}: Plugin does not inherit from PluginInterface"
-            )
+            raise PluginError(f"{py_file.name}: Plugin does not inherit from PluginInterface")
         for attr in ("name", "version", "description"):
             if not isinstance(getattr(cls, attr, None), str):
-                raise PluginError(
-                    f"{py_file.name}: Plugin.{attr} must be a str class attribute"
-                )
+                raise PluginError(f"{py_file.name}: Plugin.{attr} must be a str class attribute")
 
     def _find_file_for_name(self, name: str) -> Path:
         """Locate the ``*.py`` file whose ``Plugin.name == name``."""
         if not self._plugin_dir.exists():
-            raise PluginError(
-                f"Plugin directory {self._plugin_dir} does not exist"
-            )
+            raise PluginError(f"Plugin directory {self._plugin_dir} does not exist")
         for py_file in self._plugin_dir.glob("*.py"):
             if py_file.name.startswith("_"):
                 continue

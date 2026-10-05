@@ -23,9 +23,8 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from .adapter import BROKER_CATALOG, OPENALGO_PLATFORM_MCP
+from .adapter import BROKER_CATALOG
 from .capabilities import REGISTRY, BrokerCapabilities
-from .models import BrokerMCPInfo
 from .monday_read_smoke import monday_read_connectable
 from .recommendations import (
     NATIVE_BROKER_CAPABILITIES,
@@ -258,24 +257,6 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
     return data
 
 
-def _openalgo_mcp_entry() -> dict[str, Any]:
-    """Serialise the OpenAlgo platform MCP row.
-
-    OpenAlgo is the bridge platform, not a BROKER_CATALOG broker, but its
-    self-hosted MCP is the first-preference MCP surface (one server covering
-    every bridged broker), so the catalogue route serves it ahead of the
-    broker-hosted entries. Validated through the same BrokerMCPInfo model so
-    the row cannot drift from the schema the UI renders.
-    """
-    return {
-        "adapter_id": "openalgo",
-        "display_name": "OpenAlgo (bridge)",
-        "native": False,
-        "connectable": True,
-        "requires_static_ip": False,
-        "native_connect_blockers": [],
-        "mcp": BrokerMCPInfo(**OPENALGO_PLATFORM_MCP).model_dump(),
-    }
 
 
 @capabilities_bp.route("/broker/mcp", methods=["GET"])
@@ -288,11 +269,9 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
     """
     broker_param = request.args.get("broker", "").strip().lower()
     if broker_param:
-        if broker_param == "openalgo":
-            return jsonify({"status": "success", "broker": _openalgo_mcp_entry()}), 200
         info = BROKER_CATALOG.get(broker_param)
         if info is None:
-            known = ["openalgo"] + sorted(
+            known = sorted(
                 name for name, row in BROKER_CATALOG.items() if row.mcp is not None
             )
             return (
@@ -304,7 +283,7 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
                 404,
             )
         if info.mcp is None:
-            known = ["openalgo"] + sorted(
+            known = sorted(
                 name for name, row in BROKER_CATALOG.items() if row.mcp is not None
             )
             return (
@@ -317,9 +296,8 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
             )
         return jsonify({"status": "success", "broker": _mcp_entry(info)}), 200
 
-    # OpenAlgo (the primary, community-tested path) leads the list; the
     # broker-hosted entries follow in catalogue order.
-    brokers = [_openalgo_mcp_entry()] + [
+    brokers = [
         _mcp_entry(info) for info in BROKER_CATALOG.values() if info.mcp is not None
     ]
     return jsonify({"status": "success", "count": len(brokers), "brokers": brokers}), 200
@@ -346,24 +324,6 @@ def _default_recommendation_capabilities(include_coming_soon: bool) -> dict[str,
         if BROKER_CATALOG.get(broker_id) is not None
         and monday_read_connectable(broker_id, BROKER_CATALOG[broker_id].connectable)
     }
-
-
-# OpenAlgo is the first-preference path on every user-facing surface
-# (architecture north star): the ranking engine deliberately excludes the
-# bridge (a meta-adapter cannot be capability-ranked), so the route emits this
-# platform-level leading note for the recommendations panel to render FIRST —
-# mirroring the MCP catalogue's leading OpenAlgo entry. Without it, the panel
-# steers operators toward native brokers whose order paths are not yet
-# live-verified while never mentioning the recommended path.
-_OPENALGO_FIRST_NOTE: dict[str, str] = {
-    "broker_id": "openalgo",
-    "display_name": "OpenAlgo (bridge)",
-    "note": (
-        "Recommended first: the OpenAlgo bridge covers every use case through "
-        "your configured broker — 30+ community-tested brokers on the primary, "
-        "battle-tested path. Native adapters below are the secondary path."
-    ),
-}
 
 
 @capabilities_bp.route("/broker/recommendations", methods=["GET"])
@@ -431,7 +391,6 @@ def get_recommendations() -> tuple[Any, int]:
                 {
                     "status": "success",
                     "use_case": use_case.value,
-                    "openalgo_first": _OPENALGO_FIRST_NOTE,
                     "recommendations": [_rec_to_dict(r) for r in recs],
                 }
             ),
@@ -443,7 +402,6 @@ def get_recommendations() -> tuple[Any, int]:
         jsonify(
             {
                 "status": "success",
-                "openalgo_first": _OPENALGO_FIRST_NOTE,
                 "use_cases": {
                     uc: [_rec_to_dict(r) for r in recs] for uc, recs in everything.items()
                 },

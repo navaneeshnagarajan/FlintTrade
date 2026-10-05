@@ -7,8 +7,8 @@
  * saying why gating it would be unsafe (risk-reducing cancels must never be
  * blocked by hydration state).
  *
- * This guard exists because three write paths — the Ditto mirror arming, the
- * Action Centre approval, and the smart-route cancel — reached the broker
+ * This guard covers the retained Action Centre approval and smart-route
+ * execution paths after the account-mirroring transport was retired. Paths once reached the broker
  * with no assert and nothing in either the service tests or the widget tests
  * would have failed. The per-function unit tests check behaviour; this one
  * checks that no NEW write path can be added without making that choice
@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -31,16 +31,6 @@ function readService(file: string): string {
  * function and the file it lives in.
  */
 const GATED_WRITE_PATHS: ReadonlyArray<{ file: string; fn: string; why: string }> = [
-  {
-    file: "ftApi.ditto.ts",
-    fn: "startDittoMirror",
-    why: "arms a live multi-account order path",
-  },
-  {
-    file: "ftApi.ditto.ts",
-    fn: "setDittoAccountEnabled",
-    why: "widens the live mirror's blast radius when enabling",
-  },
   {
     file: "ftApi.trading.ts",
     fn: "approveOrder",
@@ -74,11 +64,6 @@ const EXEMPT_WRITE_PATHS: ReadonlyArray<{ file: string; fn: string; marker: RegE
     fn: "rejectOrder",
     marker: /Not gated/i,
   },
-  {
-    file: "ftApi.ditto.ts",
-    fn: "stopDittoMirror",
-    marker: /NOT write-target gated/i,
-  },
 ];
 
 /** Extract the source of a single exported function/const, docstring included. */
@@ -104,8 +89,6 @@ describe("live write paths fail closed on an unready native target", () => {
       const decl = extractDeclaration(readService(file), fn);
       const asserts =
         /assertNativeWriteTargetReadyOrThrow/.test(decl) ||
-        // Ditto routes both arming calls through one shared helper.
-        /assertMirrorArmingAllowed/.test(decl) ||
         // Smart route resolves its target through a wrapper that asserts.
         /withSmartRouteBrokerTarget/.test(decl);
       expect(
@@ -128,13 +111,9 @@ describe("ungated write paths carry a written rationale", () => {
   }
 });
 
-describe("the shared ditto arming helper reaches the real assert", () => {
-  it("assertMirrorArmingAllowed calls assertNativeWriteTargetReadyOrThrow", () => {
-    const source = readService("ftApi.ditto.ts");
-    const helper = source.slice(
-      source.indexOf("function assertMirrorArmingAllowed"),
-      source.indexOf("export const getDittoAccounts"),
-    );
-    expect(helper).toContain("assertNativeWriteTargetReadyOrThrow");
+describe("retired mirroring has no terminal write transport", () => {
+  it("cannot expose a retired account mirror client from the service barrel", () => {
+    expect(existsSync(resolve(servicesDir, "ftApi.ditto.ts"))).toBe(false);
+    expect(readService("ftApi.ts")).not.toMatch(/ftApi\.ditto|startDittoMirror|setDittoAccountEnabled/);
   });
 });

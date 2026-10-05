@@ -1,44 +1,23 @@
-"""Seasonality indicator — monthly, weekday, and day-of-month return patterns.
+"""Calendar return summaries implemented from closing-price observations.
 
-Inspired by OpenAlgo's seasonality.py example.  Answers questions like:
-  - "Which months are historically strong for NIFTY?"
-  - "Do Mondays underperform Fridays?"
-  - "Is the last trading day of the month a reliable up-day?"
-
-All functions:
-- Accept a pandas DataFrame with a DatetimeIndex and a ``close`` column.
-- Return plain dataclasses or dicts — no external rendering dependency.
-- Are fully type-annotated and work with Python 3.12+.
+Monthly values compare the last observed close in successive months. Daily
+values compare consecutive observations. Neither calculation infers whether a
+month is complete or predicts future performance.
 """
 
 from __future__ import annotations
 
+import calendar
+from collections import defaultdict
 from dataclasses import dataclass
+from math import isfinite, nan
+from statistics import mean, median, stdev
 
 import pandas as pd
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class MonthlyStats:
-    """Statistics for a single calendar month aggregated across multiple years.
-
-    Attributes:
-        month: Calendar month number (1 = January … 12 = December).
-        month_name: Full English name of the month.
-        avg_return_pct: Mean monthly return across all sampled years (%).
-        median_return_pct: Median monthly return (%).
-        std_pct: Sample standard deviation of monthly returns (%).
-        positive_rate: Fraction of sampled years where the month closed
-            positive (0.0 – 1.0).
-        years_count: Number of complete months used in the calculation.
-        best_year: ``(year, return_pct)`` for the single strongest occurrence.
-        worst_year: ``(year, return_pct)`` for the single weakest occurrence.
-    """
-
     month: int
     month_name: str
     avg_return_pct: float
@@ -52,17 +31,6 @@ class MonthlyStats:
 
 @dataclass
 class WeekdayStats:
-    """Statistics for a single day of the week across all sampled trading days.
-
-    Attributes:
-        weekday: ISO weekday index (0 = Monday … 4 = Friday).
-        weekday_name: Full English name of the weekday.
-        avg_return_pct: Mean daily return on this weekday (%).
-        std_pct: Sample standard deviation of daily returns (%).
-        positive_rate: Fraction of occurrences that closed positive (0.0 – 1.0).
-        sample_count: Number of trading days used in the calculation.
-    """
-
     weekday: int
     weekday_name: str
     avg_return_pct: float
@@ -71,263 +39,102 @@ class WeekdayStats:
     sample_count: int
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-_MONTH_NAMES: list[str] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-]
-
-_WEEKDAY_NAMES: list[str] = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-]
+def _observations(frame: pd.DataFrame) -> list[tuple[pd.Timestamp, float]]:
+    if not isinstance(frame, pd.DataFrame):
+        raise TypeError("Expected a pandas DataFrame")
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        raise TypeError("Closing prices require a DatetimeIndex")
+    if "close" not in frame.columns:
+        raise ValueError("Closing prices require a close column")
+    return [
+        (stamp, float(value))
+        for stamp, value in frame["close"].sort_index().items()
+        if pd.notna(value) and isfinite(float(value))
+    ]
 
 
-def _require_close(ohlc: pd.DataFrame) -> pd.Series:
-    """Extract and validate the ``close`` column.
-
-    Args:
-        ohlc: Input DataFrame.  Must have a DatetimeIndex and a ``close``
-            column containing numeric data.
-
-    Returns:
-        The ``close`` Series.
-
-    Raises:
-        TypeError: If ``ohlc`` is not a DataFrame or its index is not a
-            DatetimeIndex.
-        ValueError: If the ``close`` column is absent.
-    """
-    if not isinstance(ohlc, pd.DataFrame):
-        raise TypeError(
-            f"ohlc must be a pandas DataFrame, got {type(ohlc).__name__}"
-        )
-    if not isinstance(ohlc.index, pd.DatetimeIndex):
-        raise TypeError(
-            "ohlc must have a DatetimeIndex; "
-            f"got {type(ohlc.index).__name__}"
-        )
-    if "close" not in ohlc.columns:
-        raise ValueError(
-            "ohlc DataFrame must contain a 'close' column; "
-            f"found columns: {list(ohlc.columns)}"
-        )
-    return ohlc["close"]
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def compute_monthly_seasonality(ohlc: pd.DataFrame) -> list[MonthlyStats]:
-    """Compute per-calendar-month return statistics from daily OHLC data.
-
-    Monthly returns are calculated as the percentage change between the last
-    closing price of consecutive calendar months (matching OpenAlgo's
-    ``resample("ME")`` approach).  Only complete months are included; if the
-    input ends mid-month the partial month is implicitly excluded because
-    ``pct_change`` requires a previous month-end.
-
-    Args:
-        ohlc: DataFrame with a ``DatetimeIndex`` (any timezone) and at least
-            a ``close`` column of numeric type.  Typically daily frequency but
-            any intraday or higher frequency also works because the function
-            resamples to month-end internally.
-
-    Returns:
-        A list of up to 12 :class:`MonthlyStats` objects, one for each
-        calendar month that has at least one complete observation in the
-        input.  Months with no data are omitted.
-
-    Example:
-        >>> stats = compute_monthly_seasonality(nifty_daily_df)
-        >>> for s in stats:
-        ...     print(f"{s.month_name}: avg={s.avg_return_pct:.2f}%  pos={s.positive_rate:.0%}")
-    """
-    close = _require_close(ohlc)
-
-    if close.empty:
-        return []
-
-    # Resample to last close of each calendar month then compute % change
-    monthly: pd.Series = close.resample("ME").last()
-    returns: pd.Series = monthly.pct_change() * 100
-    returns = returns.dropna()
-
-    if returns.empty:
-        return []
-
-    results: list[MonthlyStats] = []
-    for month in range(1, 13):
-        month_returns: pd.Series = returns[returns.index.month == month]
-        if month_returns.empty:
+def _changes(observations: list[tuple[pd.Timestamp, float]]) -> list[tuple[pd.Timestamp, float]]:
+    result = []
+    for (previous_stamp, previous), (stamp, current) in zip(observations, observations[1:]):
+        if previous == 0:
             continue
-
-        best_idx = month_returns.idxmax()
-        worst_idx = month_returns.idxmin()
-
-        results.append(
-            MonthlyStats(
-                month=month,
-                month_name=_MONTH_NAMES[month - 1],
-                avg_return_pct=float(month_returns.mean()),
-                median_return_pct=float(month_returns.median()),
-                std_pct=float(month_returns.std()),
-                positive_rate=float((month_returns > 0).mean()),
-                years_count=int(len(month_returns)),
-                best_year=(int(best_idx.year), float(month_returns.loc[best_idx])),
-                worst_year=(int(worst_idx.year), float(month_returns.loc[worst_idx])),
-            )
-        )
-
-    return results
-
-
-def compute_weekday_seasonality(ohlc: pd.DataFrame) -> list[WeekdayStats]:
-    """Compute average daily return broken down by day of the trading week.
-
-    Daily return for bar *i* is ``(close[i] - close[i-1]) / close[i-1] * 100``.
-    Only weekdays 0–4 (Monday–Friday) are included; weekends are skipped
-    automatically because Indian exchanges do not trade on those days.
-
-    Args:
-        ohlc: DataFrame with a ``DatetimeIndex`` and a ``close`` column.
-            Daily frequency is expected, but any frequency is accepted — the
-            weekday is taken from the row's timestamp.
-
-    Returns:
-        A list of up to 5 :class:`WeekdayStats` objects (Monday to Friday),
-        only for weekdays that actually appear in the input.
-
-    Example:
-        >>> stats = compute_weekday_seasonality(nifty_daily_df)
-        >>> for s in stats:
-        ...     print(f"{s.weekday_name}: avg={s.avg_return_pct:.3f}%")
-    """
-    close = _require_close(ohlc)
-
-    if close.empty:
-        return []
-
-    daily_returns: pd.Series = close.pct_change() * 100
-    daily_returns = daily_returns.dropna()
-
-    if daily_returns.empty:
-        return []
-
-    results: list[WeekdayStats] = []
-    for wd in range(5):  # 0=Monday … 4=Friday only
-        wd_returns: pd.Series = daily_returns[daily_returns.index.weekday == wd]
-        if wd_returns.empty:
-            continue
-
-        results.append(
-            WeekdayStats(
-                weekday=wd,
-                weekday_name=_WEEKDAY_NAMES[wd],
-                avg_return_pct=float(wd_returns.mean()),
-                std_pct=float(wd_returns.std()),
-                positive_rate=float((wd_returns > 0).mean()),
-                sample_count=int(len(wd_returns)),
-            )
-        )
-
-    return results
-
-
-def compute_day_of_month_seasonality(ohlc: pd.DataFrame) -> dict[int, float]:
-    """Compute average daily return for each calendar day of the month (1–31).
-
-    Useful for identifying expiry-day patterns (e.g. monthly F&O expiry on
-    the last Thursday), month-end rebalancing effects, or salary-day demand
-    spikes.
-
-    Args:
-        ohlc: DataFrame with a ``DatetimeIndex`` and a ``close`` column.
-
-    Returns:
-        A ``dict`` mapping day-of-month (1–31) to mean daily return (%).
-        Only days that appear at least once in the input are included.
-
-    Example:
-        >>> dom = compute_day_of_month_seasonality(nifty_daily_df)
-        >>> print(f"Last Thursday avg: {dom.get(28, float('nan')):.3f}%")
-    """
-    close = _require_close(ohlc)
-
-    if close.empty:
-        return {}
-
-    daily_returns: pd.Series = close.pct_change() * 100
-    daily_returns = daily_returns.dropna()
-
-    if daily_returns.empty:
-        return {}
-
-    result: dict[int, float] = {}
-    for dom in range(1, 32):
-        dom_returns: pd.Series = daily_returns[daily_returns.index.day == dom]
-        if not dom_returns.empty:
-            result[dom] = float(dom_returns.mean())
-
+        change = 100 * (current / previous - 1)
+        if isfinite(change):
+            result.append((stamp, change))
     return result
 
 
+def _monthly_changes(frame: pd.DataFrame) -> list[tuple[pd.Timestamp, float]]:
+    closing: dict[tuple[int, int], tuple[pd.Timestamp, float]] = {}
+    for stamp, value in _observations(frame):
+        closing[(stamp.year, stamp.month)] = (stamp, value)
+    return _changes(list(closing.values()))
+
+
+def _sample_std(values: list[float]) -> float:
+    return stdev(values) if len(values) > 1 else nan
+
+
+def compute_monthly_seasonality(ohlc: pd.DataFrame) -> list[MonthlyStats]:
+    """Group observed month-to-month percentage changes by calendar month."""
+    groups: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    for stamp, change in _monthly_changes(ohlc):
+        groups[stamp.month].append((stamp.year, change))
+    summaries = []
+    for month, samples in sorted(groups.items()):
+        values = [value for year, value in samples]
+        summaries.append(
+            MonthlyStats(
+                month=month,
+                month_name=calendar.month_name[month],
+                avg_return_pct=mean(values),
+                median_return_pct=median(values),
+                std_pct=_sample_std(values),
+                positive_rate=sum(value > 0 for value in values) / len(values),
+                years_count=len(values),
+                best_year=max(samples, key=lambda sample: sample[1]),
+                worst_year=min(samples, key=lambda sample: sample[1]),
+            )
+        )
+    return summaries
+
+
+def compute_weekday_seasonality(ohlc: pd.DataFrame) -> list[WeekdayStats]:
+    """Summarise consecutive-observation returns for Monday through Friday."""
+    groups: dict[int, list[float]] = defaultdict(list)
+    for stamp, change in _changes(_observations(ohlc)):
+        if stamp.weekday() < 5:
+            groups[stamp.weekday()].append(change)
+    return [
+        WeekdayStats(
+            weekday=day,
+            weekday_name=calendar.day_name[day],
+            avg_return_pct=mean(values),
+            std_pct=_sample_std(values),
+            positive_rate=sum(value > 0 for value in values) / len(values),
+            sample_count=len(values),
+        )
+        for day, values in sorted(groups.items())
+    ]
+
+
+def compute_day_of_month_seasonality(ohlc: pd.DataFrame) -> dict[int, float]:
+    """Map observed calendar days to their mean consecutive-observation return."""
+    groups: dict[int, list[float]] = defaultdict(list)
+    for stamp, change in _changes(_observations(ohlc)):
+        groups[stamp.day].append(change)
+    return {day: mean(values) for day, values in sorted(groups.items())}
+
+
 def build_seasonality_matrix(ohlc: pd.DataFrame) -> pd.DataFrame:
-    """Build a year × month matrix of monthly percentage returns.
-
-    This mirrors the ``build_seasonality_matrix`` helper in OpenAlgo's
-    ``seasonality.py`` example, exposed here as a reusable utility.
-
-    Rows are years; columns are months 1–12.  A ``NaN`` cell means no data
-    was available for that year/month combination.
-
-    Args:
-        ohlc: DataFrame with a ``DatetimeIndex`` and a ``close`` column.
-
-    Returns:
-        A :class:`pandas.DataFrame` indexed by year (int) with integer
-        column labels 1–12 representing calendar months.
-
-    Example:
-        >>> matrix = build_seasonality_matrix(nifty_daily_df)
-        >>> print(matrix.round(2).to_string())
-    """
-    close = _require_close(ohlc)
-
-    if close.empty:
+    """Arrange observed monthly returns in a year by month matrix."""
+    cells = {(stamp.year, stamp.month): value for stamp, value in _monthly_changes(ohlc)}
+    if not cells:
         return pd.DataFrame(dtype=float)
-
-    monthly: pd.Series = close.resample("ME").last()
-    returns: pd.Series = monthly.pct_change() * 100
-
-    years = sorted({dt.year for dt in returns.dropna().index})
-    if not years:
-        return pd.DataFrame(dtype=float)
-
-    matrix = pd.DataFrame(index=years, columns=range(1, 13), dtype=float)
-
-    for dt, ret in returns.items():
-        if not pd.isna(ret) and dt.year in matrix.index:
-            matrix.loc[dt.year, dt.month] = ret
-
-    return matrix
+    years = sorted({year for year, month in cells})
+    return pd.DataFrame(
+        [[cells.get((year, month), nan) for month in range(1, 13)] for year in years],
+        index=years,
+        columns=range(1, 13),
+        dtype=float,
+    )

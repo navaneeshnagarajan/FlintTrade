@@ -42,7 +42,7 @@ SHELL := /usr/bin/env bash
 #      broker-sdk-sync, broker-reference-check
 #
 # 2. POSIX only (the recipe body itself needs bash and GNU coreutils)
-#      start-openalgo, start-legacy, health, ticks-test, sync-check,
+#      health, ticks-test, sync-check,
 #      logs-clear, install-docker, install-server-native, install-native,
 #      backup, restore
 #
@@ -79,11 +79,10 @@ ifneq (,$(wildcard .env))
 endif
 
 # Exported to scripts/ft.py, which reads them from the environment.
-OPENALGO_PORT ?= 5000
 FLINTTRADE_BACKEND_PORT ?= 5100
 FLINTTRADE_BACKEND_HOST ?= 127.0.0.1
 
-.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast check ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check site-url-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
+.PHONY: setup check-python start start-gateway stop restart status test test-fast check ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check site-url-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
 
 # ======================================================================
 # Setup
@@ -101,20 +100,14 @@ check-python: ## Verify Python >= 3.11 (required for StrEnum)
 # Service management
 # ======================================================================
 
-start: ## Start FlintTrade backend API (standalone; OpenAlgo is optional)
+start: ## Start FlintTrade backend API
 	@# delegates: PYTHONPATH=$(FLINTTRADE_PYTHONPATH) $(PYTHON) -m flinttrade_core.app
 	@# ft.py joins PYTHONPATH with os.pathsep, so it is ';' on Windows and ':' on POSIX.
 	@"$(PYTHON)" scripts/ft.py start
 
-# --- Gateway mode (v0.2.0+) — single process, no separate OpenAlgo ---
+# --- Native gateway mode — single process ---
 
 start-gateway: start ## Alias for start (standalone FlintTrade backend)
-
-start-openalgo: ## Start optional local OpenAlgo integration service
-	@bash infra/scripts/openalgo/start-openalgo.sh
-
-# Legacy mode alias — requires separate OpenAlgo instance
-start-legacy: start-openalgo ## Start optional OpenAlgo integration service
 
 stop: ## Stop FlintTrade backend API if it is listening on FLINTTRADE_BACKEND_PORT
 	@"$(PYTHON)" scripts/ft.py stop
@@ -198,7 +191,6 @@ update: ## Update Python dependencies (external test-deps live in .local/externa
 	@uv sync --frozen --all-packages
 	@echo Updated
 	@echo Note: external test-deps under .local/external/ are not git submodules anymore.
-	@echo Pull updates manually: git -C .local/external/openalgo pull
 
 clean: ## Remove build artifacts (with confirmation)
 	@# ft.py deletes the trees with shutil.rmtree (no find/rm -rf).
@@ -241,15 +233,10 @@ site-url-check: ## Verify every tracked mention of the public site URL matches f
 
 sync-check: ## Check upstream drift on external test-deps under .local/external/
 	@echo -e "$(CYAN)=== External Test-Deps Sync Check ===$(RESET)"
-	@if [ -d .local/external/openalgo/.git ]; then \
-	  (cd .local/external/openalgo && git fetch origin --quiet 2>/dev/null && echo "openalgo: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
-	else \
-	  echo -e "$(YELLOW)openalgo: not present at .local/external/openalgo (run scripts/setup-test-deps.sh)$(RESET)"; \
-	fi
 	@if [ -d .local/external/openclaw/.git ]; then \
 	  (cd .local/external/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
 	else \
-	  echo -e "$(YELLOW)openclaw: not present at .local/external/openclaw (run scripts/setup-test-deps.sh)$(RESET)"; \
+	  echo -e "$(YELLOW)openclaw: not present at .local/external/openclaw $(RESET)"; \
 	fi
 
 broker-sdk-sync: ## Refresh repo-local broker SDK refs and fail on upstream drift

@@ -25,7 +25,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolated workspace with a seeded master password (no API key)."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     master_password = tmp_path / "master_password"
     master_password.write_text("backend-log-file-test-password", encoding="utf-8")
     master_password.chmod(0o600)
@@ -73,9 +73,7 @@ def test_emitted_log_line_lands_in_flinttrade_log(workspace: Path) -> None:
     assert entry["level"] == "info"
 
 
-def test_factory_twice_does_not_double_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_factory_twice_does_not_double_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A second create_flask_app() run must not leave two file handlers writing.
 
     The second run uses a fresh workspace (rebuilding twice inside one
@@ -95,7 +93,7 @@ def test_factory_twice_does_not_double_write(
         workspaces.append(ws)
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(ws))
         monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+        monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
         create_flask_app()
 
     marker = f"backend-log-file-once-{uuid.uuid4().hex}"

@@ -1,6 +1,6 @@
 """Tests for ``flinttrade_engine.bracket_order`` — the gated-dispatcher contract.
 
-The re-architected service holds NO broker/OpenAlgo client: every leg write
+The re-architected service holds NO broker/broker client: every leg write
 goes through injected ``place_leg``/``cancel_leg`` dispatchers bound to a
 :class:`BracketPrincipal` (SafetySystem L1–L5 → ``gate_order`` →
 ``BrokerRouter`` in production). These tests use recording fakes for the
@@ -612,7 +612,7 @@ class TestCancelBracket:
         )
         bid = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=placement).bracket.bracket_id
         caller = BracketPrincipal(
-            actor_id="operator", jti="jti-2", adapter_id="openalgo", account_id="default"
+            actor_id="operator", jti="jti-2", adapter_id="broker", account_id="default"
         )
         svc.cancel_bracket(bid, principal=caller)
         _, bound = cancel_leg.calls[0]

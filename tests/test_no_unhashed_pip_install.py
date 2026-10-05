@@ -8,8 +8,6 @@ installs that pull an unhashed ``requirements.txt`` or run ``pip install`` /
   * ``pip install --require-hashes -r requirements.lock`` (pip, hashed)
   * ``uv pip install --require-hashes -r requirements.lock``
 
-OpenAlgo's own external requirements.txt (we don't control its hashing) is
-exempt — those lines reference the OpenAlgo install dir.
 """
 
 from __future__ import annotations
@@ -95,9 +93,6 @@ def _iter_files():
                 yield p
 
 
-def _is_external_openalgo(line: str) -> bool:
-    return "openalgo" in line.lower()
-
 
 @pytest.mark.unit
 def test_no_unhashed_pip_install() -> None:
@@ -111,8 +106,6 @@ def test_no_unhashed_pip_install() -> None:
                 continue
             if not _INSTALL_RE.search(_executable_text(stripped)):
                 continue
-            if _is_external_openalgo(stripped):
-                continue  # OpenAlgo's own deps — out of our control
             command_tail = stripped.split("install", 1)[1]
             references_req = bool(_REQ_FILE_RE.search(stripped)) or "-r " in stripped
             if not references_req:

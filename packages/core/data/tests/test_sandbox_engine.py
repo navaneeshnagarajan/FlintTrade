@@ -53,12 +53,7 @@ class TestInitialCapital:
 
         assert db_path.exists()
         with sqlite3.connect(db_path) as conn:
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert {"capital", "orders", "positions", "pnl", "mtm"} <= tables
         assert {"sandbox_capital", "sandbox_orders", "sandbox_positions"}.isdisjoint(tables)
 
@@ -254,8 +249,16 @@ class TestGetPositions:
     def test_position_has_required_keys(self, engine: SandboxEngine) -> None:
         engine.place_order("ZOMATO", "NSE", "BUY", 100, 200.0)
         pos = engine.get_positions()[0]
-        for key in ("symbol", "exchange", "product", "net_qty", "avg_price",
-                    "realised_pnl", "unrealised_pnl", "updated_at"):
+        for key in (
+            "symbol",
+            "exchange",
+            "product",
+            "net_qty",
+            "avg_price",
+            "realised_pnl",
+            "unrealised_pnl",
+            "updated_at",
+        ):
             assert key in pos, f"Missing key: {key}"
 
     def test_avg_price_weighted_correctly(self, engine: SandboxEngine) -> None:
@@ -285,8 +288,7 @@ class TestGetOrders:
     def test_order_has_required_keys(self, engine: SandboxEngine) -> None:
         engine.place_order("ONGC", "NSE", "BUY", 50, 260.0)
         order = engine.get_orders()[0]
-        for key in ("order_id", "symbol", "exchange", "action",
-                    "quantity", "price", "product", "status", "created_at"):
+        for key in ("order_id", "symbol", "exchange", "action", "quantity", "price", "product", "status", "created_at"):
             assert key in order, f"Missing key: {key}"
 
 
@@ -502,8 +504,9 @@ class TestPracticeCharges:
         from flinttrade_core.instrument_lots import contract_quantity_message as master_message
 
         revision = json.loads(
-            (Path(__file__).resolve().parents[2] / "core" / "tests" / "data" / "instrument_lot_revision_window.json")
-            .read_text(encoding="utf-8")
+            (
+                Path(__file__).resolve().parents[2] / "core" / "tests" / "data" / "instrument_lot_revision_window.json"
+            ).read_text(encoding="utf-8")
         )
         rows = [
             row
@@ -536,8 +539,7 @@ class TestPracticeCharges:
         )
         assert unnamed["status"] == "REJECTED"
         assert unnamed["message"] == (
-            "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, "
-            "so this order can't be sized."
+            "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
         )
 
         accepted = engine.place_order(
@@ -595,30 +597,38 @@ class TestPracticeCharges:
             price=20_000,
         )
         assert float(historical.total) != pytest.approx(float(current.total))
-        engine.import_data(json.dumps({
-            "capital": {"initial": 1_000_000, "current": 1_000_000},
-            "orders": [{
-                "order_id": "hist-1",
-                "symbol": "NIFTY24APRFUT",
-                "exchange": "NFO",
-                "action": "SELL",
-                "quantity": 1,
-                "price": 20_000,
-                "product": "NRML",
-                "status": "COMPLETE",
-                "created_at": traded.isoformat(),
-            }],
-            "trades": [{
-                "order_id": "hist-1",
-                "symbol": "NIFTY24APRFUT",
-                "exchange": "NFO",
-                "action": "SELL",
-                "quantity": 1,
-                "price": 20_000,
-                "product": "NRML",
-                "traded_at": traded.isoformat(),
-            }],
-        }))
+        engine.import_data(
+            json.dumps(
+                {
+                    "capital": {"initial": 1_000_000, "current": 1_000_000},
+                    "orders": [
+                        {
+                            "order_id": "hist-1",
+                            "symbol": "NIFTY24APRFUT",
+                            "exchange": "NFO",
+                            "action": "SELL",
+                            "quantity": 1,
+                            "price": 20_000,
+                            "product": "NRML",
+                            "status": "COMPLETE",
+                            "created_at": traded.isoformat(),
+                        }
+                    ],
+                    "trades": [
+                        {
+                            "order_id": "hist-1",
+                            "symbol": "NIFTY24APRFUT",
+                            "exchange": "NFO",
+                            "action": "SELL",
+                            "quantity": 1,
+                            "price": 20_000,
+                            "product": "NRML",
+                            "traded_at": traded.isoformat(),
+                        }
+                    ],
+                }
+            )
+        )
         trade = engine.get_trades()[0]
         assert trade["charges"] == pytest.approx(float(historical.total))
         assert trade["charges"] != pytest.approx(float(current.total))
@@ -655,7 +665,9 @@ class TestNetWorthLedger:
         assert "settlement_price" not in position
         assert "mark_source" not in position
 
-    def test_equity_notional_is_booked_into_the_ledger_without_removing_margin_twice(self, engine: SandboxEngine) -> None:
+    def test_equity_notional_is_booked_into_the_ledger_without_removing_margin_twice(
+        self, engine: SandboxEngine
+    ) -> None:
         engine.place_order("SBIN", "NSE", "BUY", 1, 800.0)
         funds = engine.get_funds()
 

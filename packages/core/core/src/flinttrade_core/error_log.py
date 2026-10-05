@@ -59,18 +59,18 @@ def _monotonic_timestamp(previous: datetime | None) -> datetime:
         return previous + timedelta(milliseconds=1)
     return now
 
+
 # Keys whose values must never be persisted.
 # Substring needles, not exact keys: field names like ``bot_token``,
 # ``access_token`` or ``api_secret`` must redact too. Over-redaction of a
 # benign key in a debug capture is the safe direction.
-_SENSITIVE_KEYS: frozenset[str] = frozenset(
-    {"password", "token", "api_key", "apikey", "secret", "totp", "otp", "pin"}
-)
+_SENSITIVE_KEYS: frozenset[str] = frozenset({"password", "token", "api_key", "apikey", "secret", "totp", "otp", "pin"})
 
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     return any(needle in lowered for needle in _SENSITIVE_KEYS)
+
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS error_log (
@@ -144,10 +144,7 @@ def _sanitise(data: dict[str, Any]) -> dict[str, Any]:
 def _sanitise_value(value: Any) -> Any:
     """Recursively redact sensitive keys in nested dicts and lists."""
     if isinstance(value, dict):
-        return {
-            k: "[REDACTED]" if _is_sensitive_key(k) else _sanitise_value(v)
-            for k, v in value.items()
-        }
+        return {k: "[REDACTED]" if _is_sensitive_key(k) else _sanitise_value(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_sanitise_value(item) for item in value]
     return value
@@ -292,9 +289,7 @@ class ErrorLog:
                     user_id,
                 ],
             )
-        logger.debug(
-            "Error logged: entry_id=%s route=%s status=%d", entry_id, route, status_code
-        )
+        logger.debug("Error logged: entry_id=%s route=%s status=%d", entry_id, route, status_code)
         return entry_id
 
     # ------------------------------------------------------------------
@@ -407,14 +402,10 @@ class ErrorLog:
         """
         if since is not None:
             with self._lock:
-                row = self._conn.execute(
-                    "SELECT COUNT(*) FROM error_log WHERE timestamp >= ?", [since]
-                ).fetchone()
+                row = self._conn.execute("SELECT COUNT(*) FROM error_log WHERE timestamp >= ?", [since]).fetchone()
         else:
             with self._lock:
-                row = self._conn.execute(
-                    "SELECT COUNT(*) FROM error_log"
-                ).fetchone()
+                row = self._conn.execute("SELECT COUNT(*) FROM error_log").fetchone()
         return int(row[0]) if row else 0
 
     # ------------------------------------------------------------------

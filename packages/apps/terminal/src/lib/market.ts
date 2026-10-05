@@ -43,7 +43,7 @@ const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
   BCD:          { open: 9 * 60,      close: 17 * 60 },
   MCX:          { open: 9 * 60,      close: 23 * 60 + 30 },   // 9:00–23:30
   NCDEX:        { open: 10 * 60,     close: 17 * 60 },        // 10:00–17:00
-  // NCO (NSE Commodities, Zerodha-only) — added upstream in OpenAlgo v2.0.0.7.
+  // NCO session timing retained for imported market history.
   NCO:          { open: 9 * 60,      close: 17 * 60 },        // 9:00–17:00
   NSE_INDEX:    { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // quote-only, mirrors NSE
   BSE_INDEX:    { open: 9 * 60 + 15, close: 15 * 60 + 30 },
@@ -247,7 +247,7 @@ function istWeekdayAndMinutes(date: Date): { day: number; minutes: number } {
   };
 }
 
-/** Interpret OpenAlgo/Explore `915` / `1530` as minutes since midnight IST. */
+/** Interpret broker/Explore `915` / `1530` as minutes since midnight IST. */
 function hhmmToMinutes(value: number): number | null {
   if (!Number.isFinite(value) || value < 0 || value > 2359) return null;
   const hhmm = Math.trunc(value);
@@ -270,7 +270,7 @@ function sessionBoundToEpochMs(value: number): number | null {
  * Trustworthy timings confirm the calendar is usable. Phase and windows come
  * from the CAS clock, not a flat 15:30 close. Timing bounds may be epoch
  * milliseconds (native brokers), epoch seconds, or HHMM integers used by
- * OpenAlgo and the Explore stub (`915` / `1530`). Weekends are Closed.
+ * broker and the Explore stub (`915` / `1530`). Weekends are Closed.
  * Missing or unusable timings are unavailable rather than a false Closed.
  *
  * A short epoch window outside the regular cash day (Muhurat) is honoured as

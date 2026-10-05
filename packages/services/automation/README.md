@@ -1,6 +1,6 @@
 # Automation
 
-> Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines, voice-order intent extraction.
+> Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -9,8 +9,7 @@
 ## Public surface
 
 - `src/flinttrade_automation/cron_manager.py — workspace.json-backed scheduled jobs`
-- `src/flinttrade_automation/telegram_bot.py — native two-way Telegram bot (own Bot API client, inbound command long-polling) + notifications + reachable emergency kill switch`
-- `src/flinttrade_automation/voice_order_bridge.py — speech-to-intent for hands-free order placement`
+- `src/flinttrade_automation/telegram_bot.py — passive notifications + emergency kill switch`
 
 (See the source for the full surface.)
 
@@ -31,6 +30,10 @@ root workspace.
 ```bash
 python -m pytest packages/services/automation/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

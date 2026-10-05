@@ -78,7 +78,6 @@ vi.mock("@/hooks/useWsBridge", () => ({ useWsBridge: () => undefined }));
 vi.mock("@/hooks/useDemoFeed", () => ({ useDemoFeed: () => undefined }));
 vi.mock("@/hooks/useTickerFallback", () => ({ useTickerFallback: () => undefined }));
 vi.mock("@/hooks/usePrevClose", () => ({ usePrevClose: () => undefined }));
-vi.mock("@/hooks/useOpenAlgoConfigHydration", () => ({ useOpenAlgoConfigHydration: () => undefined }));
 vi.mock("@/hooks/useTradingStoreSync", () => ({ useTradingStoreSync: () => undefined }));
 vi.mock("@/hooks/useBrokerAccounts", () => ({ useBrokerAccounts: () => undefined }));
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({

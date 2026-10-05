@@ -128,9 +128,7 @@ def test_flinttrade_app_start_uses_resolved_backend_host() -> None:
     server_calls = [
         node
         for node in ast.walk(start)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_run_flask_server"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_run_flask_server"
     ]
     assert any(
         keyword.arg == "host"
@@ -154,9 +152,7 @@ def test_flinttrade_app_start_uses_resolved_backend_port() -> None:
     server_calls = [
         node
         for node in ast.walk(start)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_run_flask_server"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_run_flask_server"
     ]
     assert server_calls, "FlintTradeApp._start_owned() must call _run_flask_server"
     assert any(

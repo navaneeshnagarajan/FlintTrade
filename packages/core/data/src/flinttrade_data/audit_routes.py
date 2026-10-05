@@ -200,7 +200,11 @@ def audit_log() -> tuple[Response, int]:
         until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
         # Strip timezone for comparison — TIMESTAMP column stores naive datetimes
         until_naive = until_dt.replace(tzinfo=None) if until_dt.tzinfo else until_dt
-        entries = [e for e in entries if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= until_naive]
+        entries = [
+            e
+            for e in entries
+            if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= until_naive
+        ]
 
     total = len(entries)
     import math  # noqa: PLC0415
@@ -221,16 +225,18 @@ def audit_log() -> tuple[Response, int]:
         for e in page_entries
     ]
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "entries": payload,
-            "total": total,
-            "page": page,
-            "per_page": per_page,
-            "pages": pages,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "entries": payload,
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "pages": pages,
+            },
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +280,11 @@ def audit_export() -> tuple[Response, int]:
         until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
         # Strip timezone for comparison — TIMESTAMP column stores naive datetimes
         until_naive = until_dt.replace(tzinfo=None) if until_dt.tzinfo else until_dt
-        entries = [e for e in entries if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= until_naive]
+        entries = [
+            e
+            for e in entries
+            if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= until_naive
+        ]
 
     # Build CSV in memory — acceptable for audit exports (regulatory, not streaming)
     output = io.StringIO()
@@ -283,14 +293,16 @@ def audit_export() -> tuple[Response, int]:
     for e in entries:
         import json as _json  # noqa: PLC0415
 
-        writer.writerow([
-            e.log_id,
-            e.timestamp,
-            e.action,
-            e.user,
-            e.ip or "",
-            _json.dumps(e.details, ensure_ascii=False),
-        ])
+        writer.writerow(
+            [
+                e.log_id,
+                e.timestamp,
+                e.action,
+                e.user,
+                e.ip or "",
+                _json.dumps(e.details, ensure_ascii=False),
+            ]
+        )
 
     csv_bytes = output.getvalue().encode("utf-8")
     response = make_response(csv_bytes)
@@ -347,17 +359,17 @@ def audit_stats() -> tuple[Response, int]:
         by_action[e.action] = by_action.get(e.action, 0) + 1
 
     # Sort by count descending for readability
-    sorted_counts = dict(
-        sorted(by_action.items(), key=lambda item: item[1], reverse=True)
-    )
+    sorted_counts = dict(sorted(by_action.items(), key=lambda item: item[1], reverse=True))
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "total": len(entries),
-            "by_action": sorted_counts,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "total": len(entries),
+                "by_action": sorted_counts,
+            },
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------
@@ -439,10 +451,12 @@ def audit_events() -> tuple[Response, int]:
         for e in page
     ]
 
-    return jsonify({
-        "status": "success",
-        "data": {"logs": logs, "total": total},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"logs": logs, "total": total},
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------
@@ -549,9 +563,7 @@ def audit_events_export() -> tuple[Response, int]:
     content_type = "application/pdf" if fmt == "pdf" else "text/csv; charset=utf-8"
     response = make_response(payload)
     response.headers["Content-Type"] = content_type
-    response.headers["Content-Disposition"] = (
-        f"attachment; filename=flinttrade_gated_audit_{range_str}.{fmt}"
-    )
+    response.headers["Content-Disposition"] = f"attachment; filename=flinttrade_gated_audit_{range_str}.{fmt}"
     response.headers["Content-Length"] = str(len(payload))
     return response, 200
 

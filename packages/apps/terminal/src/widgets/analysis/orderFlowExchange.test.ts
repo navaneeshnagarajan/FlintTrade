@@ -172,7 +172,7 @@ describe("resolveOrderFlowExchange", () => {
     "MCXMETAL",
     "MCXMETLDEX",
     "MCXSILVDEX",
-  ])("routes the OpenAlgo MCX index %s to MCX_INDEX", (symbol) => {
+  ])("routes the native broker MCX index %s to MCX_INDEX", (symbol) => {
     expect(resolveOrderFlowExchange(symbol)).toBe("MCX_INDEX");
   });
 
@@ -190,7 +190,7 @@ describe("resolveOrderFlowExchange", () => {
     "US30",
     "US500",
     "USCOMPOSITE",
-  ])("routes the OpenAlgo global index %s to GLOBAL_INDEX", (symbol) => {
+  ])("routes the native broker global index %s to GLOBAL_INDEX", (symbol) => {
     expect(resolveOrderFlowExchange(symbol)).toBe("GLOBAL_INDEX");
   });
 

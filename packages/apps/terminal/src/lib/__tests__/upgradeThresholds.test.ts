@@ -30,7 +30,7 @@ function zeroMetrics(): DomainMetrics {
     invest:   { holdingsViewed: 0, sipsCreated: 0, goalsSet: 0 },
     learn:    { lessonsCompleted: 0, quizzesPassed: 0, articlesRead: 0 },
     lab:      { backtestsRun: 0, strategiesCreated: 0, optimizationsRun: 0 },
-    automate: { flowsCreated: 0, alertsSet: 0, strategiesUploaded: 0 },
+    automate: { alertsSet: 0, strategiesUploaded: 0 },
     ai:       { questionsAsked: 0, strategiesGenerated: 0, signalsActedOn: 0 },
   };
 }

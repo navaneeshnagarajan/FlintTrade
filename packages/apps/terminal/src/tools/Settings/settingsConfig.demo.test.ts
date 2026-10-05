@@ -30,7 +30,7 @@ describe("settings sections in the public demo build", () => {
     // A regression guard: adding a credential-bearing section without listing it
     // here is exactly how this gap reopens.
     expect([...DEMO_HIDDEN_SECTIONS].sort()).toEqual(
-      ["api", "brokers", "llm", "security", "telegram"].sort(),
+      ["brokers", "llm", "security", "telegram"].sort(),
     );
   });
 

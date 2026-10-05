@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useConnectionStore } from "@/stores/connectionStore";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -21,6 +20,7 @@ vi.mock("@/stores/modeStore", () => ({
   ),
 }));
 
+import { useBrokerStore } from "@/stores/brokerStore";
 import ConditionalTriggersWidget from "./ConditionalTriggersWidget";
 
 const LIST_ROW = {
@@ -90,7 +90,7 @@ function fillMinimalForm() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockMode = "live";
-  useConnectionStore.setState({ openAlgoHydrated: true });
+  useBrokerStore.setState({ activeAccountId: "native:dhan:D1", accounts: [{ account_id: "D1", broker: "dhan", source: "native", status: "connected", label: "Dhan", connected_at: null, error_message: null, is_primary: true }] });
   listRows = [LIST_ROW];
   listStatus = 200;
   listMessage = "";
@@ -194,7 +194,7 @@ describe("ConditionalTriggersWidget", () => {
 
   it("maps the 501 unsupported-broker refusal honestly", async () => {
     listStatus = 501;
-    listMessage = "broker adapter 'openalgo' does not support the 'conditional_triggers' listing";
+    listMessage = "broker adapter 'dhan' does not support the 'conditional_triggers' listing";
     renderWidget();
     await waitFor(() =>
       expect(screen.getByText("Not available for this broker.")).toBeInTheDocument(),

@@ -2,7 +2,7 @@
 
 Adapted from fluxscan (marketcalls/fluxscan). Provides a framework for
 defining, validating, and executing custom Python-based market scans
-against OpenAlgo data.
+against broker data.
 
 A Scanner is a named piece of Python code that receives OHLCV data and
 returns a list of matching symbols. Scanners can be:

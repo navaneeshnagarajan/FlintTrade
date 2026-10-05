@@ -69,7 +69,7 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
     Explicit ``broker``/``account_id`` request fields win; otherwise the
     configured ``brokers.execution.default`` selector is used (mirroring the
     core order routes' target resolution), falling back to
-    ``("openalgo", "default")``.
+    ``an explicit configured account``.
 
     Args:
         params: Mapping-like request body carrying optional ``broker`` and
@@ -79,8 +79,10 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
         The ``(adapter_id, account_id)`` tuple.
     """
     if str(params.get("broker") or "").strip() or str(params.get("account_id") or "").strip():
-        adapter_id = str(params.get("broker") or "openalgo").strip().lower()
+        adapter_id = str(params.get("broker") or "").strip().lower()
         account_id = str(params.get("account_id") or "default").strip() or "default"
+        if not adapter_id:
+            raise ValueError("An explicit native broker is required")
         return adapter_id, account_id
 
     router = current_app.config.get("BROKER_ROUTER")
@@ -92,7 +94,7 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
             return parse_selector(selector)
         except ValueError:
             logger.warning("Ignoring malformed brokers.execution.default selector")
-    return "openalgo", "default"
+    raise ValueError("No execution broker account configured")
 
 
 def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
@@ -158,7 +160,7 @@ def place_bracket() -> Response:
                 "product": "MIS"
             },
             "stoploss": 22000.0,
-            "broker": "openalgo",
+            "broker": "",
             "account_id": "default"
         }
 
@@ -294,7 +296,10 @@ def place_bracket() -> Response:
     if exit_block is not None:
         return exit_block
 
-    principal = _request_principal(body)
+    try:
+        principal = _request_principal(body)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Native execution account not configured"}), 503
     result = svc.place_bracket(
         entry,
         stoploss=stoploss,
@@ -396,7 +401,10 @@ def cancel_bracket(bracket_id: str) -> Response:
     if bracket is None:
         return jsonify({"status": "error", "message": f"Bracket '{bracket_id}' not found"}), 404
 
-    principal = _request_principal(request.get_json(silent=True) or {})
+    try:
+        principal = _request_principal(request.get_json(silent=True) or {})
+    except ValueError:
+        return jsonify({"status": "error", "message": "Native execution account not configured"}), 503
     try:
         cancelled = svc.cancel_bracket(bracket_id, principal=principal)
     except BracketOrderError as exc:

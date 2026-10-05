@@ -19,9 +19,33 @@ const defaultMetrics = (): DomainMetrics => ({
   invest: { holdingsViewed: 0, sipsCreated: 0, goalsSet: 0 },
   learn: { lessonsCompleted: 0, quizzesPassed: 0, articlesRead: 0 },
   lab: { backtestsRun: 0, strategiesCreated: 0, optimizationsRun: 0 },
-  automate: { flowsCreated: 0, alertsSet: 0, strategiesUploaded: 0 },
+  automate: { alertsSet: 0, strategiesUploaded: 0 },
   ai: { questionsAsked: 0, strategiesGenerated: 0, signalsActedOn: 0 },
 });
+
+function storedObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+/** Preserve declared activity only; retired counters do not become other actions. */
+function restoreMetrics(value: unknown): DomainMetrics {
+  const metrics = defaultMetrics();
+  const stored = storedObject(value);
+  for (const domain of Object.keys(metrics) as Domain[]) {
+    const observed = storedObject(stored[domain]);
+    const restored = metrics[domain] as Record<string, number | string>;
+    for (const key of Object.keys(restored)) {
+      const candidate = observed[key];
+      if (key === "lastActiveDate") {
+        if (typeof candidate === "string") restored[key] = candidate;
+      } else if (typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0) {
+        restored[key] = candidate;
+      }
+    }
+  }
+  return metrics;
+}
 
 const defaultHelpPrefs = (): HelpPrefs => ({
   inlineHints: true,
@@ -217,24 +241,33 @@ const storeImpl: StateCreator<SkillState, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:skill",
-  version: 2,
+  version: 3,
   partialize: (state) => ({
     globalLevel: state.globalLevel,
     routeOverrides: state.routeOverrides,
     helpPrefs: state.helpPrefs,
-    metrics: state.metrics,
+    metrics: restoreMetrics(state.metrics),
     dismissedSuggestions: state.dismissedSuggestions,
     seenWidgetActions: state.seenWidgetActions,
   }),
-  // v1 → v2: seenWidgetActions added so widget_view_* events can feed
-  // `widgetsUsed`. Old snapshots simply start with an empty seen-set.
+  // v1 → v2 added the widget seen-set. v3 removes retired activity counters
+  // while preserving the surviving domain counts and operator preferences.
   migrate: (persisted, version) => {
-    const state = persisted as Partial<SkillState>;
+    const state: Record<string, unknown> = {
+      ...storedObject(persisted), metrics: restoreMetrics(storedObject(persisted).metrics),
+    };
     if (version < 2 && !Array.isArray(state.seenWidgetActions)) {
       state.seenWidgetActions = [];
     }
-    return state as SkillState;
+    return state;
   },
+  // Rehydration also admits only declared metrics for current-version data.
+  // Filling missing fields keeps every domain usable after a sparse snapshot.
+  merge: (persisted, current) => ({
+    ...current,
+    ...storedObject(persisted),
+    metrics: restoreMetrics(storedObject(persisted).metrics),
+  }),
 });
 
 // ---------------------------------------------------------------------------

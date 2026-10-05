@@ -107,8 +107,8 @@ describe("AgentPanel", () => {
     vi.mocked(getAgentStatus).mockResolvedValue(IDLE);
     vi.mocked(startAgent).mockRejectedValue(
       new Error(
-        "The agent actor 'autonomous-trader' is not authorised for openalgo:default. "
-        + "Add it to workspace.json brokers.account_acls['openalgo']['default'] to grant access.",
+        "The agent actor 'autonomous-trader' is not authorised for dhan:A1. "
+        + "Add it to workspace.json brokers.account_acls['dhan']['A1'] to grant access.",
       ),
     );
     renderPanel();
@@ -117,7 +117,7 @@ describe("AgentPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /start agent/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/not authorised for openalgo:default/)).toBeInTheDocument(),
+      expect(screen.getByText(/not authorised for dhan:A1/)).toBeInTheDocument(),
     );
   });
 

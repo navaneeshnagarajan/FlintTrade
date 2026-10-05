@@ -18,7 +18,6 @@ from flinttrade_core.workspace_migrations import broker_workspace_version, compa
 from flinttrade_gateway import registry as api
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.credentials import CredentialStore
-from flinttrade_gateway.session import BrokerSession
 
 
 @pytest.fixture
@@ -35,7 +34,7 @@ def authority(tmp_path):
         store = stores[selector.adapter_id]
         state = store.selector_state(selector)
         if not state.present:
-            broker = "zerodha" if selector.adapter_id == "openalgo" else selector.adapter_id
+            broker = selector.adapter_id
             store.put_credentials(selector, broker, "Synthetic", {"token": "synthetic"}, expected=state.version)
         return api.ManagedSessionAuthority(
             store.selector_state(selector).version, workspace.version, broker_workspace_version(workspace)
@@ -53,7 +52,7 @@ def prepare(owner, registry, selector, authority, *, client=None, expires=None):
         session,
         expected_registry=registry.snapshot_selector(selector),
         authority=authority,
-        broker="zerodha" if selector.adapter_id == "openalgo" else selector.adapter_id,
+        broker=selector.adapter_id,
         label="Synthetic",
         client=client,
     )
@@ -104,7 +103,7 @@ def test_wrong_owner_is_nonconsuming_but_owned_conflict_retires(authority):
 
 def test_connected_handles_are_exact_and_supersession_invalidates_client(authority):
     registry, owner = api.create_owned_registry()
-    selectors = [BrokerSelector("openalgo", "Case"), BrokerSelector("dhan", "Case")]
+    selectors = [BrokerSelector("upstox", "Case"), BrokerSelector("dhan", "Case")]
     clients = [object(), object()]
     for selector, client in zip(selectors, clients, strict=True):
         auth = authority(selector)
@@ -155,39 +154,8 @@ def test_foreign_incarnation_and_full_workspace_cas(authority):
         owner.publish_prepared_candidate(receipt, current_authority=changed)
 
 
-def test_legacy_info_reports_transport_independently_from_broker():
-    info = BrokerSession("raw-id", "zerodha", "Synthetic").info
-    assert (info.adapter_id, info.broker, info.account_id) == ("openalgo", "zerodha", "raw-id")
 
 
-def test_workspace_client_match_refuses_environment_and_reconfiguration(tmp_path):
-    from flinttrade_core.config import Settings
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-
-    workspace = compare_and_swap_workspace(
-        tmp_path,
-        None,
-        lambda cfg: cfg.update(
-            openalgo={
-                "host": "https://one.invalid",
-                "api_key": "synthetic-one",
-                "port": 443,
-                "ws_port": 8765,
-            }
-        ),
-    )
-    client = OpenAlgoClient(
-        Settings(
-            openalgo_host="https://one.invalid",
-            openalgo_api_key="synthetic-one",
-            openalgo_port=443,
-            openalgo_ws_port=8765,
-        )
-    )
-    assert client.matches_workspace_openalgo(workspace)
-    client.reconfigure(Settings(openalgo_host="https://two.invalid", openalgo_api_key="synthetic-two"))
-    assert not client.matches_workspace_openalgo(workspace)
-    client.close_sync()
 
 
 def test_provider_requires_workspace_and_present_exact_credential_reader(tmp_path):
@@ -230,18 +198,6 @@ def test_provider_requires_workspace_and_present_exact_credential_reader(tmp_pat
     store.close()
 
 
-def test_openalgo_adapter_has_no_raw_session_client_escape():
-    from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter
-    from flinttrade_gateway.session_provider import AuthenticatingSessionProvider, ConnectedSessionClientResolver
-
-    with pytest.raises(TypeError):
-        OpenAlgoAdapter(default_client=object())
-    with pytest.raises(TypeError):
-        OpenAlgoAdapter(client_factory=lambda _: object())
-    registry, owner = api.create_owned_registry()
-    resolver = ConnectedSessionClientResolver(AuthenticatingSessionProvider(registry, {}), registry)
-    with pytest.raises(RegistrySessionUnavailable):
-        resolver.openalgo_client(object.__new__(api.ConnectedRegistrySession))
 
 
 def test_app_and_native_consumers_do_not_access_registry_private_state():
@@ -256,12 +212,6 @@ def test_app_and_native_consumers_do_not_access_registry_private_state():
     assert not forbidden.search(inspect.getsource(native_account_routes))
 
 
-def test_ditto_denies_before_client_allocation(monkeypatch):
-    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
-    from flinttrade_ditto.runtime import DittoRouterOwner
-
-    with pytest.raises(BrokerAccountCutoverUnavailable):
-        DittoRouterOwner([], "test", write_admission=None, intent_journal=None, safety_system=None)
 
 
 @pytest.mark.asyncio
@@ -321,69 +271,11 @@ async def test_l2_registry_refusal_does_not_convert_to_empty_safety_data():
         await gather_l2_state({"REGISTRY": registry, "NATIVE_ADAPTERS": {"dhan": Adapter()}}, "dhan", account_id="Case")
 
 
-def test_reserved_compatibility_retains_telegram_but_rejects_unknown_setup_change(tmp_path):
-    from flinttrade_core.config import Settings
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-    from flinttrade_core.workspace_migrations import read_workspace_snapshot
-    from flinttrade_gateway.session_provider import AuthenticatingSessionProvider, ConnectedSessionClientResolver
-    from types import SimpleNamespace
-
-    workspace = compare_and_swap_workspace(
-        tmp_path,
-        None,
-        lambda cfg: cfg.update(
-            openalgo={
-                "host": "https://one.invalid",
-                "api_key": "synthetic",
-                "port": 443,
-                "ws_port": 8765,
-            }
-        ),
-    )
-    registry, owner = api.create_owned_registry()
-    selector = BrokerSelector("openalgo", "default")
-    client = OpenAlgoClient(
-        Settings(
-            openalgo_host="https://one.invalid", openalgo_api_key="synthetic", openalgo_port=443, openalgo_ws_port=8765
-        )
-    )
-
-    def seal():
-        return owner.seal_openalgo_default_compatibility_authority(read_workspace_snapshot(tmp_path))
-
-    receipt = owner.prepare_openalgo_default_compatibility_candidate(
-        Session("", time.time() + 3600, "raw", "openalgo"),
-        expected_registry=registry.snapshot_selector(selector),
-        authority=seal(),
-        client=client,
-        broker=None,
-        label="Synthetic",
-    )
-    owner.publish_prepared_candidate(receipt, current_authority=seal())
-    provider = AuthenticatingSessionProvider(
-        registry,
-        {"openalgo": {"default": ["actor"]}},
-        workspace_snapshot=workspace,
-        workspace_path=tmp_path,
-        compatibility_authority_for=seal,
-    )
-    resolver = ConnectedSessionClientResolver(provider, registry)
-    handle = provider(SimpleNamespace(actor_id="actor"), "openalgo", "default")
-    assert resolver.openalgo_client(handle) is client
-    telegram = compare_and_swap_workspace(
-        tmp_path, workspace.version, lambda cfg: cfg["openalgo"].update(telegram_username="synthetic-user")
-    )
-    assert resolver.openalgo_client(handle) is client
-    compare_and_swap_workspace(tmp_path, telegram.version, lambda cfg: cfg["openalgo"].update(unknown_setup="changed"))
-    with pytest.raises(RegistrySessionUnavailable):
-        resolver.openalgo_client(handle)
-    assert "synthetic" not in repr(registry.list_exact_states()[0].binding)
-    client.close_sync()
 
 
 def test_managed_client_cannot_alias_sibling_or_prior_setup(authority):
     registry, owner = api.create_owned_registry()
-    a, b = BrokerSelector("openalgo", "A"), BrokerSelector("openalgo", "B")
+    a, b = BrokerSelector("upstox", "A"), BrokerSelector("upstox", "B")
     client = object()
     first, _ = prepare(owner, registry, a, authority(a), client=client)
     with pytest.raises(RegistrySessionUnavailable):
@@ -397,7 +289,7 @@ def test_managed_client_cannot_alias_sibling_or_prior_setup(authority):
 def test_managed_client_has_one_owner_until_retirement_claim(authority, state):
     registry, owner = api.create_owned_registry()
     _, foreign = api.create_owned_registry()
-    selector = BrokerSelector("openalgo", "Case")
+    selector = BrokerSelector("upstox", "Case")
     auth = authority(selector)
     client = object()
     receipt, session = prepare(owner, registry, selector, auth, client=client)
@@ -436,36 +328,8 @@ def test_managed_client_has_one_owner_until_retirement_claim(authority, state):
     owner.publish_prepared_candidate(fresh, current_authority=auth)
 
 
-def test_reserved_default_client_remains_borrowed_during_retirement(tmp_path):
-    registry, owner = api.create_owned_registry()
-    workspace = compare_and_swap_workspace(tmp_path, None, lambda config: None)
-    authority = owner.seal_openalgo_default_compatibility_authority(workspace)
-    selector = BrokerSelector("openalgo", "default")
-    client = object()
-
-    def candidate():
-        return owner.prepare_openalgo_default_compatibility_candidate(
-            Session("synthetic", 4102444800, "raw", "openalgo"),
-            expected_registry=registry.snapshot_selector(selector), authority=authority,
-            client=client, broker=None, label="Synthetic")
-
-    owner.publish_prepared_candidate(candidate(), current_authority=authority)
-    retired = owner.abandon_prepared_candidate(candidate())
-    assert owner.claim_retired_candidate(retired).client is client
-    assert registry.snapshot_exact_state(selector).status == "connected"
 
 
-def test_receipt_seals_do_not_accumulate_on_lookup(tmp_path):
-    import gc
-    import weakref
-
-    registry, owner = api.create_owned_registry()
-    workspace = compare_and_swap_workspace(tmp_path, None, lambda cfg: None)
-    receipt = owner.seal_openalgo_default_compatibility_authority(workspace)
-    observed = weakref.ref(receipt)
-    del receipt
-    gc.collect()
-    assert observed() is None
 
 
 @pytest.mark.parametrize("expiry", [True, False, float("inf"), float("nan"), "tomorrow", None])
@@ -495,7 +359,7 @@ def test_claim_transfers_client_ownership_without_registry_retention(authority):
         pass
 
     registry, owner = api.create_owned_registry()
-    selector = BrokerSelector("openalgo", "Case")
+    selector = BrokerSelector("upstox", "Case")
     auth = authority(selector)
     client = Client()
     reference = weakref.ref(client)
@@ -514,7 +378,7 @@ def test_client_factory_is_not_a_concrete_candidate(authority):
     from flinttrade_core.account_mutation_contracts import RegistryVersionValidationError
 
     registry, owner = api.create_owned_registry()
-    selector = BrokerSelector("openalgo", "Case")
+    selector = BrokerSelector("upstox", "Case")
     calls = []
 
     def factory():
@@ -547,7 +411,7 @@ def test_registry_exhaustion_does_not_wrap_or_overwrite(authority, monkeypatch):
 def test_forged_foreign_and_replayed_handles_never_resolve_client(authority):
     registry, owner = api.create_owned_registry()
     foreign, foreign_owner = api.create_owned_registry()
-    selector = BrokerSelector("openalgo", "Case")
+    selector = BrokerSelector("upstox", "Case")
     auth = authority(selector)
     lookup = api.ManagedLookupAuthority(auth.credential_version, auth.broker_workspace_version)
     for target, holder in ((registry, owner), (foreign, foreign_owner)):
@@ -556,7 +420,7 @@ def test_forged_foreign_and_replayed_handles_never_resolve_client(authority):
     real = registry.get_connected_session_for(selector, current_authority=lookup)
     forged = object.__new__(api.ConnectedRegistrySession)
     other = foreign.get_connected_session_for(selector, current_authority=lookup)
-    for invalid in (forged, other, Session("secret", 4102444800.0, "Case", "openalgo")):
+    for invalid in (forged, other, Session("secret", 4102444800.0, "Case", "upstox")):
         with pytest.raises(RegistrySessionUnavailable):
             registry.client_for_connected_session(invalid, current_authority=lookup)
     owner.remove_session_for_exact(selector, expected_registry=real.version.registry_version)
@@ -566,80 +430,6 @@ def test_forged_foreign_and_replayed_handles_never_resolve_client(authority):
         registry.client_for_connected_session(real, current_authority=lookup)
 
 
-@pytest.mark.asyncio
-async def test_distinct_concrete_clients_ignore_raw_identity_and_setup_aba(tmp_path, monkeypatch, *, backend_lease_factory):
-    import importlib.util
-    from pathlib import Path
-    from flinttrade_core.config import Settings
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-
-    spec = importlib.util.spec_from_file_location(
-        "_exact_fixtures", Path(__file__).parents[4] / "tests" / "registry_fixtures.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    fixture = module.RegistryFixture(tmp_path)
-    calls = []
-    clients = [
-        OpenAlgoClient(Settings(openalgo_host=f"https://client-{i}.invalid", openalgo_api_key=f"synthetic-{i}"))
-        for i in (1, 2)
-    ]
-    try:
-        adapters, handles = [], []
-        for i, client in enumerate(clients):
-
-            async def funds(index=i):
-                calls.append(index)
-                return {"source": index}
-
-            monkeypatch.setattr(client, "funds", funds)
-            adapter, handle = module.exact_openalgo_adapter(fixture, client, account=f"account-{i}")
-            handle.extra["account_id"] = "other"
-            handle.extra["api_key"] = "wrong-key"
-            adapters.append(adapter)
-            handles.append(handle)
-        assert await adapters[0].funds(handles[0]) == {"source": 0}
-        assert await adapters[1].funds(handles[1]) == {"source": 1}
-        from types import SimpleNamespace
-        from flinttrade_engine import safety
-        from flinttrade_engine.request_context import RequestContext
-        from flinttrade_gateway.router import BrokerRouter
-        from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
-        monkeypatch.setattr(safety, "_SAFETY_GATE_SECRET", b"s" * 32)
-        provider = AuthenticatingSessionProvider(fixture.registry,
-            {"openalgo": {f"account-{i}": ["test-actor"] for i in (0, 1)}},
-            workspace_snapshot=fixture.workspace, workspace_path=tmp_path,
-            credential_version_for=lambda exact: fixture.store.selector_state(exact).version)
-        router = BrokerRouter({"openalgo": adapters[0]}, provider, consume_gate=safety.SafetyGate().consume, backend_lease_proof=backend_lease_factory())
-        for i, client in enumerate(clients):
-            async def place(order, index=i):
-                calls.append(("order", index))
-                return SimpleNamespace(status="success", orderid=f"synthetic-{index}")
-            monkeypatch.setattr(client, "place_order", place)
-            context = RequestContext(jti=f"synthetic-{i}", actor_type="human", actor_id="test-actor", mode="live")
-            order = SimpleNamespace(symbol="SYNTHETIC", exchange="NSE", action="BUY", quantity=1, pricetype="MARKET")
-            permit = safety.gate_order(order, context, "openalgo", account_id=f"account-{i}", backend_lease_proof=backend_lease_factory())
-            assert await router.place_order(context, adapter_id="openalgo", account_id=f"account-{i}",
-                order=order, safety_ctx=permit) == f"synthetic-{i}"
-        selector = handles[0].selector
-        before = fixture.store.selector_state(selector).version
-        creds = fixture.store.retrieve_credentials(selector)
-        fixture.store.update_credentials(selector, creds, expected=before)
-        assert fixture.store.selector_state(selector).version.generation == before.generation + 1
-        with pytest.raises(RegistrySessionUnavailable):
-            await adapters[0].funds(handles[0])
-        with pytest.raises(RegistrySessionUnavailable):
-            fixture.publish(
-                selector.adapter_id,
-                selector.account_id,
-                Session("secret", 4102444800.0, "raw", "openalgo"),
-                client=clients[0],
-            )
-        assert calls == [0, 1, ("order", 0), ("order", 1)]
-    finally:
-        for client in clients:
-            await client.close()
-        fixture.close()
 
 
 def test_list_read_smoke_sessions_requires_stamped_connected_session(authority):

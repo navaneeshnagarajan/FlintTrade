@@ -1,6 +1,6 @@
 """Fail-closed execution contracts for scheduled strategies.
 
-The scheduler may use an :class:`OpenAlgoClient` for market-data reads, but a
+The scheduler may use an :class:`BrokerClient` for market-data reads, but a
 strategy instance must never retain that client for broker mutations. Live
 orders are available only through :class:`GatedStrategyDispatcher`, which
 mints a fresh ``SafetyContext`` and delegates to the canonical
@@ -50,7 +50,7 @@ class GatedStrategyDispatcher:
     The dispatcher resolves the current request identity and router generation
     for each mutation, admits the place through Laya, runs the safety layers,
     mints a one-shot context through :func:`gate_order`, and hands the write to
-    ``BrokerRouter``. It deliberately exposes no raw adapter or OpenAlgo client.
+    ``BrokerRouter``. It deliberately exposes no raw adapter or broker client.
     Chat is not an admission source.
     """
 

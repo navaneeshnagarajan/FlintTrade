@@ -41,9 +41,7 @@ def cmd_operators_list() -> None:
         raise SystemExit(1)
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT id, username, created_at FROM account ORDER BY id"
-        ).fetchall()
+        rows = conn.execute("SELECT id, username, created_at FROM account ORDER BY id").fetchall()
     finally:
         conn.close()
     if not rows:
@@ -113,10 +111,7 @@ def cmd_operators_keep(operator_id: int, *, assume_yes: bool = False) -> None:
     print(f"Kept operator {operator_id}.")
     print(f"Backup: {backup_path}")
     print("One operator account remains. Open FlintTrade and choose Retry.")
-    print(
-        "This backup contains login secrets. Keep it private and delete it "
-        "once FlintTrade works again."
-    )
+    print("This backup contains login secrets. Keep it private and delete it once FlintTrade works again.")
 
 
 def _confirm_removal(remove_count: int, *, assume_yes: bool) -> bool:
@@ -147,9 +142,7 @@ def _confirm_removal(remove_count: int, *, assume_yes: bool) -> bool:
 def _operator_rows(db_path: Path) -> list[tuple[int, str]]:
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT id, username FROM account ORDER BY id"
-        ).fetchall()
+        rows = conn.execute("SELECT id, username FROM account ORDER BY id").fetchall()
     finally:
         conn.close()
     return [(int(row[0]), str(row[1])) for row in rows]
@@ -228,16 +221,11 @@ def _delete_operator_sessions(conn: sqlite3.Connection, removed_ids: list[int]) 
     if not removed_ids:
         return
     placeholders = ",".join("?" for _ in removed_ids)
-    tables = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-    ).fetchall()
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").fetchall()
     for (table_name,) in tables:
         if table_name == "account" or not _IDENTIFIER.fullmatch(str(table_name)):
             continue
-        columns = [
-            str(row[1])
-            for row in conn.execute(f'PRAGMA table_info("{table_name}")')
-        ]
+        columns = [str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table_name}")')]
         for column in _OPERATOR_REF_COLUMNS:
             if column not in columns:
                 continue
@@ -257,16 +245,11 @@ def _renumber_operator(conn: sqlite3.Connection, operator_id: int, canonical_id:
     """
     if operator_id == canonical_id:
         return
-    tables = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-    ).fetchall()
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").fetchall()
     for (table_name,) in tables:
         if table_name == "account" or not _IDENTIFIER.fullmatch(str(table_name)):
             continue
-        columns = [
-            str(row[1])
-            for row in conn.execute(f'PRAGMA table_info("{table_name}")')
-        ]
+        columns = [str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table_name}")')]
         for column in _OPERATOR_REF_COLUMNS:
             if column not in columns:
                 continue

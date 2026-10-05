@@ -56,6 +56,7 @@ def _make_app(basket_executor=None, split_executor=None) -> Flask:
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
     flask_app.config["MODE"] = "live"
+    flask_app.config["BROKER_ROUTER"] = MagicMock(default_selector="dhan:default")
     if basket_executor:
         flask_app.config["BASKET_EXECUTOR"] = basket_executor
     if split_executor:
@@ -149,8 +150,7 @@ def test_split_no_executor():
     with _make_app().test_client() as c:
         resp = c.post(
             "/api/v1/orders/split",
-            json={"symbol": "NIFTY25MAYFUT", "exchange": "NFO",
-                  "action": "BUY", "total_qty": 300, "chunk_size": 75},
+            json={"symbol": "NIFTY25MAYFUT", "exchange": "NFO", "action": "BUY", "total_qty": 300, "chunk_size": 75},
         )
     assert resp.status_code == 503
 

@@ -43,7 +43,7 @@ describe("exploreScheduleGate", () => {
   it("keeps leaked API rows and seeds only when Explore has none", () => {
     const leaked = [{
       name: "health_check_job",
-      description: "Verify OpenAlgo session",
+      description: "Verify native broker session",
       trigger_type: "cron",
       status: "ACTIVE",
       last_run: null,

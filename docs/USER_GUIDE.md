@@ -195,42 +195,14 @@ For step-by-step instructions tailored to each operating system, see:
 
 ## 2. First broker connection
 
-FlintTrade supports two broker paths: the recommended OpenAlgo-compatible bridge
-for users who already run OpenAlgo, and a first-party native gateway that is
-**not usable on this unreleased line**. Native broker HTTP is frozen until
-Task 9D (account mutations) and Task 7C.2 (read-port cutover). That is an
-accepted product decision: native broker UX stays down on `main` until those
-tasks land. The terminal still calls the frozen routes, so Setup → Brokers and
-Settings → Brokers will fail rather than connect or refresh a native session.
+Native broker access is **not usable on this unreleased line**: native broker UX stays down on `main`.
+Do not treat catalogue metadata as a working operator path.
 
-Use the OpenAlgo-compatible bridge for a working broker session. Do not treat
-the native Brokers screen, `/api/v1/native/*` writes, or native HTTP account
-reads as a working operator path.
-
-### Steps
-
-1. **Use the OpenAlgo path.** The community-tested bridge is the working
-   operator path. The native gateway is catalogued (Dhan, Upstox, and
-   Kotak Neo are evidence-gated as connectable; Kotak Neo is Connected
-   (read) / API smoke only; Groww and INDmoney stay disabled / coming
-   soon) but its HTTP connect and read surfaces are frozen.
-2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
-   choose your broker from the dropdown, paste your API key and secret, and
-   complete the broker's login flow (TOTP / OAuth / OTP — depends on the
-   broker). OpenAlgo persists the session. Skip this step for Example data
-   and for Practice.
-3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
-   copy the generated API key. This is the key FlintTrade uses for the
-   OpenAlgo-compatible bridge only (not your broker's key).
-4. **Set the OpenAlgo key in FlintTrade.** Broker connect is not a required
-   first-run step. After the Practice desk is open, use the optional broker
-   panel (**OpenAlgo Bridge**) or Settings → Broker Gateway, then paste the
-   OpenAlgo URL and API key. The app stores these settings in the OS workspace
-   and hot-reloads the backend client. If the URL does not include a port, set
-   REST Port (default `5000`); the WebSocket Port defaults to `8765`.
-5. **Verify the bridge.** Use the Test Connection button in the same UI.
-   Source contributors open that optional broker panel, or Settings → Broker
-   Gateway; desktop users use the in-app window.
+Broker connections use five native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney and Groww. Availability remains evidence-gated. Native broker HTTP
+mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
+cannot currently be established through the terminal. Practice uses the local
+sandbox. Funded Live placement remains unproven and fail-closed.
 
 **Native HTTP freeze.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
@@ -258,46 +230,7 @@ frozen routes; MSI static-IP host native read smoke uses the in-process
 native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
-The Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
-Upstox, and Groww when catalogue metadata is available. These cards copy the
-broker-hosted MCP URLs and client configurations, and label read-only surfaces
-such as Upstox MCP. Broker MCP tools run in the external MCP client; FlintTrade
-automation and live order placement still use the guarded OpenAlgo path while
-native HTTP remains frozen.
-
 ### Why two layers?
-
-The two-layer design lets existing OpenAlgo users keep their broker setup while
-FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
-first-party broker gateway whose HTTP connect and read surfaces are frozen
-until Task 9D and Task 7C.2.
-
-**Native Dhan + Kotak Neo Connected (read) / API smoke.**
-The path is native Dhan + Kotak Neo on the MSI static-IP host, non-funded
-live REST API smoke (quotes / depth / hist / chain where the SDK allows).
-That historical smoke does not cover the now-wired v3 async SFeed or order
-feed; those lifecycles have local synthetic coverage only.
-Prefer native; OpenAlgo is Settings / fallback only — not the primary
-connect CTA. Native HTTP remains frozen on this unreleased
-line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;
-MSI static-IP host native read smoke is the in-process read path. Dhan and Neo chrome is
-**Connected (read)** or **API smoke** only after persisted REST smoke
-evidence (`read_smoke_ok`) — never placeable Live orders, and a failed
-login/read never fakes Connected. Native Setup Continue ignores
-gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
-successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
-Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
-on latest stable 2.2.0. Neo runs exact upstream `main`
-`9a37488d77dc96442ee2a90ef78462e688cf4856`, with `v3.0.7` at
-`53cccc45fe56a193b30ffce3c03c71c5c0378538` as the release baseline. Install
-runtime `kotakneoapi` 3.0.8; explicit `release_version` 3.0.7 retains the
-stable compatibility evidence. Never install the old `neo-api-client`
-distribution; Python imports
-still use `neo_api_client`. Live place stays fail-closed. Sandbox proof is
-unavailable because Neo offers no sandbox; live-account/market-hours feed,
-funded-order, Live-promotion, and cross-platform proof remain open.
-The runtime update is verified offline only; earlier non-funded activation
-evidence does not verify this SDK version against a real account.
 
 ---
 
@@ -361,15 +294,6 @@ The confirm button reads **Continue** (accessible name `Confirm Example order`).
 Both reviews offer **Back to edit**. While the confirm is in flight the
 button reads `Confirming…`.
 
-**Practice fills.** This is the shipped Practice path. Example is sample data.
-Practice is the shipped simulated-fill path: orders place and record simulated fills.
-AI and terminal surfaces read that Practice book. Practice never leaks a live
-broker order. Live stays fail-closed until native read smoke is trusted and
-funded unlock is explicit. OpenAlgo is a Settings fallback only — not the
-primary connect CTA. Setup's primary connect action is **Continue without
-a broker**. Learn → Practice Trading explains this built-in simulated path;
-no broker connection or broker sandbox is required.
-
 **Mode, session, and sample data.** Practice and Live name the session Mode.
 **Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
 Post-close · Closed) are market-session status, never Live mode. Example data
@@ -415,7 +339,7 @@ of the UI.
 label. Example data reads `Example data. No broker is connected and no orders are sent.`
 Practice reads `Practice — simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
-Widgets stay quiet: they do not repeat a second feed chip for the same fact.
+Widgets identify illustrative and fallback figures with Sample/Example source labels.
 Mode is not provenance. A figure that stays fabricated in Practice and Live,
 such as benchmark index returns, keeps the Example chip. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
@@ -428,8 +352,8 @@ for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome normally says **Unavailable** or **Degraded** plus the failure
 in plain words — never **Connected** or **Connected (read)**. Failure class
 Laya is the exception: Broker may stay **Connected** or **Connected (read)**
-while Live place and Position Mirror start stay muted. Other money-path
-classes mute Live place and Position Mirror start the same way, with one
+while Live place stay muted. Other money-path
+classes mute Live place the same way, with one
 rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
@@ -462,8 +386,7 @@ lines, and how to start the sidecar, are in [Start Laya](#start-laya):
 `Downloading the model · X of Y GB`, `Can't download the model`,
 `Wrong model version`, and `Can't verify the model`. The refusal while
 orders are paused is `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
-Only Live-facing **Down** opens the Laya Blocked strip and mutes Live place
-and Position Mirror start. Practice place follows the Practice chip.
+Only Live-facing **Down** opens the Laya Blocked strip and mutes Live place. Practice place follows the Practice chip.
 Live-facing **Degraded** leaves Live open, shows **Laya Degraded — tighter
 limits**, and does not look Blocked. LLM is **Not configured**, or
 **Connected (suggest only)** when Chat is ready.
@@ -485,7 +408,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place and Position Mirror start stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live those pending exits include the broker's open orders when that book can be read. If the broker order book cannot be read, the cap is the open quantity minus this desk's own pending exits, and the close can still be admitted. A larger close takes the full check and is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."` and the row shows **Exit pending**. The Live hold is for that broker account. When the broker's orders cannot be read, that refusal is `"Not placed. One exit at a time for <symbol> until your broker's orders load."` The label is the symbol, or "this contract" when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the sidecar, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the sidecar is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent. A filled one can show **Closed. Exits are allowed while Laya is Down.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live those pending exits include the broker's open orders when that book can be read. If the broker order book cannot be read, the cap is the open quantity minus this desk's own pending exits, and the close can still be admitted. A larger close takes the full check and is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."` and the row shows **Exit pending**. The Live hold is for that broker account. When the broker's orders cannot be read, that refusal is `"Not placed. One exit at a time for <symbol> until your broker's orders load."` The label is the symbol, or "this contract" when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the sidecar, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the sidecar is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent. A filled one can show **Closed. Exits are allowed while Laya is Down.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -812,7 +735,7 @@ continues to SafetySystem and gate_order. **Cancel** places nothing.
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
 **Laya Degraded — tighter limits** on the Status menu and under those
 place controls. That line is not the Blocked strip, and it does not mute
-Live place or Position Mirror start. The chip shows Degraded when Live
+Live place. The chip shows Degraded when Live
 itself is Degraded. Practice Degraded applies the tighter ceiling to a
 Practice place.
 
@@ -820,7 +743,7 @@ Practice place.
 See [Start Laya](#start-laya). In Practice it shows the sidecar state and
 does not read Down while a Practice place can be admitted. **Not qualified
 for Live** is the chip tooltip. Only Live-facing **Down** opens the Laya
-Blocked strip and mutes Live place and Position Mirror start. Practice is
+Blocked strip and mutes Live place. Practice is
 not muted by that strip. While that mute is up, the Live place control
 does not also show **Laya denied**. Kill All stays reachable. Broker may
 stay **Connected** or **Connected (read)**. A Practice place is refused
@@ -831,7 +754,7 @@ while Laya is Ready or Degraded, without a matching qualification record,
 says **Laya isn't qualified for Live yet. Practice orders are available.**
 Start the opt-in model before a Down engine can admit.
 
-A close the server classifies as reduce-only is still admitted. The success line is **Closed. Exits are allowed while Laya is Down.** Cancel-all only cancels and stays reachable. Layer 5 and Ditto Kill All cancel resting orders and then flatten; they are separate from cancel-all. Connected (read) is a broker status, not a Mode.
+A close the server classifies as reduce-only is still admitted. The success line is **Closed. Exits are allowed while Laya is Down.** Cancel-all only cancels and stays reachable. Layer 5 cancels resting orders and then flattens; they are separate from cancel-all. Connected (read) is a broker status, not a Mode.
 
 **Chat.** Chat never shows **Admit** or **Approved by Laya**. Chat being
 offline does not close Live.
@@ -1013,24 +936,28 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Pre-flight checklist
 
-- [ ] Broker or OpenAlgo session is current if you are intentionally testing a
-      live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
+
 - [ ] The authenticator is enrolled. After **Later** on the
       **Two-factor authentication** card, the Live menu stays locked and
       **Enrol authenticator in Settings** links to Settings → Security
       (`/settings#security`). The Live switch does not ask for an
       authenticator code. Example and Practice stay password-only until
       enrolment. First-run Setup does not unlock Live.
+
 - [ ] An **exactly 6-digit** PIN is set under Settings → Security
       (`/settings#security`). With no PIN, Live stays locked and shows
       `Create a PIN in Settings`, linking to that same page. Once Live is
       eligible, the switch asks for this PIN. Quick Unlock uses the same
       PIN to reopen the current Mode.
+
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
+
 - [ ] In Live, the Laya chip is **Ready** or **Degraded** if you intend a Live place attempt. The chip follows the current mode and does not invent Ready. In Practice it shows the sidecar state. **Not qualified for Live** is the tooltip when Live has no matching qualification record. **Down** shows **Laya is Down. New orders are paused until it's Ready. You can still close positions.** and mutes a new Live place. Close and Square off stay available. A base checkpoint leaves Live unqualified. **Degraded** keeps Live open and shows **Laya Degraded — tighter limits**. A Practice place is refused when Practice itself is Down. After Start Laya, until the ping confirms the new state, the chip says **Checking** and the popover says **Checking Laya…**. See [Start Laya](#start-laya).
+
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
+
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
 
@@ -1111,16 +1038,15 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. `/login` redirects here and opens sign-in. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
-| `/setup` | Required first-run path. The Practice desk is **Step 2 or 3**. With no operator yet, Setup starts at Create operator. When an operator already exists and Setup is unfinished, `/setup` resumes at **Step 2 or 3**. The count is fixed from the start, from whether this machine's vault is already secured: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"; an unfinished operator resumes on that Practice step). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk** (an unfinished operator resumes on the vault step, then the Practice desk). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Reloading `/setup` mid-flow resumes the unfinished setup and keeps the same step title (for example **Step 3 of 3 - Practice desk**). A fresh browser, or a reload on the vault step that needs a setup session, shows **Continue setup** and **This machine already has an operator. Sign in to finish setup.** **Start over (deletes this unfinished operator)** asks once (**Enter your password to delete this unfinished operator.**), then the red **Delete and start over** button or **Cancel**. A failed status check stays on **Retry** and does not open the fresh-install form: **FlintTrade is busy** on HTTP 429, **Can't check setup status** for any other HTTP error or an unreadable or incomplete response, and **FlintTrade backend unavailable** only when nothing answered. A second create while an operator already exists, including two creates that overlap, is refused: the account service raises `Account already set up`, and `POST /v1/auth/setup` answers HTTP 409 with `Request conflicts with the current state`. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`; choose Practice in the Mode menu before placing a simulated order. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
-| `/automate` | Automate — flows, schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Automate → Automation Settings. |
+| `/automate` | Automate — schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Automate → Automation Settings. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
-| `/ditto` | Accounts — broker connections, Position Mirror, and the multi-account Risk Dashboard. |
+| `/ditto` | Accounts — native broker account metadata and connection status. Mirroring and aggregate broker risk remain unavailable until native cutover. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
 First-run Setup finishes on the Practice desk. That desk is **Step 2 or
@@ -1236,17 +1162,6 @@ does not change. The authenticator panel's actions are **Enrol** and
 **Later**. Card-row **Later** buttons, and **Later** in the open
 **LLM** and **Trading defaults** panels, are announced as
 `Later {title}`.
-
-Monitoring and risk limits stay in Settings. They are not cards on this
-strip. The cards never appear before the affirm, never block Practice,
-and never change the step total fixed above. On the broker panel,
-**Continue without a broker** stays the first control, above
-**FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
-**Broker connect** **Skipped**, the same as on the card. A successful
-native or OpenAlgo connection still marks the card **Done**. Persona is
-not a required first-run gate and is not part of that count. First run
-has no Live unlock. Live place stays fail-closed. A later Live unlock,
-outside this path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
@@ -1406,7 +1321,7 @@ figures. They do not use the Example label. Shareholding omits the chip
 when the read has failed. In Example, Social shows exactly one Example
 chip, and only after loading has finished. In Example, ETFs show one
 Example chip and `Example prices. Connect a broker for live quotes.`
-Practice and Live keep `live quotes via OpenAlgo. Refreshes every 30s.`
+Practice and Live keep `live quotes via the native gateway. Refreshes every 30s.`
 In Example, Sector's header reads
 `Example sector split. Connect a broker to see yours.`
 and the footer reads `Example data. Not from your holdings.` That view
@@ -1583,12 +1498,6 @@ invent live OI. The Mode honesty line is the disclosure —
 there is no second Example chip on the chain strip. An empty expiry
 is an honest empty — not zeros-as-data.
 
-1. Drag the **Option Chain** widget into the workspace.
-2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).
-3. The expiry row auto-fills from OpenAlgo's `/expiry` endpoint.
-4. Calls on the left, Puts on the right, ATM strike highlighted.
-5. Hover any cell — sparkline shows the last-100-tick history.
-
 ### OI Analytics
 
 One widget (`oichart`) with several views of the same chain read:
@@ -1704,13 +1613,6 @@ Open `/automate`. Automate place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
 It does not open a desk confirm, and it does not place the reduced
 quantity on its own. The hub has three sub-tools:
-
-### Flows
-
-Visual flow builder (drag-and-drop nodes) for "when X happens, do Y"
-automations. Nodes include market-data events, broker events, and actions such
-as sending a notification or running a local script. **New Flow** and
-**From Template** appear once in the toolbar, including when no flows are saved.
 
 ### Cron
 
@@ -1862,6 +1764,18 @@ unconfigured when Settings looks empty. Configure a provider in Live or
 Practice on this machine; see
 [Settings reference](#11-settings-reference).
 
+
+### Speaking with the AI assistant
+
+The AI Advisor microphone fills an editable conversation draft. Review the
+transcript and press Send; recognition never submits an order. Your browser
+may send audio to its speech recognition service. Typed conversation remains
+available when speech recognition is unsupported or permission is refused.
+
+An order request can produce a proposal for review. Approve uses the existing
+Practice order path and safety admission. Native Live execution remains
+unavailable until the native cutover; speech does not unlock it.
+
 ### Suggest
 
 **AI Strategy Suggestions** filters a local illustrative recommendation
@@ -1912,48 +1826,18 @@ startup.
 
 ## 10. Accounts walkthrough
 
-Open **Accounts** (`/ditto`) for broker connections, mirroring and account-level
-risk. With no mirroring accounts registered, the page explains **Connect a broker
-to mirror accounts** and offers **Add Account** for an OpenAlgo-compatible account.
-Existing native broker status remains visible. A failed account-service request
-still shows an error and **Retry**; it is not presented as an empty account list.
+### Native accounts and copy trading
 
-### Three views
+Accounts lists the built-in native broker connections. Credentials belong to the
+native gateway vault, and account selection uses the exact broker and account
+identity. Native broker HTTP reads and writes remain frozen pending the cutover.
 
-- **Mirror** — set up follower → master relationships, choose
-  proportional or fixed-lot sizing.
-- **Margin** — pre-trade margin calculator across all linked accounts.
-- **Risk** — per-account risk limits, kill-switch propagation, trailing
-  stop-loss governor.
+Native copy trading has no active runtime. Mirroring, linked-account margin and
+risk execution are unavailable; their controls stay disabled in every mode.
+Account linking returns 501, and operations requiring the missing copy runtime
+return 503 after their authentication and mode checks. No external bridge service
+is started or contacted.
 
-With example data, `/ditto` Position Mirror, **Start Position Mirroring**
-stays muted and disabled — the same honesty class as Telegram
-**Send Test** and example-data Scalper. Example data is always disarmed.
-Helper: `Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.` Practice stays disarmed. Helper: "Mirroring requires
-Live with broker accounts connected." Live arms Start only when a
-source account, at least one target, and broker accounts are
-ready. Otherwise the helpers are "Select a source account and at
-least one target to start mirroring." (missing source or targets)
-and "Connect a source and at least one target account to start
-mirroring." (list loaded empty). Pending or failed account
-fetches stay muted (`Loading accounts...` / `Could not load
-accounts.`) and are not empty states. The backend rejects
-example-data, Practice, or incomplete starts if the UI slips
-(FT-DITTO-002).
-
-With example data, `/ditto` Risk, **Kill All Positions** is disabled when there are
-no managed accounts (empty state "No managed accounts"; no confirm).
-Whenever the risk runtime is unavailable — including example data — Kill All
-stays muted and disabled with helper "Risk runtime unavailable — Kill All
-disabled." It is never the armed red emergency CTA in that state. The
-backend rejects a Kill All if the UI slips (FT-DITTO-003). Live and
-Practice with a live runtime and managed accounts still keep the armed
-control.
-
-Position mirroring patterns originally came from AlgoMirror; they now run
-in-process inside `packages/services/ditto/` (no external service required).
-
-![Ditto](screenshots/09-ditto.png)
 
 ---
 
@@ -2064,11 +1948,6 @@ Settings → **Monitoring** (`/settings#monitoring`) reads this install. It
 does not write `workspace.json`. It stays its own Settings section. The
 TopBar **Broker**, **Laya**, and **LLM** labels are a different cluster
 (FT-SET-MONITOR-001).
-
-**Connections.** Four rows: **Broker session**, **OpenAlgo bridge**,
-**WebSocket**, and **FlintTrade Backend**. Each is **Online**, **Degraded**,
-**Down**, or **Unknown**. The OpenAlgo bridge can also show a round-trip in
-milliseconds. These rows are connection state.
 
 **System Health** keeps service rows and machine rows apart. Signed-out
 checks use `GET /healthz` and `GET /readyz`, which return status only.
@@ -2263,29 +2142,7 @@ Open FlintTrade and choose **Retry**. On Welcome, **FlintTrade couldn't
 finish updating** stays up until the status check succeeds and reports
 that nothing is pending.
 
-### "Connection refused" on the OpenAlgo port
-
-OpenAlgo is not running, or it is bound to a different port. In Settings →
-Broker Gateway, keep the port in the Gateway URL or set REST Port when the URL
-omits it.
-
-```bash
-python scripts/ft.py status   # FlintTrade backend health and optional OpenAlgo status
-make start-openalgo           # POSIX only: boots the optional local-dev OpenAlgo clone
-```
-
-`python scripts/ft.py status` works on every OS; `make status` is the POSIX
-alias. `make start-openalgo` needs bash, so on Windows start the OpenAlgo clone
-with its own launcher instead.
-
-If you installed OpenAlgo separately, start it via its own start script
-(`python app.py` from the OpenAlgo repo root, or its systemd unit).
-
 ### "Port 5100 already in use"
-
-FlintTrade's backend listens on port 5100 (deliberately separate from
-OpenAlgo's multi-instance range 5000-5009). Find and kill the conflicting
-process:
 
 ```bash
 # Linux / macOS
@@ -2398,17 +2255,6 @@ as a toast.
    layer.
 
 ### Front-end shows stale prices
-
-The OpenAlgo price WebSocket on port 8765 has dropped. The top bar status
-indicator turns red when this happens. FlintTrade auto-reconnects with
-exponential back-off; if the indicator stays red for more than 30 seconds,
-restart the optional OpenAlgo process — POSIX `make start-openalgo` for
-the local-dev clone, or OpenAlgo's own launcher (`python app.py` from that
-repo, or its systemd unit) if you installed it separately. See
-["Connection refused" on the OpenAlgo port](#connection-refused-on-the-openalgo-port).
-`python scripts/ft.py start` only starts the FlintTrade backend on port
-5100 and cannot restore that socket. `python scripts/ft.py dev` is the
-contributor Vite + backend pair, not an OpenAlgo restart.
 
 ### "Cannot find module '@/...'"
 

@@ -251,9 +251,7 @@ def test_llm_config_endpoint_reports_a_failed_runtime_transition_without_persist
     monkeypatch.setattr(
         local_ai_routes,
         "persist_llm_config_with_runtime",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            OllamaRuntimeError("managed Ollama runtime is not installed")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OllamaRuntimeError("managed Ollama runtime is not installed")),
     )
 
     response = app.test_client().post(
@@ -275,7 +273,7 @@ def test_llm_config_endpoint_requires_control_auth_even_when_global_keys_are_uns
 ) -> None:
     app = _make_app(monkeypatch, tmp_path)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
 
     response = app.test_client().post(
         "/v1/config/llm",
@@ -496,11 +494,13 @@ def test_llm_config_from_env_reads_workspace_secret(monkeypatch, tmp_path: Path)
     from flinttrade_core.llm_config import persist_llm_config
     from flinttrade_ai.llm_client import LLMConfig
 
-    persist_llm_config({
-        "provider": "openai",
-        "model": "gpt-4o",
-        "api_key": "sk-unit-secret",
-    })
+    persist_llm_config(
+        {
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-unit-secret",
+        }
+    )
 
     cfg = LLMConfig.from_env()
 
@@ -722,9 +722,7 @@ def test_equivalent_custom_destination_spelling_preserves_the_bound_secret(
         }
     )
 
-    result = persist_llm_config(
-        {"host": "https://models.example.invalid/API"}
-    )
+    result = persist_llm_config({"host": "https://models.example.invalid/API"})
 
     assert result["api_key_configured"] is True
     assert read_effective_llm_config()["api_key"] == "custom-secret"
@@ -747,9 +745,7 @@ def test_destination_canonicalisation_preserves_path_case(
         }
     )
 
-    result = persist_llm_config(
-        {"host": "https://models.example.invalid/api"}
-    )
+    result = persist_llm_config({"host": "https://models.example.invalid/api"})
 
     assert result["api_key_configured"] is False
     assert not (tmp_path / "secrets" / "llm_api_key").exists()
@@ -1400,11 +1396,7 @@ def test_current_workspace_cannot_lazily_reintroduce_lmstudio(monkeypatch, tmp_p
     from flinttrade_core.workspace import Workspace
 
     workspace = Workspace()
-    workspace.update(
-        lambda config: config["llm"].update(
-            {"provider": "lmstudio", "host": "http://127.0.0.1:1234"}
-        )
-    )
+    workspace.update(lambda config: config["llm"].update({"provider": "lmstudio", "host": "http://127.0.0.1:1234"}))
 
     with pytest.raises(ValueError, match="LM Studio is retired"):
         read_effective_llm_config(Workspace())

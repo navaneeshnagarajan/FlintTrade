@@ -1132,7 +1132,7 @@ class TradeJournal:
 
     @_locked
     def import_from_tradebook(self, trades: list[dict[str, Any]]) -> list[str]:
-        """Auto-create journal entries from OpenAlgo tradebook rows.
+        """Auto-create journal entries from broker tradebook rows.
 
         Each tradebook trade becomes a :class:`JournalEntry` with the
         qualitative fields (notes, emotions, quality scores) left blank so the
@@ -1143,7 +1143,7 @@ class TradeJournal:
         is skipped to avoid double-importing.
 
         Args:
-            trades: List of dicts in OpenAlgo tradebook format.  Expected keys:
+            trades: List of dicts in broker tradebook format.  Expected keys:
                 ``symbol``, ``exchange``, ``action`` (BUY/SELL), ``quantity``,
                 ``price``, ``orderid`` (optional), ``product`` (optional),
                 ``timestamp`` / ``time`` (optional).
@@ -1170,7 +1170,7 @@ class TradeJournal:
                 logger.warning("Skipping malformed tradebook row: %r", trade)
                 continue
 
-            # Parse timestamp from tradebook field names OpenAlgo uses
+            # Parse timestamp from tradebook field names broker uses
             raw_ts = trade.get("timestamp") or trade.get("time") or trade.get("order_time")
             entry_time: datetime | None = None
             if raw_ts:

@@ -29,9 +29,7 @@ from .workspace import Workspace
 LLM_API_KEY_REF = "secret://llm/api_key"
 OLLAMA_BASE_URL = ""
 _LEGACY_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-_LMSTUDIO_RETIRED_ERROR = (
-    "LM Studio is retired; use managed Ollama or a Custom OpenAI-compatible host"
-)
+_LMSTUDIO_RETIRED_ERROR = "LM Studio is retired; use managed Ollama or a Custom OpenAI-compatible host"
 _LLM_TRANSACTION_VERSION = 1
 _LLM_TRANSACTION_PHASES = {"prepared", "committed"}
 _LLM_TRANSACTION_OPERATIONS = {"replace", "delete"}
@@ -157,9 +155,7 @@ def _validate_configurable_api_base_url(provider: str, host: str) -> str:
     except ValueError as exc:
         raise ValueError("LLM API base URL is invalid") from exc
     if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
-        raise ValueError(
-            "LLM API base URLs must not contain credentials, query parameters, or fragments"
-        )
+        raise ValueError("LLM API base URLs must not contain credentials, query parameters, or fragments")
     if parsed.scheme.lower() not in {"http", "https"} or parsed.hostname is None:
         raise ValueError("LLM API base URL must be an absolute HTTP(S) URL")
     return value
@@ -345,8 +341,7 @@ def _effective_llm_config(stored: dict[str, str]) -> dict[str, Any]:
         workspace_key = (
             stored["api_key"]
             if provider == stored_provider
-            and _trust_destination(provider, host)
-            == _trust_destination(stored_provider, str(stored.get("host") or ""))
+            and _trust_destination(provider, host) == _trust_destination(stored_provider, str(stored.get("host") or ""))
             else ""
         )
         api_key = provider_key or workspace_key
@@ -396,11 +391,9 @@ def resolve_llm_test_config(
         if "api_key" in payload:
             api_key = _normalise_api_key(payload.get("api_key", ""))
         else:
-            same_destination = (
-                provider == effective_provider
-                and _trust_destination(provider, host)
-                == _trust_destination(effective_provider, effective_host)
-            )
+            same_destination = provider == effective_provider and _trust_destination(
+                provider, host
+            ) == _trust_destination(effective_provider, effective_host)
             api_key = str(effective.get("api_key") or "") if same_destination else ""
 
     return {
@@ -636,9 +629,7 @@ def _prepare_transaction_journal(
         "desired_llm": copy.deepcopy(desired_llm),
         "had_secret": had_secret,
         "old_sha256": old_sha256,
-        "new_sha256": hashlib.sha256(replacement_key.encode("utf-8")).hexdigest()
-        if replacement_key
-        else "",
+        "new_sha256": hashlib.sha256(replacement_key.encode("utf-8")).hexdigest() if replacement_key else "",
     }
 
 
@@ -667,11 +658,7 @@ def _persist_llm_config_snapshot(
     if not any(field in payload for field in ("provider", "host", "model", "api_key")):
         raise ValueError("At least one of provider, host, model, api_key is required")
 
-    replacement_key = (
-        _normalise_api_key(payload.get("api_key", ""))
-        if "api_key" in payload
-        else None
-    )
+    replacement_key = _normalise_api_key(payload.get("api_key", "")) if "api_key" in payload else None
     secret_path = _secret_path(workspace)
 
     with _llm_transaction_lock(workspace):
@@ -706,9 +693,7 @@ def _persist_llm_config_snapshot(
 
         current_ref = str(current_llm.get("api_key_ref", "") or "")
         current_key_provider = str(current_llm.get("api_key_provider", "") or "").strip().lower()
-        current_key_destination = _normalise_destination(
-            str(current_llm.get("api_key_destination", "") or "")
-        )
+        current_key_destination = _normalise_destination(str(current_llm.get("api_key_destination", "") or ""))
         binding_present = bool(current_ref or current_key_provider or current_key_destination)
         binding_matches = (
             current_ref == LLM_API_KEY_REF

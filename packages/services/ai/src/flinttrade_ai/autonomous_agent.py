@@ -12,7 +12,7 @@ Adapted from Agentic-Trader (marketcalls/Agentic-Trader):
 
 Key differences from the reference:
 - Uses FlintTrade's LLMClient (multi-provider, no LiteLLM dependency)
-- Uses FlintTrade's OpenAlgo REST client (packages/core)
+- Uses FlintTrade's broker REST client (packages/core)
 - Async-first throughout (asyncio, httpx)
 - Typed dataclasses for all intermediate results
 - No colorama / print-heavy logging — uses standard logging
@@ -71,7 +71,7 @@ def _rebase_protection_price(level: float, entry_price: float, fill_price: float
 # Response normalisation
 #
 # The agent reads market data through whatever client is injected. The modern
-# flinttrade_core.openalgo_client returns typed Pydantic models (Quote/Depth/
+# flinttrade_core.broker_client returns typed Pydantic models (Quote/Depth/
 # list[OHLCV]); older/mock brokers return dict envelopes ({"status", "data"}).
 # These helpers accept EITHER so the same agent works against the live typed
 # client AND the dict-mocked test brokers — the wiring boundary the smart-route
@@ -317,7 +317,7 @@ class AutonomousTrader:
     2. Fetch market data in parallel (quotes + depth + technical indicators)
     3. For each symbol: generate trade signal with LLM reasoning
     4. Assess risk (position limits, existing positions)
-    5. Execute via OpenAlgo with safety guardrails
+    5. Execute via broker with safety guardrails
     6. Monitor open positions and trigger stop-loss / take-profit
 
     The agent is deliberately single-symbol-per-cycle to keep prompt size
@@ -329,7 +329,7 @@ class AutonomousTrader:
 
         from flinttrade_ai.autonomous_agent import AutonomousTrader, AgentConfig
         from flinttrade_ai.llm_client import LLMClient
-        from flinttrade_core.openalgo_client import OpenAlgoClient
+        from flinttrade_core.broker_client import BrokerClient
 
         config = AgentConfig(
             symbols=["ICICIBANK", "RELIANCE"],
@@ -340,7 +340,7 @@ class AutonomousTrader:
         )
         trader = AutonomousTrader(
             llm_client=LLMClient(),
-            openalgo_client=OpenAlgoClient(),   # market-data reads only
+            broker_client=BrokerClient(),   # market-data reads only
             config=config,
             order_executor=gated_executor,      # the ONLY order path (gated)
         )
@@ -351,7 +351,7 @@ class AutonomousTrader:
     def __init__(
         self,
         llm_client: Any,
-        openalgo_client: Any,
+        broker_client: Any,
         config: AgentConfig | None = None,
         vault: Any | None = None,
         order_executor: Any | None = None,
@@ -366,7 +366,7 @@ class AutonomousTrader:
 
         Args:
             llm_client:       FlintTrade LLMClient instance.
-            openalgo_client:  FlintTrade OpenAlgoClient instance — used for
+            broker_client:  FlintTrade BrokerClient instance — used for
                 MARKET DATA reads only (quotes/depth/history). The agent never
                 places orders through it.
             config:           Agent configuration. Uses safe defaults if None.
@@ -408,7 +408,7 @@ class AutonomousTrader:
                 drafting entirely.
         """
         self.llm = llm_client
-        self.broker = openalgo_client
+        self.broker = broker_client
         self.config = config or AgentConfig()
         self.vault = vault
         self.memory = memory
@@ -521,7 +521,7 @@ class AutonomousTrader:
     async def _fetch_symbol_data(self, symbol: str) -> MarketData:
         """Fetch quotes, depth, and calculate technical indicators for one symbol.
 
-        Runs synchronous OpenAlgo API calls via asyncio.to_thread to avoid
+        Runs synchronous broker API calls via asyncio.to_thread to avoid
         blocking the event loop. Mirrors Agentic-Trader's per-symbol fetch
         function, adapted for async.
 
@@ -877,7 +877,7 @@ class AutonomousTrader:
         """Build a typed MARKET :class:`~flinttrade_core.models.Order` for the gate.
 
         The gated executor (and the SafetyContext HMAC behind it) operates on
-        the canonical typed Order, not OpenAlgo kwargs.
+        the canonical typed Order, not broker kwargs.
         """
         from flinttrade_core.models import Action, Exchange, Order, PriceType  # noqa: PLC0415
 
@@ -1268,7 +1268,7 @@ class AutonomousTrader:
             return
 
         try:
-            # Parse via the shared normaliser — the production OpenAlgoClient
+            # Parse via the shared normaliser — the production BrokerClient
             # returns a TYPED Quote, not a dict envelope. (The sibling readers
             # _fetch_symbol_data/_compute_indicators were converted; this one
             # was missed, leaving SL/TP dead against the live client.)
@@ -1548,7 +1548,7 @@ class AutonomousTrader:
         """Square off all active positions with gated reverse MARKET orders.
 
         Places one reverse order per tracked position through the gated
-        executor (rather than a broker-level close-all, which OpenAlgo applies
+        executor (rather than a broker-level close-all, which broker applies
         regardless of strategy — quirk #2 — and which would bypass the gate).
         Fails closed without an executor; an executor-less agent can never
         have opened a position, so there is nothing to square off.

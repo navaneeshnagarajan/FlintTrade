@@ -1,5 +1,12 @@
 # FlintTrade Architecture
 
+Broker connections use five native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney and Groww. Availability remains evidence-gated. Native broker HTTP
+mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
+cannot currently be established through the terminal. Practice uses the local
+sandbox. Funded Live placement remains unproven and fail-closed.
+
+
 > Reflects `v0.0.1`. 18 package surfaces (13 Python + 3 apps: React
 > terminal, Electron desktop shell, Next.js site + 1 shared TypeScript
 > design-system package + 1 Rust/PyO3 tick engine).
@@ -7,8 +14,8 @@
 > test counts.
 
 This document is the architectural reference for contributors. For a
-user-facing overview, see [USER_GUIDE.md](USER_GUIDE.md). For HTTP /
-WebSocket contracts, see [API.md](API.md). For repo conventions, see
+user-facing overview, see [USER_GUIDE.md](USER_GUIDE.md). For first-party HTTP
+contracts, see [API.md](API.md). For repo conventions, see
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
 
 ---
@@ -17,109 +24,18 @@ WebSocket contracts, see [API.md](API.md). For repo conventions, see
 
 ```mermaid
 flowchart LR
-    subgraph Clients["Browser / Electron client"]
-        T[Terminal React App]
-        DESKTOP[Electron 44 shell]
-        SITE[Public docs site]
-        DS[Design system]
-        DESKTOP --> T
-    end
-
-    subgraph ManagedDesktop["Managed desktop source · user home"]
-        TOOLS[Checksum-verified tools]
-        SOURCE[Active source checkout]
-        GUARDIAN[Python source guardian]
-        DESKTOP -- "bootstrap / update" --> TOOLS
-        DESKTOP -- "build / promote" --> SOURCE
-        DESKTOP -- "start / drain" --> GUARDIAN
-        SOURCE --> GUARDIAN
-    end
-
-    subgraph Backend["FlintTrade backend (Python)"]
-        F[Flask app · port 5100]
-        E[engine]
-        S[screener]
-        AI[ai]
-        D[data]
-        H[historical]
-        BT[backtest]
-        AUT[automation]
-        DIT[ditto]
-        JNL[journal]
-        IND[indicators]
-        ING[webhooks]
-        GW[gateway]
-        TICK[ticks · Rust/PyO3]
-    end
-
-    subgraph NativeGateway["Native gateway · beta"]
-        NGA[adapter contract + routing]
-        DHAN[Dhan · Upstox · Kotak Neo · INDmoney · Groww<br/>adapters built to parity]
-    end
-
-    subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (optional external service)"]
-        OA[broker adapters]
-    end
-
-    subgraph LocalAI["Managed local AI · loopback only (optional)"]
-        OLL[Ollama server · private dynamic port]
-        MODELS[Workspace model store]
-        OLL --> MODELS
-    end
-
-    subgraph Brokers["Brokers (live)"]
-        B1[Zerodha · Upstox · Fyers · Angel · ...]
-    end
-
-    T -- "/api/v1/* + /ft-api/v1/* (HTTP)" --> F
-    GUARDIAN --> F
-    T -- "WS /ws (port 8765 via proxy)" --> OA
-    SITE -- "generated docs + read-only MCP" --> DS
-    T --> DS
-    F --> E
-    F --> S
-    F --> AI
-    AI -- "OpenAI-compatible API" --> OLL
-    F --> D
-    F --> H
-    F --> BT
-    F --> AUT
-    F --> DIT
-    F --> JNL
-    F --> ING
-    F --> GW
-    BT --> TICK
-    F --> NGA
-    NGA --> DHAN
-    F -- "REST" --> OA
-    OA --> B1
+    terminal[Terminal / Electron renderer] --> backend[FlintTrade backend]
+    backend --> practice[Local Practice sandbox]
+    backend --> reads[Exact-account BrokerReadPort]
+    backend --> gate[SafetyContext admission]
+    gate --> router[BrokerRouter]
+    reads --> native[Native broker adapters]
+    router --> native
+    backend --> storage[Workspace / vault / market storage]
 ```
 
-Source/browser deployments default to the FlintTrade backend on port 5100 and
-reach it through `/ft-api`. The Electron guardian instead starts its managed
-backend with `--port 0`, consumes the announced dynamic loopback port, and
-loads the terminal from that selected origin. OpenAlgo on 5000 and its
-WebSocket on 8765 are optional external integration origins, proxied through
-Vite only when that bridge is enabled. The native
-gateway contract and routing are present, and the five founder-broker adapters
-(Dhan, Upstox, Kotak Neo, INDmoney, Groww) remain dormant unless their activation
-gates pass. The current connectable native set is Dhan, Upstox, and Kotak Neo.
-Dhan and Upstox are connectable after live login/read verification and
-emergency-planner coverage. Kotak Neo is catalogue-connectable for Connected
-(read) / API smoke (FT-MONDAY-002) only; funded Live place and market-hours
-order-safety proof remain pending. Neo has no sandbox (never offer Neo
-Practice); operator copy is `Live read only until funded unlock.` INDmoney is
-read-verified and its fail-closed planner is locally verified, but it remains
-`connectable=false`: active regular `EQ-`/`DRV-` MARKET/LIMIT rows cannot yet be
-distinguished authoritatively from smart parents after restart, and the broker
-does not expose an atomic reduce-only close primitive. A funded/live-market
-order-safety proof is still required. Groww stays `connectable=false`: it has
-approved-key login/account-read proof but still needs market-data/API
-permission, static-IP resolution, and order-safety proof.
-Portal/static-IP evidence is not enough by itself to promote Groww.
-Native HTTP remains frozen (Task 9D / Task 7C.2); Setup → Brokers still fails.
-MSI static-IP host native read smoke is the in-process native read path, not a restored Brokers
-HTTP session.
+The native HTTP connection and read surfaces remain frozen. The diagram shows
+the internal safety boundaries; it does not imply operator availability.
 
 The Electron shell has machine authority but no trading authority. It owns
 tool acquisition, the managed checkout, source promotion, the source guardian,
@@ -250,17 +166,6 @@ serialisable layouts. Users compose their workspace from 71 widgets
 (18 trading + 31 analysis + 22 utility) split across 12 routes.
 
 ### State architecture
-
-```mermaid
-flowchart LR
-    WS[OpenAlgo WebSocket\nport 8765] --> J[Jotai atoms\nper-instrument LTP/Quote/Depth]
-    REST[REST API\n/api/v1 + /ft-api/v1] --> TQ[TanStack Query cache\npositions, orders, holdings, funds, optionchain]
-    J --> Z[Zustand stores\nconnection, layout, settings, aggregated P&L, mode]
-    TQ --> Z
-    Z --> UI[Widgets and routes]
-    J --> UI
-    TQ --> UI
-```
 
 **Boundary rules** — data enters through one path only and is never
 duplicated:
@@ -427,29 +332,11 @@ sandbox (Practice). It does not place an order and does not mint
 `gate_order`, and it does not replace L1–L5. A refusal or a quantity
 clamp stops before those next steps. Admit checks Down, then the hard
 rules, then typed free-text questions on the opt-in decision sidecar.
-The model can deny or clamp only. Only Down mutes Live place and
-Position Mirror start. Degraded leaves Live open and enforces a tighter
+The model can deny or clamp only. Only Down mutes Live place. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
 smart, multi, forever modify and cancel, and the other non-place write verbs still reach SafetySystem without this place admission. `POST /api/v1/orders/forever` does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.` and the route does not call a broker. A GTT body is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call. No submit route reaches a broker forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place. Laya starts Down; the three statuses are Ready, Degraded, and Down. `GET /health` records them from the sidecar when one is registered. The desk ping publishes the stored Live-facing status and does not invent Ready. A base checkpoint is not qualified for Live, so Live stays Down until a qualification record matches the pinned revision and policy. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 ### Broker reads versus gated writes
-
-`BrokerReadPort` in
-`packages/core/core/src/flinttrade_core/broker_read_port.py` defines the exact
-broker-read contract. The gateway implementation and owner factory are defined in
-`packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
-Application startup constructs the factory result and retains the dependency
-record in `packages/core/core/src/flinttrade_core/app.py`.
-The port is an in-process contract, not a new public HTTP family. Its methods
-are `quote`, `depth`, `historical`, `batch_quotes`, `option_chain`,
-`lot_sizes`, `balance`, `portfolio_greeks`, `positions`, `holdings`,
-`margin`, `order_states`, and `trades`. Native HTTP account and market-data
-routes (`/api/v1/native/…` kinds) currently return `409` with zero provider
-calls; migrating those consumers onto the port is Task 7C.2 / 8B. OpenAlgo
-passthrough remains the working operator-facing read surface. Exact broker
-reads in this work are the in-process port, not terminal UX. Broker-account
-mutations return `503` until Task 9D. Native broker UX stays down on `main`
-until both tasks land — that is the accepted product decision.
 
 Live **writes** still mint a `SafetyContext` through `gate_order` /
 `gate_broker_write` and dispatch through `BrokerRouter`. Read operations do
@@ -505,7 +392,7 @@ stateDiagram-v2
     }
     state Live {
         [*] --> realOrders
-        realOrders: Orders routed to a native broker\nadapter or OpenAlgo-compatible endpoint;\nsafety layers active
+        realOrders: Orders routed to a native broker\nadapter;\nsafety layers active
     }
 ```
 
@@ -533,28 +420,6 @@ gated broker path.
 
 ## 5. Data flow
 
-```mermaid
-flowchart TD
-    Tick[OpenAlgo WS tick] --> Atom[Jotai atom\nltpAtomFamily(symbol)]
-    Atom --> Derived[Derived atoms\nPCR · straddle · greeks]
-    Derived --> UI1[Charts · Option Chain · Order Pad]
-
-    REST[REST poll · TanStack Query] --> Cache[Query cache\npositions · orders · holdings]
-    Cache --> UI2[Positions · Orderbook · Funds]
-
-    UI1 --> Order[Order placement]
-    UI2 --> Order
-    Order --> ModeGuard[Mode guard]
-    ModeGuard --> ExampleBlock[Example data refused\nmode_blocked]
-    ModeGuard --> Laya[Laya.admit\noperator and automate place]
-    Laya --> Sandbox[Native sandbox\npractice place]
-    Laya --> Safety[5-layer safety system\nlive place]
-    Safety --> Router[Broker router]
-    Router --> Adapter[Native adapter or\nOpenAlgo-compatible API]
-    Adapter --> Broker[Broker]
-    Broker -. fill .-> Tick
-```
-
 Ticks fan in to per-instrument Jotai atoms which power every chart and
 quote widget. REST data populates a separate query cache. Orders hit the
 mode guard first. Operator and automate place then run `Laya.admit`.
@@ -563,7 +428,7 @@ An allowed Practice place stays inside FlintTrade's native sandbox and
 never enters SafetySystem or `BrokerRouter`. Other Practice verbs skip
 `Laya.admit` and stay in that sandbox. An allowed Live place then
 runs the safety layers and the gated broker router, and routes through a
-native broker adapter or an OpenAlgo-compatible endpoint. Other Live
+native broker adapter. Other Live
 writes still go from the mode guard to SafetySystem without `Laya.admit`.
 Fills come back through the tick stream and reconcile with the REST
 cache via
@@ -609,6 +474,25 @@ Workspace-first with a dev/server fallback.
 
 ### Tier 1: `workspace.json` — UI-owned runtime configuration
 
+- **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
+
+- **Enabled modules** — which packages are active.
+
+- **UI preferences** — theme, default exchange, time zone, density.
+
+- **LLM config** — provider and model from the catalogue-driven profiles in
+  `llm_provider_profiles.py` (generated into the terminal as
+  `serviceProviders.ts`). The managed Ollama endpoint is owned internally and
+  is not persisted; custom OpenAI-compatible providers retain an editable
+  host. NVIDIA NIM is in the catalogue with an intentionally blank unpinned
+  default model. Inert LLM connection records can also be stored through
+  `GET`/`POST`/`PATCH`/`DELETE` `/v1/services/connections` without invoking
+  the provider; the static provider catalogue is `GET /v1/services/providers`.
+
+- **Notification config** — Telegram bot settings.
+
+- **Order-safety settings** — rate limits, audit retention, kill-switch.
+
 Lives in a platform-specific workspace directory:
 
 | Platform | Location |
@@ -620,47 +504,9 @@ Lives in a platform-specific workspace directory:
 
 `workspace.json` contains:
 
-- **OpenAlgo bridge settings** — host, WebSocket port, and OpenAlgo API key
-  written by Setup/Settings when that optional bridge is enabled. Optional
-  `telegram_username` (used by `telegram/notify`) is accepted and persisted
-  by `GET`/`POST` `/v1/config/openalgo` or a direct `workspace.json` edit;
-  the Setup/Settings form does not expose that field.
-- **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
-- **Enabled modules** — which packages are active.
-- **UI preferences** — theme, default exchange, time zone, density.
-- **LLM config** — provider and model from the catalogue-driven profiles in
-  `llm_provider_profiles.py` (generated into the terminal as
-  `serviceProviders.ts`). The managed Ollama endpoint is owned internally and
-  is not persisted; custom OpenAI-compatible providers retain an editable
-  host. NVIDIA NIM is in the catalogue with an intentionally blank unpinned
-  default model. Inert LLM connection records can also be stored through
-  `GET`/`POST`/`PATCH`/`DELETE` `/v1/services/connections` without invoking
-  the provider; the static provider catalogue is `GET /v1/services/providers`.
-- **Notification config** — Telegram bot settings.
-- **Order-safety settings** — rate limits, audit retention, kill-switch.
-
-Native broker credentials live in the encrypted gateway vault. OpenAlgo broker
-credentials remain inside OpenAlgo; FlintTrade stores only the OpenAlgo API key
-and, if set through `/v1/config/openalgo` or `workspace.json`, optional
-`telegram_username`.
-
 ### Tier 2: `.env` — advanced dev/server fallback
 
-Lives in the repo root, never committed. Native desktop users do not need it.
-Docker/systemd deployments and contributor experiments may use it for
-`FLINTTRADE_API_KEY`, proxy/deployment flags, and fallback OpenAlgo settings
-when the app UI is not available.
-
 ### How packages read config
-
-```python
-from flinttrade_core.config import FlintTradeConfig
-
-config = FlintTradeConfig.from_env()
-config.settings.openalgo_host     # from workspace.json, with .env fallback
-config.workspace.fast_data_dir    # from workspace.json
-config.workspace.get("ui.theme")  # dot-notation access
-```
 
 Feature packages do not read `os.environ` for data paths themselves. They
 use the `Workspace` class, which resolves the platform workspace directory
@@ -729,12 +575,6 @@ options-strategy place return HTTP 501 and do not place. Order Pad Example Buy o
 with example data is a local example fill (`Example order placed`, id starting `SAMPLE-`) — no HTTP order route,
 SafetySystem, or broker.
 
-### OpenAlgo X-API-Key
-
-OpenAlgo's own endpoints use API-key auth, forwarded as the
-`X-API-KEY` header by `packages/core/core/src/flinttrade_core/openalgo_client.py`. The key
-comes from workspace config, with `.env` retained as an advanced fallback.
-
 ---
 
 ## 9. Infrastructure and deployment
@@ -757,25 +597,10 @@ python scripts/ft.py dev        # start React dev server + FlintTrade backend
 python scripts/ft.py clean      # remove build artefacts
 ```
 
-`make <target>` is the POSIX alias for each of those. A few targets are
-POSIX-only because they are bash recipes rather than `ft.py` delegators —
-`make health`, `make update`, `make full-check`, `make start-openalgo`,
-`make backup` and `make restore` among them. `make backup` and `make restore`
-call `infra/backup/` and currently fail closed with
-`coordinated_restore_unavailable`. Ordinary bhavcopy archives use
-`python -m scripts.backup` — see [setup/backup.md](setup/backup.md). The
-Makefile header lists the full split.
-
-OpenAlgo is an external service; it is NOT a git submodule and is NOT
-bundled. For local development, run `scripts/setup-test-deps.sh` (a bash
-script; on Windows use WSL2 or Git Bash) once per machine to clone a local-dev
-copy into `.local/external/`.
-
 ### External test dependencies
 
 | Service | Local-dev path | Source | Role |
 |---|---|---|---|
-| OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | Broker gateway. |
 
 AlgoMirror is intentionally absent — its mirroring patterns are reimplemented
 natively in `packages/services/ditto/` (our own code; the upstream repo is not
@@ -786,11 +611,8 @@ tracked, pulled, or called at runtime).
 | Script | Purpose |
 |---|---|
 | `infra/scripts/setup.sh` | First-time installation. |
-| `infra/scripts/openalgo/start-openalgo.sh` | Start OpenAlgo as a background process. |
-| `infra/scripts/openalgo/stop-openalgo.sh` | Stop OpenAlgo gracefully. |
 | `infra/scripts/status.sh` | Service status, ports, disk usage. |
 | `infra/scripts/health-check.sh` | Health check (exit 0/1). |
-| `scripts/setup-test-deps.sh` | Clone OpenAlgo to `.local/external/`. |
 | `scripts/reset-flinttrade-state.sh` | Wipe the FlintTrade workspace for a fresh-user test. |
 
 ### Docker

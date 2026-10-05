@@ -181,7 +181,7 @@ class BrokerReadProvenance:
             registry.selector != self.selector
             or not registry.present
             or registry.generation < 1
-            or (credential is None and self.selector != BrokerSelector("openalgo", "default"))
+            or credential is None
             or (credential is not None and (credential.selector != self.selector or credential.generation < 1))
             or type(workspace.instance_id) is not UUID
             or type(workspace.generation) is not int
@@ -811,15 +811,11 @@ class BrokerReadPort(Protocol):
 
     async def historical(self, request: HistoricalRequest) -> BrokerReadOutcome[HistoricalSnapshot]: ...
 
-    async def batch_quotes(
-        self, request: BatchQuoteRequest
-    ) -> BrokerReadOutcome[tuple[QuoteSnapshot, ...]]: ...
+    async def batch_quotes(self, request: BatchQuoteRequest) -> BrokerReadOutcome[tuple[QuoteSnapshot, ...]]: ...
 
     async def option_chain(self, request: OptionChainRequest) -> BrokerReadOutcome[OptionChainSnapshot]: ...
 
-    async def lot_sizes(
-        self, request: LotSizeRequest
-    ) -> BrokerReadOutcome[tuple[InstrumentLotSizeSnapshot, ...]]: ...
+    async def lot_sizes(self, request: LotSizeRequest) -> BrokerReadOutcome[tuple[InstrumentLotSizeSnapshot, ...]]: ...
 
     async def balance(self) -> BrokerReadOutcome[BalanceSnapshot]: ...
 
@@ -833,8 +829,6 @@ class BrokerReadPort(Protocol):
 
     async def margin(self, request: MarginRequest) -> BrokerReadOutcome[MarginSnapshot]: ...
 
-    async def order_states(
-        self, request: OrderStateRequest
-    ) -> BrokerReadOutcome[tuple[OrderStateSnapshot, ...]]: ...
+    async def order_states(self, request: OrderStateRequest) -> BrokerReadOutcome[tuple[OrderStateSnapshot, ...]]: ...
 
     async def trades(self) -> BrokerReadOutcome[tuple[TradeSnapshot, ...]]: ...

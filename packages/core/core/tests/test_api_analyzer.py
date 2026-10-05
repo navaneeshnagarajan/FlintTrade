@@ -243,8 +243,12 @@ def test_recent_limit_clamped(az: APIAnalyzer) -> None:
 def test_replay_returns_full_record(az: APIAnalyzer) -> None:
     """replay(call_id) returns a dict with all fields populated."""
     cid = az.log_call(
-        "/v1/orders/place", "POST",
-        {"symbol": "NIFTY"}, 200, {"orderid": "ORD001"}, 20.0,
+        "/v1/orders/place",
+        "POST",
+        {"symbol": "NIFTY"},
+        200,
+        {"orderid": "ORD001"},
+        20.0,
     )
     replayed = az.replay(cid)
     assert replayed["call_id"] == cid

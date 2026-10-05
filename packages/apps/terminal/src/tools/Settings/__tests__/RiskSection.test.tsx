@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runtime = vi.hoisted(() => ({
   mode: "live",
   apiKey: "",
-  openAlgoHydrated: true,
   activeAccountId: "native:upstox:A" as string | null,
   accounts: [
     { account_id: "A", broker: "upstox", source: "native", status: "connected" },
@@ -30,14 +29,12 @@ vi.mock("@/stores/modeStore", () => ({
 
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: Object.assign(
-    (selector: (state: { apiKey: string; openAlgoHydrated: boolean }) => unknown) => selector({
+    (selector: (state: { apiKey: string }) => unknown) => selector({
       apiKey: runtime.apiKey,
-      openAlgoHydrated: runtime.openAlgoHydrated,
     }),
     {
       getState: () => ({
         apiKey: runtime.apiKey,
-        openAlgoHydrated: runtime.openAlgoHydrated,
       }),
     },
   ),
@@ -124,7 +121,6 @@ describe("RiskSection account-bound safety controls", () => {
   beforeEach(() => {
     runtime.mode = "live";
     runtime.apiKey = "";
-    runtime.openAlgoHydrated = true;
     runtime.activeAccountId = "native:upstox:A";
     api.getSafetyConfigForTarget.mockReset().mockImplementation(
       (target: { account_id: "A" | "B" }) => Promise.resolve(safetyConfig(target.account_id)),

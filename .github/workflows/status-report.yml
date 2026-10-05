@@ -15,10 +15,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        # NOTE: `submodules: recursive` was removed 2026-05-19. OpenAlgo +
+        # NOTE: `submodules: recursive` was removed 2026-05-19. External services +
         # OpenClaw + AlgoMirror are no longer git submodules — they were
         # detached in commit 3da42e4 and live under `.local/external/`
-        # (gitignored, cloned on demand via scripts/setup-test-deps.sh).
+        # (gitignored, provisioned separately when needed).
         # Trying to recursively check them out triggered noisy warnings
         # on every weekly run.
 

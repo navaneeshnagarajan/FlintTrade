@@ -97,6 +97,17 @@ describe("core Flint chart UI primitives", () => {
     expect(screen.getByText("Total")).toBeInTheDocument();
   });
 
+  it.each([{ slices: [] }, { slices: [{ label: "Cash", value: 100, color: "#34d399" }] }])(
+    "renders a valid full-circle gradient for zero or one positive slice",
+    ({ slices }) => {
+      render(<FlintDonutBreakdown ariaLabel="Full capital allocation" slices={slices} />);
+      const chart = screen.getByRole("img", { name: "Full capital allocation" });
+      expect(chart.getAttribute("style")).toContain("conic-gradient");
+      expect(chart.getAttribute("style")).toContain("0%,");
+      expect(chart.getAttribute("style")).toContain("100%");
+    },
+  );
+
   it("renders a shared ranked bar list with a chart marker", () => {
     render(
       <FlintRankedBarList

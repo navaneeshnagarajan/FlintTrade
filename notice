@@ -6,8 +6,7 @@ Copyright 2026 Navaneesh Nagarajan
 FlintTrade is a native-first trading platform: its backend, native gateway
 contract, safety/gating layer, and the bulk of its application code are
 original work by the FlintTrade authors. It is not a fork of another trading
-application, and it can interoperate with OpenAlgo through an optional bridge
-adapter rather than bundling OpenAlgo's source.
+application. Broker connections use the native FlintTrade gateway.
 
 A number of widgets and modules were adapted from open-source projects. Where a
 file was adapted from a specific upstream source it carries an in-source
@@ -17,14 +16,8 @@ fully-original implementations is in progress.)
 
 ## Adapted from / influenced by
 
-- OpenAlgo (https://openalgo.in) — AGPL-3.0
-  Copyright 2024-2026 Rajandran R and OpenAlgo contributors
-  Broker-gateway interoperability target; some UI/RAG modules adapted (AGPL).
-- openalgo-flow — AGPL-3.0 — Copyright 2025-2026 Marketcalls
 - etftracker — MIT — Copyright 2026 Marketcalls
 - trading-journal — MIT — Copyright 2025 Trade Journal Application
-- trading-strategies-openalgo — MIT — Copyright 2025 WINDY-WINDWARD
-- openalgo-portfoliogreeks — MIT — Copyright 2025 Marketcalls
 - pyindicators — MIT — Copyright 2024 PyIndicators
 - OpenClaw — agent-pattern reference
 - hermes-agent (https://github.com/NousResearch/hermes-agent) — MIT

@@ -1,5 +1,12 @@
 # FlintTrade Developer Guide
 
+Broker connections use five native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney and Groww. Availability remains evidence-gated. Native broker HTTP
+mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
+cannot currently be established through the terminal. Practice uses the local
+sandbox. Funded Live placement remains unproven and fail-closed.
+
+
 This guide is for contributors and integrators. It assumes you have read
 [USER_GUIDE.md](USER_GUIDE.md) so you know what FlintTrade does at a user
 level, and that you are comfortable with Python, TypeScript, and Git.
@@ -22,15 +29,14 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `terminal` | TypeScript / React | User-facing single-page application; FlexLayout workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
 | `desktop` | TypeScript / Electron 44 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
-| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions, service-provider catalogue, inert service connections, and the `BrokerReadPort` contract | `packages/core/core/tests/` |
+| `core` | Python | Flask app entry point, native broker reads, config, workspace, models, exceptions, service-provider catalogue, inert service connections, and the `BrokerReadPort` contract | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | Pure-NumPy batch indicators (110 exports; no TA-Lib) + streaming classes (optional Numba on 3 kernels) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | OpenAlgo-compatible bridge support, native broker adapter contract/routing, founder-broker adapter code (Dhan, Upstox, and Kotak Neo connectable (Kotak Neo Connected (read) / API smoke only on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox); INDmoney and Groww built but coming soon), credential store, and WebSocket bridge | `packages/integrations/gateway/tests/` |
-| `webhooks` | Python | Generic HMAC-signed custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
+| `webhooks` | Python | Generic HMAC-signed custom webhooks, alerter | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
-| `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
+| `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis | `packages/services/automation/tests/` |
 | `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy template modules | `packages/services/backtest/tests/` |
 | `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
@@ -53,15 +59,9 @@ Pick the guide for your platform and follow it end-to-end:
 - [Raspberry Pi setup](setup/raspberry-pi.md)
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
-A complete dev environment includes Python 3.12, Node 22.22.2+ (24 recommended),
-and Rust stable if you build `ticks`. OpenAlgo is optional: install it
-separately, or clone a local-dev copy into `.local/external/openalgo/` with
-`scripts/setup-test-deps.sh` (a bash script — on Windows run it in WSL2 or Git
-Bash), only when you want the OpenAlgo-compatible integration path.
-
 For the FULL Python stack — every workspace member plus the ML/AI extras
 (vectorbt+numba backtesting, lightgbm/optuna ensemble tuning, local sqlite RAG,
-reportlab PDF export, openpyxl Excel bridge) — sync all packages and extras
+reportlab PDF export) — sync all packages and extras
 (the never-consumed `talib` extra was removed; the indicators are pure NumPy):
 
 ```bash
@@ -350,32 +350,12 @@ For research and parameter sweeps. Lives under
 For the production engine. Lives under
 `packages/services/engine/src/flinttrade_engine/strategies/`.
 
-1. Subclass `flinttrade_engine.strategy.BaseStrategy`.
-2. Implement the lifecycle hooks (`on_tick`, `on_order_event`,
-   `on_position_event`, `on_stop`).
-3. Register in `packages/services/engine/src/flinttrade_engine/strategies/__init__.py`.
-4. Write a unit test against a mocked OpenAlgo client.
-5. Update the strategy registry so the Strategy Lab UI lists it.
-
 Two production strategies ship today: `ema_crossover` and `wheel_live`.
 Use either as a reference implementation.
 
 ---
 
 ## 8. Adding a broker adapter
-
-FlintTrade has two first-class broker paths: the recommended
-OpenAlgo-compatible bridge and the native gateway. A native broker is a direct
-SDK/HTTP adapter that implements the `BrokerAdapter` Protocol and is routed
-through the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
-(`brokers/openalgo.py`) alongside the native ones. Do not model a new native
-broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
-infrastructure shims, not broker adapters. Exact **reads** use
-the contract defined by `BrokerReadPort`; `flinttrade_gateway.broker_read_service`
-defines its owner factory, while application composition constructs and retains
-the resulting dependency record. Native HTTP read routes currently return
-`409` with zero provider calls until Task 7C.2 cuts them over to that port.
-Reads do not traverse `gate_order` / `BrokerRouter`. Writes still must.
 
 1. Add a native adapter under
    `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`
@@ -492,22 +472,7 @@ port 5100. The backend's WSGI middleware strips the `/ft-api` prefix
 `url_prefix="/v1"` answers requests at `/ft-api/v1/…` from the outside
 and `/v1/…` from the inside. Do not double-prefix.
 
-### Port 5100 is the FlintTrade backend — not OpenAlgo
-
-OpenAlgo runs on ports 5000-5009 (multi-instance range). FlintTrade
-deliberately picks 5100 to avoid that range. Do not propose
-consolidating onto a single port; it would clash with multi-instance
-OpenAlgo setups.
-
 ### Broker authentication
-
-The OpenAlgo bridge handles its own broker authentication (TOTP, OAuth,
-OTP, biometric flows) — FlintTrade only holds the OpenAlgo API key for that
-path. The native broker gateway, by contrast, stores broker credentials in
-the encrypted vault (`gateway/credentials.py`, Fernet + PBKDF2) and performs
-credential-replay / OAuth / TOTP login itself via
-`flinttrade_gateway/native_login.py`. New native adapters follow that vault +
-gated-session model; never add plaintext credential storage.
 
 ### Safety layers
 
@@ -805,9 +770,7 @@ In `packages/apps/terminal/`, the dev server proxies:
 
 | Route prefix | Target |
 |---|---|
-| `/api` | `http://127.0.0.1:5000` (OpenAlgo) |
 | `/ft-api` | `http://127.0.0.1:5100` (FlintTrade backend) |
-| `/ws` | `ws://127.0.0.1:8765` (OpenAlgo WebSocket) |
 
 In dev mode, `packages/apps/terminal/src/services/api.ts` uses *relative*
 paths (empty base URL). In production, it reads the full host from the
@@ -907,7 +870,7 @@ Shareholding, and Social render that chip, not `ExampleLabel`.
 `EtfTab` in Example renders one, with
 `Example prices. Connect a broker for live quotes.`
 Practice and Live keep
-`live quotes via OpenAlgo. Refreshes every 30s`
+`live quotes via the native gateway. Refreshes every 30s`
 when quotes have loaded.
 `SectorTab` in Example uses
 `Example sector split. Connect a broker to see yours.`
@@ -928,22 +891,6 @@ holdings the inline XIRR is omitted.
 with the chip on the sample `Allocation` label only. Equity Holdings
 and Cash notes are blank on example data. A connected book keeps
 `Allocation (live assets only)` and `Live from broker`.
-
-### OpenAlgo bugs to work around
-
-1. **Sandbox sends real orders for some brokers.** Verify isolation
-   before testing.
-2. **`closeposition` ignores strategy.** Track positions per-strategy
-   yourself.
-3. **WebSocket drops without heartbeat.** The terminal client in
-   `packages/apps/terminal/src/services/websocket.ts` implements ping/pong.
-   The Python `OpenAlgoClient` is REST-only apart from `ping`.
-4. **PNL calculation incorrect for some brokers.** Compute it locally
-   from `tradebook`.
-5. **MCX symbol format inconsistency.** Normalise in
-   `packages/core/core/src/flinttrade_core/symbol_utils.py`.
-6. **Never touch OpenAlgo's SQLite directly.** Concurrent access
-   corrupts the DB. Always go through the REST API.
 
 ### Instrument lot sizes
 

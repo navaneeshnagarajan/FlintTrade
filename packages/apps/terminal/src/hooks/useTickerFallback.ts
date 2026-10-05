@@ -1,48 +1,7 @@
-/**
- * useTickerFallback
- *
- * REST polling fallback for tick data when the WebSocket is disconnected.
- *
- * Design:
- *   - Watches `wsConnected` from connectionStore
- *   - When WS is DOWN: polls `getTicker` every 5 s for the instruments currently
- *     subscribed to the WS service (ltp mode only, capped at MAX_INSTRUMENTS)
- *   - When WS comes back UP: clears the interval immediately
- *   - Writes results to the same `tickAtomFamily` atoms the WS bridge writes to,
- *     using the identical key format "{exchange}:{symbol}" (display-name keys)
- *   - Publishes an honest health report (staleness + truncation) via the hook's
- *     return value AND the exported `tickerFallbackStatusAtom`, so consumers can
- *     show "data is stale" / "N symbols not refreshed" instead of silently
- *     rendering frozen prices as live.
- *
- * Cap policy (no silent lies):
- *   REST polling is capped at MAX_INSTRUMENTS to respect the 50/s rate limit.
- *   When more instruments are subscribed than the cap allows, instruments are
- *   prioritised — the terminal-wide selected instrument first (it drives the
- *   chart/OrderPad), then always-visible index instruments (ticker bar), then
- *   the remainder most-recently-subscribed first (an MRU proxy: the newest
- *   subscriptions belong to the widgets currently on screen). Whatever falls
- *   beyond the cap is reported in `droppedKeys`/`truncated` — those atoms are
- *   NOT refreshed while the WS is down.
- *
- * Atom key convention (must match useWsBridge + marketAtoms):
- *   Indices  → "NSE_INDEX:NIFTY", "BSE_INDEX:SENSEX", etc.
- *   MCX      → "MCX:GOLD", "MCX:SILVER", etc.   (display names, not futures suffixes)
- *   Equities → "NSE:RELIANCE", "NSE:INFY", etc.
- *
- * For MCX the WS bridge resolves nearest-futures contracts internally and maps
- * their tick keys back to display-name atom keys. The WS subscription list
- * therefore contains the FULL futures symbol (e.g. "GOLD02APR26FUT"); when the
- * fallback polls such an instrument it mirrors the bridge's routing and writes
- * the result to the display-name atom ("MCX:GOLD"), never to the (unread)
- * futures-suffix key.
- *
- * Composition:
- *   Call useTickerFallback() in the same component that calls useWsBridge()
- *   (currently AppLayout). Both hooks are independent — they share only the
- *   Jotai store and the connectionStore.
+/** Native quote polling for the instruments currently displayed by the terminal.
+ * Quotes share the Jotai tick cache and local listeners. Each poll belongs to
+ * one captured market authority; account changes discard its pending results.
  */
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { atom, useStore } from "jotai";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
@@ -50,13 +9,15 @@ import { channelInstrumentAtoms, USER_CHANNELS } from "@/services/fdc3/channels"
 import { useConnectionStore } from "@/stores/connectionStore";
 import { getWsService } from "@/services/websocket";
 import { getTicker } from "@/services/api";
+import { useMarketDataScope, requireCurrentMarketDataScope } from "@/hooks/useDataScope";
+import { useMarketObservationEpoch } from "@/hooks/useMarketObservationEpoch";
 import { FEED_STALE_AFTER_MS } from "@/lib/feedFreshness";
 import type { WsTick, WsInstrument } from "@/types/api";
 
 /** Maximum instruments to poll simultaneously to stay within the 50/s rate limit. */
 export const MAX_INSTRUMENTS = 10;
 
-/** Poll interval in milliseconds when WebSocket is disconnected. */
+/** Native REST quote polling interval in milliseconds. */
 const POLL_INTERVAL_MS = 5_000;
 
 /**
@@ -112,7 +73,7 @@ function instrumentKey(inst: WsInstrument): string {
 const MCX_FUTURES_SUFFIX = /^([A-Z]+?)\d{2}[A-Z]{3}\d{2}FUT$/;
 
 /**
- * The atom key the tick should be WRITTEN to. Mirrors the WS bridge's
+ * The atom key the tick should be WRITTEN to. Uses the local registry's
  * futures→display routing so an MCX futures subscription refreshes the
  * display-name atom ("MCX:GOLD") that widgets actually read.
  */
@@ -165,6 +126,8 @@ export function prioritiseFallbackInstruments(
 export function useTickerFallback(enabled = true): TickerFallbackStatus {
   const wsConnected = useConnectionStore((s) => s.wsConnected);
   const store = useStore();
+  const scope = useMarketDataScope();
+  const { epoch, currentEpoch } = useMarketObservationEpoch();
   const [status, setStatus] = useState<TickerFallbackStatus>(INITIAL_STATUS);
 
   // Publish every status change to both the local state (hook return) and the
@@ -199,6 +162,7 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
   const lastUpdatedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     // WS is connected — fallback inactive; live staleness is the WS service's
     // concern (diagnostics.tickAgeMs), not this hook's.
     if (wsConnected) {
@@ -208,61 +172,57 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
 
     // Grab subscribed instruments from the WS service (ltp subscriptions only).
     // getWsService() may return null if the service was never initialised (e.g.
-    // before wsUrl is set).
+    // before a stream is available).
     const ws = getWsService();
     if (!ws) return;
 
-    const allSubscribed = ws.getSubscriptions("ltp");
-    if (allSubscribed.length === 0) return;
-
-    const { polled, dropped } = prioritiseFallbackInstruments(
-      allSubscribed,
-      USER_CHANNELS.map((c) => store.get(channelInstrumentAtoms[c.id])),
-    );
-    const polledKeys = polled.map(displayKey);
-    const droppedKeys = dropped.map(displayKey);
-
+    let cancelled = false;
+    let polling = false;
+    let polledKeys: string[] = [];
+    let droppedKeys: string[] = [];
     const report = () => {
+      if (cancelled) return;
       const lastUpdatedAt = lastUpdatedAtRef.current;
-      publish({
-        active: true,
-        lastUpdatedAt,
-        isStale: lastUpdatedAt === null || Date.now() - lastUpdatedAt > STALE_AFTER_MS,
-        polledKeys,
-        droppedKeys,
-        truncated: droppedKeys.length > 0,
-      });
+      publish({ active: polledKeys.length > 0, lastUpdatedAt,
+        isStale: polledKeys.length > 0 && (lastUpdatedAt === null || Date.now() - lastUpdatedAt > STALE_AFTER_MS),
+        polledKeys, droppedKeys, truncated: droppedKeys.length > 0 });
     };
-
+    const current = () => {
+      if (cancelled || currentEpoch.current !== epoch) return false;
+      try { requireCurrentMarketDataScope(scope); return true; } catch { return false; }
+    };
     const runPoll = async () => {
-      const successes = await pollAll(polled, store);
-      if (successes > 0) lastUpdatedAtRef.current = Date.now();
+      if (polling || !current()) return;
+      // Widget interests change without remounting AppLayout. Read them anew
+      // each cycle so closing or changing a widget releases its polling work.
+      const subscribed = [...new Map([...ws.getSubscriptions("ltp"), ...ws.getSubscriptions("quote")]
+        .map((instrument) => [instrumentKey(instrument), instrument])).values()];
+      const { polled, dropped } = prioritiseFallbackInstruments(subscribed,
+        USER_CHANNELS.map((channel) => store.get(channelInstrumentAtoms[channel.id])));
+      polledKeys = polled.map(displayKey);
+      droppedKeys = dropped.map(displayKey);
       report();
+      polling = true;
+      try {
+        const successes = await pollAll(polled, store, current, scope);
+        if (!current()) return;
+        if (successes > 0) lastUpdatedAtRef.current = Date.now();
+        report();
+      } finally { polling = false; }
     };
-
-    // Honest initial report (stale until the first poll lands), then an
-    // immediate poll so the UI gets data right away on disconnect.
-    report();
+    lastUpdatedAtRef.current = null;
     if (typeof document === "undefined" || !document.hidden) void runPoll();
-
     const timer = setInterval(() => {
-      // Double-check inside the interval: if WS reconnected, bail early and let
-      // the interval clear on the next effect run. This avoids a race where the
-      // interval fires one extra time after WS comes back.
-      // A hidden tab does not keep polling quotes.
       if (wsConnectedRef.current || document.hidden) return;
-
       void runPoll();
     }, POLL_INTERVAL_MS);
 
     return () => {
+      cancelled = true;
       clearInterval(timer);
     };
-  // Re-run when connection drops (wsConnected flips false) or on mount.
-  // We intentionally exclude `store` from the deps array because useStore()
-  // returns a stable reference for the lifetime of the Provider.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, wsConnected, publish]);
+  // Re-run on a feed or authority change.
+  }, [enabled, wsConnected, publish, scope, store, epoch, currentEpoch]);
 
   return status;
 }
@@ -276,12 +236,15 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
 async function pollAll(
   instruments: WsInstrument[],
   store: ReturnType<typeof useStore>,
+  current: () => boolean,
+  scope: string,
 ): Promise<number> {
   let successes = 0;
   await Promise.allSettled(
     instruments.map(async (inst) => {
       try {
         const quote = await getTicker(inst.symbol, inst.exchange);
+        if (!current()) return;
 
         // Map Quote → WsTick (Quote is a strict superset of WsTick's required fields)
         const tick: WsTick = {
@@ -297,10 +260,16 @@ async function pollAll(
           pct: quote.pct,
         };
 
-        // Write to the same atom the WS bridge writes to. The key uses the
+        // Write to the shared native observation atom. The key uses the
         // instrument display name (MCX futures suffixes are mapped back),
         // matching useWsBridge + marketAtoms.
-        store.set(tickAtomFamily(displayKey(inst)), tick);
+        let merged = tick;
+        store.set(tickAtomFamily(displayKey(inst)), (existing) => {
+          const previousClose = quote.prev_close ?? existing?.prevClose;
+          merged = previousClose !== undefined ? { ...tick, prevClose: previousClose } : tick;
+          return merged;
+        }, scope);
+        if (current()) getWsService().publishTick?.(merged);
         successes += 1;
       } catch {
         // Swallow per-instrument errors — expected during broker downtime / pre-market.

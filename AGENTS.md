@@ -9,7 +9,7 @@ FlintTrade is a monorepo for an Indian trading platform. Python packages live un
 `python scripts/ft.py <target>` is the cross-platform entry point — it needs no make and no bash, and behaves identically on Windows, macOS and Linux. After an install the shim exposes the same subcommands as `flinttrade <target>`. `make <target>` is the POSIX alias for the same targets; a few POSIX-only targets have no `ft.py` equivalent and are marked below.
 
 - `python scripts/ft.py setup` installs project dependencies.
-- `python scripts/ft.py dev` starts the terminal dev server plus the FlintTrade backend; run `make start-openalgo` (POSIX only) separately for the optional OpenAlgo integration path.
+- `python scripts/ft.py dev` starts the terminal dev server plus the FlintTrade backend.
 - `python scripts/ft.py test` runs all pytest suites with the required import mode.
 - `python scripts/ft.py test-fast [paths/flags]` runs focused pytest and stops on the first failure; both test commands use at most four workers by default (`--workers 0` selects serial execution).
 - `python scripts/ft.py check` runs affected checks, including staged/unstaged/untracked changes; `check --full` runs the exhaustive local gate and `check --dry-run` prints the plan.
@@ -38,10 +38,10 @@ Before opening or merging any PR, fetch `origin`, verify `origin/main` against t
 
 - **Pipeline:** build agents (Codex or other supported agents) → independent multi-agent review panels → maintainer. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
 - **Full arsenal:** for substantial work use parallel independent agents (fan-out → adversarial verification → synthesis), relevant skills, specialised tools, and MCP (a library-docs MCP for APIs, the browser-preview toolset for UI). Don't fall back to bare read/edit when a specialised tool fits.
-- **Gated execution is load-bearing:** any new order path must mint a `SafetyContext` through `gate_order` → `BrokerRouter`. Never add a path that reaches a broker adapter or `OpenAlgoClient.place_order` ungated.
+- **Gated execution is load-bearing:** any new order path must mint a `SafetyContext` through `gate_order` → `BrokerRouter`. Never add a path that reaches a broker adapter ungated.
 - **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `PLAN.md` is the curated public roadmap (the detailed working plan lives at `.local/agent-context/PLAN.md`); `changelog.md` is for **shipped** code only (no in-flight design entries).
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
-- **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + OpenAlgo-parity observability apply.
+- **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + broker observability apply.
 
 ## Agent skills
 
@@ -98,7 +98,7 @@ together. Local
 macOS output is ad-hoc sealed with no Team ID; Apple distribution
 signing/notarisation, Windows/Linux native runtime evidence and the accepted
 RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
-Count pins remain 71 widgets, 37 brokers and 18 packages. `PLAN.md` is the
+Count pins remain 71 widgets, 5 brokers and 18 packages. `PLAN.md` is the
 curated public roadmap; the detailed working plan of record lives at
 `.local/agent-context/PLAN.md` — resume from its ordered delivery/status/current
 work queue, verify branch/PR state live, and never push without explicit
@@ -121,7 +121,7 @@ maintainer permission.
 
 ## Security & Configuration
 
-Never commit `.env`, API keys, broker credentials, fund amounts, order IDs, hostnames, or personal IPs. Start from `.env.example`. Secrets (master password, JWT secret, API-key pepper, safety-gate secret) are file-backed + hardened under the platform workspace dir (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on macOS, `%APPDATA%/flinttrade/` on Windows), never in `.env`. Native-adapter broker credentials live in the encrypted gateway vault (`gateway/credentials.py`, Fernet with a per-row random salt + PBKDF2-derived key from the master password); the OpenAlgo bridge path keeps broker auth inside OpenAlgo and holds only the OpenAlgo API key. Report vulnerabilities through `security.md` rather than public issues.
+Never commit `.env`, API keys, broker credentials, fund amounts, order IDs, hostnames, or personal IPs. Start from `.env.example`. Secrets (master password, JWT secret, API-key pepper, safety-gate secret) are file-backed + hardened under the platform workspace dir (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on macOS, `%APPDATA%/flinttrade/` on Windows), never in `.env`. Native-adapter broker credentials live in the encrypted gateway vault (`gateway/credentials.py`, Fernet with a per-row random salt + PBKDF2-derived key from the master password). Report vulnerabilities through `security.md` rather than public issues.
 
 <!-- reticle:begin (managed by `reticle init` — edit outside these markers) -->
 ## Verifying with Reticle

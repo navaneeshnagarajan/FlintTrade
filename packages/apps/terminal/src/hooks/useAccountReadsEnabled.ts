@@ -19,7 +19,7 @@ export function resolveAccountReadsEnabled(mode: AppMode, brokerConnected: boole
 interface ScopedAccountReadsInput {
   mode: AppMode;
   apiKey: string;
-  openAlgoStatus: ConnectionStatus;
+  connectionStatus: ConnectionStatus;
   accounts: BrokerAccount[];
   activeAccountId: string | null;
 }
@@ -31,14 +31,11 @@ interface ScopedAccountReadsInput {
  */
 export function resolveScopedAccountReadsEnabled({
   mode,
-  apiKey,
-  openAlgoStatus,
   accounts,
   activeAccountId,
 }: ScopedAccountReadsInput): boolean {
   if (mode === "explore") return false;
   if (mode === "practice") return true;
-  if (apiKey.trim()) return openAlgoStatus === "connected";
   return resolveNativeDataAccount(accounts, activeAccountId)?.status === "connected";
 }
 
@@ -46,21 +43,18 @@ export function resolveScopedAccountReadsEnabled({
 export interface AccountReadContext {
   readonly identity: AccountAuthorityIdentity;
   readonly enabled: boolean;
-  readonly host: string;
-  readonly apiKey: string;
 }
 
 /** Check read availability against the exact account encoded by an identity. */
 export function accountIdentityReadsEnabled(
   identity: AccountAuthorityIdentity,
-  openAlgoStatus: ConnectionStatus,
+  _connectionStatus: ConnectionStatus,
   accounts: BrokerAccount[],
 ): boolean {
   if (identity.mode === "explore") return false;
   if (identity.mode === "practice") {
     return identity.brokerType === "sandbox" && identity.accountId === "default";
   }
-  if (identity.brokerType === "openalgo") return openAlgoStatus === "connected";
   if (identity.brokerType === "unconfigured") return false;
   return accounts.some((account) => (
     account.source === "native"
@@ -79,27 +73,21 @@ export function useAccountReadContext(): AccountReadContext {
   // hooks consume that store snapshot without mounting enabled observers that
   // could leak protected account discovery into Explore.
   const mode = useModeStore((state) => state.mode);
-  const host = useConnectionStore((state) => state.host);
-  const apiKey = useConnectionStore((state) => state.apiKey);
-  const openAlgoStatus = useConnectionStore((state) => state.status);
+  const connectionStatus = useConnectionStore((state) => state.status);
   const accounts = useBrokerStore((state) => state.accounts);
   const activeAccountId = useBrokerStore((state) => state.activeAccountId);
 
   return useMemo(() => {
     const identity = resolveAccountAuthorityIdentity({
       mode,
-      host,
-      apiKey,
       accounts,
       activeAccountId,
     });
     return Object.freeze({
       identity,
-      enabled: accountIdentityReadsEnabled(identity, openAlgoStatus, accounts),
-      host,
-      apiKey,
+      enabled: accountIdentityReadsEnabled(identity, connectionStatus, accounts),
     });
-  }, [mode, host, apiKey, openAlgoStatus, accounts, activeAccountId]);
+  }, [mode, connectionStatus, accounts, activeAccountId]);
 }
 
 /**

@@ -403,17 +403,6 @@ def _concrete_lot_adapter(monkeypatch, kind: str, result: object, error: Excepti
             raise error
         return result
 
-    if kind == "openalgo":
-        from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter
-
-        class Client:
-            async def instruments(self, exchange):
-                return await source(exchange)
-
-        adapter = object.__new__(OpenAlgoAdapter)
-        client = Client()
-        monkeypatch.setattr(adapter, "_client", lambda _session: client)
-        return adapter
     if kind == "groww":
         from flinttrade_gateway.brokers.groww import GrowwAdapter
 
@@ -941,7 +930,7 @@ def test_telegram_only_workspace_change_preserves_existing_and_new_broker_ports(
     original_binding = owner._grants[existing].binding
 
     def update_telegram(config):
-        config["openalgo"]["telegram_username"] = "linked-trader"
+        config.setdefault("telegram", {})["username"] = "linked-trader"
 
     updated = compare_and_swap_workspace(harness.workspace_path, original.version, update_telegram)
     assert updated.version != original.version
@@ -1427,7 +1416,6 @@ def test_balance_conversion_signal_is_malformed_but_provider_value_error_is_prov
 @pytest.mark.parametrize(
     ("kind", "payload"),
     [
-        ("openalgo", {"data": [{"symbol": "NIFTY", "exchange": "NSE", "lot_size": "bad"}]}),
         ("groww", [{"trading_symbol": "NIFTY", "exchange": "NSE", "lot_size": "bad"}]),
         ("indmoney", [{"TRADING_SYMBOL": "NIFTY", "EXCH": "NSE", "LOT_UNITS": "bad"}]),
     ],
@@ -1439,7 +1427,7 @@ def test_concrete_lot_converter_failures_are_malformed(harness, monkeypatch, kin
     assert calls == [kind]
 
 
-@pytest.mark.parametrize("kind", ["openalgo", "groww", "indmoney"])
+@pytest.mark.parametrize("kind", ["groww", "indmoney"])
 def test_concrete_lot_provider_failures_remain_provider_failure(harness, monkeypatch, kind) -> None:
     outcome, calls = _read_concrete_lot(
         harness,
@@ -1453,36 +1441,8 @@ def test_concrete_lot_provider_failures_remain_provider_failure(harness, monkeyp
     assert calls == [kind]
 
 
-def test_openalgo_lot_requires_provider_exchange_identity(harness, monkeypatch) -> None:
-    outcome, calls = _read_concrete_lot(
-        harness,
-        monkeypatch,
-        "openalgo",
-        {"data": [{"symbol": "NIFTY", "lot_size": 75}]},
-    )
-
-    assert outcome == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
-    assert calls == ["openalgo"]
 
 
-@pytest.mark.parametrize("layer", ["outer", "nested", "row"])
-def test_openalgo_lot_rejects_non_string_keys_without_hooks(harness, monkeypatch, layer) -> None:
-    target = "data" if layer != "row" else "symbol"
-    trap = _CollidingKeyTrap(target)
-    row = {"symbol": "NIFTY", "exchange": "NSE", "lot_size": 75}
-    if layer == "outer":
-        payload = {trap: [row]}
-    elif layer == "nested":
-        payload = {"data": {trap: [row]}}
-    else:
-        payload = {"data": [{trap: "NIFTY", "exchange": "NSE", "lot_size": 75}]}
-    trap.calls.clear()
-
-    outcome, calls = _read_concrete_lot(harness, monkeypatch, "openalgo", payload)
-
-    assert outcome == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
-    assert calls == ["openalgo"]
-    assert trap.calls == []
 
 
 @pytest.mark.parametrize("kind", ["groww", "indmoney"])

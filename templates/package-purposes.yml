@@ -25,17 +25,17 @@ apps/terminal:
     - "src/services/api.ts — REST + WebSocket client"
 core/core:
   language: Python
-  purpose: "Flask application, OpenAlgo client (45+ endpoints), config and workspace management, authentication service, and the WSGI prefix-stripper."
+  purpose: "Flask application, native broker read client, config and workspace management, authentication service, and the WSGI prefix-stripper."
   entry_points:
     - "src/flinttrade_core/app.py — Flask app factory + blueprint registration"
-    - "src/flinttrade_core/openalgo_client.py — typed wrapper over OpenAlgo's REST API"
+    - "src/flinttrade_core/broker_client.py — read-only native broker client"
     - "src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance"
     - "src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders"
 core/data:
   language: Python
   purpose: "Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, and a (dormant) QuestDB writer."
   entry_points:
-    - "src/flinttrade_data/tick_recorder.py — real-time tick capture to DuckDB / QuestDB"
+    - "src/flinttrade_data/tick_recorder.py — local tick buffering/storage; native capture unavailable"
     - "src/flinttrade_data/audit_logger.py — append-only audit trail"
     - "src/flinttrade_data/questdb_bridge.py — ILP-based ingestion"
 core/design-system:
@@ -70,17 +70,17 @@ core/ticks:
     - "Cargo.toml — crate metadata and dependencies"
 integrations/gateway:
   language: Python
-  purpose: "FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, BROKER_CATALOG (35 brokers), an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter."
+  purpose: "FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, BROKER_CATALOG (5 brokers), an encrypted credential vault, and the WebSocket bridge."
   entry_points:
     - "src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG"
     - "src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification"
     - "src/flinttrade_gateway/registry.py — BrokerRegistry over the 35-broker catalogue"
-    - "src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, OpenAlgo bridge, …) against the BrokerAdapter ABC"
+    - "src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww) against the BrokerAdapter ABC"
     - "src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault"
     - "src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
 integrations/webhooks:
   language: Python
-  purpose: "HMAC-validated custom webhook intake rail for generic inbound alerts and flows."
+  purpose: "HMAC-validated custom webhook intake rail for generic inbound alerts."
   entry_points:
     - "src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake"
 services/ai:
@@ -93,11 +93,10 @@ services/ai:
     - "src/flinttrade_ai/advisor.py — production advisor surface for the AI Centre route"
 services/automation:
   language: Python
-  purpose: "Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines, voice-order intent extraction."
+  purpose: "Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines."
   entry_points:
     - "src/flinttrade_automation/cron_manager.py — workspace.json-backed scheduled jobs"
     - "src/flinttrade_automation/telegram_bot.py — passive notifications + emergency kill switch"
-    - "src/flinttrade_automation/voice_order_bridge.py — speech-to-intent for hands-free order placement"
 services/backtest:
   language: Python
   purpose: "Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy template modules across 6 categories."

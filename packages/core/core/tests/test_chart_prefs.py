@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_chart_prefs.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import pytest

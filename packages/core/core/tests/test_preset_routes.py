@@ -272,8 +272,12 @@ class TestGetPreset:
 
     def test_all_builtins_accessible(self, client):
         slugs = [
-            "scalper-zone", "options-desk", "market-watch",
-            "analysis", "risk-monitor", "investor-view",
+            "scalper-zone",
+            "options-desk",
+            "market-watch",
+            "analysis",
+            "risk-monitor",
+            "investor-view",
         ]
         for slug in slugs:
             resp = client.get(f"/api/v1/presets/{slug}", headers=_auth())
@@ -316,7 +320,8 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="Desc Update")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/api/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}",
+            headers=_auth(),
             json={"description": "New description"},
         )
         assert resp.status_code == 200
@@ -326,7 +331,8 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="Widget Update")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/api/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}",
+            headers=_auth(),
             json={"widgets": ["orderpad", "depth"]},
         )
         assert resp.status_code == 200
@@ -337,7 +343,8 @@ class TestUpdatePreset:
         preset_id = created["data"]["id"]
         new_layout = {"type": "tabs", "tab_count": 4}
         resp = client.put(
-            f"/api/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}",
+            headers=_auth(),
             json={"layout": new_layout},
         )
         assert resp.status_code == 200
@@ -347,7 +354,8 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="Time Update")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/api/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}",
+            headers=_auth(),
             json={"description": "Updated"},
         )
         new_ts = resp.get_json()["data"]["updated_at"]
@@ -373,7 +381,8 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="To Rename")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/api/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}",
+            headers=_auth(),
             json={"name": "Taken Name"},
         )
         assert resp.status_code == 400
@@ -443,7 +452,8 @@ class TestForkPreset:
 
     def test_fork_custom_name(self, client):
         resp = client.post(
-            "/api/v1/presets/market-watch/fork", headers=_auth(),
+            "/api/v1/presets/market-watch/fork",
+            headers=_auth(),
             json={"name": "My Market Watch"},
         )
         assert resp.get_json()["data"]["name"] == "My Market Watch"
@@ -483,7 +493,8 @@ class TestForkPreset:
 
     def test_forked_preset_appears_in_list(self, client):
         client.post(
-            "/api/v1/presets/scalper-zone/fork", headers=_auth(),
+            "/api/v1/presets/scalper-zone/fork",
+            headers=_auth(),
             json={"name": "Listed Fork"},
         )
         list_data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]

@@ -84,10 +84,12 @@ def query_local_bars() -> tuple[Any, int]:
 
     table = INTERVAL_TABLES.get(interval)
     if table is None:
-        return jsonify({
-            "status": "error",
-            "message": f"Unknown interval {interval!r}. Known: {sorted(INTERVAL_TABLES)}",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Unknown interval {interval!r}. Known: {sorted(INTERVAL_TABLES)}",
+            }
+        ), 400
 
     try:
         limit = int(request.args.get("limit", _DEFAULT_LIMIT))
@@ -115,17 +117,19 @@ def query_local_bars() -> tuple[Any, int]:
         if ts is not None and not isinstance(ts, (str, int, float)):
             row["timestamp"] = str(ts)
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "symbol": symbol,
-            "exchange": exchange,
-            "interval": interval,
-            "count": len(rows),
-            "truncated": truncated,
-            "bars": rows,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "symbol": symbol,
+                "exchange": exchange,
+                "interval": interval,
+                "count": len(rows),
+                "truncated": truncated,
+                "bars": rows,
+            },
+        }
+    ), 200
 
 
 @local_data_bp.route("/v1/historify/bars/summary", methods=["GET"])
@@ -164,28 +168,34 @@ def download_bhavcopy() -> tuple[Any, int]:
     raw_segments = body.get("segments") or list(SEGMENTS)
     segments = [str(s).strip().lower() for s in raw_segments if str(s).strip().lower() in SEGMENTS]
     if not segments:
-        return jsonify({
-            "status": "error",
-            "message": f"segments must be a subset of {list(SEGMENTS)}",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"segments must be a subset of {list(SEGMENTS)}",
+            }
+        ), 400
 
     downloader = BhavcopyDownloader(_get_bhavcopy_dir())
     try:
         result = downloader.download_range(start, end, segments)
     except ValueError as exc:
         logger.info("Bhavcopy range rejected: %s", exc)
-        return jsonify({
-            "status": "error",
-            "message": "Invalid range: end must not precede start and the span is capped at 31 days per call",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Invalid range: end must not precede start and the span is capped at 31 days per call",
+            }
+        ), 400
     except Exception as exc:
         logger.warning("Bhavcopy download failed: %s", exc)
         return jsonify({"status": "error", "message": "Bhavcopy download failed"}), 500
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "dest_dir": str(_get_bhavcopy_dir()),
-            **result.to_dict(),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "dest_dir": str(_get_bhavcopy_dir()),
+                **result.to_dict(),
+            },
+        }
+    ), 200

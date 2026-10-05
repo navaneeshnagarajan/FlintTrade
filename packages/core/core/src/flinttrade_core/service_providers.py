@@ -191,9 +191,10 @@ class RightsGrant:
             raise ValueError("every evidence fact must match the grant basis")
         if self.basis is not RightsBasis.FLINTTRADE_POLICY and not evidence:
             raise ValueError("non-policy rights grants require evidence")
-        is_expansive = any(
-            getattr(self.rights, name) is PermissionState.ALLOWED for name in _PERMISSION_NAMES
-        ) or self.rights.max_evidence_use_scope is not EvidenceUseScope.ISOLATED_RESEARCH
+        is_expansive = (
+            any(getattr(self.rights, name) is PermissionState.ALLOWED for name in _PERMISSION_NAMES)
+            or self.rights.max_evidence_use_scope is not EvidenceUseScope.ISOLATED_RESEARCH
+        )
         if is_expansive and not evidence:
             raise ValueError("expansive rights grants require evidence")
         model_evidence = tuple(fact for fact in evidence if _is_model_specific_subject_kind(fact.subject_kind))
@@ -209,8 +210,10 @@ class RightsGrant:
             fact.identifier != self.model_identity.model_id for fact in model_evidence
         ):
             raise ValueError("model evidence identifier must match model identity")
-        if self.model_identity is not None and (self.basis is not RightsBasis.FLINTTRADE_POLICY or is_expansive) and not any(
-            fact.identifier == self.model_identity.model_id for fact in model_evidence
+        if (
+            self.model_identity is not None
+            and (self.basis is not RightsBasis.FLINTTRADE_POLICY or is_expansive)
+            and not any(fact.identifier == self.model_identity.model_id for fact in model_evidence)
         ):
             raise ValueError("model identity requires matching model evidence")
         object.__setattr__(self, "evidence", evidence)
@@ -258,8 +261,7 @@ def _is_model_specific_subject_kind(subject_kind: str) -> bool:
 
 def _has_model_scoped_permission(rights: UsageRights) -> bool:
     return any(
-        getattr(rights, name) is PermissionState.ALLOWED
-        for name in ("model_distribution", "derivative_distribution")
+        getattr(rights, name) is PermissionState.ALLOWED for name in ("model_distribution", "derivative_distribution")
     )
 
 

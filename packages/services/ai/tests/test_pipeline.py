@@ -12,8 +12,9 @@ class TestSignalPipeline:
     def test_init_defaults(self):
         from flinttrade_ai.pipeline import SignalPipeline
 
-        p = SignalPipeline(openalgo_host="http://localhost:5000")
-        assert p.host == "http://localhost:5000"
+        p = SignalPipeline()
+        assert p._broker_client is None
+        assert not hasattr(p, "api_key")
         assert p.instruments is not None
         assert len(p.instruments) >= 2
         assert p.interval == "5m"
@@ -26,60 +27,38 @@ class TestSignalPipeline:
         assert len(p.instruments) == 1
         assert p.instruments[0]["symbol"] == "RELIANCE"
 
-    def test_init_uses_workspace_openalgo_settings(self, monkeypatch, tmp_path):
-        from flinttrade_ai.pipeline import SignalPipeline
-        from flinttrade_core.workspace import Workspace
 
-        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
-        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
-        monkeypatch.delenv("OPENALGO_HOST", raising=False)
-
-        workspace = Workspace()
-        workspace.initialise()
-        config = workspace.as_dict()
-        config["openalgo"] = {
-            "api_key": "workspace-ai-key",
-            "host": "http://127.0.0.1:5003",
-            "ws_port": 8767,
-        }
-        workspace.save(config)
-
-        p = SignalPipeline()
-
-        assert p.host == "http://127.0.0.1:5003"
-        assert p.api_key == "workspace-ai-key"
-
-    def test_fetch_bars_uses_injected_openalgo_client(self):
+    def test_fetch_bars_uses_injected_broker_client(self):
         from flinttrade_ai.pipeline import SignalPipeline
 
         class _Row:
             def model_dump(self):
                 return {"timestamp": "2026-07-06", "close": 100.5}
 
-        openalgo_client = MagicMock()
-        openalgo_client.history = AsyncMock(return_value=[_Row()])
-        openalgo_client.close = AsyncMock()
-        p = SignalPipeline(openalgo_client=openalgo_client)
+        broker_client = MagicMock()
+        broker_client.history = AsyncMock(return_value=[_Row()])
+        broker_client.close = AsyncMock()
+        p = SignalPipeline(broker_client=broker_client)
 
         rows = p.fetch_bars("RELIANCE", "NSE")
 
         assert rows == [{"timestamp": "2026-07-06", "close": 100.5}]
-        openalgo_client.history.assert_awaited_once()
-        openalgo_client.close.assert_not_awaited()
+        broker_client.history.assert_awaited_once()
+        broker_client.close.assert_not_awaited()
 
     def test_fetch_bars_sorts_and_deduplicates_for_all_scheduled_consumers(self):
         from flinttrade_ai.pipeline import SignalPipeline
 
-        openalgo_client = MagicMock()
-        openalgo_client.history = AsyncMock(
+        broker_client = MagicMock()
+        broker_client.history = AsyncMock(
             return_value=[
                 {"timestamp": "2026-07-10T09:20:00+00:00", "close": 102.0},
                 {"timestamp": "2026-07-10T09:15:00+00:00", "close": 100.0},
                 {"timestamp": "2026-07-10T09:15:00+00:00", "close": 101.0},
             ]
         )
-        openalgo_client.close = AsyncMock()
-        pipeline = SignalPipeline(openalgo_client=openalgo_client)
+        broker_client.close = AsyncMock()
+        pipeline = SignalPipeline(broker_client=broker_client)
 
         rows = pipeline.fetch_bars("RELIANCE", "NSE")
 
@@ -279,76 +258,6 @@ class TestSignalPipeline:
         assert SignalPipeline is not None
 
 
-class TestWorkspaceRestPort:
-    """U20: the fallback client must carry the workspace REST-port override."""
-
-    def _seed_workspace(self, tmp_path, monkeypatch):
-        from flinttrade_core.workspace import Workspace
-
-        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
-        for var in ("OPENALGO_API_KEY", "OPENALGO_HOST", "OPENALGO_PORT"):
-            monkeypatch.delenv(var, raising=False)
-
-        workspace = Workspace()
-        workspace.initialise()
-        config = workspace.as_dict()
-        config["openalgo"] = {
-            "api_key": "workspace-port-key",
-            "host": "http://127.0.0.1",
-            "port": 5055,
-        }
-        workspace.save(config)
-
-    def test_init_retains_full_settings_including_port(self, monkeypatch, tmp_path):
-        from flinttrade_ai.pipeline import SignalPipeline
-        from flinttrade_core.config import openalgo_rest_base_url
-
-        self._seed_workspace(tmp_path, monkeypatch)
-        p = SignalPipeline()
-
-        assert p._settings.openalgo_port == 5055
-        assert p._settings.openalgo_api_key == "workspace-port-key"
-        assert openalgo_rest_base_url(p._settings) == "http://127.0.0.1:5055"
-
-    def test_fetch_bars_fallback_client_receives_full_settings(self, monkeypatch, tmp_path):
-        """The fallback client is built from the FULL retained Settings — the
-        old partial rebuild (host+key only) silently reverted the configured
-        REST port to :5000."""
-        from flinttrade_core import openalgo_client as oc
-        from flinttrade_ai.pipeline import SignalPipeline
-
-        self._seed_workspace(tmp_path, monkeypatch)
-
-        captured: dict = {}
-
-        class _StubClient:
-            def __init__(self, settings):
-                captured["settings"] = settings
-
-            async def history(self, **_kwargs):
-                return []
-
-            async def close(self):
-                return None
-
-        monkeypatch.setattr(oc, "OpenAlgoClient", _StubClient)
-
-        p = SignalPipeline()
-        p.fetch_bars("NIFTY", "NSE_INDEX")
-
-        assert captured["settings"].openalgo_port == 5055
-        assert captured["settings"].openalgo_api_key == "workspace-port-key"
-
-    def test_constructor_overrides_still_win(self, monkeypatch, tmp_path):
-        from flinttrade_ai.pipeline import SignalPipeline
-
-        self._seed_workspace(tmp_path, monkeypatch)
-        p = SignalPipeline(openalgo_host="http://10.0.0.9:6000/", openalgo_api_key="explicit")
-
-        assert p.host == "http://10.0.0.9:6000"
-        assert p.api_key == "explicit"
-        assert p._settings.openalgo_host == "http://10.0.0.9:6000"
-        assert p._settings.openalgo_api_key == "explicit"
 
 
 class TestLegacyModelMigration:

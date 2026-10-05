@@ -6,7 +6,7 @@ HMAC ``SafetyContext`` bound to the selector-bound principal) →
 ``BrokerRouter`` (ACL + re-verification + one-shot gate consumption) → broker
 adapter. The dispatch callables are injected by the Flask app via
 :func:`build_gated_leg_dispatchers`; the service itself never holds a raw
-broker/OpenAlgo client for writes, so an ungated leg write is structurally
+broker/broker client for writes, so an ungated leg write is structurally
 impossible (``gateway/tests/test_no_legacy_order_path.py`` pins this).
 
 OCO honesty: FlintTrade has no fill monitor for bracket legs yet, so the
@@ -64,13 +64,13 @@ class BracketPrincipal:
     Attributes:
         actor_id: Operator identity from the verified session JWT (``sub``).
         jti: JWT id of the live session making the request.
-        adapter_id: Target broker adapter (e.g. ``"openalgo"``, ``"dhan"``).
+        adapter_id: Target broker adapter (e.g. ``"broker"``, ``"dhan"``).
         account_id: Target account within the adapter.
     """
 
     actor_id: str
     jti: str
-    adapter_id: str = "openalgo"
+    adapter_id: str = "broker"
     account_id: str = "default"
 
 
@@ -134,7 +134,7 @@ class BracketOrder:
     trailing_sl: float | None = None
     strategy: str = "Flint"
     product: str = "MIS"
-    adapter_id: str = "openalgo"
+    adapter_id: str = "broker"
     account_id: str = "default"
     entry_pricetype: str = "MARKET"
     status: str = "active"
@@ -274,7 +274,7 @@ class BracketOrderService:
     Places the entry leg, then the single protective exit leg, tracking both
     under one ``bracket_id`` in an in-memory registry. Every broker write goes
     through the injected gated dispatchers (SafetySystem → ``gate_order`` →
-    ``BrokerRouter``); the service holds NO broker/OpenAlgo client, so it
+    ``BrokerRouter``); the service holds NO broker/broker client, so it
     fails closed when the dispatchers are absent instead of simulating fills.
 
     Usage::
@@ -805,7 +805,7 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
 
     Args:
         app: The Flask application whose config carries ``BROKER_ROUTER``,
-            ``SAFETY``, ``CLIENT``/``OPENALGO_CLIENT`` and ``AUDIT``.
+            ``SAFETY``, ``CLIENT``/``BROKER_CLIENT`` and ``AUDIT``.
 
     Returns:
         ``(place_leg, cancel_leg)`` callables for :class:`BracketOrderService`.
@@ -815,9 +815,9 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
         # Broker-bound coroutines must run on the shared client's owner event
         # loop (pooled httpx connections are loop-affine) — mirrors the human
         # order path. Falls back to a fresh loop for test fakes/no client.
-        from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+        from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
-        client = app.config.get("CLIENT") or app.config.get("OPENALGO_CLIENT")
+        client = app.config.get("CLIENT") or app.config.get("BROKER_CLIENT")
         return client_call_sync(client, coro)
 
     def _require_router() -> Any:

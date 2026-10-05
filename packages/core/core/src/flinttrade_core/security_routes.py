@@ -71,10 +71,12 @@ def register_security_middleware(app: Flask, monitor: SecurityMonitor | None = N
             if any(request.path.startswith(p) for p in _BAN_EXEMPT_PREFIXES):
                 return None
             logger.warning("Blocked request from banned IP %s → %s", log_ref(ip, kind="ip"), request.path)
-            return jsonify({
-                "status": "error",
-                "message": "Your IP address has been blocked.",
-            }), 403
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Your IP address has been blocked.",
+                }
+            ), 403
         return None
 
 
@@ -92,10 +94,12 @@ def get_stats() -> tuple[Any, int]:
         ``banned_count``, and ``top_offenders``.
     """
     monitor = _get_monitor()
-    return jsonify({
-        "status": "success",
-        "data": monitor.get_stats(),
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": monitor.get_stats(),
+        }
+    ), 200
 
 
 @security_bp.route("/bans", methods=["GET"])
@@ -107,10 +111,12 @@ def get_bans() -> tuple[Any, int]:
     """
     monitor = _get_monitor()
     bans = monitor.get_banned_ips()
-    return jsonify({
-        "status": "success",
-        "data": {"bans": [r.to_dict() for r in bans]},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"bans": [r.to_dict() for r in bans]},
+        }
+    ), 200
 
 
 @security_bp.route("/records", methods=["GET"])
@@ -123,10 +129,12 @@ def get_records() -> tuple[Any, int]:
     """
     monitor = _get_monitor()
     records = monitor.get_all_records()
-    return jsonify({
-        "status": "success",
-        "data": {"records": [r.to_dict() for r in records]},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"records": [r.to_dict() for r in records]},
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------

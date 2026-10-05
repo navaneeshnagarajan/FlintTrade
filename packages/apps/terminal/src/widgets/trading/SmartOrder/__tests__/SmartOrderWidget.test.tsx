@@ -19,12 +19,14 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: {
-    // openAlgoHydrated: true models a normally-loaded app; the hydration
+    //  models a normally-loaded app; the hydration
     // fail-closed window is covered by brokerTargets/api tests.
-    getState: () => ({ apiKey: mockApiKey, openAlgoHydrated: true }),
+    getState: () => ({ apiKey: mockApiKey }),
   },
 }));
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native" }>,
     selector: string | null,
@@ -173,7 +175,7 @@ describe("SmartOrderWidget", () => {
     expect(screen.getByText("Complete")).toBeInTheDocument();
   });
 
-  it("routes through the active native account when no OpenAlgo key is configured", async () => {
+  it("routes through the active native account when no native broker key is configured", async () => {
     mockBrokerState = {
       accounts: [
         { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -200,8 +202,8 @@ describe("SmartOrderWidget", () => {
     });
   });
 
-  it("keeps OpenAlgo primary when an OpenAlgo key is configured", async () => {
-    mockApiKey = "openalgo-key";
+  it("pins the native account even when a backend API key is present", async () => {
+    mockApiKey = "dhan-key";
     mockBrokerState = {
       accounts: [
         { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -221,8 +223,7 @@ describe("SmartOrderWidget", () => {
     fireEvent.click(screen.getByRole("button", { name: /route order/i }));
 
     await waitFor(() => expect(startSmartRoute).toHaveBeenCalledOnce());
-    expect(vi.mocked(startSmartRoute).mock.calls[0][0]).not.toHaveProperty("broker");
-    expect(vi.mocked(startSmartRoute).mock.calls[0][0]).not.toHaveProperty("account_id");
+    expect(vi.mocked(startSmartRoute).mock.calls[0][0]).toMatchObject({ broker: "upstox", account_id: "U1" });
   });
 
   it("surfaces the backend's refusal message verbatim", async () => {

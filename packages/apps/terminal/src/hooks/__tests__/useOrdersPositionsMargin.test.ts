@@ -43,7 +43,7 @@ const mockGetMargin = vi.fn<
     signal?: AbortSignal,
   ) => Promise<MarginData>
 >();
-const dataScopeState = vi.hoisted(() => ({ value: "live:openalgo:first" }));
+const dataScopeState = vi.hoisted(() => ({ value: "live:native:dhan:A1" }));
 
 vi.mock("@/services/api", () => ({
   getOrderbook: (context: AccountReadContext, signal?: AbortSignal) =>
@@ -71,7 +71,7 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
     identity: {
       mode: "live",
       scopeKey: dataScopeState.value,
-      brokerType: "openalgo",
+      brokerType: "dhan",
       accountId: "default",
     },
     enabled: true,
@@ -117,7 +117,7 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  dataScopeState.value = "live:openalgo:first";
+  dataScopeState.value = "live:native:dhan:A1";
   // clearAllMocks keeps implementations — re-pin the "all sessions closed"
   // default so a per-test mockImplementation cannot leak forward.
   mockIsMarketHours.mockImplementation(() => false);
@@ -138,8 +138,8 @@ describe("useOrders", () => {
       {
         identity: {
           mode: "live",
-          scopeKey: "live:openalgo:first",
-          brokerType: "openalgo",
+          scopeKey: "live:native:dhan:A1",
+          brokerType: "dhan",
           accountId: "default",
         },
         enabled: true,
@@ -301,8 +301,8 @@ describe("usePositions", () => {
       {
         identity: {
           mode: "live",
-          scopeKey: "live:openalgo:first",
-          brokerType: "openalgo",
+          scopeKey: "live:native:dhan:A1",
+          brokerType: "dhan",
           accountId: "default",
         },
         enabled: true,
@@ -369,7 +369,7 @@ describe("useMargin — enabled gate", () => {
     await waitFor(() => expect(mockGetMargin).toHaveBeenCalledTimes(1));
     expect(mockGetMargin).toHaveBeenCalledWith(
       expect.objectContaining({
-        identity: expect.objectContaining({ scopeKey: "live:openalgo:first" }),
+        identity: expect.objectContaining({ scopeKey: "live:native:dhan:A1" }),
       }),
       "NIFTY",
       "NFO",
@@ -433,7 +433,7 @@ describe("useMargin — enabled gate", () => {
     );
     await waitFor(() => expect(mockGetMargin).toHaveBeenCalledTimes(1));
 
-    dataScopeState.value = "live:openalgo:second";
+    dataScopeState.value = "live:native:dhan:A2";
     rerender();
 
     await waitFor(() => expect(mockGetMargin).toHaveBeenCalledTimes(2));

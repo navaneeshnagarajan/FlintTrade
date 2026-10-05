@@ -53,6 +53,7 @@
 import {
   useRef,
   useEffect,
+  useLayoutEffect,
   useState,
   useCallback,
   memo,
@@ -67,6 +68,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import type { WidgetProps } from "@/types/widgets";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -753,14 +755,26 @@ function DOMHeatmapWidget(props: WidgetProps) {
 
   const track = useTrackBehavior();
   const isExplore = useModeStore((s) => s.mode === "explore");
+  const scope = useMarketDataScope();
 
   const [symbol, setSymbol] = useState(() => panelParams?.symbol ?? "NIFTY");
   const [viewMode, setViewMode] = useState<ViewMode>(() => resolveViewMode(panelParams?.view));
   const [scale, setScale] = useState<IntensityScale>(() => resolveScale(panelParams?.scale));
-  const [error, setError] = useState<string | null>(null);
-  const [ltp, setLtp] = useState(0);
-  const [snapshotCount, setSnapshotCount] = useState(0);
-  const [hover, setHover] = useState<DOMHover | null>(null);
+  const [rawError, setError] = useState<string | null>(null);
+  const [rawLtp, setLtp] = useState(0);
+  const [rawSnapshotCount, setSnapshotCount] = useState(0);
+  const [rawHover, setHover] = useState<DOMHover | null>(null);
+
+  const sourceKey = `${scope}:${symbol}`;
+  const activeSourceRef = useRef(sourceKey);
+  activeSourceRef.current = sourceKey;
+  const ringSourceRef = useRef(sourceKey);
+  const [publishedSource, setPublishedSource] = useState(sourceKey);
+  const currentData = publishedSource === sourceKey;
+  const error = currentData ? rawError : null;
+  const ltp = currentData ? rawLtp : 0;
+  const snapshotCount = currentData ? rawSnapshotCount : 0;
+  const hover = currentData ? rawHover : null;
 
   // Transport state (absorbed from OrderBookReplay)
   const [index, setIndex] = useState(0);
@@ -812,8 +826,8 @@ function DOMHeatmapWidget(props: WidgetProps) {
       const dpr = window.devicePixelRatio || 1;
       drawHeatmap(
         ctx,
-        snapshotsRef.current,
-        ltpRef.current,
+        ringSourceRef.current === activeSourceRef.current ? snapshotsRef.current : [],
+        ringSourceRef.current === activeSourceRef.current ? ltpRef.current : 0,
         canvas.width,
         canvas.height,
         dpr,
@@ -864,8 +878,10 @@ function DOMHeatmapWidget(props: WidgetProps) {
     return () => observer.disconnect();
   }, [paint]);
 
-  // Reset the ring whenever the instrument or the data source changes.
-  useEffect(() => {
+  // Reset before paint; old authority data is hidden during the first new render.
+  useLayoutEffect(() => {
+    ringSourceRef.current = sourceKey;
+    setPublishedSource(sourceKey);
     snapshotsRef.current = [];
     levelCacheRef.current = { src: null, levels: [] };
     setSnapshotCount(0);
@@ -875,7 +891,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
     setIsPlaying(false);
     setHover(null);
     paint();
-  }, [symbol, isExplore, paint]);
+  }, [sourceKey, paint]);
 
   // ── Live source: REST poll into the ring ───────────────────────────────────
   // Replay pauses the poll so the ring the scrubber addresses is stable (and
@@ -883,13 +899,18 @@ function DOMHeatmapWidget(props: WidgetProps) {
   useEffect(() => {
     if (isExplore || isReplay) return;
 
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted && activeSourceRef.current === sourceKey;
+    let pending = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     const exchange = EXCHANGES[symbol] ?? "NSE";
 
     async function poll() {
+      if (pending || !current()) return;
+      pending = true;
       try {
-        const depth = await getDepth(symbol, exchange);
-        if (!depth) return;
+        const depth = await getDepth(symbol, exchange, controller.signal, scope);
+        if (!current() || !depth) return;
         const snap = buildSnapshot(depth);
         snapshotsRef.current = [
           ...snapshotsRef.current.slice(-(MAX_SNAPSHOTS - 1)),
@@ -908,9 +929,11 @@ function DOMHeatmapWidget(props: WidgetProps) {
         }
         setError(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Depth fetch error");
+        if (current()) setError(e instanceof Error ? e.message : "Depth fetch error");
+      } finally {
+        pending = false;
       }
-      paint();
+      if (current()) paint();
     }
 
     function startPolling() {
@@ -938,10 +961,11 @@ function DOMHeatmapWidget(props: WidgetProps) {
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
+      controller.abort();
       stopPolling();
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [symbol, isExplore, isReplay, paint]);
+  }, [sourceKey, symbol, scope, isExplore, isReplay, paint]);
 
   // ── Explore source: the deterministic demo generator ───────────────────────
   // Same shape, same renderer, same transport — but always badged "Demo data".
@@ -953,6 +977,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
     let tick = seed;
 
     const publish = () => {
+      if (activeSourceRef.current !== sourceKey) return;
       snapshotsRef.current = demoSnapshots(data);
       setSnapshotCount(snapshotsRef.current.length);
       setLtp(data.priceLevels[data.currentPriceIndex] ?? 0);
@@ -994,7 +1019,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
       stop();
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [symbol, isExplore, isReplay, paint]);
+  }, [sourceKey, symbol, isExplore, isReplay, paint]);
 
   // Keep the scrubber inside the ring as it fills or resets.
   useEffect(() => {
@@ -1170,7 +1195,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
             type="button"
             onClick={() => handleViewModeChange("live")}
             aria-pressed={viewMode === "live"}
-            aria-label="Live accumulating view"
+            aria-label="Accumulating depth view"
             className={cn(
               "px-2 py-0.5 text-xxs rounded transition-colors",
               viewMode === "live"
@@ -1178,7 +1203,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
             )}
           >
-            Live
+            Accumulate
           </button>
           <button
             type="button"
@@ -1211,6 +1236,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
               generator and are ALWAYS labelled — a heatmap of invented
               liquidity must never be mistakable for the real book. */}
           
+          {isExplore && <Badge variant="outline" aria-label="Example generated depth">Example</Badge>}
           {!isExplore && !error && snapshotCount > 0 && (
             <Badge
               variant="outline"
@@ -1341,7 +1367,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
         aria-label={`DOM heatmap for ${symbol}${isExplore ? " (Example)" : ""}. ${
           isReplay
             ? "Replay view: scrub the captured snapshots with the transport controls below."
-            : "Live view: snapshots accumulate left to right."
+            : "Accumulating view: snapshots accumulate left to right."
         } Shows bid volume (blue) and ask volume (red) at price levels over time. Brighter colours indicate larger order size. Mid price shown as dashed white line.`}
         data-testid="domheatmap-container"
         onMouseMove={handleMouseMove}

@@ -1,8 +1,8 @@
 """Daily broker re-authentication status for the Account Manager.
 
-Indian broker logins (and the OpenAlgo sessions in front of them) expire once a
+Indian broker logins (and the broker sessions in front of them) expire once a
 day — the operator must re-authenticate each trading morning. Most brokers and
-OpenAlgo invalidate the session around 08:00 IST. This module computes, from the
+broker invalidate the session around 08:00 IST. This module computes, from the
 last successful authentication, whether a given account needs re-auth *today*, so
 the Account Manager can show a per-broker "reauth required" indicator that drives
 the operator to act.

@@ -26,20 +26,27 @@ from flinttrade_core.practice_agent_runtime import validate_practice_config
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("body", [
-    None, [], {"symbols": "RELIANCE"}, {"symbols": [42]}, {"symbols": []},
-    {"symbols": ["RELIANCE"], "cycle_interval_sec": True},
-    {"symbols": ["RELIANCE"], "max_position_size": 1.5},
-    {"symbols": ["RELIANCE"], "stop_loss_pct": float("nan")},
-    {"symbols": ["RELIANCE"], "take_profit_pct": float("inf")},
-    {"symbols": ["RELIANCE"], "daily_stop_loss": 0},
-    {"symbols": ["RELIANCE"], "exchange": "UNKNOWN"},
-    {"symbols": ["RELIANCE"], "product": "BO"},
-    {"symbols": ["RELIANCE"], "mode": "live"},
-    {"symbols": ["RELIANCE"], "broker": "live-broker"},
-    {"symbols": ["RELIANCE"], "cycle_interval_sec": 86400},
-    {"symbols": ["RELIANCE"] * 21},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        [],
+        {"symbols": "RELIANCE"},
+        {"symbols": [42]},
+        {"symbols": []},
+        {"symbols": ["RELIANCE"], "cycle_interval_sec": True},
+        {"symbols": ["RELIANCE"], "max_position_size": 1.5},
+        {"symbols": ["RELIANCE"], "stop_loss_pct": float("nan")},
+        {"symbols": ["RELIANCE"], "take_profit_pct": float("inf")},
+        {"symbols": ["RELIANCE"], "daily_stop_loss": 0},
+        {"symbols": ["RELIANCE"], "exchange": "UNKNOWN"},
+        {"symbols": ["RELIANCE"], "product": "BO"},
+        {"symbols": ["RELIANCE"], "mode": "live"},
+        {"symbols": ["RELIANCE"], "broker": "live-broker"},
+        {"symbols": ["RELIANCE"], "cycle_interval_sec": 86400},
+        {"symbols": ["RELIANCE"] * 21},
+    ],
+)
 def test_config_rejects_ambiguous_or_unbounded_input(body):
     with pytest.raises(ValueError):
         validate_practice_config(body)
@@ -75,8 +82,14 @@ def desk(tmp_path, monkeypatch, backend_lease_proof):
     monkeypatch.setattr(auth_routes, "_get_auth_service", lambda: None)
     state = SimpleNamespace(
         now=datetime.fromisoformat("2026-09-30T10:00:00+05:30"),
-        revoked=set(), enabled=True, signal="HOLD", reads=0, learning=None,
-        release=threading.Event(), analysis_entered=threading.Event(), delayed=False,
+        revoked=set(),
+        enabled=True,
+        signal="HOLD",
+        reads=0,
+        learning=None,
+        release=threading.Event(),
+        analysis_entered=threading.Event(),
+        delayed=False,
     )
     monkeypatch.setattr(auth_routes, "_is_jti_revoked", lambda jti: jti in state.revoked)
     monkeypatch.setattr(agent_routes, "_agent_flag_enabled", lambda: state.enabled)
@@ -96,13 +109,21 @@ def desk(tmp_path, monkeypatch, backend_lease_proof):
     sandbox = SandboxEngine(str(tmp_path / "sandbox.sqlite"), initial_capital=100_000)
     store = AgentRunStore(tmp_path / "runs.sqlite")
     app.config.update(
-        TESTING=True, DATA_SANDBOX_ENGINE=sandbox, PRACTICE_AGENT_RUN_STORE=store,
-        BACKEND_LEASE_PROOF=backend_lease_proof, RUNTIME_ACCEPTING_REQUESTS=True,
-        RATE_LIMITER=RateLimiter(), TIME_SCHEDULER=SimpleNamespace(
+        TESTING=True,
+        DATA_SANDBOX_ENGINE=sandbox,
+        PRACTICE_AGENT_RUN_STORE=store,
+        BACKEND_LEASE_PROOF=backend_lease_proof,
+        RUNTIME_ACCEPTING_REQUESTS=True,
+        RATE_LIMITER=RateLimiter(),
+        TIME_SCHEDULER=SimpleNamespace(
             now_ist=lambda: state.now,
             get_market_session=lambda *_args, **_kwargs: (wall_time(9, 15), wall_time(15, 30)),
-        ), BROKER_ROUTER=_NeverLive(), OPENALGO_CLIENT=_NeverLive(), CLIENT=_NeverLive(),
-        TICK_RECORDER=None, SAFETY=SafetySystem(),
+        ),
+        BROKER_ROUTER=_NeverLive(),
+        BROKER_CLIENT=_NeverLive(),
+        CLIENT=_NeverLive(),
+        TICK_RECORDER=None,
+        SAFETY=SafetySystem(),
     )
     app.register_blueprint(order_routes.orders_bp)
     for path, method, function in (
@@ -120,23 +141,49 @@ def desk(tmp_path, monkeypatch, backend_lease_proof):
         state.reads += 1
         now = datetime.now(UTC).isoformat()
         instrument = {"symbol": symbol, "exchange": exchange, "instrument_id": None}
-        return BrokerAnalysisContext({
-            "symbol": symbol, "exchange": exchange,
-            "quote": {"value": {"instrument": instrument, "available": True,
-                                "ltp": 123.5, "open": 120, "high": 124, "low": 119,
-                                "volume": 10, "prev_close": 120}, "observed_at": now},
-            "depth": {"value": {"instrument": instrument, "bids": [], "asks": []}, "observed_at": now},
-            "historical": {"value": {"instrument": instrument, "interval": "5m", "bars": [
-                {"timestamp": now, "open": 120, "high": 124, "low": 119, "close": 123.5, "volume": 10}
-                for _ in range(60)
-            ]}},
-        }, {"event_id": "synthetic-observation", "input_digest": "b" * 64})
+        return BrokerAnalysisContext(
+            {
+                "symbol": symbol,
+                "exchange": exchange,
+                "quote": {
+                    "value": {
+                        "instrument": instrument,
+                        "available": True,
+                        "ltp": 123.5,
+                        "open": 120,
+                        "high": 124,
+                        "low": 119,
+                        "volume": 10,
+                        "prev_close": 120,
+                    },
+                    "observed_at": now,
+                },
+                "depth": {"value": {"instrument": instrument, "bids": [], "asks": []}, "observed_at": now},
+                "historical": {
+                    "value": {
+                        "instrument": instrument,
+                        "interval": "5m",
+                        "bars": [
+                            {"timestamp": now, "open": 120, "high": 124, "low": 119, "close": 123.5, "volume": 10}
+                            for _ in range(60)
+                        ],
+                    }
+                },
+            },
+            {"event_id": "synthetic-observation", "input_digest": "b" * 64},
+        )
 
     monkeypatch.setattr(ai_broker_context, "collect_configured_broker_context", collect)
 
     def token(**changes):
-        claims = {"sub": "operator", "jti": "practice-session", "type": "session", "mode": "practice",
-                  "iat": int(time.time()), "exp": int(time.time()) + 3600}
+        claims = {
+            "sub": "operator",
+            "jti": "practice-session",
+            "type": "session",
+            "mode": "practice",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+        }
         claims.update(changes)
         return jwt.encode(claims, key, algorithm="HS256")
 
@@ -167,15 +214,28 @@ def _run_finished(desk):
     return _supervisor(desk).run.thread is not None and not _supervisor(desk).run.thread.is_alive()
 
 
-@pytest.mark.parametrize("claims,code", [
-    ({"mode": "live"}, 403), ({"mode": "explore"}, 403),
-    ({"type": "reset"}, 401), ({"setup_session": True}, 401),
-    ({"exp": 1}, 401), ({"exp": None}, 401), ({"jti": ""}, 401),
-])
+@pytest.mark.parametrize(
+    "claims,code",
+    [
+        ({"mode": "live"}, 403),
+        ({"mode": "explore"}, 403),
+        ({"type": "reset"}, 401),
+        ({"setup_session": True}, 401),
+        ({"exp": 1}, 401),
+        ({"exp": None}, 401),
+        ({"jti": ""}, 401),
+    ],
+)
 def test_every_control_requires_full_practice_session(desk, claims, code):
     headers = {"Authorization": "Bearer " + desk.token(**claims)}
-    for path, method in (("/start", "POST"), ("/stop", "POST"), ("/status", "GET"), ("/runs", "GET"),
-                         ("/runs/example/events", "GET"), ("/runs/example/resolve", "POST")):
+    for path, method in (
+        ("/start", "POST"),
+        ("/stop", "POST"),
+        ("/status", "GET"),
+        ("/runs", "GET"),
+        ("/runs/example/events", "GET"),
+        ("/runs/example/resolve", "POST"),
+    ):
         result = desk.client.open(path, method=method, headers=headers, json={"symbols": ["RELIANCE"]})
         assert result.status_code == code
     assert desk.store.list_runs() == []
@@ -276,10 +336,20 @@ def test_external_flattening_requires_reconciliation_of_retained_tracker(desk):
     desk.signal = "BUY"
     assert _start(desk).status_code == 202
     _wait_for(lambda: _supervisor(desk).run.snapshot.get("cycle_count") == 1)
-    result = desk.client.post("/api/v1/orders/place", headers=desk.headers, json={
-        "symbol": "RELIANCE", "exchange": "NSE", "product": "MIS", "action": "SELL",
-        "quantity": 1, "pricetype": "MARKET", "price": 123.5, "price_basis": "ltp",
-    })
+    result = desk.client.post(
+        "/api/v1/orders/place",
+        headers=desk.headers,
+        json={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 1,
+            "pricetype": "MARKET",
+            "price": 123.5,
+            "price_basis": "ltp",
+        },
+    )
     assert result.status_code == 200, result.get_json()
     assert desk.sandbox.get_positions() == []
     assert desk.client.post("/stop", headers=desk.headers, json={}).status_code == 200
@@ -510,9 +580,13 @@ def test_real_closed_trade_learning_persists_and_reopens_offline(desk, tmp_path)
         restored.close()
 
 
-@pytest.mark.parametrize("laya_status,quantity,code", [
-    (DecisionStatus.DOWN, 1, "laya_denied"), (DecisionStatus.DEGRADED, 4, "laya_clamp"),
-])
+@pytest.mark.parametrize(
+    "laya_status,quantity,code",
+    [
+        (DecisionStatus.DOWN, 1, "laya_denied"),
+        (DecisionStatus.DEGRADED, 4, "laya_clamp"),
+    ],
+)
 def test_cycle_preserves_denial_or_clamp_in_durable_evidence(desk, laya_status, quantity, code):
     desk.signal = "BUY"
     process_laya().set_status(laya_status)
@@ -634,8 +708,10 @@ def test_model_failure_brakes_and_records_unavailability_instead_of_healthy_hold
     def unavailable(_messages):
         if failure == "raises":
             raise OSError("private-provider-detail-must-not-persist")
-        return SimpleNamespace(content="BUY" if failure == "error_response" else " ",
-                               error="private-provider-detail-must-not-persist" if failure == "error_response" else "")
+        return SimpleNamespace(
+            content="BUY" if failure == "error_response" else " ",
+            error="private-provider-detail-must-not-persist" if failure == "error_response" else "",
+        )
 
     desk.llm.chat = unavailable
     assert _start(desk).status_code == 202
@@ -660,7 +736,9 @@ def test_model_construction_failure_is_visible_without_persisting_provider_detai
     events = desk.store.events(row["run_id"])
     assert row["status"] == "failed"
     assert "Configured model unavailable" in row["error"]
-    assert any(event["kind"] == "model_unavailable" and event["data"]["operation"] == "construction" for event in events)
+    assert any(
+        event["kind"] == "model_unavailable" and event["data"]["operation"] == "construction" for event in events
+    )
     assert "private-provider-detail" not in repr(row) + repr(events)
     assert desk.sandbox.get_orders() == []
 
@@ -720,13 +798,19 @@ def test_model_budget_exhaustion_settles_positions_and_skips_learning(desk):
     events = desk.store.events(row["run_id"])
     assert row["status"] == "stopped"
     assert row["snapshot"]["model_usage"] == {
-        "model_call_limit": 2, "model_output_limit": 64, "model_calls_used": 2,
-        "model_calls_remaining": 0, "status": "exhausted",
+        "model_call_limit": 2,
+        "model_output_limit": 64,
+        "model_calls_used": 2,
+        "model_calls_remaining": 0,
+        "status": "exhausted",
     }
     assert desk.sandbox.get_positions() == []
     assert len(desk.sandbox.get_trades()) == 2
     assert len([event for event in events if event["kind"] == "model_attempt_reserved"]) == 2
-    assert any(event["kind"] == "session_learning_skipped" and event["data"]["reason"] == "model_limit_exhausted" for event in events)
+    assert any(
+        event["kind"] == "session_learning_skipped" and event["data"]["reason"] == "model_limit_exhausted"
+        for event in events
+    )
 
 
 def test_model_reservation_write_failure_brakes_without_calling_provider(desk, monkeypatch):
@@ -860,7 +944,9 @@ def test_reflection_skips_after_kill_without_consuming_a_model_attempt(desk):
     row = desk.store.list_runs()[0]
     events = desk.store.events(row["run_id"])
     assert row["snapshot"]["model_usage"]["model_calls_used"] == 1
-    assert any(e["kind"] == "session_learning_skipped" and e["data"]["reason"] == "practice_kill_switch_active" for e in events)
+    assert any(
+        e["kind"] == "session_learning_skipped" and e["data"]["reason"] == "practice_kill_switch_active" for e in events
+    )
     assert desk.sandbox.get_positions() == []
 
 

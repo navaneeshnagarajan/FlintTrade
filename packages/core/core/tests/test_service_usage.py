@@ -546,6 +546,9 @@ with ServiceUsageLedger(Path(sys.argv[1])) as store:
     env["PYTHONPATH"] = os.pathsep.join(str(p) for p in sys.path if p)
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path / "usage"), operation],
-        env=env, text=True, capture_output=True, timeout=15,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=15,
     )
     assert result.returncode == 0, f"child status={result.returncode}; {result.stderr}"

@@ -211,9 +211,7 @@ def _new_internal_correlation_id() -> str:
 def _bounded_exception_code(exc: Exception) -> str:
     name = type(exc).__name__
     safe = "".join(
-        character
-        for character in name
-        if character.isascii() and (character.isalnum() or character in "_.-")
+        character for character in name if character.isascii() and (character.isalnum() or character in "_.-")
     )
     return (safe or "UnexpectedError")[:64]
 
@@ -300,9 +298,8 @@ def _persist_locked_model_selection(
         persist_config = persist_config or persist_llm_config
     current = read_config()
     configured_model = str(current.get("model") or "").strip()
-    if (
-        str(current.get("provider") or "").strip().lower() == "ollama"
-        and _model_aliases(configured_model).intersection(_model_aliases(source_model))
+    if str(current.get("provider") or "").strip().lower() == "ollama" and _model_aliases(configured_model).intersection(
+        _model_aliases(source_model)
     ):
         persist_config({"model": locked_model})
 
@@ -358,9 +355,7 @@ def start_configured_local_ai_runtime(
             runtime.start_async()
     except Exception as exc:  # noqa: BLE001 - app remains available for recovery
         correlation_id = _log_unexpected_runtime_failure("autostart", exc)
-        app.config["OLLAMA_AUTOSTART_ERROR"] = (
-            f"Managed Ollama autostart failed (correlation_id={correlation_id})"
-        )
+        app.config["OLLAMA_AUTOSTART_ERROR"] = f"Managed Ollama autostart failed (correlation_id={correlation_id})"
         return False
     app.config.pop("OLLAMA_AUTOSTART_ERROR", None)
     return True
@@ -396,9 +391,7 @@ def _provider_transition_uses_managed_ollama(
     previous_runtime_provider = str(effective.get("provider") or previous_provider or "ollama").strip().lower()
     provider_override = os.getenv("LLM_PROVIDER", "").strip()
     target_runtime_provider = (
-        previous_runtime_provider
-        if provider_override or "provider" not in payload
-        else target_provider or "ollama"
+        previous_runtime_provider if provider_override or "provider" not in payload else target_provider or "ollama"
     )
     return "ollama" in {
         previous_provider,
@@ -444,9 +437,7 @@ def _persist_llm_config_with_runtime_locked(
     previous_runtime_provider = str(effective.get("provider") or previous_provider or "ollama").strip().lower()
     provider_override = os.getenv("LLM_PROVIDER", "").strip()
     target_runtime_provider = (
-        previous_runtime_provider
-        if provider_override or "provider" not in payload
-        else target_provider or "ollama"
+        previous_runtime_provider if provider_override or "provider" not in payload else target_provider or "ollama"
     )
     if target_provider == "ollama":
         from .llm_config import normalise_ollama_host  # noqa: PLC0415
@@ -459,9 +450,7 @@ def _persist_llm_config_with_runtime_locked(
         "model": str(previous.get("model") or ""),
         "api_key": resolve_secret(),
     }
-    needs_managed_activation = target_provider == "ollama" and any(
-        field in payload for field in ("provider", "model")
-    )
+    needs_managed_activation = target_provider == "ollama" and any(field in payload for field in ("provider", "model"))
     managed_ollama_involved = _provider_transition_uses_managed_ollama(payload, previous, effective)
     runtime = app.config.get("OLLAMA_RUNTIME")
     runtime_status: dict[str, Any] | None = None
@@ -513,9 +502,7 @@ def _persist_llm_config_with_runtime_locked(
             started_here = True
         elif not status.get("managed_process"):
             raise OllamaRuntimeError("managed Ollama readiness ownership could not be proven")
-        target_model = str(
-            payload.get("model", previous.get("model") or effective.get("model") or "")
-        ).strip()
+        target_model = str(payload.get("model", previous.get("model") or effective.get("model") or "")).strip()
         try:
             if not target_model or not runtime.model_is_accepted(target_model):
                 raise OllamaRuntimeError("managed Ollama requires an installed, accepted model")
@@ -550,9 +537,7 @@ def _persist_llm_config_with_runtime_locked(
             except Exception:  # noqa: BLE001 - reported as an unproven rollback
                 rollback_failed = True
             if rollback_failed:
-                raise OllamaRuntimeError(
-                    "LLM config transition failed and rollback could not be proven"
-                ) from exc
+                raise OllamaRuntimeError("LLM config transition failed and rollback could not be proven") from exc
             runtime.mark_provider_transition_mutation_resolved()
             raise
 
@@ -586,9 +571,7 @@ def _persist_llm_config_with_runtime_locked(
             restart_managed_ollama = False
             if stopped_here and rollback_persisted:
                 try:
-                    restart_managed_ollama = _selects_managed_ollama(
-                        read_current_effective_config()
-                    )
+                    restart_managed_ollama = _selects_managed_ollama(read_current_effective_config())
                 except Exception:  # noqa: BLE001 - reported as an unproven rollback
                     rollback_failed = True
             if restart_managed_ollama:
@@ -605,9 +588,7 @@ def _persist_llm_config_with_runtime_locked(
                 except Exception:  # noqa: BLE001 - reported as an unproven rollback
                     rollback_failed = True
             if rollback_failed:
-                raise OllamaRuntimeError(
-                    "LLM config transition failed and rollback could not be proven"
-                ) from exc
+                raise OllamaRuntimeError("LLM config transition failed and rollback could not be proven") from exc
             runtime.mark_provider_transition_mutation_resolved()
             raise
 
@@ -680,9 +661,7 @@ def persist_llm_config_with_runtime(
     )
 
     read_config = read_config or read_llm_config
-    read_effective_config = read_effective_config or (
-        read_effective_llm_config if needs_defaults else read_config
-    )
+    read_effective_config = read_effective_config or (read_effective_llm_config if needs_defaults else read_config)
     read_current_effective_config = read_current_effective_config or read_effective_config
     resolve_secret = resolve_secret or resolve_llm_api_key
     persist_config = persist_config or persist_llm_config
@@ -762,9 +741,7 @@ def repair_local_ai() -> tuple[Response, int]:
             status = runtime.status()
             if status.get("repair_allowed") is not True:
                 reason = status.get("repair_blocked_reason")
-                raise OllamaRuntimeError(
-                    str(reason or "managed Ollama runtime repair is unavailable")
-                )
+                raise OllamaRuntimeError(str(reason or "managed Ollama runtime repair is unavailable"))
             return _success(runtime.repair_async(admission_id=admission_id), status_code=202)
     except Exception as exc:  # noqa: BLE001 - mapped to a bounded HTTP response
         return _runtime_error(exc)

@@ -6,7 +6,7 @@
  *   - LiveModeNotice: these are live-broker constructs; outside Live mode the
  *     widgets neither fetch nor pretend.
  *   - BrokerTargetSelect: broker/account selector fed by connected brokerStore
- *     accounts plus the OpenAlgo bridge default.
+ *     accounts with an explicit native selection.
  *   - BrokerOrdersErrorNotice: surfaces backend refusals verbatim; a 501 maps
  *     to "Not available for this broker".
  *   - BrokerRowsTable: defensive table over adapter-specific rows (the
@@ -161,7 +161,7 @@ function encodeTarget(target: Required<BrokerTarget>): string {
 
 function decodeTarget(value: string): Required<BrokerTarget> {
   const index = value.indexOf(TARGET_SEPARATOR);
-  if (index < 0) return { broker: "openalgo", account_id: "default" };
+  if (index < 0) return { broker: "unconfigured", account_id: "default" };
   return {
     broker: decodeURIComponent(value.slice(0, index)),
     account_id: decodeURIComponent(value.slice(index + TARGET_SEPARATOR.length)),
@@ -169,7 +169,7 @@ function decodeTarget(value: string): Required<BrokerTarget> {
 }
 
 export const DEFAULT_BROKER_TARGET: Required<BrokerTarget> = {
-  broker: "openalgo",
+  broker: "unconfigured",
   account_id: "default",
 };
 
@@ -183,7 +183,6 @@ export function brokerOrderTargetExists(
   target: Required<BrokerTarget>,
   accounts: ReturnType<typeof useBrokerStore.getState>["accounts"],
 ): boolean {
-  if (encodeTarget(target) === encodeTarget(DEFAULT_BROKER_TARGET)) return true;
   return accounts.some(
     (account) =>
       isBrokerOrderTargetableAccount(account) &&
@@ -192,32 +191,20 @@ export function brokerOrderTargetExists(
   );
 }
 
-/**
- * Select the broker/account target for gated broker-management widgets.
- *
- * OpenAlgo remains primary when a bridge API key is present. In native-only
- * Live mode, the active connected native account becomes the initial target so
- * GTT/super/trigger/position writes do not silently hit OpenAlgo/default.
- */
+/** Select the exact connected native account for broker-management widgets. */
 export function useBrokerOrderTarget(
   mode: string,
 ): [Required<BrokerTarget>, (target: Required<BrokerTarget>) => void] {
   const apiKey = useConnectionStore((s) => s.apiKey);
-  // Read the hydration gate reactively so the target recomputes once the raw
-  // OpenAlgo apiKey is rehydrated after a reload. While un-hydrated the pure
-  // selector fails closed (returns undefined), so this initial target falls
-  // back to the default rather than diverting to a native account on a
-  // transiently-empty apiKey.
-  const openAlgoHydrated = useConnectionStore((s) => s.openAlgoHydrated);
   const { accounts, activeAccountId } = useBrokerStore(
     useShallow((s) => ({ accounts: s.accounts, activeAccountId: s.activeAccountId })),
   );
 
   const automaticTarget = useMemo<Required<BrokerTarget>>(
     () =>
-      pickNativeBrokerOrderTargetFromState(mode, apiKey, accounts, activeAccountId, openAlgoHydrated) ??
+      pickNativeBrokerOrderTargetFromState(mode, apiKey, accounts, activeAccountId) ??
       DEFAULT_BROKER_TARGET,
-    [mode, apiKey, accounts, activeAccountId, openAlgoHydrated],
+    [mode, apiKey, accounts, activeAccountId],
   );
   const [target, setTarget] = useState<Required<BrokerTarget>>(automaticTarget);
   const [manualTarget, setManualTarget] = useState(false);
@@ -243,7 +230,7 @@ export function useBrokerOrderTarget(
 /**
  * Select a connected native account from an explicit broker allow-list.
  *
- * Some management surfaces have no OpenAlgo equivalent and are implemented by
+ * Some management surfaces have no broker equivalent and are implemented by
  * only a subset of native adapters. Returning `null` when none is connected
  * keeps their queries and write controls fail closed.
  */
@@ -305,7 +292,6 @@ export function useSupportedNativeBrokerOrderTarget(
 }
 
 interface BrokerTargetSelectPolicy {
-  includeOpenAlgo?: boolean;
   nativeOnly?: boolean;
   supportedBrokers?: readonly string[];
 }
@@ -315,17 +301,13 @@ export function brokerOrderTargetOptions(
   policy: BrokerTargetSelectPolicy = {},
 ): { target: Required<BrokerTarget>; label: string }[] {
   const {
-    includeOpenAlgo = true,
     nativeOnly = false,
     supportedBrokers,
   } = policy;
   const allowed = supportedBrokers?.map((broker) => broker.toLowerCase());
   const options: { target: Required<BrokerTarget>; label: string }[] = [];
-  if (includeOpenAlgo) {
-    options.push({ target: DEFAULT_BROKER_TARGET, label: "OpenAlgo · default" });
-  }
   for (const account of accounts) {
-    if (!isBrokerOrderTargetableAccount(account)) continue;
+    if (account.source !== "native" || !isBrokerOrderTargetableAccount(account)) continue;
     if (nativeOnly && account.source !== "native") continue;
     if (allowed && !allowed.includes(account.broker.toLowerCase())) continue;
     const target = { broker: account.broker, account_id: account.account_id };
@@ -341,19 +323,16 @@ export function brokerOrderTargetOptions(
 export function BrokerTargetSelect({
   value,
   onChange,
-  includeOpenAlgo = true,
   nativeOnly = false,
   supportedBrokers,
 }: {
   value: Required<BrokerTarget> | null;
   onChange: (target: Required<BrokerTarget>) => void;
-  includeOpenAlgo?: boolean;
   nativeOnly?: boolean;
   supportedBrokers?: readonly string[];
 }) {
   const accounts = useBrokerStore(useShallow((s) => s.accounts));
   const options = brokerOrderTargetOptions(accounts, {
-    includeOpenAlgo,
     nativeOnly,
     supportedBrokers,
   });

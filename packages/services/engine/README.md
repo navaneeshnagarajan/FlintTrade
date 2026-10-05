@@ -12,7 +12,7 @@
 - `src/flinttrade_engine/strategy_execution.py — gated scheduled-strategy execution through BrokerRouter`
 - `src/flinttrade_engine/strategy.py — base class for live strategies`
 - `src/flinttrade_engine/sandbox_executor.py — user-strategy execution with AST guard`
-- `src/flinttrade_engine/mode_guard.py — server-side Practice / Live enforcement; example data is refused`
+- `src/flinttrade_engine/mode_guard.py — server-side Explore / Practice / Live enforcement`
 
 (See the source for the full surface.)
 
@@ -33,6 +33,10 @@ root workspace.
 ```bash
 python -m pytest packages/services/engine/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

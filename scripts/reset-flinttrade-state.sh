@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reset FlintTrade user state for a fresh-install test.
 #
-# Does NOT touch OpenAlgo state (.local/external/openalgo/db/). Only wipes the
+# Wipes the
 # per-OS workspace directory (auth.db, credentials.db, activity, security,
 # traffic/error logs, jwt_secret, master_password, workspace.json,
 # contracts cache, rag store):
@@ -96,7 +96,7 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
-# 1. Kill FlintTrade backend (port 5100) if running. Leave OpenAlgo (5000) alone.
+# 1. Kill FlintTrade backend (port 5100) if running.
 # ---------------------------------------------------------------------------
 BACKEND_PID=""
 # 'set -euo pipefail' is in force: lsof exits 1 when nothing is listening, which
@@ -110,7 +110,7 @@ elif netstat -ano 2>/dev/null | grep -qE "127\.0\.0\.1:5100\s+.*LISTENING"; then
 fi
 
 if [ -n "${BACKEND_PID:-}" ]; then
-    echo "→ Killing FlintTrade backend (PID $BACKEND_PID); OpenAlgo untouched"
+    echo "→ Killing FlintTrade backend (PID $BACKEND_PID)"
     taskkill //F //PID "$BACKEND_PID" >/dev/null 2>&1 || kill "$BACKEND_PID" 2>/dev/null || kill -9 "$BACKEND_PID" 2>/dev/null || true
     sleep 2
 fi
@@ -136,15 +136,6 @@ fi
 rm -rf "$STATE_DIR"
 mkdir -p "$STATE_DIR"
 echo "→ Wiped $STATE_DIR"
-
-# ---------------------------------------------------------------------------
-# 4. Verify OpenAlgo state is intact.
-# ---------------------------------------------------------------------------
-if [ -f ".local/external/openalgo/db/openalgo.db" ]; then
-    echo "→ OpenAlgo state intact: .local/external/openalgo/db/openalgo.db ($(du -h .local/external/openalgo/db/openalgo.db | cut -f1))"
-else
-    echo "→ Note: .local/external/openalgo/db/openalgo.db missing — OpenAlgo will first-run on next start (or you have no local-dev OpenAlgo clone; that's fine if you run OpenAlgo from another location)"
-fi
 
 # ---------------------------------------------------------------------------
 # 5. Optionally restart the backend.

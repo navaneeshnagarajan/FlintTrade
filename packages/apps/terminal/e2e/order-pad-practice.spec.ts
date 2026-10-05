@@ -151,26 +151,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { accounts: [] } };
     },
   });
-  syntheticApi.register({
-    name: "hydrate blank OpenAlgo configuration",
-    method: "GET",
-    path: "/ft-api/v1/config/openalgo",
-    expectedCalls: 2,
-    handler: (request) => {
-      expectAuthenticatedGet(request);
-      return {
-        json: {
-          status: "success",
-          data: {
-            api_key_configured: false,
-            host: "",
-            port: "",
-            ws_port: "",
-          },
-        },
-      };
-    },
-  });
+
   syntheticApi.register({
     name: "read Practice sandbox funds",
     method: "GET",

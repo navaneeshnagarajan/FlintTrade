@@ -5,7 +5,7 @@
  * Status dots reflect live state (kill switch, running strategy count).
  */
 
-import { Workflow, Clock, Activity, FileText, Settings2, FileCode2, Webhook } from "lucide-react";
+import { Clock, Activity, FileText, Settings2, FileCode2, Webhook } from "lucide-react";
 import { SectionNav } from "@/components/layout/SectionNav";
 import "./shared";
 
@@ -13,17 +13,16 @@ import "./shared";
 // Types
 // ---------------------------------------------------------------------------
 
-export type SectionId = "flows" | "schedules" | "monitors" | "logs" | "strategies" | "settings" | "webhooks";
+export type SectionId = "schedules" | "monitors" | "logs" | "strategies" | "settings" | "webhooks";
 
 interface SectionDef {
   id: SectionId;
   label: string;
-  icon: typeof Workflow;
+  icon: typeof Clock;
   desc: string;
 }
 
 export const SECTIONS: SectionDef[] = [
-  { id: "flows",      label: "Flow Builder",       icon: Workflow,   desc: "Visual flow design and local drafts" },
   { id: "schedules",  label: "Schedules",           icon: Clock,      desc: "Cron jobs & timed executions" },
   { id: "monitors",   label: "Monitors",            icon: Activity,   desc: "Live strategy monitoring" },
   { id: "strategies", label: "Strategies",          icon: FileCode2,  desc: "Upload and run Python strategies" },

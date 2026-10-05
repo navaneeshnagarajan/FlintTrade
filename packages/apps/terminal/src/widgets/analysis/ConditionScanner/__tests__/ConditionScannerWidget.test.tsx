@@ -47,6 +47,7 @@ vi.mock("@/services/api", () => ({
 }));
 
 import ConditionScannerWidget from "../ConditionScannerWidget";
+import { useModeStore } from "@/stores/modeStore";
 import { LS_KEY_MULTI } from "@/widgets/utility/Watchlist/types";
 
 function wrapper() {
@@ -124,6 +125,9 @@ const RUN_TWO_ROWS = {
 };
 
 beforeEach(() => {
+  useModeStore.setState({ mode: "explore" });
+  mockMultiQuotes.mockReset();
+  mockMultiQuotes.mockResolvedValue([]);
   mockPrebuilt.mockReset();
   mockRun.mockReset();
   mockUnusualOI.mockReset();
@@ -165,13 +169,13 @@ describe("ConditionScannerWidget", () => {
     expect(mockRun.mock.calls[0][0]).toBe("rsi_oversold");
     expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
     expect(screen.getByText(/1 of 50 matched/)).toBeInTheDocument();
-    // response-driven badge: the backend says it scanned sample bars
-    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    // Response provenance is disclosed even outside the global Example mode.
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
     // …and the absorbed banner, which names the remedy the badge only carries
     // in a tooltip.
     expect(
-      screen.queryByText(/Sample scan — connect a broker read account/i),
-    ).not.toBeInTheDocument();
+      screen.queryByText(/Sample scan — native market provenance is unavailable/i),
+    ).toBeInTheDocument();
     expect(screen.getByText("RSI below 30", { selector: "td *, td" })).toBeInTheDocument();
   });
 
@@ -195,8 +199,8 @@ describe("ConditionScannerWidget", () => {
     await chooseScanAndRun();
 
     expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
-    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Sample scan — connect a broker read account/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText(/Sample scan — native market provenance is unavailable/i)).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     expect(screen.queryByText(/Live scan/i)).not.toBeInTheDocument();
   });
@@ -321,10 +325,19 @@ describe("ConditionScannerWidget", () => {
     expect(await screen.findByText("Auto")).toBeInTheDocument();
     expect(screen.getByText("Banking")).toBeInTheDocument();
     expect(
-      screen.queryByText(/Sample data — leave Explore and connect OpenAlgo/i),
-    ).not.toBeInTheDocument();
+      screen.getByText(/Sample data — illustrative sector movers/i),
+    ).toBeInTheDocument();
     // scan controls belong to the scans view only
     expect(screen.queryByRole("button", { name: /^run$/i })).not.toBeInTheDocument();
+  });
+
+  it.each(["practice", "live"] as const)("discloses sector fallback while native %s quotes are pending", async (mode) => {
+    useModeStore.setState({ mode });
+    mockMultiQuotes.mockReturnValue(new Promise(() => {}));
+    renderWidget({ view: "sectors" });
+    expect(await screen.findByText("Auto")).toBeInTheDocument();
+    expect(screen.getByText(/Sample data — illustrative sector movers/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Live sectors/i)).not.toBeInTheDocument();
   });
 
   it("opens on the sectors view when params.view says so", async () => {

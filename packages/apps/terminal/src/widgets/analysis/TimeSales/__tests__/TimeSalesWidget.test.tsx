@@ -70,7 +70,7 @@ describe("TimeSalesWidget — tape", () => {
   it("renders the sample tape with demo affordance when disconnected", () => {
     render(<TimeSalesWidget {...defaultProps} />);
 
-    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Tape & Microstructure");
     // Sample prints render (unique first-row time from the sample tape).
     expect(screen.getByText(SAMPLE_TAPE[0].time)).toBeInTheDocument();
@@ -122,7 +122,7 @@ describe("TimeSalesWidget — microstructure statistics", () => {
     // 4 prints in the last 10 s → 0.4 prints/s; sizes 100/100/100/500 → avg
     // 200, so only the 500 exceeds twice the average. Three buys, one sell →
     // 75% up / 25% down. Every one of these is arithmetic over the prints the
-    // WebSocket fold produced, not over a generated tick array.
+    // native quote fold produced, not over a generated tick array.
     mockConnected.mockReturnValue(true);
     mockUseTape.mockReturnValue([
       livePrint(4, 500, 500, "buy"),
@@ -160,7 +160,7 @@ describe("TimeSalesWidget — microstructure statistics", () => {
     // but it must still be impossible to read demo statistics as live ones.
     render(<TimeSalesWidget {...statsViewProps} />);
 
-    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toBeInTheDocument();
     // Sample statistics are the sample tape's own: 20 prints, 10 buys, 9 sells.
     expect(screen.getByText("50% up / 45% down")).toBeInTheDocument();

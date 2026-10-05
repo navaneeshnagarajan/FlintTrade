@@ -42,9 +42,7 @@ def obv(
     validate_series(close, min_length=1)
     validate_series(volume, min_length=1)
     if len(close) != len(volume):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
 
     n = len(close)
     result = np.zeros(n, dtype=np.float64)
@@ -88,9 +86,7 @@ def ad(
     validate_ohlcv(high, low, close, min_length=1)
     validate_series(volume, min_length=1)
     if len(volume) != len(close):
-        raise ValueError(
-            f"Array length mismatch: volume={len(volume)}, close={len(close)}"
-        )
+        raise ValueError(f"Array length mismatch: volume={len(volume)}, close={len(close)}")
 
     n = len(close)
     result = np.zeros(n, dtype=np.float64)
@@ -132,9 +128,7 @@ def cmf(
     validate_ohlcv(high, low, close, min_length=period)
     validate_series(volume, min_length=period)
     if len(volume) != len(close):
-        raise ValueError(
-            f"Array length mismatch: volume={len(volume)}, close={len(close)}"
-        )
+        raise ValueError(f"Array length mismatch: volume={len(volume)}, close={len(close)}")
 
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
@@ -187,9 +181,7 @@ def mfi(
     validate_ohlcv(high, low, close, min_length=period + 1)
     validate_series(volume, min_length=period + 1)
     if len(volume) != len(close):
-        raise ValueError(
-            f"Array length mismatch: volume={len(volume)}, close={len(close)}"
-        )
+        raise ValueError(f"Array length mismatch: volume={len(volume)}, close={len(close)}")
 
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
@@ -238,9 +230,7 @@ def vwma(
     validate_series(close, min_length=period)
     validate_series(volume, min_length=period)
     if len(close) != len(volume):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
 
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
@@ -286,9 +276,7 @@ def efi(
     validate_series(close, min_length=2)
     validate_series(volume, min_length=2)
     if len(close) != len(volume):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
     if period < 1:
         raise ValueError(f"efi period must be >= 1, got {period}")
 
@@ -338,9 +326,7 @@ def pvt(
     validate_series(close, min_length=1)
     validate_series(volume, min_length=1)
     if len(close) != len(volume):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
 
     n = len(close)
     result = np.zeros(n, dtype=np.float64)
@@ -387,9 +373,7 @@ def cumulative_delta(
     validate_series(close, min_length=1)
     validate_series(volume, min_length=1)
     if len(close) != len(volume):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
 
     n = len(close)
     result = np.zeros(n, dtype=np.float64)
@@ -435,9 +419,7 @@ def volume_profile(
     validate_series(close, min_length=2)
     validate_series(volume, min_length=2)
     if len(close) != len(volume):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
     if num_bins < 2:
         raise ValueError(f"volume_profile num_bins must be >= 2, got {num_bins}")
 

@@ -5,7 +5,7 @@ modules as top-level (``from registry import BrokerRegistry``) but the
 ``src`` directory is a proper Python package (``src/__init__.py`` +
 relative imports in every module). When pytest is invoked from the repo
 root, bare-name imports fail because the src modules' relative imports
-(``from .session import BrokerSession``) have no parent package.
+(package-relative imports) have no parent package.
 
 This conftest imports every gateway submodule through its package path
 first, then aliases the loaded modules back to bare names so the legacy
@@ -29,7 +29,7 @@ os.environ.setdefault("NEO_LOG_FILE_ENABLED", "false")
 
 
 @pytest.fixture
-def backend_lease_factory(monkeypatch):
+def backend_lease_factory(monkeypatch, tmp_path):
     """Explicit real ownership acquired after the test selects its workspace."""
     from flinttrade_core.backend_instance import acquire_backend_instance_lease
     from flinttrade_core.workspace import workspace_dir
@@ -37,6 +37,8 @@ def backend_lease_factory(monkeypatch):
     leases = {}
 
     def acquire():
+        if "FLINTTRADE_WORKSPACE_DIR" not in os.environ:
+            monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "isolated-backend"))
         path = workspace_dir().resolve()
         if path not in leases:
             leases[path] = acquire_backend_instance_lease()
@@ -61,7 +63,6 @@ _GATEWAY_MODULES = (
     "models",
     "exceptions",
     "adapter",
-    "session",
     "registry",
     "auth",
     "credentials",

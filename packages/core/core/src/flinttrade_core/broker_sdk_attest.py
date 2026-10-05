@@ -113,10 +113,14 @@ def _kotak_provenance_matches(dist: metadata.Distribution, source_commit: str) -
     try:
         url = urlsplit(data["url"])
         origin_ok = (
-            url.scheme == "https" and url.hostname == "github.com"
-            and url.username is None and url.password is None and url.port is None
+            url.scheme == "https"
+            and url.hostname == "github.com"
+            and url.username is None
+            and url.password is None
+            and url.port is None
             and url.path == "/Kotak-Neo/kotak-neo-python.git"
-            and not url.query and not url.fragment
+            and not url.query
+            and not url.fragment
         )
     except (KeyError, TypeError, ValueError, AttributeError):
         return False
@@ -131,7 +135,8 @@ def _attest_kotak(pin: dict[str, Any]) -> tuple[str | None, str]:
     kotak = [dist for dist in distributions if _distribution_name(dist) == "kotakneoapi"]
     old = [dist for dist in distributions if _distribution_name(dist) == "neo-api-client"]
     other_owners = [
-        dist for dist in distributions
+        dist
+        for dist in distributions
         if _distribution_name(dist) not in {"kotakneoapi", "neo-api-client"} and _owns_neo_namespace(dist)
     ]
     if old or other_owners or len(kotak) > 1:
@@ -190,8 +195,7 @@ def attest_all(
 def required_failures(results: list[AttestationResult]) -> list[AttestationResult]:
     """Results that would block a live broker (missing / version mismatch)."""
     return [
-        r for r in results
-        if r.status in (STATUS_MISMATCH, STATUS_MISSING, STATUS_PROVENANCE_MISMATCH, STATUS_CONFLICT)
+        r for r in results if r.status in (STATUS_MISMATCH, STATUS_MISSING, STATUS_PROVENANCE_MISMATCH, STATUS_CONFLICT)
     ]
 
 
@@ -262,13 +266,16 @@ def log_report(results: list[AttestationResult]) -> None:
         elif r.status == STATUS_MISSING:
             logger.warning(
                 "Broker SDK attest: %s SDK NOT INSTALLED (pinned %s) — cannot go live",
-                r.broker, r.pinned_version,
+                r.broker,
+                r.pinned_version,
             )
         else:  # mismatch
             logger.warning(
                 "Broker SDK attest: %s version MISMATCH (pinned %s, installed %s) — "
                 "orders for this broker must be halted",
-                r.broker, r.pinned_version, r.installed_version,
+                r.broker,
+                r.pinned_version,
+                r.installed_version,
             )
 
 

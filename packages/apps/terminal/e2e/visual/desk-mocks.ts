@@ -64,12 +64,9 @@ export function registerExampleDeskReads(
   });
   registerExploreAdvisorStatusProbe(registry, { expectedCalls: { minimum: 1, maximum: 16 } });
   registerAuthStatus(registry, { ...AUTH_READY }, "Mode menu Live-arm status");
-  registerRead(registry, "gateway accounts", "/ft-api/v1/accounts", { accounts: [] });
+
   registerRead(registry, "native accounts", "/ft-api/api/v1/native/accounts", { accounts: [] });
-  registerRead(registry, "openalgo configuration", "/ft-api/v1/config/openalgo", {
-    status: "success",
-    data: { api_key_configured: false, host: "", port: "", ws_port: "" },
-  });
+
   registerRead(registry, "example breadth", "/ft-api/v1/breadth/current", {
     status: "success",
     is_sample_data: true,

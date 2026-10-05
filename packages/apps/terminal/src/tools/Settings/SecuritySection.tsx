@@ -705,7 +705,7 @@ export function SecuritySection() {
         <ShieldOff size={12} className="shrink-0 mt-0.5 text-warning" />
         <span>
           IP bans block requests at the FlintTrade backend layer only. They do not
-          affect OpenAlgo or your broker connection.
+          affect your broker connection.
         </span>
       </div>
     </div>

@@ -300,8 +300,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             _report_provision_failure(ws, exc, verbose=verbose)
             if _existing_secret_is_usable(ws):
                 print(
-                    "  The existing master password is present and hardened, so the "
-                    "credential vault remains usable.",
+                    "  The existing master password is present and hardened, so the credential vault remains usable.",
                     file=sys.stderr,
                 )
                 raise SystemExit(EXIT_PROVISION_DEGRADED) from None

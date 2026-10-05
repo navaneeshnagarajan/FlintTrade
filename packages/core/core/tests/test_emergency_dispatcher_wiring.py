@@ -34,11 +34,11 @@ class _ClientLoopOwner:
 
 
 class _Router:
-    default_selector = "openalgo:primary"
+    default_selector = "dhan:primary"
 
     def __init__(
         self,
-        selectors: tuple[str, ...] = ("openalgo:primary",),
+        selectors: tuple[str, ...] = ("dhan:primary",),
         authorised: tuple[str, ...] | None = None,
         *,
         backend_lease_proof: BackendLeaseProof,
@@ -68,11 +68,7 @@ class _Router:
         policy: EmergencyWritePolicy,
         **_kwargs: Any,
     ) -> EmergencyReductionPlan:
-        completed = {
-            str(call["verb"])
-            for call in self.calls
-            if call["request_ctx"].selector == request_ctx.selector
-        }
+        completed = {str(call["verb"]) for call in self.calls if call["request_ctx"].selector == request_ctx.selector}
         pending = tuple(verb for verb in policy.verbs if verb not in completed)
         return EmergencyReductionPlan(
             writes=tuple(
@@ -100,7 +96,8 @@ class _Safety:
 
 
 def test_runtime_dispatcher_binds_operator_principal_and_confirms_retry_by_readback(
-    monkeypatch, backend_lease_proof,
+    monkeypatch,
+    backend_lease_proof,
 ) -> None:
     from flinttrade_engine import safety as safety_module
 
@@ -136,8 +133,8 @@ def test_runtime_dispatcher_binds_operator_principal_and_confirms_retry_by_readb
         "exit_all_positions",
     ]
     assert all(call[2].actor_id == "operator" for call in minted)
-    assert all(call[2].selector == "openalgo:primary" for call in minted)
-    assert all(call[3:] == ("openalgo", "primary") for call in minted)
+    assert all(call[2].selector == "dhan:primary" for call in minted)
+    assert all(call[3:] == ("dhan", "primary") for call in minted)
     assert minted[0][2].jti == minted[1][2].jti
     assert client.calls > len(router.calls)
     assert len(router.calls) == 2
@@ -187,8 +184,8 @@ def test_runtime_dispatcher_fails_closed_without_operator_profile(backend_lease_
 def test_runtime_dispatcher_targets_every_registered_account_before_per_write_acl(backend_lease_proof) -> None:
     app = Flask("emergency-parent-multi-account")
     router = _Router(
-        ("openalgo:primary", "dhan:family"),
-        authorised=("openalgo:primary",),
+        ("dhan:primary", "dhan:family"),
+        authorised=("dhan:primary",),
         backend_lease_proof=backend_lease_proof,
     )
     app.config.update(
@@ -205,7 +202,7 @@ def test_runtime_dispatcher_targets_every_registered_account_before_per_write_ac
     with dispatcher.authority() as targets:
         selectors = [target.request_ctx.selector for target in targets]
 
-    assert selectors == ["openalgo:primary", "dhan:family"]
+    assert selectors == ["dhan:primary", "dhan:family"]
     assert router.authorised_actor_ids == []
 
 
@@ -227,7 +224,8 @@ def test_runtime_dispatcher_persists_unauthorised_registered_target_under_l5(bac
     journal = InMemoryEmergencyIntentJournal()
     app = Flask("emergency-parent-global-l5")
     router = ACLRouter(
-        ("openalgo:primary", "dhan:family"), authorised=("openalgo:primary",),
+        ("dhan:primary", "dhan:family"),
+        authorised=("dhan:primary",),
         backend_lease_proof=backend_lease_proof,
     )
     app.config.update(
@@ -247,16 +245,14 @@ def test_runtime_dispatcher_persists_unauthorised_registered_target_under_l5(bac
 
     assert result.complete is False
     assert episode is not None
-    assert episode.affected_selectors == ("dhan:family", "openalgo:primary")
+    assert episode.affected_selectors == ("dhan:family", "dhan:primary")
     assert all(call["request_ctx"].selector != "dhan:family" for call in router.calls)
 
 
 def test_telegram_polling_starts_only_after_emergency_dispatcher_binding() -> None:
     source = inspect.getsource(FlintTradeApp._start_owned)
 
-    assert source.index("_bind_runtime_emergency_dispatcher(") < source.index(
-        "self.telegram.start_background()"
-    )
+    assert source.index("_bind_runtime_emergency_dispatcher(") < source.index("self.telegram.start_background()")
 
 
 def test_telegram_kill_preflight_failure_does_not_latch_l5_or_dispatch(backend_lease_proof) -> None:
@@ -300,7 +296,9 @@ def test_telegram_released_preflight_cannot_authorise_l5_activation() -> None:
     assert "authority is unavailable" in result.response
 
 
-def test_telegram_kill_holds_one_generation_and_acl_authority_through_dispatch(monkeypatch, backend_lease_proof) -> None:
+def test_telegram_kill_holds_one_generation_and_acl_authority_through_dispatch(
+    monkeypatch, backend_lease_proof
+) -> None:
     """A rebuild cannot invalidate Telegram's target between preflight and L5."""
     from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
     from flinttrade_engine import safety as safety_module
@@ -363,7 +361,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
     backend_lease_proof,
 ) -> None:
     import flinttrade_core.app as app_module
-    from flinttrade_core.workspace_migrations import default_workspace_config
+    from flinttrade_core.workspace_migrations import default_workspace_config, write_workspace_config
     from flinttrade_engine import safety as safety_module
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
@@ -422,14 +420,19 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
         _ClientLoopOwner(),
     )
     app.config["EMERGENCY_RUNTIME_READY"] = True
+    native_config = default_workspace_config()
+    native_config["brokers"]["registered"] = ["upstox:replacement"]
+    native_config["brokers"]["execution"]["default"] = "upstox:replacement"
+    target_workspace = tmp_path / "native-rebuild-workspace"
+    write_workspace_config(target_workspace, native_config, expected_version=None)
+    monkeypatch.setattr(app_module, "_workspace_dir", lambda: target_workspace)
     monkeypatch.setattr(
-        app_module,
-        "_read_workspace_brokers",
-        lambda: default_workspace_config()["brokers"],
+        app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False)
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
     monkeypatch.setattr(app_module, "_build_reconcile_targets_provider", lambda *_args: None)
-    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", lambda *_args, **_kwargs: candidate_router)
+    monkeypatch.setattr(
+        app_module, "_build_broker_router_from_dependencies", lambda *_args, **_kwargs: candidate_router
+    )
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
     activation: dict[str, Any] = {}

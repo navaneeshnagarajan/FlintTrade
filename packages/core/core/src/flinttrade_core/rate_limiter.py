@@ -185,16 +185,12 @@ class RateLimiter:
 
             conn.execute(_OVERRIDES_CREATE_SQL)
 
-            rows = conn.execute(
-                "SELECT user_id, endpoint, user_rate FROM rate_limit_overrides"
-            ).fetchall()
+            rows = conn.execute("SELECT user_id, endpoint, user_rate FROM rate_limit_overrides").fetchall()
             for row in rows:
                 self._user_overrides[(row[0], row[1])] = row[2]
 
             self._overrides_conn = conn
-            logger.debug(
-                "Loaded %d rate-limit overrides from %s", len(rows), db_path
-            )
+            logger.debug("Loaded %d rate-limit overrides from %s", len(rows), db_path)
         except Exception as exc:
             logger.warning(
                 "Cannot initialise overrides DB (%s): %s — overrides will be in-memory only",
@@ -206,9 +202,7 @@ class RateLimiter:
     # Public API
     # ------------------------------------------------------------------
 
-    def set_user_override(
-        self, user_id: str, endpoint: str, user_rate: int
-    ) -> None:
+    def set_user_override(self, user_id: str, endpoint: str, user_rate: int) -> None:
         """Override the per-user rate for a specific user and endpoint.
 
         Useful for granting trusted users a higher limit than the default.
@@ -273,8 +267,7 @@ class RateLimiter:
                 if self._overrides_conn is not None:
                     try:
                         self._overrides_conn.execute(
-                            "DELETE FROM rate_limit_overrides "
-                            "WHERE user_id = ? AND endpoint = ?",
+                            "DELETE FROM rate_limit_overrides WHERE user_id = ? AND endpoint = ?",
                             [user_id, endpoint],
                         )
                     except Exception as exc:
@@ -389,14 +382,10 @@ class RateLimiter:
             global_rate: Global requests per second across all users.
         """
         with self._lock:
-            self._endpoint_configs[endpoint] = _EndpointConfig(
-                user_rate=user_rate, global_rate=global_rate
-            )
+            self._endpoint_configs[endpoint] = _EndpointConfig(user_rate=user_rate, global_rate=global_rate)
             # Invalidate existing buckets for this endpoint so they
             # are recreated with the new capacity on next check.
-            self._user_buckets = {
-                k: v for k, v in self._user_buckets.items() if k[1] != endpoint
-            }
+            self._user_buckets = {k: v for k, v in self._user_buckets.items() if k[1] != endpoint}
             if endpoint in self._global_buckets:
                 del self._global_buckets[endpoint]
         logger.debug(
@@ -445,18 +434,14 @@ class RateLimiter:
         capacity = float(rate * self._window_seconds)
         bucket = self._user_buckets.get(key)
         if bucket is None or bucket.capacity != capacity or bucket.rate != float(rate):
-            self._user_buckets[key] = _Bucket(
-                capacity=capacity, rate=float(rate), tokens=capacity
-            )
+            self._user_buckets[key] = _Bucket(capacity=capacity, rate=float(rate), tokens=capacity)
         return self._user_buckets[key]
 
     def _get_global_bucket(self, endpoint: str, rate: int) -> _Bucket:
         """Return or create the global bucket.  Caller must hold ``_lock``."""
         if endpoint not in self._global_buckets:
             capacity = float(rate * self._window_seconds)
-            self._global_buckets[endpoint] = _Bucket(
-                capacity=capacity, rate=float(rate), tokens=capacity
-            )
+            self._global_buckets[endpoint] = _Bucket(capacity=capacity, rate=float(rate), tokens=capacity)
         return self._global_buckets[endpoint]
 
 
@@ -467,12 +452,7 @@ class RateLimiter:
 
 def _header_rate_limit_user_id(user_id_header: str) -> str:
     """Return the unauthenticated / header-keyed bucket identity."""
-    return (
-        request.headers.get(user_id_header)
-        or request.headers.get("X-API-Key")
-        or request.remote_addr
-        or "anonymous"
-    )
+    return request.headers.get(user_id_header) or request.headers.get("X-API-Key") or request.remote_addr or "anonymous"
 
 
 def _verified_jwt_subject() -> str | None:

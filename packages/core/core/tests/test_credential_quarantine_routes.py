@@ -17,7 +17,7 @@ def recovery_app(monkeypatch, backend_lease_proof):
     from flinttrade_core.app import create_flask_app
 
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.setenv("ENABLE_ANALYZER", "true")
     app = create_flask_app(backend_lease_proof=backend_lease_proof)
     assert app.config["CREDENTIAL_STORE"] is not None
@@ -91,7 +91,7 @@ def test_recovery_family_denials_precede_body_storage_and_provider(recovery_app,
     app.config = CheckedConfig(app.root_path, defaults=app.config)
     for name in ("get_data", "get_json", "_load_form_data"):
         monkeypatch.setattr(Request, name, forbidden)
-    monkeypatch.setattr("flinttrade_gateway.adapter.load_broker_adapter", forbidden)
+    monkeypatch.setattr("flinttrade_gateway.brokers.native_factory.build_native_adapters", forbidden)
     cases = [
         ("POST", "/quarantine/PRIVATE-path/adopt", 503),
         ("DELETE", "/quarantine", 503),

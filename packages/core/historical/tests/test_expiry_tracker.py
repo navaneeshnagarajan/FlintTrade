@@ -1,6 +1,6 @@
 """Tests for ExpiryTracker — option chain snapshot capture and retrieval.
 
-Uses in-memory DuckDB. OpenAlgo client is mocked.
+Uses in-memory DuckDB. native broker client is mocked.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ class AsyncOptionChainClient:
 class TestCaptureSnapshot:
     def _tracker(self, client=None):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         return ExpiryTracker(client=client, db_path=":memory:")
 
     def test_capture_stores_rows_in_duckdb(self):
@@ -53,13 +54,25 @@ class TestCaptureSnapshot:
         client.optionchain.return_value = [
             {
                 "strike_price": 24000,
-                "call_oi": 100000, "call_volume": 5000, "call_ltp": 150.5, "call_iv": 12.5,
-                "put_oi": 80000, "put_volume": 4000, "put_ltp": 120.0, "put_iv": 13.0,
+                "call_oi": 100000,
+                "call_volume": 5000,
+                "call_ltp": 150.5,
+                "call_iv": 12.5,
+                "put_oi": 80000,
+                "put_volume": 4000,
+                "put_ltp": 120.0,
+                "put_iv": 13.0,
             },
             {
                 "strike_price": 24100,
-                "call_oi": 90000, "call_volume": 4500, "call_ltp": 100.0, "call_iv": 11.0,
-                "put_oi": 70000, "put_volume": 3500, "put_ltp": 160.0, "put_iv": 14.0,
+                "call_oi": 90000,
+                "call_volume": 4500,
+                "call_ltp": 100.0,
+                "call_iv": 11.0,
+                "put_oi": 70000,
+                "put_volume": 3500,
+                "put_ltp": 160.0,
+                "put_iv": 14.0,
             },
         ]
         tracker = self._tracker(client)
@@ -72,8 +85,14 @@ class TestCaptureSnapshot:
         client.optionchain.return_value = [
             {
                 "strike_price": 24000,
-                "call_oi": 100000, "call_volume": 5000, "call_ltp": 150.5, "call_iv": 12.5,
-                "put_oi": 80000, "put_volume": 4000, "put_ltp": 120.0, "put_iv": 13.0,
+                "call_oi": 100000,
+                "call_volume": 5000,
+                "call_ltp": 150.5,
+                "call_iv": 12.5,
+                "put_oi": 80000,
+                "put_volume": 4000,
+                "put_ltp": 120.0,
+                "put_iv": 13.0,
             },
         ]
         tracker = self._tracker(client)
@@ -133,7 +152,7 @@ class TestCaptureSnapshot:
         tracker = self._tracker(client=None)
         count = tracker.capture_snapshot("NIFTY", "260326")
         assert count == 0
-        assert tracker.last_capture_error == "No OpenAlgo client configured"
+        assert tracker.last_capture_error == "No native broker client configured"
 
     def test_capture_with_empty_response_returns_zero(self):
         client = MagicMock(spec=["optionchain"])
@@ -151,34 +170,38 @@ class TestCaptureSnapshot:
         assert tracker.last_capture_error == "API timeout"
 
     def test_capture_uses_modern_option_chain_client(self):
-        client = ModernOptionChainClient([
-            {
-                "strike_price": 24000,
-                "call_oi": 100,
-                "call_volume": 50,
-                "call_ltp": 150,
-                "call_iv": 12,
-                "put_oi": 80,
-                "put_volume": 40,
-                "put_ltp": 120,
-                "put_iv": 13,
-            },
-        ])
+        client = ModernOptionChainClient(
+            [
+                {
+                    "strike_price": 24000,
+                    "call_oi": 100,
+                    "call_volume": 50,
+                    "call_ltp": 150,
+                    "call_iv": 12,
+                    "put_oi": 80,
+                    "put_volume": 40,
+                    "put_ltp": 120,
+                    "put_iv": 13,
+                },
+            ]
+        )
         tracker = self._tracker(client)
         count = tracker.capture_snapshot("NIFTY", "260326")
         assert count == 2
         assert client.calls == [("NIFTY", "NFO")]
 
     def test_capture_uses_gateway_payload_with_expiry(self):
-        client = GatewayOptionChainClient({
-            "chain": [
-                {
-                    "strike": 24000,
-                    "ce": {"oi": 100, "volume": 50, "ltp": 150, "iv": 0.12},
-                    "pe": {"oi": 80, "volume": 40, "ltp": 120, "iv": 0.13},
-                },
-            ],
-        })
+        client = GatewayOptionChainClient(
+            {
+                "chain": [
+                    {
+                        "strike": 24000,
+                        "ce": {"oi": 100, "volume": 50, "ltp": 150, "iv": 0.12},
+                        "pe": {"oi": 80, "volume": 40, "ltp": 120, "iv": 0.13},
+                    },
+                ],
+            }
+        )
         tracker = self._tracker(client)
         count = tracker.capture_snapshot("NIFTY", "2026-03-26")
         assert count == 2
@@ -193,23 +216,25 @@ class TestCaptureSnapshot:
     def test_capture_resolves_async_typed_option_chain(self):
         from flinttrade_core.models import OptionChain, OptionChainStrike
 
-        client = AsyncOptionChainClient(OptionChain(
-            underlying="NIFTY",
-            exchange="NFO",
-            strikes=[
-                OptionChainStrike(
-                    strike_price=24000,
-                    ce_oi=100,
-                    ce_volume=50,
-                    ce_ltp=150,
-                    ce_iv=12,
-                    pe_oi=80,
-                    pe_volume=40,
-                    pe_ltp=120,
-                    pe_iv=13,
-                ),
-            ],
-        ))
+        client = AsyncOptionChainClient(
+            OptionChain(
+                underlying="NIFTY",
+                exchange="NFO",
+                strikes=[
+                    OptionChainStrike(
+                        strike_price=24000,
+                        ce_oi=100,
+                        ce_volume=50,
+                        ce_ltp=150,
+                        ce_iv=12,
+                        pe_oi=80,
+                        pe_volume=40,
+                        pe_ltp=120,
+                        pe_iv=13,
+                    ),
+                ],
+            )
+        )
         tracker = self._tracker(client)
         count = tracker.capture_snapshot("NIFTY", "260326")
         assert count == 2
@@ -223,14 +248,23 @@ class TestCaptureSnapshot:
 class TestListExpiries:
     def _tracker_with_data(self):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         client = MagicMock(spec=["optionchain"])
         tracker = ExpiryTracker(client=client, db_path=":memory:")
 
         # Insert data for two expiries
         client.optionchain.return_value = [
-            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-             "put_ltp": 120, "put_iv": 13},
+            {
+                "strike_price": 24000,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
         ]
         tracker.capture_snapshot("NIFTY", "260326")
         tracker.capture_snapshot("NIFTY", "260402")
@@ -285,6 +319,7 @@ class TestListExpiries:
 class TestGetHistoricalChainEmpty:
     def test_empty_when_no_data(self):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         tracker = ExpiryTracker(client=None, db_path=":memory:")
         chain = tracker.get_historical_chain("NIFTY", "260326")
         assert chain == []
@@ -298,11 +333,20 @@ class TestGetHistoricalChainEmpty:
 class TestParseOptionChain:
     def test_parse_nested_dict_response(self):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         data = {
             "data": [
-                {"strike": 24000, "ce_oi": 100, "ce_volume": 50,
-                 "ce_ltp": 150, "ce_iv": 12, "pe_oi": 80, "pe_volume": 40,
-                 "pe_ltp": 120, "pe_iv": 13},
+                {
+                    "strike": 24000,
+                    "ce_oi": 100,
+                    "ce_volume": 50,
+                    "ce_ltp": 150,
+                    "ce_iv": 12,
+                    "pe_oi": 80,
+                    "pe_volume": 40,
+                    "pe_ltp": 120,
+                    "pe_iv": 13,
+                },
             ],
         }
         rows = ExpiryTracker._parse_option_chain(data, "NIFTY", "NFO", "260326")
@@ -312,10 +356,19 @@ class TestParseOptionChain:
 
     def test_parse_skips_zero_strike(self):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         data = [
-            {"strike_price": 0, "call_oi": 100, "call_volume": 50,
-             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-             "put_ltp": 120, "put_iv": 13},
+            {
+                "strike_price": 0,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
         ]
         rows = ExpiryTracker._parse_option_chain(data, "NIFTY", "NFO", "260326")
         assert len(rows) == 0
@@ -331,6 +384,7 @@ class TestSnapshotRateLimiter:
 
     def test_rate_limiter_allows_burst(self):
         from flinttrade_historical.expiry_tracker import SnapshotRateLimiter
+
         limiter = SnapshotRateLimiter(max_per_second=10)
         # Should not raise for a small burst
         for _ in range(5):
@@ -340,6 +394,7 @@ class TestSnapshotRateLimiter:
     def test_rate_limiter_daily_limit_raises(self):
         import pytest
         from flinttrade_historical.expiry_tracker import SnapshotRateLimiter
+
         limiter = SnapshotRateLimiter(max_per_second=100, max_per_day=3)
         limiter.wait_if_needed()
         limiter.wait_if_needed()
@@ -353,6 +408,7 @@ class TestDownloadMetadata:
 
     def _tracker(self, client=None):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         return ExpiryTracker(client=client, db_path=":memory:")
 
     def test_has_snapshot_false_when_empty(self):
@@ -362,9 +418,17 @@ class TestDownloadMetadata:
     def test_has_snapshot_true_after_capture(self):
         client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
-            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-             "put_ltp": 120, "put_iv": 13},
+            {
+                "strike_price": 24000,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
         ]
         tracker = self._tracker(client)
         tracker.capture_snapshot("NIFTY", "260326")
@@ -373,9 +437,17 @@ class TestDownloadMetadata:
     def test_get_download_history(self):
         client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
-            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-             "put_ltp": 120, "put_iv": 13},
+            {
+                "strike_price": 24000,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
         ]
         tracker = self._tracker(client)
         tracker.capture_snapshot("NIFTY", "260326")
@@ -391,11 +463,20 @@ class TestBulkCapture:
     def test_capture_multiple_skips_existing(self):
         client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
-            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-             "put_ltp": 120, "put_iv": 13},
+            {
+                "strike_price": 24000,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
         ]
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         tracker = ExpiryTracker(client=client, db_path=":memory:")
 
         # Capture first expiry
@@ -409,11 +490,20 @@ class TestBulkCapture:
     def test_capture_multiple_no_skip(self):
         client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
-            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-             "put_ltp": 120, "put_iv": 13},
+            {
+                "strike_price": 24000,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
         ]
         from flinttrade_historical.expiry_tracker import ExpiryTracker
+
         tracker = ExpiryTracker(client=client, db_path=":memory:")
         results = tracker.capture_multiple("NIFTY", ["260326", "260402"], skip_existing=False)
         assert results["260326"] == 2
@@ -421,7 +511,7 @@ class TestBulkCapture:
 
 
 # ---------------------------------------------------------------------------
-# Client provider — OpenAlgo settings hot-reload safety
+# Client provider — native broker settings hot-reload safety
 # ---------------------------------------------------------------------------
 
 
@@ -434,9 +524,17 @@ class TestClientProvider:
     """
 
     _CHAIN = [
-        {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-         "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-         "put_ltp": 120, "put_iv": 13},
+        {
+            "strike_price": 24000,
+            "call_oi": 100,
+            "call_volume": 50,
+            "call_ltp": 150,
+            "call_iv": 12,
+            "put_oi": 80,
+            "put_volume": 40,
+            "put_ltp": 120,
+            "put_iv": 13,
+        },
     ]
 
     def test_capture_uses_current_provider_client_after_hot_reload(self):
@@ -468,7 +566,7 @@ class TestClientProvider:
 
         tracker = ExpiryTracker(client=broken_provider, db_path=":memory:")
         assert tracker.capture_snapshot("NIFTY", "260326") == 0
-        assert tracker.last_capture_error == "No OpenAlgo client configured"
+        assert tracker.last_capture_error == "No native broker client configured"
 
     def test_client_instance_still_accepted(self):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
@@ -523,10 +621,7 @@ def test_schema_migration_adds_snapshot_id_to_legacy_table(tmp_path):
     tracker = ExpiryTracker(db_path=str(db_path))
     try:
         columns = {
-            row[1]
-            for row in tracker.connection.execute(
-                "PRAGMA table_info('expired_option_chains')"
-            ).fetchall()
+            row[1] for row in tracker.connection.execute("PRAGMA table_info('expired_option_chains')").fetchall()
         }
         migration = tracker.connection.execute(
             "SELECT name FROM _migrations WHERE name = ?",
@@ -549,9 +644,17 @@ def test_schema_migration_adds_snapshot_id_to_legacy_table(tmp_path):
             (snapshots[0][0], 1, 2),
             (snapshots[1][0], 1, 2),
         ]
-        assert len({row[0] for row in tracker.connection.execute(
-            "SELECT DISTINCT snapshot_id FROM expired_option_chains"
-        ).fetchall()}) == 2
+        assert (
+            len(
+                {
+                    row[0]
+                    for row in tracker.connection.execute(
+                        "SELECT DISTINCT snapshot_id FROM expired_option_chains"
+                    ).fetchall()
+                }
+            )
+            == 2
+        )
         assert [row["strike"] for row in tracker.get_historical_chain("NIFTY", "2026-03-26")] == [24100, 24100]
     finally:
         tracker.close()
@@ -563,9 +666,17 @@ class TestDefaultDbPathMigration:
     (copy — never move; existing workspace files are never clobbered)."""
 
     _CHAIN = [
-        {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
-         "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
-         "put_ltp": 120, "put_iv": 13},
+        {
+            "strike_price": 24000,
+            "call_oi": 100,
+            "call_volume": 50,
+            "call_ltp": 150,
+            "call_iv": 12,
+            "put_oi": 80,
+            "put_volume": 40,
+            "put_ltp": 120,
+            "put_iv": 13,
+        },
     ]
 
     def _seed(self, db_path, expiry):
@@ -584,9 +695,7 @@ class TestDefaultDbPathMigration:
         legacy_home = tmp_path / "legacy-home" / ".flinttrade" / "data"
         workspace = tmp_path / "workspace"
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
-        monkeypatch.setattr(
-            et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb"
-        )
+        monkeypatch.setattr(et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb")
 
         legacy_home.mkdir(parents=True)
         self._seed(legacy_home / "expiry_tracker.duckdb", "260326")
@@ -608,9 +717,7 @@ class TestDefaultDbPathMigration:
         legacy_home = tmp_path / "legacy-home" / ".flinttrade" / "data"
         workspace = tmp_path / "workspace"
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
-        monkeypatch.setattr(
-            et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb"
-        )
+        monkeypatch.setattr(et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb")
 
         legacy_home.mkdir(parents=True)
         self._seed(legacy_home / "expiry_tracker.duckdb", "260326")
@@ -632,9 +739,7 @@ class TestDefaultDbPathMigration:
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
         (workspace / "data").mkdir(parents=True)
         self._seed(workspace / "data" / "expiry_tracker.duckdb", "260326")
-        monkeypatch.setattr(
-            et, "_legacy_db_path", lambda: workspace / "data" / "expiry_tracker.duckdb"
-        )
+        monkeypatch.setattr(et, "_legacy_db_path", lambda: workspace / "data" / "expiry_tracker.duckdb")
 
         tracker = et.ExpiryTracker()
         try:
@@ -657,9 +762,7 @@ class TestDefaultDbPathMigration:
         legacy_home = tmp_path / "legacy-home" / ".flinttrade" / "data"
         workspace = tmp_path / "workspace"
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
-        monkeypatch.setattr(
-            et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb"
-        )
+        monkeypatch.setattr(et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb")
 
         legacy_home.mkdir(parents=True)
         self._seed(legacy_home / "expiry_tracker.duckdb", "260326")

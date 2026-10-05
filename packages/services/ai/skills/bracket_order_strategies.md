@@ -32,7 +32,7 @@ BO margin ≈ SL value × example quantity × margin multiplier
          ≈ 50 × 65 × 1.1 = ~₹3,575 per lot (approx)
 ```
 
-Actual values vary by broker; always verify via `/api/v1/margin` before deploying. The margin benefit is only active while both BO legs are live.
+Actual values vary by broker; always verify via the connected native adapter margin reader before deploying. The margin benefit is only active while both BO legs are live.
 
 ## Trailing SL in Bracket Orders
 
@@ -60,25 +60,11 @@ Example: Buy Nifty at 22,000. Initial SL = 21,980 (20 points). Trail step = 10 p
 - Position might be partially closed before SL
 - News-driven trades where the target is dynamic
 
-## BO Placement via OpenAlgo
+## BO Placement via broker
 
-```python
-# Example: Buy Nifty with quantity 65, 20-pt SL, 40-pt target, 10-pt trail
-placeorder(
-    symbol="NIFTY",
-    exchange="NFO",
-    action="BUY",
-    product="MIS",
-    quantity=65,
-    price_type="LIMIT",
-    price=22000,
-    stoploss=20,
-    squareoff=40,
-    trailing_stoploss=10
-)
-```
+Orders must be emitted through FlintTrade's strategy runtime and admitted by the safety gate before BrokerRouter dispatch. Select an explicit native broker account; unsupported order varieties must be refused.
 
-Note: `stoploss`, `squareoff`, and `trailing_stoploss` are in points/ticks, not prices. Confirm parameter names with your broker's OpenAlgo adapter — not all brokers support trailing SL.
+Note: `stoploss`, `squareoff`, and `trailing_stoploss` are in points/ticks, not prices. Confirm parameter names with your broker's broker adapter — not all brokers support trailing SL.
 
 ## Common Mistakes
 

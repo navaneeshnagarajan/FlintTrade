@@ -3,7 +3,7 @@
 Covers the built-in fallback table, cache behaviour, live-fetch path
 (mocked), and the synchronous helper function.
 
-No network calls are made — the OpenAlgoClient is mocked throughout.
+No network calls are made — the BrokerClient is mocked throughout.
 Run with: python -m pytest packages/services/screener/tests/test_lot_sizes.py -v --import-mode=importlib
 """
 
@@ -143,7 +143,7 @@ class TestLotSizeResolverCache:
         client.instruments.return_value = {"status": "success", "data": rows}
         return LotSizeResolver(client, cache_ttl=3600)
 
-    def test_first_call_fetches_from_openalgo(self):
+    def test_first_call_fetches_from_broker(self):
         instruments = [{"symbol": "NIFTY", "exchange": "NFO", "lot_size": 75}]
         resolver = self._make_resolver(instruments)
         lot = resolver.get_lot_size("NIFTY", "NFO")
@@ -168,7 +168,7 @@ class TestLotSizeResolverCache:
         assert resolver.cache_size >= 1
 
     def test_stale_cache_refetches(self):
-        """After TTL expiry, the resolver must re-fetch from OpenAlgo."""
+        """After TTL expiry, the resolver must re-fetch from broker."""
         instruments = [{"symbol": "NIFTY", "exchange": "NFO", "lot_size": 75}]
         resolver = self._make_resolver(instruments)
         resolver._cache_ttl = 0  # expire immediately
@@ -354,7 +354,7 @@ class TestLotSizeResolverResolve:
         assert resolution == LotResolution(FALLBACK_LOT_SIZES["NIFTY"], "fallback")
 
     def test_async_client_with_envelope_is_supported(self):
-        """The REAL OpenAlgoClient.instruments is async and returns an
+        """The REAL BrokerClient.instruments is async and returns an
         envelope dict — the resolver must drive the coroutine and unwrap
         ``data`` (a sync list-returning fake was the only thing the old code
         handled, so the live path never worked against the real client)."""

@@ -3,13 +3,13 @@
 When a :class:`PositionMirror` is constructed with a ``broker_router`` injected,
 each mirrored order must be dispatched through ``gate_order`` ->
 ``BrokerRouter.place_order`` (account-bound HMAC + ACL + one-shot consume)
-rather than the transitional raw OpenAlgo ``httpx`` POST.
+rather than the transitional raw broker ``httpx`` POST.
 
 These tests assert:
 
 1. ``execute(master_order)`` calls ``router.place_order`` exactly once per
    enabled slave account.
-2. Each call supplies explicit ``adapter_id='openalgo'`` and the account's own
+2. Each call supplies explicit ``adapter_id='broker'`` and the account's own
    ``account_id`` so no routing default can redirect the write.
 3. The per-account allocated quantity is what reaches the router.
 4. NO ``httpx`` client is constructed when a router is present (the httpx
@@ -18,7 +18,7 @@ These tests assert:
 5. A ``SafetyBypassError`` raised by the router is captured as
    ``result.error`` (a per-account failure) without crashing the whole mirror.
 
-All tests are unit-level — no live OpenAlgo, no network, no real router.
+All tests are unit-level — no live broker, no network, no real router.
 """
 
 from __future__ import annotations
@@ -66,8 +66,8 @@ def _make_account(
     return BrokerAccount(
         account_id=account_id,
         name=name,
-        openalgo_host=host,
-        api_key=api_key,
+        adapter_id="dhan",
+
         allocation_weight=weight,
         enabled=enabled,
         is_master=is_master,
@@ -144,7 +144,7 @@ class _RefusingRouter(_FakeRouter):
 def _explode_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make any ``httpx.Client`` construction in mirror.py blow up.
 
-    Proves the gated path never falls back to the raw OpenAlgo POST while a
+    Proves the gated path never falls back to the raw broker POST while a
     router is present — if it did, this would surface as a loud RuntimeError
     rather than a silent network attempt.
     """
@@ -154,7 +154,7 @@ def _explode_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
             "httpx.Client must NOT be used when a broker_router is injected"
         )
 
-    monkeypatch.setattr("flinttrade_ditto.mirror.httpx.Client", _boom)
+    monkeypatch.setattr("httpx.Client", _boom)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ class TestGatedMirrorDispatch:
     def test_non_live_operator_mode_fails_closed(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """A Practice/Explore operator mode refuses the mirror — no router call.
 
-        The gated dispatch targets a live OpenAlgo account directly (never the
+        The gated dispatch targets a live broker account directly (never the
         Practice SandboxEngine), so a non-live mode must not reach the router.
         """
         router = _FakeRouter()
@@ -200,7 +200,7 @@ class TestGatedMirrorDispatch:
         assert result.failed == 2
         assert all("not 'live'" in (r.error or "") for r in result.results)
 
-    def test_explicit_target_is_openalgo_and_account_id(
+    def test_explicit_target_is_broker_and_account_id(
         self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """Every call carries an explicit adapter and account target."""
@@ -214,7 +214,7 @@ class TestGatedMirrorDispatch:
 
         adapters = {adapter for adapter, _acct, _qty in router.calls}
         accts = {acct for _adapter, acct, _qty in router.calls}
-        assert adapters == {"openalgo"}
+        assert adapters == {"dhan"}
         assert accts == {"acc_a", "acc_b"}
 
     def test_uses_injected_account_loop_runner(self, _explode_httpx: None, *, backend_lease_factory) -> None:
@@ -263,7 +263,7 @@ class TestGatedMirrorDispatch:
     def test_request_context_carries_selector_and_agent_actor(
         self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
-        """The minted RequestContext binds the openalgo:<acct> selector as agent."""
+        """The minted RequestContext binds the broker:<acct> selector as agent."""
         router = _FakeRouter()
         accounts = [_make_account("acc_a")]
         mirror = _make_gated_mirror(
@@ -279,7 +279,7 @@ class TestGatedMirrorDispatch:
         ctx = router.contexts[0]
         assert ctx.actor_type == "agent"
         assert ctx.actor_id == "ditto"
-        assert ctx.selector == "openalgo:acc_a"
+        assert ctx.selector == "dhan:acc_a"
 
     def test_authenticated_human_actor_is_preserved(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """A runtime-starting human remains the signed mirror principal."""
@@ -620,7 +620,7 @@ class TestUngatedFallbackGuard:
     def test_ungated_optin_no_longer_exists(self) -> None:
         """The transitional ``allow_ungated_fallback`` escape hatch was retired
         (contract §8.1) — constructing with it must fail, so no caller can ever
-        re-enable a raw, ungated OpenAlgo forward."""
+        re-enable a raw, ungated broker forward."""
         with pytest.raises(TypeError):
             PositionMirror(
                 [_make_account("acc_a")],

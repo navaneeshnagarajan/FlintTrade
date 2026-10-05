@@ -59,7 +59,6 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
   const mode = useModeStore((state) => state.mode);
   const isLive = mode === "live";
   const apiKey = useConnectionStore((state) => state.apiKey);
-  const openAlgoHydrated = useConnectionStore((state) => state.openAlgoHydrated);
   const accounts = useBrokerStore((state) => state.accounts);
   const activeAccountId = useBrokerStore((state) => state.activeAccountId);
   const activeAccount = useMemo(
@@ -67,23 +66,19 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
     [accounts, activeAccountId],
   );
   const safetyTarget = useMemo<SafetyAccountTarget | undefined>(() => {
-    if (!isLive || !openAlgoHydrated) return undefined;
-    if (apiKey.trim()) return { broker: "openalgo", account_id: "default" };
+    if (!isLive) return undefined;
     return pickNativeBrokerOrderTargetFromState(
       mode,
       apiKey,
       accounts,
       activeAccountId,
-      openAlgoHydrated,
     );
-  }, [accounts, activeAccountId, apiKey, isLive, mode, openAlgoHydrated]);
+  }, [accounts, activeAccountId, apiKey, isLive, mode]);
   const backendSelectorKey = safetyTarget
     ? `${safetyTarget.broker}:${safetyTarget.account_id}`
     : "unbound";
   const displayedSelectorKey = safetyTarget
-    ? apiKey.trim()
-      ? "gateway:openalgo:default"
-      : activeAccount
+    ? activeAccount
         ? brokerAccountKey(activeAccount)
         : `native:${safetyTarget.broker}:${safetyTarget.account_id}`
     : "unbound";

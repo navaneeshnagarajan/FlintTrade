@@ -28,7 +28,7 @@ export function AboutSection() {
         <p className="text-xs text-text-secondary leading-relaxed">
           Native-first trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
           FlintTrade has its own backend, native gateway contract, {widgetCatalog.length} widgets, and an optional
-          OpenAlgo-compatible bridge, and ships as a native desktop app for macOS, Windows, and Linux.
+          ships as a native desktop app for macOS, Windows, and Linux.
           Monorepo with 18 package surfaces across Python, React, Electron, shared UI, and Rust.
         </p>
       </div>
@@ -56,16 +56,7 @@ export function AboutSection() {
             <span>Technology stack — versions and dependency purposes</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>
-          <a
-            href="https://github.com/navaneeshnagarajan/openalgo"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <ExternalLink size={12} className="flex-none text-text-muted" />
-            <span>OpenAlgo — optional broker bridge</span>
-            <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
-          </a>
+
           <a
             href="https://www.gnu.org/licenses/agpl-3.0.html"
             target="_blank"

@@ -25,19 +25,12 @@ from flinttrade_core.broker_account_cutover import MutationAdmission, require_br
 from flinttrade_core.broker_identity import INT64_MAX, BrokerSelector, CredentialVersion, _validate_selector
 from flinttrade_core.workspace_migrations import (
     BrokerWorkspaceVersion,
-    WorkspaceSnapshot,
     WorkspaceVersion,
-    broker_workspace_version,
-    legacy_openalgo_broker_projection,
 )
 
 from .adapter import BROKER_CATALOG
 from .brokers._base import Session
-from .exceptions import BrokerNotFoundError
 from .models import AccountStatus, BrokerAccountInfo, BrokerInfo
-from .session import BrokerSession
-
-_DEFAULT = BrokerSelector("openalgo", "default")
 
 
 @dataclass(frozen=True)
@@ -84,28 +77,12 @@ class RegistryRetirementReceipt(_OpaqueReceipt):
     """Identity-sealed single-use claim on quarantined payload."""
 
 
-class OpenAlgoDefaultCompatibilityAuthorityReceipt(_OpaqueReceipt):
-    """Caller-lifetime seal; private OpenAlgo authority never renders."""
 
 
-@dataclass(frozen=True)
-class OpenAlgoDefaultCompatibilitySessionVersion:
-    selector: BrokerSelector
-    registry_version: RegistrySelectorVersion
-    workspace_version: WorkspaceVersion
-    broker_workspace_version: BrokerWorkspaceVersion
-
-    def __post_init__(self) -> None:
-        if self.selector != _DEFAULT or type(self.registry_version) is not RegistrySelectorVersion:
-            raise RegistryVersionValidationError
-        self.registry_version.__post_init__()
-        if self.registry_version.selector != _DEFAULT or not self.registry_version.present:
-            raise RegistryVersionValidationError
-        validate_workspace_versions(self.workspace_version, self.broker_workspace_version)
 
 
-Binding = SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion
-SessionPublicationAuthority = ManagedSessionAuthority | OpenAlgoDefaultCompatibilityAuthorityReceipt
+Binding = SessionVersion
+SessionPublicationAuthority = ManagedSessionAuthority
 
 
 @dataclass(frozen=True)
@@ -136,7 +113,7 @@ class RegistryRemoveResult:
 @dataclass(frozen=True, repr=False)
 class RetiredRegistryCandidate:
     selector: BrokerSelector
-    session: Session | BrokerSession
+    session: Session
     client: object | None
     managed: bool = False
 
@@ -150,20 +127,15 @@ class RetiredRegistryCandidate:
 @dataclass(repr=False)
 class _Record:
     selector: BrokerSelector
-    session: Session | BrokerSession
+    session: Session
     client: object | None
     expected: RegistrySelectorVersion
-    authority: ManagedSessionAuthority | _CompatibilityAuthority
+    authority: ManagedSessionAuthority
     broker: str | None
     label: str
     binding: Binding | None = None
 
 
-@dataclass(frozen=True, repr=False)
-class _CompatibilityAuthority:
-    workspace_version: WorkspaceVersion
-    broker_workspace_version: BrokerWorkspaceVersion
-    projection: Any
 
 
 class ConnectedRegistrySession(_OpaqueReceipt):
@@ -250,7 +222,7 @@ class BrokerRegistry:
         self._clients: dict[int, tuple[object, BrokerSelector, object]] = {}
         self._default_selector: BrokerSelector | None = None
         self._default_workspace: WorkspaceVersion | None = None
-        self._sessions: dict[str, BrokerSession] = {}
+        self._sessions: dict[str, Session] = {}
         self._adapter_sessions: dict[tuple[str, str], Session] = {}
         self._primary: str | None = None
 
@@ -274,41 +246,26 @@ class BrokerRegistry:
         ):
             raise RegistryVersionConflict
 
-    def _authority(self, authority: SessionPublicationAuthority) -> ManagedSessionAuthority | _CompatibilityAuthority:
+    def _authority(self, authority: SessionPublicationAuthority) -> ManagedSessionAuthority:
         if type(authority) is ManagedSessionAuthority:
             authority.__post_init__()
             return authority
-        if type(authority) is OpenAlgoDefaultCompatibilityAuthorityReceipt and authority in self._authorities:
-            return self._authorities[authority]
         raise RegistryCapabilityError
 
-    def seal_openalgo_default_compatibility_authority(
-        self, workspace_snapshot: WorkspaceSnapshot, *, owner_token: object
-    ) -> OpenAlgoDefaultCompatibilityAuthorityReceipt:
-        self._owner(owner_token)
-        if type(workspace_snapshot) is not WorkspaceSnapshot:
-            raise RegistryVersionValidationError
-        broker = broker_workspace_version(workspace_snapshot)
-        validate_workspace_versions(workspace_snapshot.version, broker)
-        authority = _CompatibilityAuthority(
-            workspace_snapshot.version, broker, legacy_openalgo_broker_projection(workspace_snapshot.as_dict())
-        )
-        receipt = OpenAlgoDefaultCompatibilityAuthorityReceipt()
-        with self._lock:
-            self._authorities[receipt] = authority
-        return receipt
 
     def _prepare(
         self,
         selector: BrokerSelector,
         session: object,
         expected: RegistrySelectorVersion,
-        authority: ManagedSessionAuthority | _CompatibilityAuthority,
+        authority: ManagedSessionAuthority,
         client: object | None,
         broker: str | None,
         label: str,
     ) -> PreparedRegistryCandidateReceipt:
         _validate_selector(selector)
+        if selector.adapter_id == "openalgo":
+            raise RegistryVersionValidationError
         if callable(client):
             raise RegistryVersionValidationError
         if type(expected) is not RegistrySelectorVersion:
@@ -317,7 +274,7 @@ class BrokerRegistry:
         if expected.selector != selector:
             raise RegistryVersionValidationError
         if (
-            not isinstance(session, (Session, BrokerSession))
+            not isinstance(session, Session)
             or (broker is not None and type(broker) is not str)
             or type(label) is not str
         ):
@@ -329,8 +286,6 @@ class BrokerRegistry:
                 or not math.isfinite(session.expires_at)
             ):
                 raise RegistryVersionValidationError
-        if isinstance(session, BrokerSession) and selector.adapter_id != "openalgo":
-            raise RegistryVersionValidationError
         if type(authority) is ManagedSessionAuthority and authority.credential_version.selector != selector:
             raise RegistryVersionValidationError
         if id(session) in self._managed_sessions:
@@ -342,12 +297,10 @@ class BrokerRegistry:
                                        for reference, _ in self._claimed.values() if (payload := reference()) is not None)
             if borrowed:
                 raise RegistrySessionUnavailable
-        client_binding = authority if selector != _DEFAULT else _DEFAULT
+        client_binding = authority
         if client is not None:
             owned = self._clients.get(id(client))
-            if owned is not None and (
-                selector != _DEFAULT or owned[1] != selector or owned[2] != client_binding
-            ):
+            if owned is not None:
                 raise RegistrySessionUnavailable
         receipt = PreparedRegistryCandidateReceipt()
         self._prepared[receipt] = _Record(selector, session, client, expected, authority, broker, label)
@@ -371,28 +324,11 @@ class BrokerRegistry:
     ) -> PreparedRegistryCandidateReceipt:
         self._owner(owner_token)
         with self._lock:
-            if type(authority) is not ManagedSessionAuthority or selector == _DEFAULT:
+            if type(authority) is not ManagedSessionAuthority:
                 raise RegistryVersionValidationError
             authority.__post_init__()
             return self._prepare(selector, session, expected_registry, authority, client, broker, label)
 
-    def prepare_openalgo_default_compatibility_candidate(
-        self,
-        session: object,
-        *,
-        expected_registry: RegistrySelectorVersion,
-        authority: OpenAlgoDefaultCompatibilityAuthorityReceipt,
-        client: object,
-        broker: str | None,
-        label: str,
-        owner_token: object,
-    ) -> PreparedRegistryCandidateReceipt:
-        self._owner(owner_token)
-        with self._lock:
-            sealed = self._authority(authority)
-            if type(sealed) is not _CompatibilityAuthority or not isinstance(session, Session) or client is None:
-                raise RegistryCapabilityError
-            return self._prepare(_DEFAULT, session, expected_registry, sealed, client, broker, label)
 
     def _retire(self, record: _Record) -> RegistryRetirementReceipt:
         receipt = RegistryRetirementReceipt()
@@ -419,18 +355,13 @@ class BrokerRegistry:
             except (RegistryVersionConflict, RegistryVersionValidationError):
                 raise RegistryVersionConflict(retirement_receipt=self._retire(record)) from None
             version = RegistrySelectorVersion(record.selector, self._incarnation, record.expected.generation + 1, True)
-            if type(current) is ManagedSessionAuthority:
-                binding = SessionVersion(
-                    record.selector,
-                    version,
-                    current.credential_version,
-                    current.workspace_version,
-                    current.broker_workspace_version,
-                )
-            else:
-                binding = OpenAlgoDefaultCompatibilitySessionVersion(
-                    record.selector, version, current.workspace_version, current.broker_workspace_version
-                )
+            binding = SessionVersion(
+                record.selector,
+                version,
+                current.credential_version,
+                current.workspace_version,
+                current.broker_workspace_version,
+            )
             previous = self._records.get(record.selector)
             retired = self._retire(previous) if previous is not None else None
             record.binding = binding
@@ -593,38 +524,26 @@ class BrokerRegistry:
         )
 
     def _connected(
-        self, selector: BrokerSelector, authority: ManagedLookupAuthority | OpenAlgoDefaultCompatibilityAuthorityReceipt
+        self, selector: BrokerSelector, authority: ManagedLookupAuthority
     ) -> _Record:
         record = self._records.get(selector)
         if record is None or not isinstance(record.session, Session) or self._status(record) != "connected":
             raise RegistrySessionUnavailable
-        if type(record.authority) is ManagedSessionAuthority:
-            if type(authority) is not ManagedLookupAuthority:
-                raise RegistrySessionUnavailable
-            authority.__post_init__()
-            if (
-                authority.credential_version != record.authority.credential_version
-                or authority.broker_workspace_version != record.authority.broker_workspace_version
-            ):
-                raise RegistrySessionUnavailable
-        else:
-            try:
-                current = self._authority(authority)
-            except RegistryCapabilityError:
-                raise RegistrySessionUnavailable from None
-            if (
-                type(current) is not _CompatibilityAuthority
-                or current.broker_workspace_version != record.authority.broker_workspace_version
-                or current.projection != record.authority.projection
-            ):
-                raise RegistrySessionUnavailable
+        if type(authority) is not ManagedLookupAuthority:
+            raise RegistrySessionUnavailable
+        authority.__post_init__()
+        if (
+            authority.credential_version != record.authority.credential_version
+            or authority.broker_workspace_version != record.authority.broker_workspace_version
+        ):
+            raise RegistrySessionUnavailable
         return record
 
     def get_connected_session_for(
         self,
         selector: BrokerSelector,
         *,
-        current_authority: ManagedLookupAuthority | OpenAlgoDefaultCompatibilityAuthorityReceipt,
+        current_authority: ManagedLookupAuthority,
     ) -> ConnectedRegistrySession:
         _validate_selector(selector)
         with self._lock:
@@ -637,7 +556,7 @@ class BrokerRegistry:
         self,
         session: ConnectedRegistrySession,
         *,
-        current_authority: ManagedLookupAuthority | OpenAlgoDefaultCompatibilityAuthorityReceipt,
+        current_authority: ManagedLookupAuthority,
     ) -> object:
         with self._lock:
             if type(session) is not ConnectedRegistrySession or session not in self._handles:
@@ -704,7 +623,7 @@ class BrokerRegistry:
         self._sessions = {
             selector.account_id: record.session
             for selector, record in self._records.items()
-            if counts[selector.account_id] == 1 and isinstance(record.session, BrokerSession)
+            if counts[selector.account_id] == 1 and isinstance(record.session, Session)
         }
         self._adapter_sessions = {
             (selector.adapter_id, selector.account_id): record.session
@@ -727,28 +646,17 @@ class BrokerRegistry:
     put_session = _unversioned_unavailable
     remove_session_for = _unversioned_unavailable
 
-    def get_session(self, account_id: str) -> BrokerSession:
-        with self._lock:
-            matches = [record for selector, record in self._records.items() if selector.account_id == account_id]
-            if len(matches) > 1:
-                raise BrokerAccountAmbiguousError
-            if not matches:
-                raise BrokerNotFoundError("broker_session_missing")
-            if not isinstance(matches[0].session, BrokerSession):
-                raise RegistrySessionUnavailable
-            return matches[0].session
+    def get_session(self, account_id: str) -> Session:
+        if sum(selector.account_id == account_id for selector in self._records) > 1:
+            raise BrokerAccountAmbiguousError
+        raise RegistrySessionUnavailable
 
-    def get_session_for(self, adapter_id: str, account_id: str) -> Any:
-        """Unversioned raw canonical lookup cannot grant routing authority."""
+    def get_session_for(self, adapter_id: str, account_id: str) -> Session:
         BrokerSelector(adapter_id, account_id)
         raise RegistrySessionUnavailable
 
-    def get_primary_session(self) -> BrokerSession:
-        with self._lock:
-            record = self._records.get(self._default_selector)
-            if record is None or not isinstance(record.session, BrokerSession):
-                raise RegistrySessionUnavailable
-            return record.session
+    def get_primary_session(self) -> Session:
+        raise RegistrySessionUnavailable
 
     def get_primary_account_id(self) -> str | None:
         with self._lock:
@@ -880,15 +788,7 @@ class RegistryPublicationOwner:
     def prepare_session_candidate(self, *args: Any, **kwargs: Any) -> PreparedRegistryCandidateReceipt:
         return self._call("prepare_session_candidate", *args, **kwargs)
 
-    def prepare_openalgo_default_compatibility_candidate(
-        self, *args: Any, **kwargs: Any
-    ) -> PreparedRegistryCandidateReceipt:
-        return self._call("prepare_openalgo_default_compatibility_candidate", *args, **kwargs)
 
-    def seal_openalgo_default_compatibility_authority(
-        self, *args: Any, **kwargs: Any
-    ) -> OpenAlgoDefaultCompatibilityAuthorityReceipt:
-        return self._call("seal_openalgo_default_compatibility_authority", *args, **kwargs)
 
     def publish_prepared_candidate(self, *args: Any, **kwargs: Any) -> RegistryPublishResult:
         return self._call("publish_prepared_candidate", *args, **kwargs)
@@ -927,7 +827,7 @@ class RegistryPublicationOwner:
                 self._registry._claimed.pop(id(payload))
                 self._registry._retired[receipt] = record
                 if record.client is not None:
-                    binding = record.authority if record.selector != _DEFAULT else _DEFAULT
+                    binding = record.authority
                     self._registry._clients[id(record.client)] = (record.client, record.selector, binding)
                 raise
             self._retirements.discard(receipt)

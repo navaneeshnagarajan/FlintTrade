@@ -48,16 +48,11 @@ _NAMED_GUARDS = {
             "flinttrade_ai.agent_backends.hermes_session.HermesACPSession.ensure_started",
         ),
     ),
-    "flinttrade_gateway.adapter": (
-        ("load_broker_adapter", "flinttrade_gateway.adapter.load_broker_adapter"),
-    ),
-    "flinttrade_gateway.session": (
-        ("load_broker_adapter", "flinttrade_gateway.session.load_broker_adapter"),
+    "flinttrade_gateway.brokers.native_factory": (
+        ("build_native_adapters", "flinttrade_gateway.brokers.native_factory.build_native_adapters"),
     ),
     "flinttrade_gateway.registry": (("BrokerRegistry", "flinttrade_gateway.registry.BrokerRegistry"),),
-    "flinttrade_gateway.credentials": (
-        ("CredentialStore", "flinttrade_gateway.credentials.CredentialStore"),
-    ),
+    "flinttrade_gateway.credentials": (("CredentialStore", "flinttrade_gateway.credentials.CredentialStore"),),
     "flinttrade_gateway.contracts": (("ContractManager", "flinttrade_gateway.contracts.ContractManager"),),
 }
 

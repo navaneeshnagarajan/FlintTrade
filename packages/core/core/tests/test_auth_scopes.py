@@ -65,9 +65,7 @@ def test_invalid_session_token_is_401(app, monkeypatch):
 
 def test_legacy_token_without_scopes_claim_gets_full_default(app, monkeypatch):
     # A session minted before the scopes claim existed is the operator => full scopes.
-    monkeypatch.setattr(
-        "flinttrade_core.auth_routes.decode_token", lambda t: {"sub": "op", "jti": "j1"}
-    )
+    monkeypatch.setattr("flinttrade_core.auth_routes.decode_token", lambda t: {"sub": "op", "jti": "j1"})
     with app.test_client() as c:
         assert c.get("/guarded", headers={"Authorization": "Bearer abc"}).status_code == 200
 
@@ -82,7 +80,7 @@ def test_new_session_scopes_do_not_retroactively_widen_legacy_tokens():
     legacy = getattr(auth_scopes, "LEGACY_NO_SCOPE_SESSION_SCOPES", DEFAULT_SESSION_SCOPES)
     assert "admin.services.write" in DEFAULT_SESSION_SCOPES
     assert "admin.services.write" not in legacy
-    assert "admin.config.openalgo.write" not in legacy
+    assert "admin.config.dhan.write" not in legacy
 
 
 @pytest.mark.parametrize("claim", [None, "admin.audit.read", {"admin.audit.read": True}, ["admin.audit.read", 7]])

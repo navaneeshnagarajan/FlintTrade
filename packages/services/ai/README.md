@@ -27,17 +27,15 @@ If you only want to use the package in isolation, the package's `pyproject.toml`
 `Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
 root workspace.
 
-RAG storage, local sentence-transformer embeddings, and Crawl4AI scraping are
-loaded only when those features are enabled and their libraries are installed in
-the local environment. They are intentionally not locked into the default
-workspace install, so the trading terminal and backend do not inherit unresolved
-upstream advisories from optional AI tooling.
-
 ## Tests
 
 ```bash
 python -m pytest packages/services/ai/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

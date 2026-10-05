@@ -31,7 +31,7 @@ class _FakeRecorder:
         self.future_source_timestamp_rejections = 5
         self.invalid_source_timestamp_rejections = 6
         self.source_timestamp_error = ""
-        self.reconnect_requests = 0
+        self.retired_identity_updates = 0
         self.max_instruments = 512
         self._subscription_lock = threading.RLock()
         self._watchlist: dict[str, list[dict[str, str]]] = {
@@ -63,7 +63,9 @@ class _FakeRecorder:
 
     def get_watchlist(self) -> dict[str, list[dict[str, str]]]:
         with self._subscription_lock:
-            return {mode: [dict(instrument) for instrument in instruments] for mode, instruments in self._watchlist.items()}
+            return {
+                mode: [dict(instrument) for instrument in instruments] for mode, instruments in self._watchlist.items()
+            }
 
     def add_symbols(self, instruments: list[dict[str, str]], mode: str = "quote") -> None:
         with self._subscription_lock:
@@ -82,13 +84,11 @@ class _FakeRecorder:
     def replace_watchlist(self, watchlist: dict[str, list[dict[str, str]]]) -> None:
         with self._subscription_lock:
             self._watchlist = {
-                mode: [dict(instrument) for instrument in instruments]
-                for mode, instruments in watchlist.items()
+                mode: [dict(instrument) for instrument in instruments] for mode, instruments in watchlist.items()
             }
 
-    def request_reconnect(self) -> bool:
-        self.reconnect_requests += 1
-        return True
+    def retire_removed_identities(self) -> None:
+        self.retired_identity_updates += 1
 
 
 class _FakeSignalHub:
@@ -146,24 +146,24 @@ class TestStatus:
         assert data["connected"] is False
         assert "hint" in data
 
-    def test_configured_startup_failure_is_not_reported_as_off(self, client, app):
+    def test_legacy_enabled_flag_cannot_claim_capture_while_preserving_error(self, client, app):
         app.config["TICK_CAPTURE_ENABLED"] = True
-        app.config["TICK_CAPTURE_ERROR"] = "OpenAlgo rejected [redacted]"
+        app.config["TICK_CAPTURE_ERROR"] = "native broker rejected [redacted]"
 
         data = client.get("/api/v1/data/ticks/status").get_json()["data"]
 
-        assert data["enabled"] is True
+        assert data["enabled"] is False
         assert data["running"] is False
         assert data["connected"] is False
-        assert data["last_error"] == "OpenAlgo rejected [redacted]"
-        assert "hint" not in data
+        assert data["last_error"] == "native broker rejected [redacted]"
+        assert "unavailable" in data["hint"]
 
-    def test_enabled_reports_recorder_state(self, client, wired):
+    def test_local_recorder_counters_remain_visible_without_claiming_native_capture(self, client, wired):
         resp = client.get("/api/v1/data/ticks/status")
         data = resp.get_json()["data"]
-        assert data["enabled"] is True
-        assert data["running"] is True
-        assert data["connected"] is True
+        assert data["enabled"] is False
+        assert data["running"] is False
+        assert data["connected"] is False
         assert data["tick_count"] == 42
         assert data["persisted_tick_count"] == 40
         assert data["pending_tick_count"] == 2
@@ -188,8 +188,8 @@ class TestStatus:
 
         data = client.get("/api/v1/data/ticks/status").get_json()["data"]
 
-        assert data["running"] is True
-        assert data["connected"] is True
+        assert data["running"] is False
+        assert data["connected"] is False
         assert data["last_error"] == "connection reload failed"
         assert data["integration_error"] == "connection reload failed"
 
@@ -227,13 +227,13 @@ class TestStatus:
 
     def test_connected_and_sanitised_error_are_reported_when_reconnecting(self, client, wired):
         wired.is_connected = False
-        wired.last_error = "OpenAlgo connection refused"
+        wired.last_error = "native broker connection refused"
 
         data = client.get("/api/v1/data/ticks/status").get_json()["data"]
 
-        assert data["running"] is True
+        assert data["running"] is False
         assert data["connected"] is False
-        assert data["last_error"] == "OpenAlgo connection refused"
+        assert data["last_error"] == "native broker connection refused"
 
     def test_connected_control_error_is_reported(self, client, wired):
         wired.is_connected = True
@@ -241,8 +241,8 @@ class TestStatus:
 
         data = client.get("/api/v1/data/ticks/status").get_json()["data"]
 
-        assert data["running"] is True
-        assert data["connected"] is True
+        assert data["running"] is False
+        assert data["connected"] is False
         assert data["last_error"] == "Partial subscription failure: NSE:BAD"
 
 
@@ -298,9 +298,7 @@ class TestQuery:
         app.config["TICK_STORAGE"] = storage
         app.config["TICK_STORAGE_LOCK"] = threading.Lock()
 
-        resp = client.get(
-            "/api/v1/data/ticks?symbol=NIFTY&exchange=NSE_INDEX&start=2026-07-06&end=2026-07-06&limit=2"
-        )
+        resp = client.get("/api/v1/data/ticks?symbol=NIFTY&exchange=NSE_INDEX&start=2026-07-06&end=2026-07-06&limit=2")
 
         assert resp.status_code == 200
         assert storage.requested_limit == 3
@@ -323,9 +321,7 @@ class TestQuery:
         app.config["TICK_STORAGE"] = Storage()
         app.config["TICK_STORAGE_LOCK"] = UnpublishingLock()
 
-        response = client.get(
-            "/api/v1/data/ticks?symbol=NIFTY&exchange=NSE_INDEX&start=2026-07-06&end=2026-07-06"
-        )
+        response = client.get("/api/v1/data/ticks?symbol=NIFTY&exchange=NSE_INDEX&start=2026-07-06&end=2026-07-06")
 
         assert response.status_code == 409
 
@@ -335,8 +331,8 @@ class TestWatchlist:
         resp = client.post(
             "/api/v1/data/ticks/watchlist",
             json={
-            "action": "add",
-            "instruments": [{"exchange": "NSE", "symbol": "RELIANCE"}],
+                "action": "add",
+                "instruments": [{"exchange": "NSE", "symbol": "RELIANCE"}],
             },
         )
         assert resp.status_code == 409
@@ -345,21 +341,21 @@ class TestWatchlist:
         resp = client.post(
             "/api/v1/data/ticks/watchlist",
             json={
-            "action": "add",
-            "instruments": [{"exchange": "NSE", "symbol": "reliance"}],
+                "action": "add",
+                "instruments": [{"exchange": "NSE", "symbol": "reliance"}],
             },
         )
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert {"exchange": "NSE", "symbol": "RELIANCE"} in data["watchlist"]["quote"]
-        assert data["applies_on"] == "reconnect requested"
-        assert data["reconnect_requested"] is True
+        assert data["applies_on"] == "local ingestion only"
+        assert data["reconnect_requested"] is False
 
         resp = client.post(
             "/api/v1/data/ticks/watchlist",
             json={
-            "action": "remove",
-            "instruments": [{"exchange": "NSE", "symbol": "RELIANCE"}],
+                "action": "remove",
+                "instruments": [{"exchange": "NSE", "symbol": "RELIANCE"}],
             },
         )
         data = resp.get_json()["data"]
@@ -423,9 +419,7 @@ class TestWatchlist:
         )
 
         assert resp.status_code == 400
-        assert resp.get_json()["message"] == (
-            "instrument exchange and symbol must be non-empty strings without ':'"
-        )
+        assert resp.get_json()["message"] == ("instrument exchange and symbol must be non-empty strings without ':'")
         assert wired.get_watchlist() == previous
 
     def test_lifecycle_lock_is_acquired_before_resolving_the_active_recorder(self, client, app, wired):
@@ -482,7 +476,7 @@ class TestWatchlist:
 
         assert resp.status_code == 200
         assert hub.instruments == ["NSE:RELIANCE", "NSE_INDEX:NIFTY"]
-        assert wired.reconnect_requests == 1
+        assert wired.retired_identity_updates == 1
 
         resp = client.post(
             "/api/v1/data/ticks/watchlist",
@@ -495,7 +489,7 @@ class TestWatchlist:
 
         assert resp.status_code == 200
         assert hub.instruments == ["NSE:RELIANCE"]
-        assert wired.reconnect_requests == 2
+        assert wired.retired_identity_updates == 2
 
     def test_idempotent_watchlist_update_skips_signal_reset_and_reconnect(self, client, app, wired):
         hub = app.config["SIGNAL_HUB"]
@@ -513,12 +507,11 @@ class TestWatchlist:
         assert response.get_json()["data"]["changed"] is False
         assert response.get_json()["data"]["applies_on"] == "unchanged"
         assert hub.update_calls == 0
-        assert wired.reconnect_requests == 0
+        assert wired.retired_identity_updates == 0
 
     def test_add_rejects_watchlist_capacity_overflow_without_partial_update(self, client, app, wired):
         wired._watchlist["quote"] = [
-            {"exchange": "NSE", "symbol": f"SYM{index}"}
-            for index in range(wired.max_instruments)
+            {"exchange": "NSE", "symbol": f"SYM{index}"} for index in range(wired.max_instruments)
         ]
         previous = wired.get_watchlist()
         hub = app.config["SIGNAL_HUB"]
@@ -536,7 +529,7 @@ class TestWatchlist:
         assert response.get_json()["message"] == "watchlist cannot exceed 512 unique instruments"
         assert wired.get_watchlist() == previous
         assert hub.update_calls == 0
-        assert wired.reconnect_requests == 0
+        assert wired.retired_identity_updates == 0
 
     def test_signal_allowlist_failure_restores_exact_recorder_snapshot_without_hub_compensation(
         self, client, app, wired
@@ -568,7 +561,7 @@ class TestWatchlist:
         assert {"exchange": "NSE", "symbol": "RELIANCE"} in observed_watchlists[0]["quote"]
         assert wired.get_watchlist() == previous
         assert hub.update_calls == 1
-        assert wired.reconnect_requests == 0
+        assert wired.retired_identity_updates == 0
 
     def test_concurrent_adds_produce_exact_union_in_recorder_and_signal_hub(self, app, wired):
         first_entered = threading.Event()
@@ -641,9 +634,9 @@ class TestWatchlist:
         resp = client.post(
             "/api/v1/data/ticks/watchlist",
             json={
-            "action": "add",
-            "mode": "bogus",
-            "instruments": [{"exchange": "NSE", "symbol": "X"}],
+                "action": "add",
+                "mode": "bogus",
+                "instruments": [{"exchange": "NSE", "symbol": "X"}],
             },
         )
         assert resp.status_code == 400

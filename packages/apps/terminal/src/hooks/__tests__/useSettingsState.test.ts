@@ -10,7 +10,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
-  isAcceptedOpenAlgoConfigStatus,
   probeSettingsLlmHydration,
   useSettingsState,
 } from "../useSettingsState";
@@ -19,7 +18,6 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import type { OpenAlgoConfigData } from "@/services/ftApi.openalgo";
 
 // ---------------------------------------------------------------------------
 // Mock the websocket service (resetWsService would fail in jsdom)
@@ -73,8 +71,8 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function mockFetchWithOpenAlgoConfig(
-  config: OpenAlgoConfigData = {
+function mockFetchWithLlmConfig(
+  config: Record<string, unknown> = {
     api_key_configured: false,
     api_key_last4: "",
     host: "",
@@ -139,7 +137,7 @@ function mockFetchWithFailedPost(
 describe("useSettingsState", () => {
   beforeEach(() => {
     resetStores();
-    mockFetchWithOpenAlgoConfig();
+    mockFetchWithLlmConfig();
     mockEmitNotification.mockClear();
   });
 
@@ -149,12 +147,7 @@ describe("useSettingsState", () => {
     vi.useRealTimers();
   });
 
-  it("accepts backend OpenAlgo config save status variants", () => {
-    expect(isAcceptedOpenAlgoConfigStatus("ok")).toBe(true);
-    expect(isAcceptedOpenAlgoConfigStatus("success")).toBe(true);
-    expect(isAcceptedOpenAlgoConfigStatus("partial")).toBe(true);
-    expect(isAcceptedOpenAlgoConfigStatus("error")).toBe(false);
-  });
+
 
   it("returns general with fontSize from settingsStore", () => {
     useSettingsStore.setState({ fontSize: "large" });
@@ -198,187 +191,15 @@ describe("useSettingsState", () => {
     expect(result.current.risk.maxOrdersPerMinute).toBe("30");
   });
 
-  it("returns redacted connection data from the memory-only connection cache", async () => {
-    mockFetchWithOpenAlgoConfig({
-      api_key: "test-api-key",
-      api_key_configured: true,
-      api_key_last4: "-key",
-      host: "http://192.168.1.10:5000",
-      port: 5000,
-      ws_port: 8765,
-    });
 
-    const { result } = renderHook(() => useSettingsState());
 
-    await waitFor(() => {
-      expect(result.current.connection).toEqual({
-        host: "http://192.168.1.10:5000",
-        port: "5000",
-        wsPort: "8765",
-        apiKeyConfigured: true,
-        apiKeyLast4: "-key",
-      });
-    });
-    expect(result.current.connection).not.toHaveProperty("apiKey");
-    expect(useConnectionStore.getState().apiKey).toBe("test-api-key");
-  });
 
-  it("hydrates connection metadata and the memory-only runtime key from the workspace endpoint", async () => {
-    mockFetchWithOpenAlgoConfig({
-      api_key: "workspace-api-key",
-      api_key_configured: true,
-      api_key_last4: "-key",
-      host: "http://192.168.1.20",
-      port: 5001,
-      ws_port: 8770,
-    });
 
-    const { result } = renderHook(() => useSettingsState());
 
-    await waitFor(() => {
-      expect(result.current.connection.host).toBe("http://192.168.1.20");
-      expect(result.current.connection.port).toBe("5001");
-      expect(result.current.connection.wsPort).toBe("8770");
-      expect(result.current.connection.apiKeyConfigured).toBe(true);
-      expect(result.current.connection.apiKeyLast4).toBe("-key");
-    });
-    expect(useConnectionStore.getState().apiKey).toBe("workspace-api-key");
-  });
 
-  it("accepts an explicitly saved connection without issuing another backend write", async () => {
-    const fetchMock = mockFetchWithOpenAlgoConfig({
-      api_key: "existing-api-key",
-      api_key_configured: true,
-      api_key_last4: "-key",
-      host: "http://127.0.0.1:5000",
-      port: 5000,
-      ws_port: 8765,
-    });
-    const { result } = renderHook(() => useSettingsState());
 
-    await waitFor(() => {
-      expect(result.current.connection.apiKeyConfigured).toBe(true);
-    });
 
-    act(() => {
-      useConnectionStore.getState().setConfig({
-        host: "https://openalgo.local",
-        apiKey: "replacement-api-key",
-        wsUrl: "wss://openalgo.local:9770",
-      });
-      result.current.acceptConnection({
-        host: "https://openalgo.local",
-        port: "5010",
-        apiKey: "replacement-api-key",
-        wsPort: "9770",
-      });
-    });
 
-    expect(result.current.connection).toEqual({
-      host: "https://openalgo.local",
-      port: "5010",
-      wsPort: "9770",
-      apiKeyConfigured: true,
-      apiKeyLast4: "-key",
-    });
-    expect(fetchMock.mock.calls.filter(
-      (call) => (call[1] as RequestInit | undefined)?.method === "POST",
-    )).toHaveLength(0);
-  });
-
-  it("keeps saved credential metadata when an accepted save omits a replacement key", async () => {
-    mockFetchWithOpenAlgoConfig({
-      api_key: "existing-api-key",
-      api_key_configured: true,
-      api_key_last4: "-key",
-      host: "http://127.0.0.1:5000",
-      port: 5000,
-      ws_port: 8765,
-    });
-    const { result } = renderHook(() => useSettingsState());
-
-    await waitFor(() => {
-      expect(useConnectionStore.getState().apiKey).toBe("existing-api-key");
-    });
-
-    act(() => {
-      result.current.acceptConnection({
-        host: "http://127.0.0.1:5000",
-        port: "5000",
-        apiKey: "",
-        wsPort: "8765",
-      });
-    });
-
-    expect(result.current.connection.apiKeyConfigured).toBe(true);
-    expect(result.current.connection.apiKeyLast4).toBe("-key");
-  });
-
-  it("does not let an older hydration response overwrite an accepted save", async () => {
-    let resolveOpenAlgo: ((response: Response) => void) | undefined;
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      if (String(input).includes("/config/llm")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            status: "success",
-            data: {
-              provider: "",
-              host: "",
-              model: "",
-              api_key_configured: false,
-              api_key_last4: "",
-            },
-          }),
-        } as Response);
-      }
-      return new Promise<Response>((resolve) => {
-        resolveOpenAlgo = resolve;
-      });
-    }));
-    const { result } = renderHook(() => useSettingsState());
-
-    act(() => {
-      useConnectionStore.getState().setConfig({
-        host: "https://new-openalgo.local",
-        apiKey: "new-api-key",
-        wsUrl: "wss://new-openalgo.local:9770",
-      });
-      result.current.acceptConnection({
-        host: "https://new-openalgo.local",
-        port: "5010",
-        apiKey: "new-api-key",
-        wsPort: "9770",
-      });
-    });
-
-    await act(async () => {
-      resolveOpenAlgo?.({
-        ok: true,
-        json: async () => ({
-          status: "success",
-          data: {
-            api_key: "old-api-key",
-            api_key_configured: true,
-            api_key_last4: "-key",
-            host: "http://old-openalgo.local:5000",
-            port: 5000,
-            ws_port: 8765,
-          },
-        }),
-      } as Response);
-      await Promise.resolve();
-    });
-
-    expect(result.current.connection).toEqual({
-      host: "https://new-openalgo.local",
-      port: "5010",
-      wsPort: "9770",
-      apiKeyConfigured: true,
-      apiKeyLast4: "-key",
-    });
-    expect(useConnectionStore.getState().apiKey).toBe("new-api-key");
-  });
 
   it("returns telegram settings from settingsStore", () => {
     useSettingsStore.setState({
@@ -417,7 +238,7 @@ describe("useSettingsState", () => {
 
   it("accepts NVIDIA as a generated backend provider ID", async () => {
     const provider: LlmProviderId = "nvidia";
-    mockFetchWithOpenAlgoConfig(undefined, {
+    mockFetchWithLlmConfig(undefined, {
       provider,
       host: "",
       model: "operator-selected-model",
@@ -432,7 +253,7 @@ describe("useSettingsState", () => {
   });
 
   it("hydrates LLM config from the backend workspace endpoint without exposing the API key", async () => {
-    mockFetchWithOpenAlgoConfig(undefined, {
+    mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o",
@@ -496,7 +317,7 @@ describe("useSettingsState", () => {
   });
 
   it("keeps a managed Ollama endpoint returned by the backend backend-only", async () => {
-    mockFetchWithOpenAlgoConfig(undefined, {
+    mockFetchWithLlmConfig(undefined, {
       provider: "ollama",
       host: "http://127.0.0.1:49157",
       model: "qwen3:8b",
@@ -518,7 +339,7 @@ describe("useSettingsState", () => {
       llm: { provider: "grok", authMode: "api-key", host: "", model: "grok-3-mini", apiKey: "" },
       llmSetupPending: true,
     });
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o",
@@ -665,7 +486,7 @@ describe("useSettingsState", () => {
   });
 
   it("clears cloud hosts and rejects blank hosts for host-based providers", async () => {
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "hermes",
       host: "http://hermes.internal:8000",
       model: "hermes-3",
@@ -696,7 +517,7 @@ describe("useSettingsState", () => {
 
   it("does not accept a generic blank host edit for a credentialled provider", async () => {
     vi.useFakeTimers();
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "custom",
       host: "http://127.0.0.1:9000",
       model: "private-model",
@@ -718,7 +539,7 @@ describe("useSettingsState", () => {
 
   it("requires a full credential transaction before changing a Custom trust destination", async () => {
     vi.useFakeTimers();
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "custom",
       host: "https://old.example.test/v1",
       model: "private-model",
@@ -740,7 +561,7 @@ describe("useSettingsState", () => {
   });
 
   it("persists a replacement provider credential in the same activation transaction", async () => {
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o",
@@ -769,7 +590,7 @@ describe("useSettingsState", () => {
   });
 
   it("persists Claude Code OAuth as an auth marker without inventing a backend provider", async () => {
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o-mini",
@@ -800,7 +621,7 @@ describe("useSettingsState", () => {
   });
 
   it("removes a credential with a coherent full-provider transaction", async () => {
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o-mini",
@@ -912,7 +733,7 @@ describe("useSettingsState", () => {
     expect(result.current.llm.provider).toBe("anthropic");
   });
 
-  function postCalls(fetchMock: ReturnType<typeof mockFetchWithOpenAlgoConfig>) {
+  function postCalls(fetchMock: ReturnType<typeof mockFetchWithLlmConfig>) {
     return fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === "POST",
     );
@@ -920,7 +741,7 @@ describe("useSettingsState", () => {
 
   it("persists model edits as a debounced partial backend patch", async () => {
     vi.useFakeTimers();
-    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const fetchMock = mockFetchWithLlmConfig();
     const { result } = renderHook(() => useSettingsState());
     await vi.waitFor(() => expect(result.current.llmHydrationState).toBe("ready"));
 
@@ -981,7 +802,7 @@ describe("useSettingsState", () => {
 
   it("never routes API-key edits through generic debounced persistence", async () => {
     vi.useFakeTimers();
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o-mini",
@@ -1005,7 +826,7 @@ describe("useSettingsState", () => {
 
   it("coalesces rapid model edits into one debounced POST", async () => {
     vi.useFakeTimers();
-    const fetchMock = mockFetchWithOpenAlgoConfig(undefined, {
+    const fetchMock = mockFetchWithLlmConfig(undefined, {
       provider: "openai",
       host: "",
       model: "gpt-4o-mini",
@@ -1157,7 +978,7 @@ describe("useSettingsState", () => {
 
   it("flushes a pending LLM edit when the settings surface unmounts", async () => {
     vi.useFakeTimers();
-    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const fetchMock = mockFetchWithLlmConfig();
     const { result, unmount } = renderHook(() => useSettingsState());
     await vi.waitFor(() => expect(result.current.llmHydrationState).toBe("ready"));
 
@@ -1179,18 +1000,7 @@ describe("useSettingsState", () => {
     });
   });
 
-  it("exposes update action functions", () => {
-    const { result } = renderHook(() => useSettingsState());
 
-    expect(typeof result.current.updateGeneral).toBe("function");
-    expect(typeof result.current.updateTradingDefaults).toBe("function");
-    expect(typeof result.current.updateRiskLimits).toBe("function");
-    expect(typeof result.current.updateLLM).toBe("function");
-    expect(typeof result.current.updateTelegram).toBe("function");
-    expect(typeof result.current.updateDataPaths).toBe("function");
-    expect(typeof result.current.acceptConnection).toBe("function");
-    expect(typeof result.current.handleRestart).toBe("function");
-  });
 
   it("restarting is false by default", () => {
     const { result } = renderHook(() => useSettingsState());

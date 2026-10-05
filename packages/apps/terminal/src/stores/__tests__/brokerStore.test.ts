@@ -44,7 +44,7 @@ describe("brokerStore", () => {
     });
 
     it("keeps a composite-key activeAccountId untouched", () => {
-      for (const key of ["native:dhan:D1", "gateway:upstox:U1"]) {
+      for (const key of ["native:dhan:D1", "native:upstox:U1"]) {
         const out = migrateBrokerPersist({ accounts: [], activeAccountId: key }, 0) as {
           activeAccountId: string | null;
         };
@@ -52,9 +52,16 @@ describe("brokerStore", () => {
       }
     });
 
-    it("leaves already-migrated (version >= 1) state untouched", () => {
+    it("leaves already-migrated (version >= 2) state untouched", () => {
       const state = { accounts: [], activeAccountId: "CLIENT123" };
-      expect(migrateBrokerPersist(state, 1)).toBe(state);
+      expect(migrateBrokerPersist(state, 2)).toBe(state);
+    });
+
+    it("scrubs retired snapshots and active selection on the version-2 upgrade", () => {
+      const native = makeAccount({ source: "native", broker: "dhan", account_id: "D1" });
+      const retired = makeAccount({ source: "gateway", broker: "zerodha", account_id: "Z1" });
+      expect(migrateBrokerPersist({ accounts: [retired, native], activeAccountId: "gateway:zerodha:Z1" }, 1))
+        .toMatchObject({ accounts: [native], activeAccountId: null });
     });
 
     it("leaves a null active account alone", () => {

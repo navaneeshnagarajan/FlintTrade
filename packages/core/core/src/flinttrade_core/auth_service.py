@@ -75,10 +75,7 @@ def migration_update_paused_line(count: int) -> str:
     The count is the only variable. Usernames, paths, and other personal
     data stay out of the line.
     """
-    return (
-        f"Update paused: this database has {count} operator accounts; "
-        "FlintTrade supports one. No data was changed."
-    )
+    return f"Update paused: this database has {count} operator accounts; FlintTrade supports one. No data was changed."
 
 
 def _is_six_digit_pin(pin: str) -> bool:
@@ -134,7 +131,9 @@ class AuthService:
         self._db_path = Path(db_path) if db_path else _DEFAULT_DB_PATH
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._hasher = argon2.PasswordHasher(
-            time_cost=3, memory_cost=65536, parallelism=4,
+            time_cost=3,
+            memory_cost=65536,
+            parallelism=4,
         )
         self._local = threading.local()
         self._connections: list[sqlite3.Connection] = []
@@ -232,17 +231,13 @@ class AuthService:
         # Idempotent migration — older DBs predate the password_changed_at
         # column. ADD COLUMN is cheap and avoids a destructive rebuild.
         try:
-            self._db.execute(
-                "ALTER TABLE account ADD COLUMN password_changed_at REAL NOT NULL DEFAULT 0"
-            )
+            self._db.execute("ALTER TABLE account ADD COLUMN password_changed_at REAL NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             # Column already exists — fresh installs hit this on the
             # CREATE TABLE path above.
             pass
         try:
-            self._db.execute(
-                "ALTER TABLE account ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1"
-            )
+            self._db.execute("ALTER TABLE account ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1")
         except sqlite3.OperationalError:
             pass
         # First-run finish is distinct from account creation. The column is
@@ -252,9 +247,7 @@ class AuthService:
         # starts incomplete: the default stays 0, and this update does not
         # run again once the column is present.
         try:
-            self._db.execute(
-                "ALTER TABLE account ADD COLUMN setup_finished INTEGER NOT NULL DEFAULT 0"
-            )
+            self._db.execute("ALTER TABLE account ADD COLUMN setup_finished INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
         else:
@@ -262,9 +255,7 @@ class AuthService:
         # Frozen when the operator is created. Later vault opens must not
         # rewrite it, or a reload would change Step N of M.
         try:
-            self._db.execute(
-                "ALTER TABLE account ADD COLUMN setup_vault_presecured INTEGER"
-            )
+            self._db.execute("ALTER TABLE account ADD COLUMN setup_vault_presecured INTEGER")
         except sqlite3.OperationalError:
             pass
         self._migrate_single_operator()
@@ -278,9 +269,7 @@ class AuthService:
         epoch after the account itself is deleted. Tokens issued before the
         binding existed no longer match.
         """
-        existing = self._db.execute(
-            "SELECT 1 FROM account_session WHERE id = 1"
-        ).fetchone()
+        existing = self._db.execute("SELECT 1 FROM account_session WHERE id = 1").fetchone()
         if existing is not None or not self.is_setup():
             return
         self._db.execute(
@@ -296,9 +285,7 @@ class AuthService:
             ``(operator_id, epoch)`` or ``None`` before the first account exists.
         """
         try:
-            row = self._db.execute(
-                "SELECT operator_id, epoch FROM account_session WHERE id = 1"
-            ).fetchone()
+            row = self._db.execute("SELECT operator_id, epoch FROM account_session WHERE id = 1").fetchone()
         except sqlite3.OperationalError:
             return None
         if row is None:
@@ -307,9 +294,7 @@ class AuthService:
 
     def _bump_epoch_locked(self) -> None:
         """Invalidate every previously issued session. Caller holds the write lock."""
-        row = self._db.execute(
-            "SELECT epoch FROM account_session WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT epoch FROM account_session WHERE id = 1").fetchone()
         if row is None:
             self._db.execute(
                 "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
@@ -326,9 +311,7 @@ class AuthService:
 
         Caller holds the write lock and commits.
         """
-        row = self._db.execute(
-            "SELECT epoch FROM account_session WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT epoch FROM account_session WHERE id = 1").fetchone()
         operator_id = str(uuid.uuid4())
         if row is None:
             self._db.execute(
@@ -359,9 +342,7 @@ class AuthService:
             logger.error("%s", migration_update_paused_line(count))
             return
         try:
-            self._db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS account_one_operator ON account ((1))"
-            )
+            self._db.execute("CREATE UNIQUE INDEX IF NOT EXISTS account_one_operator ON account ((1))")
         except sqlite3.IntegrityError:
             raced = self._operator_count()
             if raced > 1:
@@ -389,9 +370,7 @@ class AuthService:
         Account creation alone is not finished setup. The operator still has
         the vault and Practice affirm ahead of them until this flag is set.
         """
-        row = self._db.execute(
-            "SELECT setup_finished FROM account WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT setup_finished FROM account WHERE id = 1").fetchone()
         if not row:
             return False
         return bool(row["setup_finished"])
@@ -405,9 +384,7 @@ class AuthService:
         if not self.is_setup():
             raise RuntimeError("Account is not set up")
         with self._write_lock:
-            self._db.execute(
-                "UPDATE account SET setup_finished = 1 WHERE id = 1"
-            )
+            self._db.execute("UPDATE account SET setup_finished = 1 WHERE id = 1")
             self._db.commit()
 
     def setup_vault_presecured(self) -> bool | None:
@@ -418,9 +395,7 @@ class AuthService:
         """
         if not self.is_setup():
             return None
-        row = self._db.execute(
-            "SELECT setup_vault_presecured FROM account WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT setup_vault_presecured FROM account WHERE id = 1").fetchone()
         if not row or row["setup_vault_presecured"] is None:
             return None
         return bool(row["setup_vault_presecured"])
@@ -434,9 +409,7 @@ class AuthService:
         if not self.is_setup():
             raise RuntimeError("Account is not set up")
         with self._write_lock:
-            row = self._db.execute(
-                "SELECT setup_vault_presecured FROM account WHERE id = 1"
-            ).fetchone()
+            row = self._db.execute("SELECT setup_vault_presecured FROM account WHERE id = 1").fetchone()
             if row and row["setup_vault_presecured"] is not None:
                 return
             self._db.execute(
@@ -526,8 +499,7 @@ class AuthService:
                     """INSERT INTO account (id, username, email, password_hash, pin_hash,
                        totp_secret_encrypted, totp_salt, totp_enabled, created_at)
                        VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
-                    [username, email, password_hash, pin_hash, encrypted, totp_salt,
-                     datetime.now(UTC).isoformat()],
+                    [username, email, password_hash, pin_hash, encrypted, totp_salt, datetime.now(UTC).isoformat()],
                 )
                 self._bind_new_operator_locked()
         except sqlite3.IntegrityError as exc:
@@ -583,9 +555,7 @@ class AuthService:
         automatically during the very next successful login) the flag can
         be removed; it will default to off in a future release.
         """
-        row = self._db.execute(
-            "SELECT totp_secret_encrypted, totp_salt FROM account WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT totp_secret_encrypted, totp_salt FROM account WHERE id = 1").fetchone()
         if not row:
             return
 
@@ -631,11 +601,12 @@ class AuthService:
         secret, or None if decryption produced garbage.
         """
         import re
+
         legacy_key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 390_000, dklen=32)
         key_stream = hashlib.sha256(legacy_key).digest()
         while len(key_stream) < len(encrypted):
             key_stream += hashlib.sha256(key_stream).digest()
-        decrypted = bytes(a ^ b for a, b in zip(encrypted, key_stream[:len(encrypted)]))
+        decrypted = bytes(a ^ b for a, b in zip(encrypted, key_stream[: len(encrypted)]))
         try:
             plaintext = decrypted.decode("utf-8")
             # TOTP secrets are base32-encoded (A-Z, 2-7, =)
@@ -664,9 +635,7 @@ class AuthService:
         that confirmation. Live unlock reads the same flag.
         """
         try:
-            row = self._db.execute(
-                "SELECT totp_enabled FROM account WHERE id = 1"
-            ).fetchone()
+            row = self._db.execute("SELECT totp_enabled FROM account WHERE id = 1").fetchone()
         except sqlite3.OperationalError:
             return False
         return bool(row and row["totp_enabled"])
@@ -719,9 +688,7 @@ class AuthService:
         if not self.verify_password(password):
             return False
 
-        self._execute_locked(
-            "UPDATE account SET pin_hash = ? WHERE id = 1", [_hash_pin(pin)]
-        )
+        self._execute_locked("UPDATE account SET pin_hash = ? WHERE id = 1", [_hash_pin(pin)])
         logger.info("Quick-unlock PIN set/updated via post-setup path")
         return True
 
@@ -765,9 +732,7 @@ class AuthService:
         so a concurrent request cannot double-consume the same code.
         """
         with self._write_lock:
-            rows = self._db.execute(
-                "SELECT code_hash FROM backup_codes WHERE used = 0"
-            ).fetchall()
+            rows = self._db.execute("SELECT code_hash FROM backup_codes WHERE used = 0").fetchall()
             for row in rows:
                 try:
                     if self._hasher.verify(row["code_hash"], code):
@@ -823,8 +788,7 @@ class AuthService:
 
         Stamps ``password_changed_at`` with the current epoch so that
         previously issued JWTs (whose ``iat`` predates the change) can be
-        rejected at decode time — mirrors the upstream OpenAlgo v2.0.0.7
-        session-invalidation behaviour. Without this stamp a leaked token
+        rejected at decode time. Without this stamp a leaked token
         would remain valid until natural expiry.
 
         Args:
@@ -840,9 +804,7 @@ class AuthService:
         if len(new_password) < 8:
             raise ValueError("Password too weak — minimum 8 characters")
 
-        row = self._db.execute(
-            "SELECT username FROM account WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT username FROM account WHERE id = 1").fetchone()
         if not row or row["username"] != username:
             return False
 
@@ -864,9 +826,7 @@ class AuthService:
         than the returned epoch was issued before the password change and
         MUST be rejected.
         """
-        row = self._db.execute(
-            "SELECT password_changed_at FROM account WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT password_changed_at FROM account WHERE id = 1").fetchone()
         if not row:
             return 0.0
         try:
@@ -917,9 +877,7 @@ class AuthService:
         """
         if not self.verify_password(password):
             return None
-        row = self._db.execute(
-            "SELECT 1 FROM account WHERE id = 1"
-        ).fetchone()
+        row = self._db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
         if not row:
             return None
 

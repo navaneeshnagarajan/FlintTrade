@@ -275,10 +275,7 @@ def test_concurrent_load_activate(loader: PluginLoader, plugin_dir: Path) -> Non
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=_work, args=(f"thread_plugin_{i}",))
-        for i in range(5)
-    ]
+    threads = [threading.Thread(target=_work, args=(f"thread_plugin_{i}",)) for i in range(5)]
     for t in threads:
         t.start()
     for t in threads:

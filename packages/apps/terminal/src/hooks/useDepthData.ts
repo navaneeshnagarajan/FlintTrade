@@ -1,5 +1,5 @@
 /**
- * TanStack Query hook for fetching market depth data from the OpenAlgo API.
+ * TanStack Query hook for fetching market depth data from the broker API.
  *
  * Returns bid/ask depth levels for a given symbol. Polls every 1 second
  * to build up the time-series the DOM Heatmap accumulates. (Written for
@@ -15,6 +15,7 @@ import type { MarketDepth } from "@/types/api";
 import { isDocumentHidden } from "@/lib/deskPolling";
 import { useRearmPollingWhenVisible } from "@/hooks/useRearmPollingWhenVisible";
 import { isMarketHours } from "@/lib/market";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 
 /**
  * Fetch market depth for a symbol.
@@ -28,17 +29,16 @@ export function useDepthData(
   exchange: string,
   enabled = true,
 ) {
-  const queryKey = ["depth", symbol, exchange] as const;
+  const scope = useMarketDataScope();
+  const queryKey = ["depth", scope, symbol, exchange] as const;
   useRearmPollingWhenVisible(
     queryKey,
     () => enabled && symbol.length > 0 && isMarketHours(),
   );
   return useQuery<MarketDepth>({
     queryKey,
-    queryFn: () => getDepth(symbol, exchange),
+    queryFn: ({ signal }) => getDepth(symbol, exchange, signal, scope),
     enabled: enabled && !!symbol,
     refetchInterval: () => (isDocumentHidden() || !isMarketHours() ? false : 1_000),
-    // Keep previous data while refetching to avoid flicker
-    placeholderData: (prev) => prev,
   });
 }

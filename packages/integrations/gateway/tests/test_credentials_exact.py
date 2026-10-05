@@ -36,46 +36,8 @@ def seed(store, selector, *, primary=False):
     return result
 
 
-def test_exact_component_presence_shared_cas_and_absent_delete(store):
-    selector = BrokerSelector("openalgo", "A:1")
-    unseen = state(store, selector)
-    assert (unseen.version.generation, unseen.present, unseen.origin) == (0, False, None)
-    setup = store.put_setup(selector, {"base_url": "HTTP://EXAMPLE.COM:80/"}, expected=unseen.version)
-    assert setup.generation == 1
-    assert store.retrieve_setup(selector) == {"base_url": "http://example.com:80"}
-    both = store.put_credentials(selector, "zerodha", "Synthetic", {"token": "old"}, expected=setup)
-    assert both.generation == 2
-    assert state(store, selector).credential_present and state(store, selector).setup_present
-    assert store.account_for_selector(selector).broker == "zerodha"
-    with pytest.raises(vault.CredentialStaleError):
-        store.remove_setup(selector, expected=setup)
-    credentials = store.remove_setup(selector, expected=both)
-    assert credentials.generation == 3 and state(store, selector).present
-    absent = store.remove_selector(selector, expected=credentials)
-    assert absent.generation == 4 and not state(store, selector).present
-    again = store.remove_credentials(selector, expected=absent)
-    assert again.generation == 5
-    assert state(store, selector).origin == "managed"
-    with pytest.raises(vault.CredentialStaleError):
-        store.remove_selector(selector, expected=absent)
 
 
-def test_stage_detects_setup_and_true_absent_aba(store):
-    selector = BrokerSelector("openalgo", "A")
-    stage = store.stage_credentials(selector, {"token": "candidate"}, broker="openalgo", label="Synthetic")
-    assert stage.expected_version.generation == 0
-    first = store.remove_selector(selector, expected=state(store, selector).version)
-    assert first.generation == 1
-    with pytest.raises(vault.CredentialStaleError):
-        stage.commit()
-    seed(store, selector)
-    stage = store.stage_credentials(selector)
-    store.put_setup(selector, {"base_url": "https://example.com"}, expected=state(store, selector).version)
-    with pytest.raises(vault.CredentialStaleError):
-        stage.commit()
-    assert store.retrieve_credentials(selector) == {"token": "old"}
-    stage.discard()
-    stage.discard()
 
 
 def test_primary_touches_demoted_version_and_restores_forward(store):
@@ -109,26 +71,6 @@ def test_primary_snapshot_rejects_new_membership_atomically(store):
     assert store.account_for_selector(c).is_primary
 
 
-def test_selector_snapshot_is_opaque_forward_cas_and_store_bound(store):
-    a, b = BrokerSelector("openalgo", "A"), BrokerSelector("dhan", "B")
-    empty = store.snapshot_selector(a)
-    created = seed(store, a)
-    store.restore_selector(empty, expected=created)
-    assert state(store, a).version.generation == 2
-    assert not state(store, a).present
-    seed(store, a, primary=True)
-    seed(store, b)
-    snapshot = store.snapshot_selector(a)
-    assert "token" not in repr(snapshot) and "old" not in repr(snapshot)
-    current = store.remove_selector(a, expected=state(store, a).version)
-    reopened = vault.CredentialStore(store._db_path, "synthetic-password")
-    with pytest.raises(vault.CredentialStaleError):
-        reopened.restore_selector(snapshot, expected=current)
-    store.apply_primary_projection(store.snapshot_primary_projection(b, True))
-    with pytest.raises(vault.CredentialStaleError):
-        store.restore_selector(snapshot, expected=current)
-    assert store.account_for_selector(b).is_primary
-    assert store.account_for_selector(a) is None
 
 
 def test_versions_persist_and_legacy_creation_is_unavailable(store):
@@ -161,33 +103,6 @@ def test_wrong_selector_cannot_reveal_or_overwrite(store):
     assert store.retrieve_credentials(a) == {"token": "old"}
 
 
-@pytest.mark.parametrize(
-    "setup",
-    [
-        {},
-        {"base_url": "https://example.com", "api_key": "secret"},
-        {"base_url": "https://user:secret@example.com"},
-        {"base_url": "https://example.com?"},
-        {"base_url": "https://example.com#"},
-        {"base_url": "https://example.com/path"},
-        {"base_url": "https://example.com:"},
-        {"base_url": "https://example.com:0"},
-        {"base_url": "https://example.com:65536"},
-        {"base_url": "https://exam%70le.com"},
-        {"base_url": "https://é.com"},
-        {"base_url": " https://example.com"},
-        {"base_url": "https://example.com\\path"},
-        {"base_url": "https://[bad]"},
-        {"base_url": "https://example.com", "ws_port": True},
-        {"base_url": "https://example.com", "ws_port": "1"},
-    ],
-)
-def test_setup_validation_is_mutation_free(store, setup):
-    selector = BrokerSelector("openalgo", "A")
-    before = state(store, selector).version
-    with pytest.raises(vault.CredentialValidationError, match="^credential_validation_failed$"):
-        store.put_setup(selector, setup, expected=before)
-    assert state(store, selector).version == before
 
 
 def test_overflow_refuses_all_primary_changes_and_sql_rejects_zero(store):
@@ -440,23 +355,6 @@ def test_copied_invalid_generation_is_refused_on_reopen(store, bad):
         vault.CredentialStore(store._db_path, "synthetic-password")
 
 
-def test_primary_noop_has_no_generation_and_unrelated_selector_bytes_are_isolated(store):
-    a, b = BrokerSelector("openalgo", "A"), BrokerSelector("openalgo", "B")
-    seed(store, a, primary=True)
-    seed(store, b)
-    before = state(store, a).version
-    mutation = store.apply_primary_projection(store.snapshot_primary_projection(a, True))
-    assert mutation.before_versions == mutation.after_versions == (before,)
-
-    def row_bytes():
-        with closing(sqlite3.connect(store._db_path)) as conn:
-            return conn.execute("SELECT * FROM accounts WHERE account_id='A'").fetchone()
-
-    original = row_bytes()
-    store.put_setup(b, {"base_url": "https://[::1]:443", "ws_port": 65535}, expected=state(store, b).version)
-    store.remove_selector(b, expected=state(store, b).version)
-    assert row_bytes() == original
-    assert state(store, a).version == before
 
 
 def test_postcommit_physical_replacement_is_failure_with_possibly_applied_mutation(store, monkeypatch):
@@ -500,21 +398,6 @@ def test_foreign_incarnation_in_same_file_latches_even_after_restore(store):
         store.retrieve_credentials(a)
 
 
-def test_stale_precedes_missing_update_and_snapshot_restore_preserves_both_components(store):
-    a = BrokerSelector("openalgo", "A")
-    first = seed(store, a)
-    with_setup = store.put_setup(a, {"base_url": "https://example.com:443", "ws_port": 1}, expected=first)
-    snapshot = store.snapshot_selector(a)
-    deleted = store.remove_selector(a, expected=with_setup)
-    with pytest.raises(vault.CredentialStaleError):
-        store.update_credentials(a, {}, expected=with_setup)
-    restored = store.restore_selector(snapshot, expected=deleted)
-    assert restored.generation == 4
-    assert store.retrieve_credentials(a) == {"token": "old"}
-    assert store.retrieve_setup(a) == {"base_url": "https://example.com:443", "ws_port": 1}
-    copy = store.retrieve_setup(a)
-    copy["ws_port"] = 200
-    assert store.retrieve_setup(a)["ws_port"] == 1
 
 
 def test_vault_refuses_wal_not_accepted_by_connection(tmp_path, monkeypatch):

@@ -32,7 +32,7 @@ _TEST_API_KEY = "csrf-test-api-key"
 @pytest.fixture()
 def app():
     """Create a Flask test app with auth middleware active."""
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app
@@ -42,8 +42,8 @@ def app():
     yield flask_app
 
     # Restore — don't leak test key
-    if os.environ.get("OPENALGO_API_KEY") == _TEST_API_KEY:
-        os.environ.pop("OPENALGO_API_KEY", None)
+    if os.environ.get("FLINTTRADE_API_KEY") == _TEST_API_KEY:
+        os.environ.pop("FLINTTRADE_API_KEY", None)
 
 
 @pytest.fixture()
@@ -133,9 +133,11 @@ class TestPublicEndpointBypass:
         assert resp.status_code in (401, 503)
         data = resp.get_json()
         # The error should be about credentials or service, not about API key
-        assert "unauthorized" not in data.get("message", "").lower() or \
-            "credentials" in data.get("message", "").lower() or \
-            "service" in data.get("message", "").lower()
+        assert (
+            "unauthorized" not in data.get("message", "").lower()
+            or "credentials" in data.get("message", "").lower()
+            or "service" in data.get("message", "").lower()
+        )
 
     def test_auth_setup_no_key_required(self, client: Any) -> None:
         """POST /v1/auth/setup is public — accessible without API key."""

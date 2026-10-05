@@ -4,7 +4,7 @@
 - yfinance: MCX commodity prices (GOLD, SILVER, CRUDE in INR), global indices
 - jugaad-data: NSE holidays, corporate actions
 
-These are supplementary sources. Primary data comes from OpenAlgo via broker API.
+These are supplementary sources. Primary data comes from native broker via broker API.
 """
 
 from __future__ import annotations
@@ -97,13 +97,12 @@ class NSEData:
         if self._chart is None:
             try:
                 from openchart import NSEData as OpenChartNSE
+
                 self._chart = OpenChartNSE()
                 logger.info("OpenChart NSEData initialised")
             except ImportError:
                 logger.warning("openchart not installed — pip install openchart")
-                raise ImportError(
-                    "openchart is required for free NSE data. Install with: pip install openchart"
-                )
+                raise ImportError("openchart is required for free NSE data. Install with: pip install openchart")
         return self._chart
 
     def historical(
@@ -166,7 +165,11 @@ class NSEData:
 
             logger.info(
                 "OpenChart: %s %s — %d bars (%s to %s)",
-                symbol, exchange, result.total_bars, start_date, end_date,
+                symbol,
+                exchange,
+                result.total_bars,
+                start_date,
+                end_date,
             )
         except ImportError:
             result.error = "openchart not installed"
@@ -203,12 +206,12 @@ class NSEData:
 
 # Yahoo Finance tickers for Indian MCX commodities
 _YFINANCE_MCX_MAP: dict[str, str] = {
-    "GOLD": "GC=F",       # Gold futures (USD) — convert to INR
-    "SILVER": "SI=F",     # Silver futures
-    "CRUDEOIL": "CL=F",   # WTI Crude
-    "NATURALGAS": "NG=F", # Natural Gas
-    "COPPER": "HG=F",     # Copper
-    "ZINC": "ZN=F",       # Zinc (LME)
+    "GOLD": "GC=F",  # Gold futures (USD) — convert to INR
+    "SILVER": "SI=F",  # Silver futures
+    "CRUDEOIL": "CL=F",  # WTI Crude
+    "NATURALGAS": "NG=F",  # Natural Gas
+    "COPPER": "HG=F",  # Copper
+    "ZINC": "ZN=F",  # Zinc (LME)
 }
 
 # INR conversion ticker
@@ -246,7 +249,9 @@ class CommodityData:
             convert_to_inr: multiply by USDINR rate if True
         """
         result = FreeDataResult(
-            symbol=commodity, exchange="MCX", source="yfinance",
+            symbol=commodity,
+            exchange="MCX",
+            source="yfinance",
         )
 
         ticker = _YFINANCE_MCX_MAP.get(commodity.upper())
@@ -262,8 +267,11 @@ class CommodityData:
 
         try:
             data = yf.download(
-                ticker, start=start_date, end=end_date,
-                interval=interval, progress=False,
+                ticker,
+                start=start_date,
+                end=end_date,
+                interval=interval,
+                progress=False,
             )
             if data is None or data.empty:
                 result.error = f"No yfinance data for {ticker}"
@@ -274,8 +282,11 @@ class CommodityData:
             if convert_to_inr:
                 try:
                     fx = yf.download(
-                        _USDINR_TICKER, start=start_date, end=end_date,
-                        interval=interval, progress=False,
+                        _USDINR_TICKER,
+                        start=start_date,
+                        end=end_date,
+                        interval=interval,
+                        progress=False,
                     )
                     if fx is not None and not fx.empty:
                         # Use a simple average for the period
@@ -298,7 +309,10 @@ class CommodityData:
 
             logger.info(
                 "yfinance: %s (%s) — %d bars, INR rate=%.2f",
-                commodity, ticker, result.total_bars, inr_rate,
+                commodity,
+                ticker,
+                result.total_bars,
+                inr_rate,
             )
         except Exception as exc:
             result.error = str(exc)
@@ -333,12 +347,10 @@ class NSEHolidays:
 
         try:
             from jugaad_data.holidays import holidays as jd_holidays
+
             holiday_dates = jd_holidays(year)
             if isinstance(holiday_dates, list):
-                self._cache[year] = [
-                    d if isinstance(d, date) else date.fromisoformat(str(d))
-                    for d in holiday_dates
-                ]
+                self._cache[year] = [d if isinstance(d, date) else date.fromisoformat(str(d)) for d in holiday_dates]
             else:
                 self._cache[year] = []
             logger.info("Loaded %d NSE holidays for %d", len(self._cache[year]), year)
@@ -408,7 +420,11 @@ class FreeDataSource:
     ) -> FreeDataResult:
         """Get free MCX commodity data via yfinance."""
         return self.commodity.historical(
-            commodity, start_date, end_date, interval, convert_to_inr,
+            commodity,
+            start_date,
+            end_date,
+            interval,
+            convert_to_inr,
         )
 
     def search(self, query: str) -> list[dict[str, str]]:

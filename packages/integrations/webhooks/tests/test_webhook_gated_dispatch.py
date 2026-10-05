@@ -63,13 +63,13 @@ def test_gate_order_invoked_with_matching_external_intent_metadata(backend_lease
         mode="live",
         intent_source="custom",
         external_nonce_hash=nonce_hash,
-        selector="openalgo:default",
+        selector="broker:default",
     )
 
     safety_ctx = gate_order(
         {"symbol": "RELIANCE", "action": "BUY"},
         request_ctx,
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         actor_type="external_intent",
         intent_source="custom",
@@ -97,14 +97,14 @@ def test_gate_order_rejects_mismatched_external_nonce(backend_lease_proof) -> No
         mode="live",
         intent_source="custom",
         external_nonce_hash=real_hash,
-        selector="openalgo:default",
+        selector="broker:default",
     )
 
     with pytest.raises(SafetyBypassError, match="external_nonce_mismatch"):
         gate_order(
             {"symbol": "RELIANCE", "action": "BUY"},
             request_ctx,
-            adapter_id="openalgo",
+            adapter_id="broker",
             account_id="default",
             actor_type="external_intent",
             intent_source="custom",

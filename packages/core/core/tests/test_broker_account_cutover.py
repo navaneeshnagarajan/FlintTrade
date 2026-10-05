@@ -42,19 +42,9 @@ MUTATIONS = [
     ("POST", "/api/v1/native/accounts/upstox/synthetic/login"),
     ("POST", "/api/v1/native/accounts/upstox/synthetic/set-primary"),
     ("DELETE", "/api/v1/native/accounts/upstox/synthetic"),
-    ("POST", "/v1/accounts"),
-    ("DELETE", "/v1/accounts/synthetic"),
-    ("POST", "/v1/accounts/synthetic/reconnect"),
-    ("POST", "/v1/accounts/synthetic/set-primary"),
-    ("POST", "/v1/auth/oauth/start"),
-    ("POST", "/v1/auth/credentials"),
-    ("POST", "/v1/auth/otp/request"),
-    ("POST", "/v1/auth/otp/verify"),
     ("PUT", "/v1/rate-limits"),
     ("POST", "/admin/credentials/rotation/upstox/schedule"),
     ("POST", "/admin/credentials/rotation/upstox/rotate-now"),
-    ("POST", "/api/v1/ditto/accounts"),
-    ("DELETE", "/api/v1/ditto/accounts/synthetic"),
 ]
 
 
@@ -113,13 +103,12 @@ def test_http_mutations_authenticate_then_deny_before_body_or_authorities(guarde
         assert response.status_code == 401
 
 
-@pytest.mark.parametrize("path", ["/api/v1/native/oauth/callback", "/v1/auth/oauth/callback"])
+@pytest.mark.parametrize("path", ["/api/v1/native/oauth/callback"])
 def test_callbacks_do_not_consume_or_echo_pending_state(guarded_app, path, monkeypatch):
     app, forbidden = guarded_app
     pending = {"synthetic-state": {"broker": "zerodha", "label": "test", "account_id": "test"}}
     app.config["OAUTH_STATES"] = deepcopy(pending)
     monkeypatch.setattr(native_account_routes, "_OAUTH_PENDING", deepcopy(pending))
-    monkeypatch.setattr("flinttrade_gateway.auth._oauth_states", forbidden)
     response = app.test_client().get(path + "?state=synthetic-state&code=synthetic-code")
     assert forbidden.calls == []
     assert response.status_code == 503
@@ -185,33 +174,11 @@ def test_startup_skips_workspace_and_authorities(monkeypatch, caplog):
     app.config.update(NATIVE_ADAPTERS=forbidden, REGISTRY=forbidden, CREDENTIAL_STORE=forbidden)
     with caplog.at_level(logging.INFO):
         assert app_module._reestablish_native_sessions(app) == {}
-        app_module._reconnect_saved_accounts(forbidden, forbidden, logging.getLogger("test"))
         blueprint = configure_session_rotation(app)
     assert blueprint is not None
     assert app.config["ROTATION_SCHEDULER"].get_jobs() == []
     assert forbidden.calls == []
     assert "broker_account_cutover_unavailable" in caplog.text
-
-
-@pytest.mark.parametrize("method", ["add_account", "remove_account"])
-def test_ditto_direct_writers_deny_before_fence_and_storage(method, tmp_path):
-    from flinttrade_ditto.account_manager import AccountManager
-
-    forbidden = Forbidden()
-    manager = AccountManager(
-        db_path=str(tmp_path / "metadata.db"),
-        credential_store=forbidden,
-        installation_state_root=tmp_path / "installation",
-    )
-    original_state = manager._installation_state
-    try:
-        manager._installation_state = forbidden
-        with pytest.raises(BrokerAccountCutoverUnavailable, match="^broker_account_cutover_unavailable$"):
-            getattr(manager, method)(forbidden)
-    finally:
-        manager._installation_state = original_state
-        manager.close()
-    assert forbidden.calls == []
 
 
 @pytest.mark.parametrize("endpoint", ["schedule", "rotate-now"])
@@ -229,30 +196,6 @@ def test_standalone_rotation_blueprint_denies_before_body_and_rotator(endpoint):
     assert response.status_code == 503
     assert response.json == {"error": "broker_account_cutover_unavailable"}
     assert forbidden.calls == []
-
-
-def test_only_exact_default_openalgo_session_is_published(tmp_path, *, backend_lease_factory):
-    from flinttrade_core.app import build_broker_router
-    from flinttrade_core.broker_identity import BrokerSelector
-    from flinttrade_core.config import Settings
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-    from flinttrade_core.workspace_migrations import compare_and_swap_workspace
-    fixture = RegistryFixture(tmp_path)
-    def configure(config):
-        config["openalgo"]["api_key"] = "synthetic-key"
-        config["brokers"]["registered"] = ["openalgo:default", "openalgo:other"]
-    snapshot = compare_and_swap_workspace(tmp_path, fixture.workspace.version, configure)
-    cfg = snapshot.as_dict()["openalgo"]
-    client = OpenAlgoClient(Settings(openalgo_host=cfg["host"], openalgo_api_key=cfg["api_key"],
-        openalgo_port=int(cfg["port"]), openalgo_ws_port=int(cfg["ws_port"])))
-    try:
-        build_broker_router(fixture.registry, snapshot.as_dict()["brokers"], openalgo_client=client,
-            registry_publication_owner=fixture.owner, workspace_snapshot=snapshot, workspace_path=tmp_path, backend_lease_proof=backend_lease_factory())
-        assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "default")).status == "connected"
-        assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "other")) is None
-    finally:
-        client.close_sync()
-        fixture.close()
 
 
 @pytest.mark.parametrize("weekly", [False, True])
@@ -335,7 +278,7 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
     from flinttrade_core.app import create_flask_app
 
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     app = create_flask_app(backend_lease_proof=backend_lease_factory())
     client = app.test_client()
     with app.app_context():
@@ -346,7 +289,7 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
         assert response.json == {"error": "broker_account_cutover_unavailable"}
         assert response.headers["Cache-Control"] == "no-store"
         assert client.open(path, method="OPTIONS", data="synthetic", content_type="text/plain").status_code == 200
-    for path in ("/api/v1/native/oauth/callback", "/v1/auth/oauth/callback"):
+    for path in ("/api/v1/native/oauth/callback",):
         response = client.get(path + "?code=synthetic&state=synthetic")
         assert response.status_code == 503
         assert response.json == {"error": "broker_account_cutover_unavailable"}
@@ -364,7 +307,7 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
     assert response.json["data"]["accepted"] is True
     rows_before = app.config["CREDENTIAL_STORE"].list_accounts()
     response = client.post("/v1/config/openalgo", headers=headers, json={"telegram_username": "synthetic"})
-    assert response.status_code == 200, response.json
+    assert response.status_code in (404, 405), response.json
     assert app.config["CREDENTIAL_STORE"].list_accounts() == rows_before
 
 
@@ -378,7 +321,7 @@ def test_real_factory_rejection_precedes_body_validation_and_observability(
     from flinttrade_core.app import create_flask_app
 
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.setenv("ENABLE_ANALYZER", "true")
     app = create_flask_app()
     with app.app_context():
@@ -407,7 +350,6 @@ def test_real_factory_rejection_precedes_body_validation_and_observability(
     monkeypatch.setattr(native_account_routes, "_pop_pending_oauth_callback", forbidden)
     monkeypatch.setattr(operations_routes, "_ditto_manager", forbidden)
     monkeypatch.setattr(operations_routes, "_quiesce_ditto_account_generation", forbidden)
-    monkeypatch.setattr("flinttrade_gateway.auth._oauth_states", forbidden)
     for method in ("get_json", "get_data", "_load_form_data"):
         monkeypatch.setattr(Request, method, body_reads)
     observed = []
@@ -478,7 +420,6 @@ def test_real_factory_rejection_precedes_body_validation_and_observability(
 @pytest.mark.parametrize(
     "path",
     [
-        "/v1/config/openalgo",
         "/v1/config/telegram",
         "/api/v1/native/postbacks/upstox",
         "/api/v1/ditto/accounts/synthetic/enable",
@@ -500,8 +441,9 @@ def test_real_factory_retains_non_cutover_content_type_validation(path):
     assert response.json == {"status": "error", "message": "Content-Type must be application/json"}
 
 
-
-_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_spec = importlib.util.spec_from_file_location(
+    "_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py"
+)
 _fixture_module = importlib.util.module_from_spec(_fixture_spec)
 _fixture_spec.loader.exec_module(_fixture_module)
 RegistryFixture = _fixture_module.RegistryFixture
@@ -509,12 +451,15 @@ RegistryFixture = _fixture_module.RegistryFixture
 
 def test_published_native_read_refuses_until_verified_read_port_cutover(tmp_path):
     from flinttrade_gateway.brokers._base import Session
+
     fixture = RegistryFixture(tmp_path)
     calls = []
+
     class Adapter:
         async def profile(self, session):
             calls.append(session)
             raise AssertionError("provider must not run")
+
     app = Flask(__name__)
     app.register_blueprint(native_account_routes.native_accounts_bp)
     for account in ("synthetic", "other"):
@@ -524,7 +469,7 @@ def test_published_native_read_refuses_until_verified_read_port_cutover(tmp_path
     app.config.update(REGISTRY=fixture.registry, NATIVE_ADAPTERS={"upstox": Adapter()}, CREDENTIAL_STORE=forbidden)
     response = app.test_client().get("/api/v1/native/accounts/upstox/synthetic/profile")
     assert response.status_code == 409
-    assert response.json == {"status": "error", "message": "Native broker session is unavailable."}
+    assert response.json == {"status": "error", "message": "Native broker HTTP reads are unavailable until the read cutover"}
     assert fixture.registry.list_exact_states() == before
     assert forbidden.calls == calls == []
     fixture.close()
@@ -538,17 +483,16 @@ def test_ditto_default_manager_retains_reads_and_fenced_metadata_only_changes(tm
 
     harden_directory(tmp_path)
     store = CredentialStore(tmp_path / "vault.db", "synthetic-password")
-    selector = BrokerSelector("openalgo", "synthetic")
-    store.put_credentials(selector, "openalgo", "Synthetic", {"api_key": "synthetic-key"},
-                          expected=store.selector_state(selector).version)
+    selector = BrokerSelector("dhan", "synthetic")
+    store.put_credentials(
+        selector, "dhan", "Synthetic", {"token": "synthetic-key"}, expected=store.selector_state(selector).version
+    )
     kwargs = {
         "db_path": str(tmp_path / "metadata.db"),
-        "credential_store": store,
-        "installation_state_root": tmp_path / "installation",
     }
-    with AccountManager(**kwargs, mutation_admission=lambda: None) as seed:
-        seed.add_account(BrokerAccount("synthetic", "http://127.0.0.1:1", "synthetic-key"))
-    credentials_before = store.retrieve_for("openalgo", "synthetic")
+    with AccountManager(**kwargs) as seed:
+        seed.add_account(BrokerAccount("synthetic", "dhan", "Synthetic"))
+    credentials_before = store.retrieve_for("dhan", "synthetic")
     with AccountManager(**kwargs) as manager:
         assert len(manager.list_accounts()) == 1
         manager.disable_account("synthetic")
@@ -567,4 +511,4 @@ def test_ditto_default_manager_retains_reads_and_fenced_metadata_only_changes(tm
             response = client.post(f"/api/v1/ditto/accounts/synthetic/{action}", headers=headers)
             assert response.status_code == 200, response.json
             assert manager.get_account("synthetic").enabled is expected
-    assert store.retrieve_for("openalgo", "synthetic") == credentials_before
+    assert store.retrieve_for("dhan", "synthetic") == credentials_before

@@ -51,8 +51,12 @@ def practice_entry_kill_code(app: Flask) -> str | None:
         if type(safety) is not SafetySystem or type(safety.l5_kill) is not KillSwitch:
             raise ValueError
         result = safety.l5_kill.validate()
-        if (type(result) is not SafetyResult or result.layer != "L5_KILL"
-                or type(result.verdict) is not SafetyVerdict or type(result.passed) is not bool):
+        if (
+            type(result) is not SafetyResult
+            or result.layer != "L5_KILL"
+            or type(result.verdict) is not SafetyVerdict
+            or type(result.passed) is not bool
+        ):
             raise ValueError
         if result.verdict is SafetyVerdict.PASS and result.passed is True:
             return None
@@ -126,9 +130,14 @@ class PracticeAgentAdapter:
             self._backend_lease_proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
         except BackendLeaseUnavailable:
             raise PracticeAgentError("practice_runtime_unavailable") from None
-        if (type(session_token) is not str or not session_token or len(session_token) > 16_384
-                or type(max_quote_age_seconds) not in {float, int}
-                or not math.isfinite(max_quote_age_seconds) or not 0 < max_quote_age_seconds <= 60):
+        if (
+            type(session_token) is not str
+            or not session_token
+            or len(session_token) > 16_384
+            or type(max_quote_age_seconds) not in {float, int}
+            or not math.isfinite(max_quote_age_seconds)
+            or not 0 < max_quote_age_seconds <= 60
+        ):
             raise PracticeAgentError("practice_session_invalid")
         self._app = app
         self.__token = session_token
@@ -172,11 +181,17 @@ class PracticeAgentAdapter:
                 claims = decode_token(self.__token)
             subject, jti, expiry = claims.get("sub"), claims.get("jti"), claims.get("exp")
             if (
-                claims.get("type") != "session" or claims.get("mode") != "practice"
+                claims.get("type") != "session"
+                or claims.get("mode") != "practice"
                 or claims.get("setup_session") is True
-                or type(subject) is not str or not subject.strip() or len(subject.encode()) > 1024
-                or type(jti) is not str or not jti.strip() or len(jti.encode()) > 256
-                or type(expiry) not in {int, float} or not math.isfinite(expiry)
+                or type(subject) is not str
+                or not subject.strip()
+                or len(subject.encode()) > 1024
+                or type(jti) is not str
+                or not jti.strip()
+                or len(jti.encode()) > 256
+                or type(expiry) not in {int, float}
+                or not math.isfinite(expiry)
                 or expiry <= datetime.now(UTC).timestamp()
                 or (self._identity is not None and self._identity != (subject, jti))
             ):
@@ -211,8 +226,12 @@ class PracticeAgentAdapter:
 
     @staticmethod
     def _instrument(symbol: object, exchange: object) -> tuple[str, str]:
-        if (not isinstance(symbol, str) or not _IDENTITY.fullmatch(symbol)
-                or not isinstance(exchange, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)):
+        if (
+            not isinstance(symbol, str)
+            or not _IDENTITY.fullmatch(symbol)
+            or not isinstance(exchange, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)
+        ):
             raise PracticeAgentError("practice_order_invalid")
         return symbol, exchange
 
@@ -227,14 +246,25 @@ class PracticeAgentAdapter:
             age = (datetime.now(UTC) - observed).total_seconds()
             if record.get("source_as_of") is not None:
                 source_time = datetime.fromisoformat(record["source_as_of"])
-                if source_time.tzinfo is None or not 0 <= (datetime.now(UTC) - source_time).total_seconds() <= self._max_quote_age:
+                if (
+                    source_time.tzinfo is None
+                    or not 0 <= (datetime.now(UTC) - source_time).total_seconds() <= self._max_quote_age
+                ):
                     raise ValueError
-            if (data["symbol"] != symbol or data["exchange"] != exchange
-                    or instrument["symbol"] != symbol or instrument["exchange"] != exchange
-                    or value["available"] is not True or type(price) not in {int, float}
-                    or not math.isfinite(price) or price <= 0
-                    or observed.tzinfo is None or not 0 <= age <= self._max_quote_age
-                    or not context.receipt.get("event_id") or not context.receipt.get("input_digest")):
+            if (
+                data["symbol"] != symbol
+                or data["exchange"] != exchange
+                or instrument["symbol"] != symbol
+                or instrument["exchange"] != exchange
+                or value["available"] is not True
+                or type(price) not in {int, float}
+                or not math.isfinite(price)
+                or price <= 0
+                or observed.tzinfo is None
+                or not 0 <= age <= self._max_quote_age
+                or not context.receipt.get("event_id")
+                or not context.receipt.get("input_digest")
+            ):
                 raise ValueError
         except Exception:
             raise PracticeAgentError("practice_market_data_invalid") from None
@@ -251,11 +281,15 @@ class PracticeAgentAdapter:
             value = InstrumentLotSizeSnapshot(**record["value"])
             provenance = record["provenance"]
             quote = data["quote"]
-            if (data.get("schema_version") != 1
-                    or value.symbol != symbol or value.exchange != exchange
-                    or record["request"] != {"exchange": exchange, "symbols": [symbol]}
-                    or type(provenance) is not dict or provenance.get("requested_role") != "quote"
-                    or provenance != quote["provenance"]):
+            if (
+                data.get("schema_version") != 1
+                or value.symbol != symbol
+                or value.exchange != exchange
+                or record["request"] != {"exchange": exchange, "symbols": [symbol]}
+                or type(provenance) is not dict
+                or provenance.get("requested_role") != "quote"
+                or provenance != quote["provenance"]
+            ):
                 raise ValueError
             BrokerSelector(**provenance["selector"])
             quote_id = quote["value"]["instrument"].get("instrument_id")
@@ -266,7 +300,10 @@ class PracticeAgentAdapter:
                 stamps.append(record["source_as_of"])
             for stamp in stamps:
                 instant = datetime.fromisoformat(stamp)
-                if instant.tzinfo is None or not 0 <= (datetime.now(UTC) - instant).total_seconds() <= self._max_quote_age:
+                if (
+                    instant.tzinfo is None
+                    or not 0 <= (datetime.now(UTC) - instant).total_seconds() <= self._max_quote_age
+                ):
                     raise ValueError
             canonical = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
             if context.receipt["input_digest"] != hashlib.sha256(canonical.encode("utf-8")).hexdigest():
@@ -287,8 +324,11 @@ class PracticeAgentAdapter:
         if self._app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True:
             raise PracticeAgentError("practice_runtime_unavailable")
         with self._app.test_request_context(
-            "/api/v1/ai/agent/market-data", method="GET", headers={
-                "Authorization": "Bearer " + self.__token, "X-FlintTrade-Mode": "practice",
+            "/api/v1/ai/agent/market-data",
+            method="GET",
+            headers={
+                "Authorization": "Bearer " + self.__token,
+                "X-FlintTrade-Mode": "practice",
             },
         ):
             return collect_configured_broker_context(symbol, exchange)
@@ -327,17 +367,22 @@ class PracticeAgentAdapter:
         try:
             return await self._context(symbol, exchange, fresh=operation == "quotes")
         except PracticeAgentError as exc:
-            self._emit("data_unavailable", {"code": exc.code, "operation": operation,
-                                             "symbol": symbol, "exchange": exchange})
+            self._emit(
+                "data_unavailable", {"code": exc.code, "operation": operation, "symbol": symbol, "exchange": exchange}
+            )
             raise
 
     async def quotes(self, *, symbol: str, exchange: str) -> dict[str, Any]:
         """Return a validated observed quote, without inventing source freshness."""
         context = await self._read_context(symbol, exchange, "quotes")
         record = self._quote(context, symbol, exchange)
-        return {"status": "success", "data": deepcopy(record["value"]),
-                "observed_at": record["observed_at"], "source_as_of": record.get("source_as_of"),
-                "input_receipt": dict(context.receipt)}
+        return {
+            "status": "success",
+            "data": deepcopy(record["value"]),
+            "observed_at": record["observed_at"],
+            "source_as_of": record.get("source_as_of"),
+            "input_receipt": dict(context.receipt),
+        }
 
     async def depth(self, *, symbol: str, exchange: str) -> dict[str, Any]:
         """Return authorised depth, or make a missing capability visible."""
@@ -345,13 +390,20 @@ class PracticeAgentAdapter:
         value = context.market_data.get("depth", {}).get("value")
         if not isinstance(value, dict):
             error = PracticeAgentError("practice_depth_unavailable")
-            self._emit("data_unavailable", {"code": error.code, "operation": "depth",
-                                             "symbol": symbol, "exchange": exchange})
+            self._emit(
+                "data_unavailable", {"code": error.code, "operation": "depth", "symbol": symbol, "exchange": exchange}
+            )
             raise error
         return {"status": "success", "data": deepcopy(value)}
 
     async def history(
-        self, *, symbol: str, exchange: str, interval: str, start_date: str, end_date: str,
+        self,
+        *,
+        symbol: str,
+        exchange: str,
+        interval: str,
+        start_date: str,
+        end_date: str,
     ) -> dict[str, Any]:
         """Expose the collector's bounded 5-minute context to the analysis engine."""
         context = await self._read_context(symbol, exchange, "history")
@@ -361,11 +413,14 @@ class PracticeAgentAdapter:
                 raise ValueError
             datetime.fromisoformat(start_date)
             datetime.fromisoformat(end_date)
-            data = {field: [bar[field] for bar in value["bars"]] for field in ("open", "high", "low", "close", "volume")}
+            data = {
+                field: [bar[field] for bar in value["bars"]] for field in ("open", "high", "low", "close", "volume")
+            }
         except (KeyError, TypeError, ValueError):
             error = PracticeAgentError("practice_history_unavailable")
-            self._emit("data_unavailable", {"code": error.code, "operation": "history",
-                                             "symbol": symbol, "exchange": exchange})
+            self._emit(
+                "data_unavailable", {"code": error.code, "operation": "history", "symbol": symbol, "exchange": exchange}
+            )
             raise error from None
         return {"status": "success", "data": data}
 
@@ -375,24 +430,39 @@ class PracticeAgentAdapter:
         quantity = kwargs.get("quantity")
         if type(quantity) is str and quantity.isascii() and quantity.isdigit():
             quantity = int(quantity)
-        if (exchange not in {"NSE", "BSE", *DERIVATIVE_EXCHANGES}
-                or not isinstance(product, str) or product not in {"MIS", "NRML", "CNC"}
-                or action not in {"BUY", "SELL"} or type(quantity) is not int or quantity <= 0
-                or kwargs.get("mode", "practice") != "practice"
-                or kwargs.get("order_type", kwargs.get("pricetype", "MARKET")) != "MARKET"
-                or kwargs.get("variety", "regular") != "regular"
-                or any(key in kwargs for key in ("apikey", "api_key", "account_id", "broker", "adapter_id"))):
+        if (
+            exchange not in {"NSE", "BSE", *DERIVATIVE_EXCHANGES}
+            or not isinstance(product, str)
+            or product not in {"MIS", "NRML", "CNC"}
+            or action not in {"BUY", "SELL"}
+            or type(quantity) is not int
+            or quantity <= 0
+            or kwargs.get("mode", "practice") != "practice"
+            or kwargs.get("order_type", kwargs.get("pricetype", "MARKET")) != "MARKET"
+            or kwargs.get("variety", "regular") != "regular"
+            or any(key in kwargs for key in ("apikey", "api_key", "account_id", "broker", "adapter_id"))
+        ):
             raise PracticeAgentError("practice_order_invalid")
         note = kwargs.get("rationale") or kwargs.get("note") or kwargs.get("admission_note") or ""
         strategy = kwargs.get("strategy") or "AutonomousAgent"
         if not isinstance(note, str) or not isinstance(strategy, str):
             raise PracticeAgentError("practice_order_invalid")
-        return {"symbol": symbol, "exchange": exchange, "product": product, "action": action,
-                "quantity": quantity, "order_type": "MARKET", "strategy": strategy,
-                "admission_note": note, "rationale": note}
+        return {
+            "symbol": symbol,
+            "exchange": exchange,
+            "product": product,
+            "action": action,
+            "quantity": quantity,
+            "order_type": "MARKET",
+            "strategy": strategy,
+            "admission_note": note,
+            "rationale": note,
+        }
 
     def _is_reduction(
-        self, body: dict[str, Any], positions: list[dict[str, Any]] | None = None,
+        self,
+        body: dict[str, Any],
+        positions: list[dict[str, Any]] | None = None,
         orders: list[dict[str, Any]] | None = None,
     ) -> bool:
         from flinttrade_engine.reduce_only import classify_reduce_only
@@ -401,13 +471,22 @@ class PracticeAgentAdapter:
             if positions is None or orders is None:
                 sandbox = self._app.config.get("DATA_SANDBOX_ENGINE")
                 positions, orders = sandbox.get_positions(), sandbox.get_orders()
-            if (not isinstance(positions, list) or not isinstance(orders, list)
-                    or any(not isinstance(row, dict) for row in [*positions, *orders])):
+            if (
+                not isinstance(positions, list)
+                or not isinstance(orders, list)
+                or any(not isinstance(row, dict) for row in [*positions, *orders])
+            ):
                 raise ValueError
             return classify_reduce_only(
-                symbol=body["symbol"], exchange=body["exchange"], product=body["product"],
-                action=body["action"], quantity=body["quantity"], positions=positions,
-                our_orders=orders, broker_orders=[], live=False,
+                symbol=body["symbol"],
+                exchange=body["exchange"],
+                product=body["product"],
+                action=body["action"],
+                quantity=body["quantity"],
+                positions=positions,
+                our_orders=orders,
+                broker_orders=[],
+                live=False,
             ).qualifies
         except Exception:
             return False
@@ -426,7 +505,10 @@ class PracticeAgentAdapter:
         self._check_cancellation()
 
     def _locked_dispatch_guard(
-        self, body: dict[str, Any], positions: list[dict[str, Any]], orders: list[dict[str, Any]],
+        self,
+        body: dict[str, Any],
+        positions: list[dict[str, Any]],
+        orders: list[dict[str, Any]],
         context: BrokerAnalysisContext,
     ) -> tuple[Any, int] | AbstractContextManager[None]:
         # This callable is installed only in our in-process request environ.
@@ -478,13 +560,23 @@ class PracticeAgentAdapter:
             raise PracticeAgentError("practice_reconciliation_required")
         trade = matched[0]
         price = trade.get("price")
-        if (any(str(trade.get(key)) != str(body[key]) for key in ("symbol", "exchange", "product", "action", "quantity"))
-                or type(price) not in {float, int} or not math.isfinite(price) or price <= 0):
+        if (
+            any(
+                str(trade.get(key)) != str(body[key]) for key in ("symbol", "exchange", "product", "action", "quantity")
+            )
+            or type(price) not in {float, int}
+            or not math.isfinite(price)
+            or price <= 0
+        ):
             raise PracticeAgentError("practice_reconciliation_required")
         return {**response, "orderid": order_id, "fill_price": float(price), "quantity": body["quantity"]}
 
     def _dispatch(
-        self, body: dict[str, Any], context: BrokerAnalysisContext, *, cached_on_drain: bool = False,
+        self,
+        body: dict[str, Any],
+        context: BrokerAnalysisContext,
+        *,
+        cached_on_drain: bool = False,
     ) -> dict[str, Any]:
         from flinttrade_core.order_routes import place_order
 
@@ -495,11 +587,17 @@ class PracticeAgentAdapter:
         # This marker comes from the validated quote receipt, never order input;
         # observation/source timestamps retain their separate evidence meanings.
         body = {**body, "price": float(record["value"]["ltp"]), "price_basis": "ltp"}
-        self._emit("dispatch_started", {"mode": "practice", "order": body,
-                                       "input_receipt": context.receipt,
-                                       "quote_observed_at": record["observed_at"],
-                                       "quote_source_as_of": record.get("source_as_of"),
-                                       "cached_on_drain": cached_on_drain})
+        self._emit(
+            "dispatch_started",
+            {
+                "mode": "practice",
+                "order": body,
+                "input_receipt": context.receipt,
+                "quote_observed_at": record["observed_at"],
+                "quote_source_as_of": record.get("source_as_of"),
+                "cached_on_drain": cached_on_drain,
+            },
+        )
         try:
             self._dispatch_guard(body)
         except PracticeAgentError as exc:
@@ -508,11 +606,15 @@ class PracticeAgentAdapter:
             return payload
         try:
             with self._app.test_request_context(
-                "/api/v1/orders/place", method="POST", json=body,
+                "/api/v1/orders/place",
+                method="POST",
+                json=body,
                 headers={"Authorization": "Bearer " + self.__token, "X-FlintTrade-Mode": "practice"},
-                environ_overrides={"flinttrade.practice_agent_guard": lambda body, positions, orders: (
-                    self._locked_dispatch_guard(body, positions, orders, context)
-                )},
+                environ_overrides={
+                    "flinttrade.practice_agent_guard": lambda body, positions, orders: self._locked_dispatch_guard(
+                        body, positions, orders, context
+                    )
+                },
             ):
                 response = self._app.make_response(place_order())
                 payload = response.get_json()
@@ -521,8 +623,12 @@ class PracticeAgentAdapter:
                 payload = {**payload, "http_status": response.status_code}
                 if 200 <= response.status_code < 300:
                     payload = self._confirmed_fill(payload, body)
-                elif not (400 <= response.status_code < 500 and payload.get("status") == "error"
-                          and not payload.get("order_id") and not payload.get("orderid")):
+                elif not (
+                    400 <= response.status_code < 500
+                    and payload.get("status") == "error"
+                    and not payload.get("order_id")
+                    and not payload.get("orderid")
+                ):
                     raise ValueError
                 self._emit("dispatch_result", {"mode": "practice", "order": body, "response": payload})
                 return payload
@@ -555,8 +661,15 @@ class PracticeAgentAdapter:
                     else:
                         context = await self._context(body["symbol"], body["exchange"], fresh=True)
                 except PracticeAgentError as exc:
-                    self._emit("data_unavailable", {"code": exc.code, "operation": "dispatch_quote",
-                                                    "symbol": body["symbol"], "exchange": body["exchange"]})
+                    self._emit(
+                        "data_unavailable",
+                        {
+                            "code": exc.code,
+                            "operation": "dispatch_quote",
+                            "symbol": body["symbol"],
+                            "exchange": body["exchange"],
+                        },
+                    )
                     raise
                 return self._dispatch(body, context, cached_on_drain=cached_on_drain)
         except PracticeAgentError as exc:
@@ -578,7 +691,9 @@ class PracticeAgentAdapter:
         passed = payload.get("status") == "COMPLETE" and bool(payload.get("orderid"))
         acknowledgement = (
             PracticeOrderResponse(payload["orderid"], "COMPLETE", payload["fill_price"], payload["quantity"])
-            if passed else None
+            if passed
+            else None
         )
-        return PracticeDecision(passed, "" if passed else str(payload.get("message") or "Practice order refused"),
-                                acknowledgement, payload)
+        return PracticeDecision(
+            passed, "" if passed else str(payload.get("message") or "Practice order refused"), acknowledgement, payload
+        )

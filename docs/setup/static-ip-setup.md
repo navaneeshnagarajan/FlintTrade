@@ -35,11 +35,6 @@ stream lifecycle has local synthetic coverage only; live-account,
 market-hours, funded-order, Live-promotion, and cross-platform proof remain
 outstanding.
 
-When those reads succeed (not login-only), chrome is **Connected (read)**
-/ **API smoke** — never imply placeable Live orders. Neo copy is
-`Live read only until funded unlock.` Prefer native; OpenAlgo is
-Settings / fallback only. Keep personal IPs out of this repository.
-
 ## FlintTrade Boundary
 
 FlintTrade stores no personal public IP in committed docs or examples. Keep IPs

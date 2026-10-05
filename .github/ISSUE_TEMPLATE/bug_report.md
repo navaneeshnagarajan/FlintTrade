@@ -31,8 +31,7 @@ If applicable, add screenshots or paste relevant log output (redact any broker c
 - **FlintTrade version:** (e.g., v0.0.1 — check `VERSION` file)
 - **OS:** (Windows / macOS / Ubuntu, version)
 - **Browser:** (if a UI bug — Chrome 130, Firefox 132, etc.)
-- **OpenAlgo version:** (check the gateway you've connected)
-- **Broker:** (which of the 37 brokers — if relevant)
+- **Broker:** (which native adapter — if relevant)
 - **Mode:** Explore / Practice / Live
 
 ## Additional context

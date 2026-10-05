@@ -50,12 +50,6 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     ("GET", "/v1/docs/search"),
     ("GET", "/v1/docs/document"),
     ("GET", "/v1/docs/changelog"),
-    # Setup-wizard OpenAlgo probe. Once an account exists the handler
-    # requires a session or setup-session JWT.
-    ("GET", "/v1/config/openalgo"),
-    ("POST", "/v1/config/openalgo"),
-    # Setup-wizard connectivity probe. The handler is loopback-only.
-    ("POST", "/v1/test-connection"),
     # Signed webhook intake. HMAC is checked inside the receiver.
     # GET /v1/webhook/log stays authenticated.
     ("POST", "/v1/webhook/<source>"),
@@ -63,7 +57,6 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     # Browser CSP report-uri. The browser cannot attach a session.
     ("POST", "/csp-report"),
     # Broker OAuth browser redirect. The state token is the check.
-    ("GET", "/v1/auth/oauth/callback"),
     ("GET", "/api/v1/native/oauth/callback"),
     # Broker server postback. The broker cannot send a FlintTrade session.
     ("POST", "/api/v1/native/postbacks/<adapter_id>"),

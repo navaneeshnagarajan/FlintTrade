@@ -89,7 +89,6 @@ IS_WINDOWS = os.name == "nt"
 
 BACKEND_HOST = os.environ.get("FLINTTRADE_BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.environ.get("FLINTTRADE_BACKEND_PORT", "5100"))
-OPENALGO_PORT = int(os.environ.get("OPENALGO_PORT", "5000"))
 BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 
 CORE_SRC = REPO_ROOT / "packages" / "core" / "core" / "src"
@@ -852,11 +851,9 @@ def cmd_status(_args: list[str]) -> int:
     else:
         info(f"  API: not responding on port {BACKEND_PORT}")
 
-    info("\nOpenAlgo integration (optional):")
-    info(f"  API: {'responding' if port_is_live(OPENALGO_PORT) else 'not responding'} on port {OPENALGO_PORT}")
 
     info("\nPorts:")
-    for port in (BACKEND_PORT, OPENALGO_PORT, 5173, 3000):
+    for port in (BACKEND_PORT, 5173, 3000):
         info(f"  :{port} - {describe_port(port)}")
 
     info("\nWorkspace:")
@@ -885,7 +882,6 @@ def cmd_dev(_args: list[str]) -> int:
     header("FlintTrade Dev Mode")
     info("  Terminal:  http://127.0.0.1:5173")
     info(f"  Backend:   {BACKEND_URL}")
-    info("  OpenAlgo:  optional integration, configure in Settings when needed")
     info("")
 
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)

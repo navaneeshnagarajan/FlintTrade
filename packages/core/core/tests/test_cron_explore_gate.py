@@ -84,10 +84,13 @@ def test_explore_helper_allows_practice(monkeypatch: pytest.MonkeyPatch) -> None
         assert _explore_schedule_write_blocked() is None
 
 
-@pytest.mark.parametrize("path,attr", [
-    ("/api/v1/cron/jobs/health_check_job/pause", "pause_calls"),
-    ("/api/v1/cron/jobs/health_check_job/resume", "resume_calls"),
-])
+@pytest.mark.parametrize(
+    "path,attr",
+    [
+        ("/api/v1/cron/jobs/health_check_job/pause", "pause_calls"),
+        ("/api/v1/cron/jobs/health_check_job/resume", "resume_calls"),
+    ],
+)
 def test_explore_header_blocks_schedule_write(
     client: FlaskClient,
     flask_app: Flask,
@@ -103,10 +106,13 @@ def test_explore_header_blocks_schedule_write(
     assert getattr(cron, attr) == []
 
 
-@pytest.mark.parametrize("path,attr", [
-    ("/api/v1/cron/jobs/health_check_job/pause", "pause_calls"),
-    ("/api/v1/cron/jobs/health_check_job/resume", "resume_calls"),
-])
+@pytest.mark.parametrize(
+    "path,attr",
+    [
+        ("/api/v1/cron/jobs/health_check_job/pause", "pause_calls"),
+        ("/api/v1/cron/jobs/health_check_job/resume", "resume_calls"),
+    ],
+)
 def test_practice_header_allows_schedule_write(
     client: FlaskClient,
     flask_app: Flask,

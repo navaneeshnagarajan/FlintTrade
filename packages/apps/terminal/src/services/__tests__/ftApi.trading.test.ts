@@ -23,9 +23,9 @@ vi.mock("@/stores/modeStore", () => ({
 
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: {
-    // openAlgoHydrated: true models a normally-loaded app; the hydration
+    //  models a normally-loaded app; the hydration
     // fail-closed window is covered by brokerTargets/api tests.
-    getState: () => ({ apiKey: storeState.apiKey, openAlgoHydrated: true }),
+    getState: () => ({ apiKey: storeState.apiKey }),
   },
 }));
 
@@ -36,6 +36,8 @@ vi.mock("@/stores/authStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native" }>,
     selector: string | null,
@@ -114,8 +116,9 @@ function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknow
 describe("approveOrder", () => {
   beforeEach(() => {
     storeState.mode = "live";
-    storeState.apiKey = "openalgo-key";
+    storeState.apiKey = "test-backend-key";
     storeState.token = "live-jwt";
+    storeState.brokerState = { accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected" }], activeAccountId: "native:upstox:U1" };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       jsonResponse({ status: "success", data: { status: "approved" } }),
     ));
@@ -141,7 +144,7 @@ describe("startSmartRoute", () => {
     storeState.mode = "live";
     storeState.apiKey = "";
     storeState.token = "";
-    storeState.brokerState = { accounts: [], activeAccountId: null };
+    storeState.brokerState = { accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected" }], activeAccountId: "native:upstox:U1" };
     fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: SMART_ROUTE_JOB }));
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -190,8 +193,8 @@ describe("startSmartRoute", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps OpenAlgo primary when an OpenAlgo API key is configured", async () => {
-    storeState.apiKey = "openalgo-key";
+  it("pins the native account even when a backend API key is configured", async () => {
+    storeState.apiKey = "test-backend-key";
     storeState.brokerState = {
       accounts: [
         { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -201,8 +204,7 @@ describe("startSmartRoute", () => {
 
     await startSmartRoute(BASE_PARAMS);
 
-    expect(requestBody(fetchMock)).not.toHaveProperty("broker");
-    expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
+    expect(requestBody(fetchMock)).toMatchObject({ broker: "upstox", account_id: "U1" });
   });
 
   it("does not add a native target outside live mode", async () => {
@@ -261,7 +263,7 @@ describe("placeBracketOrder", () => {
     storeState.mode = "live";
     storeState.apiKey = "";
     storeState.token = "";
-    storeState.brokerState = { accounts: [], activeAccountId: null };
+    storeState.brokerState = { accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected" }], activeAccountId: "native:upstox:U1" };
     fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(
         {
@@ -402,7 +404,7 @@ describe("account-bound safety state", () => {
     storeState.mode = "live";
     storeState.apiKey = "";
     storeState.token = "";
-    storeState.brokerState = { accounts: [], activeAccountId: null };
+    storeState.brokerState = { accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected" }], activeAccountId: "native:upstox:U1" };
     fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       status: "success",
       data: {
@@ -435,7 +437,7 @@ describe("account-bound safety state", () => {
   });
 
   it("uses the caller's explicit selector for opening capital even if stores differ", async () => {
-    storeState.apiKey = "openalgo-key";
+    storeState.apiKey = "test-backend-key";
 
     await updateSafetyConfig({ opening_risk_capital: 100000 }, target);
 
@@ -447,7 +449,7 @@ describe("account-bound safety state", () => {
   });
 
   it("uses the caller's explicit selector for L4 reset even if stores differ", async () => {
-    storeState.apiKey = "openalgo-key";
+    storeState.apiKey = "test-backend-key";
 
     await resetDailyPnLState(target);
 

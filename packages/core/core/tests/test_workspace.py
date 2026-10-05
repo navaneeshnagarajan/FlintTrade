@@ -18,7 +18,6 @@ def _clear_storage_overrides(monkeypatch, *extra: str) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-
 class TestWorkspaceResolution:
     """Test workspace directory resolution across platforms."""
 
@@ -26,6 +25,7 @@ class TestWorkspaceResolution:
         monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
         monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "custom"))
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace()
         assert ws.workspace_dir == (tmp_path / "custom").resolve()
 
@@ -33,6 +33,7 @@ class TestWorkspaceResolution:
         monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "home"))
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
         from flinttrade_core.workspace import Workspace, workspace_dir
+
         ws = Workspace()
         assert ws.workspace_dir == workspace_dir()
         assert ws.workspace_dir == (tmp_path / "workspace").resolve()
@@ -41,6 +42,7 @@ class TestWorkspaceResolution:
         monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
         monkeypatch.setattr(platform, "system", lambda: "Linux")
         from flinttrade_core.workspace import _default_home
+
         result = _default_home()
         assert result == Path.home() / ".flinttrade"
 
@@ -48,6 +50,7 @@ class TestWorkspaceResolution:
         monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
         monkeypatch.setattr(platform, "system", lambda: "Darwin")
         from flinttrade_core.workspace import _default_home
+
         result = _default_home()
         assert result == Path.home() / "Library" / "Application Support" / "flinttrade"
 
@@ -56,6 +59,7 @@ class TestWorkspaceResolution:
         monkeypatch.setattr(platform, "system", lambda: "Windows")
         monkeypatch.setenv("APPDATA", "/fake/appdata")
         from flinttrade_core.workspace import _default_home
+
         result = _default_home()
         assert result == Path("/fake/appdata/flinttrade")
 
@@ -482,6 +486,7 @@ class TestLegacyPluginDirectoryMigration:
         assert loader.discover() == []
         assert (legacy / "my_plugin.py").exists()
 
+
 class TestWorkspaceCopyMachinery:
     """Unit tests for the public copy-once machinery and its Wave-0 additions."""
 
@@ -804,6 +809,7 @@ class TestWorkspaceInit:
     def test_initialize_creates_dirs(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "ws"))
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         assert ws.is_initialized
@@ -815,6 +821,7 @@ class TestWorkspaceInit:
     def test_initialize_writes_workspace_json(self, tmp_path):
         from flinttrade_core.workspace_migrations import WORKSPACE_VERSION
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         with open(ws.config_path) as f:
@@ -826,6 +833,7 @@ class TestWorkspaceInit:
 
     def test_not_initialized_before_init(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "empty")
         assert not ws.is_initialized
 
@@ -1176,6 +1184,7 @@ class TestWorkspaceLoadSave:
     def test_save_and_load(self, tmp_path):
         from flinttrade_core.workspace_migrations import WORKSPACE_VERSION
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise({"version": WORKSPACE_VERSION, "initialized": True, "data": "hello"})
         ws2 = Workspace(home_dir=tmp_path / "ws")
@@ -1183,6 +1192,7 @@ class TestWorkspaceLoadSave:
 
     def test_get_dot_notation(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         assert ws.get("ui.theme") == "dark"
@@ -1190,12 +1200,14 @@ class TestWorkspaceLoadSave:
 
     def test_get_missing_key_returns_default(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         assert ws.get("nonexistent.key", "fallback") == "fallback"
 
     def test_set_and_persist(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         ws.set("ui.theme", "light")
@@ -1257,6 +1269,7 @@ class TestWorkspaceLoadSave:
 
     def test_path_expansion(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         # fast_data_dir should be an absolute path (~ expanded)
@@ -1274,6 +1287,7 @@ class TestWorkspaceLoadSave:
 
     def test_ensure_directories(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws._config = {"storage": {"fast": str(tmp_path / "ws" / "data"), "archive": str(tmp_path / "ws" / "archive")}}
         ws.ensure_directories()
@@ -1282,6 +1296,7 @@ class TestWorkspaceLoadSave:
 
     def test_as_dict_returns_copy(self, tmp_path):
         from flinttrade_core.workspace import Workspace
+
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         d = ws.as_dict()
@@ -1291,6 +1306,7 @@ class TestWorkspaceLoadSave:
     def test_corrupt_json_is_refused_without_overwriting(self, tmp_path):
         import json
         from flinttrade_core.workspace import Workspace
+
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
         (ws_dir / "workspace.json").write_text("not valid json{{{")

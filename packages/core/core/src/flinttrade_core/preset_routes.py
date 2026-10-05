@@ -401,15 +401,17 @@ def list_presets() -> tuple[Response, int]:
     """
     custom = _load_custom()
     all_presets = list(_BUILTIN_PRESETS) + sorted(custom.values(), key=lambda p: p.name)
-    return jsonify({
-        "status": "success",
-        "data": {
-            "presets": [_preset_dict(p) for p in all_presets],
-            "total": len(all_presets),
-            "builtin_count": len(_BUILTIN_PRESETS),
-            "custom_count": len(custom),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "presets": [_preset_dict(p) for p in all_presets],
+                "total": len(all_presets),
+                "builtin_count": len(_BUILTIN_PRESETS),
+                "custom_count": len(custom),
+            },
+        }
+    ), 200
 
 
 @preset_bp.route("/", methods=["POST"])

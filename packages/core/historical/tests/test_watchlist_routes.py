@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/historical/tests/test_watchlist_routes.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ _TEST_API_KEY = "test-watchlist-routes-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -29,7 +31,7 @@ def app_client(monkeypatch_module, tmp_path_factory):
     from flinttrade_historical.watchlist import DownloadWatchlist
     from flinttrade_historical.watchlist_routes import init_watchlist_routes
 
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     workspace_root = tmp_path_factory.mktemp("workspace")
     monkeypatch_module.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace_root))
     (workspace_root / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -67,7 +69,6 @@ def _delete(client, url, body=None):
 
 
 class TestWatchlistRoutes:
-
     def test_list_empty(self, app_client):
         resp = _get(app_client, "/v1/historify/watchlist")
         assert resp.status_code == 200
@@ -76,8 +77,7 @@ class TestWatchlistRoutes:
         assert isinstance(data["data"], list)
 
     def test_add_item(self, app_client):
-        resp = _post(app_client, "/v1/historify/watchlist",
-                     {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
+        resp = _post(app_client, "/v1/historify/watchlist", {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
         assert resp.status_code == 201
         data = json.loads(resp.data)
         assert data["status"] == "success"
@@ -88,18 +88,15 @@ class TestWatchlistRoutes:
         # having executed first. Under pytest-randomly, test ordering inside
         # the class is shuffled and this test was running BEFORE test_add_item
         # in CI, leaving an empty watchlist and `assert 'RELIANCE' in []`.
-        _post(app_client, "/v1/historify/watchlist",
-              {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
+        _post(app_client, "/v1/historify/watchlist", {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
         resp = _get(app_client, "/v1/historify/watchlist")
         data = json.loads(resp.data)
         symbols = [item["symbol"] for item in data["data"]]
         assert "RELIANCE" in symbols
 
     def test_remove_item(self, app_client):
-        _post(app_client, "/v1/historify/watchlist",
-              {"symbol": "TEMPSTOCK", "exchange": "NSE"})
-        resp = _delete(app_client, "/v1/historify/watchlist",
-                       {"symbol": "TEMPSTOCK", "exchange": "NSE"})
+        _post(app_client, "/v1/historify/watchlist", {"symbol": "TEMPSTOCK", "exchange": "NSE"})
+        resp = _delete(app_client, "/v1/historify/watchlist", {"symbol": "TEMPSTOCK", "exchange": "NSE"})
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["status"] == "success"
@@ -114,8 +111,7 @@ class TestWatchlistRoutes:
         from flinttrade_core.workspace import workspace_dir
         import flinttrade_historical.watchlist_routes as wr
 
-        _post(app_client, "/v1/historify/watchlist",
-              {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
+        _post(app_client, "/v1/historify/watchlist", {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
 
         captured: dict = {}
 
@@ -135,8 +131,7 @@ class TestWatchlistRoutes:
 
         monkeypatch.setattr(wr, "_job_manager", _StubManager())
 
-        resp = _post(app_client, "/v1/historify/download",
-                     {"start_date": "2026-01-01", "end_date": "2026-01-31"})
+        resp = _post(app_client, "/v1/historify/download", {"start_date": "2026-01-01", "end_date": "2026-01-31"})
         assert resp.status_code == 202
         data = json.loads(resp.data)
         assert data["status"] == "success"

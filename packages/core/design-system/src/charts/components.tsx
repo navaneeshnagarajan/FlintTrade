@@ -2140,7 +2140,8 @@ function normaliseDonutSlices(slices: readonly FlintDonutSlice[]): FlintDonutSli
 function buildDonutGradient(slices: readonly FlintDonutSlice[]): string {
   const visible = normaliseDonutSlices(slices)
   const total = visible.reduce((sum, slice) => sum + slice.value, 0)
-  if (total <= 0) return "#1f2937 0% 100%"
+  if (total <= 0) return "#1f2937 0%, #1f2937 100%"
+  if (visible.length === 1) return `${visible[0].color} 0%, ${visible[0].color} 100%`
 
   let cursor = 0
   return visible

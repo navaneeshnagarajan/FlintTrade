@@ -17,11 +17,6 @@ The Electron desktop shell keeps its own checkout at `~/.flinttrade/src/FlintTra
 and its own `~/.local/bin/flinttrade` launcher, so the two installs never
 collide and can be run in either order.
 
-Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
-configuration is handled in the UI; no `.env` file is required. Your workspace
-lives at `~/.flinttrade/` (override with `FLINTTRADE_WORKSPACE_DIR`, or
-`FLINTTRADE_HOME`).
-
 ### If the site is unreachable (repo-direct fallback)
 
 Use this whenever the command above fails: the hosted URL is only a redirect to
@@ -98,20 +93,7 @@ shell if that is your policy (it should be). If the site is unreachable, run it
 repo-direct with
 `curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-install.sh | bash`.
 
-Complete Setup in the app. Broker/OpenAlgo configuration is handled in the
-UI; no `.env` file is required.
-
 ## Manual `.AppImage` download
-
-1. Download `FlintTrade-<version>-linux-x64.AppImage` or
-   `FlintTrade-<version>-linux-arm64.AppImage` for your architecture from the
-   release page.
-2. Run `chmod +x FlintTrade-<version>-linux-<arch>.AppImage`, then
-   `./FlintTrade-<version>-linux-<arch>.AppImage`. Running an AppImage directly
-   needs `libfuse2`; if your distro does not ship it, either install it or run
-   `./FlintTrade-<version>-linux-<arch>.AppImage --appimage-extract-and-run`.
-3. Complete Setup in the app. Broker/OpenAlgo configuration is handled in the
-   UI; no `.env` file is required.
 
 Electron releases publish AppImage only; `.deb` and `.rpm` are not part of the
 new four-installer contract.

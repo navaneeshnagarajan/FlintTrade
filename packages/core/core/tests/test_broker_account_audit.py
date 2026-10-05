@@ -22,24 +22,40 @@ from flinttrade_data.audit_logger import AuditLogger
 
 def event():
     return AccountMutationAudit(
-        event_id=uuid4(), operation_ref="a" * 64, selector_ref="b" * 64,
-        actor_ref="c" * 64, session_ref="d" * 64,
-        kind=AccountMutationKind.CONNECT, state=AccountOperationStage.COMMITTED,
-        expected_credential_generation=0, credential_generation=1,
-        expected_workspace_generation=1, workspace_generation=2,
-        expected_broker_generation=1, broker_generation=2,
+        event_id=uuid4(),
+        operation_ref="a" * 64,
+        selector_ref="b" * 64,
+        actor_ref="c" * 64,
+        session_ref="d" * 64,
+        kind=AccountMutationKind.CONNECT,
+        state=AccountOperationStage.COMMITTED,
+        expected_credential_generation=0,
+        credential_generation=1,
+        expected_workspace_generation=1,
+        workspace_generation=2,
+        expected_broker_generation=1,
+        broker_generation=2,
     )
 
 
-@pytest.mark.parametrize("field,value", [
-    ("event_id", "not-an-event"), ("selector_ref", "private-account"),
-    ("actor_ref", "private-actor"), ("session_ref", "session:" + "d" * 64),
-    ("operation_ref", "A" * 64), ("kind", "connect"), ("state", "committed"),
-    ("state", AccountOperationStage.ADMITTED),
-    ("expected_credential_generation", True), ("credential_generation", None),
-    ("credential_generation", 0), ("workspace_generation", 1),
-    ("broker_generation", False),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("event_id", "not-an-event"),
+        ("selector_ref", "private-account"),
+        ("actor_ref", "private-actor"),
+        ("session_ref", "session:" + "d" * 64),
+        ("operation_ref", "A" * 64),
+        ("kind", "connect"),
+        ("state", "committed"),
+        ("state", AccountOperationStage.ADMITTED),
+        ("expected_credential_generation", True),
+        ("credential_generation", None),
+        ("credential_generation", 0),
+        ("workspace_generation", 1),
+        ("broker_generation", False),
+    ],
+)
 def test_account_audit_rejects_private_or_invalid_evidence(field, value):
     with pytest.raises(AccountContractError, match="account_contract_invalid"):
         replace(event(), **{field: value})
@@ -73,8 +89,13 @@ def test_account_audit_serialised_evidence_cannot_be_extended_or_rebound(mutatio
 
 
 def test_account_audit_unknown_outcome_never_claims_commit_versions():
-    value = replace(event(), state=AccountOperationStage.AUTHENTICATION_UNKNOWN,
-                    credential_generation=None, workspace_generation=None, broker_generation=None)
+    value = replace(
+        event(),
+        state=AccountOperationStage.AUTHENTICATION_UNKNOWN,
+        credential_generation=None,
+        workspace_generation=None,
+        broker_generation=None,
+    )
     assert AccountMutationAudit.from_dict(value.to_dict()) == value
     with pytest.raises(AccountContractError):
         replace(value, credential_generation=1)

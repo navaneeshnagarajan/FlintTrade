@@ -29,7 +29,12 @@ _RECOVERY_LOCK = threading.Lock()
 
 
 def _connect(
-    path_str: str, sync: str, temp_store: str, cache_size_kb: int, *, uri: bool = False,
+    path_str: str,
+    sync: str,
+    temp_store: str,
+    cache_size_kb: int,
+    *,
+    uri: bool = False,
 ) -> sqlite3.Connection:
     conn = sqlite3.connect(
         path_str,
@@ -127,8 +132,7 @@ def open_sqlite(
             if backup is None:
                 raise
             logger.warning(
-                "Database %s was not SQLite (legacy DuckDB engine file); "
-                "moved it to %s and recreated fresh",
+                "Database %s was not SQLite (legacy DuckDB engine file); moved it to %s and recreated fresh",
                 path_str,
                 backup,
             )
@@ -160,9 +164,7 @@ def disable_journal_triggers(conn: sqlite3.Connection) -> Iterator[None]:
     finally:
         for ddl in saved_ddl.values():
             conn.execute(ddl)
-        has_fts = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='journal_fts'"
-        ).fetchone()
+        has_fts = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='journal_fts'").fetchone()
         if has_fts:
             conn.execute("INSERT INTO journal_fts(journal_fts) VALUES('rebuild')")
 

@@ -51,9 +51,7 @@ class _StubRunner:
         force: bool = False,
     ) -> list[dict[str, Any]]:
         self.trigger_calls += 1
-        self.trigger_requests.append(
-            (frozenset(selectors) if selectors is not None else None, force)
-        )
+        self.trigger_requests.append((frozenset(selectors) if selectors is not None else None, force))
         return list(self._payloads)
 
 
@@ -71,9 +69,7 @@ class _LedgerEvidenceRunner(_StubRunner):
         force: bool = False,
     ) -> list[dict[str, Any]]:
         self.trigger_calls += 1
-        self.trigger_requests.append(
-            (frozenset(selectors) if selectors is not None else None, force)
-        )
+        self.trigger_requests.append((frozenset(selectors) if selectors is not None else None, force))
         payloads: list[dict[str, Any]] = []
         for selector in sorted(selectors or ()):
             broker, account_id = selector.split(":", 1)
@@ -170,10 +166,15 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_reports_happy_path_newest_first(home: Path) -> None:
     """Reports come back parsed, newest (last-appended) line first."""
-    _write_history(home, "dhan", "ACC1", [
-        _report(generated_at="2026-06-12T09:00:00+00:00"),
-        _report(generated_at="2026-06-12T09:05:00+00:00", clean=False, severity="critical", critical=2),
-    ])
+    _write_history(
+        home,
+        "dhan",
+        "ACC1",
+        [
+            _report(generated_at="2026-06-12T09:00:00+00:00"),
+            _report(generated_at="2026-06-12T09:05:00+00:00", clean=False, severity="critical", critical=2),
+        ],
+    )
     client = _app().test_client()
     resp = client.get("/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1")
     assert resp.status_code == 200
@@ -189,9 +190,7 @@ def test_reports_happy_path_newest_first(home: Path) -> None:
 
 
 def test_reports_respects_limit(home: Path) -> None:
-    _write_history(home, "dhan", "ACC1", [
-        _report(generated_at=f"2026-06-12T09:0{i}:00+00:00") for i in range(7)
-    ])
+    _write_history(home, "dhan", "ACC1", [_report(generated_at=f"2026-06-12T09:0{i}:00+00:00") for i in range(7)])
     client = _app().test_client()
     resp = client.get("/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1&limit=2")
     assert resp.status_code == 200
@@ -203,9 +202,7 @@ def test_reports_respects_limit(home: Path) -> None:
 
 
 def test_reports_default_limit_is_five(home: Path) -> None:
-    _write_history(home, "dhan", "ACC1", [
-        _report(generated_at=f"2026-06-12T09:0{i}:00+00:00") for i in range(7)
-    ])
+    _write_history(home, "dhan", "ACC1", [_report(generated_at=f"2026-06-12T09:0{i}:00+00:00") for i in range(7)])
     client = _app().test_client()
     resp = client.get("/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1")
     assert resp.status_code == 200
@@ -257,9 +254,7 @@ def test_reports_skip_identityless_and_malformed_evidence(home: Path) -> None:
         ],
     )
 
-    response = _app().test_client().get(
-        "/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1"
-    )
+    response = _app().test_client().get("/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1")
 
     assert response.status_code == 200
     reports = response.get_json()["data"]["reports"]
@@ -320,10 +315,12 @@ def test_reports_invalid_bearer_token_rejected(home: Path) -> None:
 
 def test_reports_rejects_an_account_outside_the_current_router_acl(home: Path) -> None:
     _write_history(home, "dhan", "ACC1", [_report()])
-    response = _app(
-        BROKER_ROUTER=_ResolutionRouter(selectors=()),
-    ).test_client().get(
-        "/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1"
+    response = (
+        _app(
+            BROKER_ROUTER=_ResolutionRouter(selectors=()),
+        )
+        .test_client()
+        .get("/api/v1/reconciliation/reports?broker=dhan&account_id=ACC1")
     )
 
     assert response.status_code == 403
@@ -336,16 +333,29 @@ def test_reports_rejects_an_account_outside_the_current_router_acl(home: Path) -
 
 
 def test_status_summarises_latest_line_per_target(home: Path) -> None:
-    _write_history(home, "dhan", "ACC1", [
-        _report(clean=True, generated_at="2026-06-12T08:00:00+00:00"),
-        _report(
-            clean=False, severity="critical", critical=1, warning=2,
-            generated_at="2026-06-12T09:00:00+00:00",
-        ),
-    ])
-    _write_history(home, "upstox", "U99", [
-        _report(broker="upstox", account="U99", clean=True, generated_at="2026-06-12T09:10:00+00:00"),
-    ])
+    _write_history(
+        home,
+        "dhan",
+        "ACC1",
+        [
+            _report(clean=True, generated_at="2026-06-12T08:00:00+00:00"),
+            _report(
+                clean=False,
+                severity="critical",
+                critical=1,
+                warning=2,
+                generated_at="2026-06-12T09:00:00+00:00",
+            ),
+        ],
+    )
+    _write_history(
+        home,
+        "upstox",
+        "U99",
+        [
+            _report(broker="upstox", account="U99", clean=True, generated_at="2026-06-12T09:10:00+00:00"),
+        ],
+    )
     client = _app().test_client()
     resp = client.get("/api/v1/reconciliation/status")
     assert resp.status_code == 200
@@ -382,9 +392,13 @@ def test_status_filters_targets_by_current_router_acl(home: Path) -> None:
     _write_history(home, "dhan", "ACC1", [_report()])
     _write_history(home, "upstox", "U99", [_report(broker="upstox", account="U99")])
 
-    response = _app(
-        BROKER_ROUTER=_ResolutionRouter(selectors=("dhan:ACC1",)),
-    ).test_client().get("/api/v1/reconciliation/status")
+    response = (
+        _app(
+            BROKER_ROUTER=_ResolutionRouter(selectors=("dhan:ACC1",)),
+        )
+        .test_client()
+        .get("/api/v1/reconciliation/status")
+    )
 
     assert response.status_code == 200
     assert response.get_json()["data"]["targets"] == [
@@ -453,22 +467,26 @@ def test_run_can_produce_zero_reports(home: Path) -> None:
 
 
 def test_run_filters_returned_reports_by_current_router_acl(home: Path) -> None:
-    runner = _StubRunner(payloads=[
-        _report(),
-        _report(broker="upstox", account="U99"),
-    ])
+    runner = _StubRunner(
+        payloads=[
+            _report(),
+            _report(broker="upstox", account="U99"),
+        ]
+    )
 
-    response = _app(
-        runner=runner,
-        BROKER_ROUTER=_ResolutionRouter(selectors=("dhan:ACC1",)),
-    ).test_client().post("/api/v1/reconciliation/run", json={})
+    response = (
+        _app(
+            runner=runner,
+            BROKER_ROUTER=_ResolutionRouter(selectors=("dhan:ACC1",)),
+        )
+        .test_client()
+        .post("/api/v1/reconciliation/run", json={})
+    )
 
     assert response.status_code == 200
     data = response.get_json()["data"]
     assert data["count"] == 1
-    assert [(row["adapter_id"], row["account_id"]) for row in data["reports"]] == [
-        ("dhan", "ACC1")
-    ]
+    assert [(row["adapter_id"], row["account_id"]) for row in data["reports"]] == [("dhan", "ACC1")]
     assert runner.trigger_requests == [(frozenset({"dhan:ACC1"}), False)]
 
 
@@ -476,7 +494,8 @@ def test_run_invalid_bearer_token_rejected(home: Path) -> None:
     runner = _StubRunner()
     client = _app(runner=runner).test_client()
     resp = client.post(
-        "/api/v1/reconciliation/run", json={},
+        "/api/v1/reconciliation/run",
+        json={},
         headers={"Authorization": "Bearer not-a-jwt"},
     )
     assert resp.status_code == 401
@@ -495,9 +514,13 @@ def test_run_returns_conflict_when_cycle_is_already_active(home: Path) -> None:
             raise ReconciliationRunBusyError("already running")
 
     runner = _BusyRunner()
-    response = _app(runner=runner).test_client().post(
-        "/api/v1/reconciliation/run",
-        json={},
+    response = (
+        _app(runner=runner)
+        .test_client()
+        .post(
+            "/api/v1/reconciliation/run",
+            json={},
+        )
     )
 
     assert response.status_code == 409
@@ -614,12 +637,16 @@ class _ResolutionRouter:
 
 def test_unknown_outcome_listing_returns_operator_safe_attempt_details(home: Path) -> None:
     ledger, attempt_id = _unknown_ledger(home)
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=_ResolutionRouter(),
-    ).test_client().get(
-        "/api/v1/reconciliation/outcomes",
-        headers=_live_headers(),
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=_ResolutionRouter(),
+        )
+        .test_client()
+        .get(
+            "/api/v1/reconciliation/outcomes",
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 200
@@ -663,12 +690,16 @@ def test_unknown_outcome_listing_filters_accounts_by_current_router_acl(home: Pa
     ledger.mark_invoked(hidden_attempt, observed_at=observed)
     ledger.mark_outcome_unknown(hidden_attempt, "TimeoutError", observed_at=observed)
 
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=_ResolutionRouter(),
-    ).test_client().get(
-        "/api/v1/reconciliation/outcomes",
-        headers=_live_headers(),
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=_ResolutionRouter(),
+        )
+        .test_client()
+        .get(
+            "/api/v1/reconciliation/outcomes",
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 200
@@ -710,9 +741,7 @@ def test_unknown_outcome_resolution_rejects_inexact_or_incomplete_evidence(
         **body_override,
     }
     if "account_id" in body_override and "confirmation" not in body_override:
-        body["confirmation"] = (
-            f"CONFIRM APPLIED dhan:{body['account_id']}:{attempt_id}"
-        )
+        body["confirmation"] = f"CONFIRM APPLIED dhan:{body['account_id']}:{attempt_id}"
 
     response = app.test_client().post(
         f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
@@ -734,17 +763,19 @@ def test_unknown_outcome_resolution_requires_pin_audit_and_exact_selector(home: 
     ledger.record_broker_snapshot(
         adapter_id="dhan",
         account_id="personal",
-        orders=[{
-            "orderid": "RECOVERED-1",
-            "symbol": "RELIANCE",
-            "exchange": "NSE",
-            "product": "MIS",
-            "action": "BUY",
-            "status": "OPEN",
-            "quantity": 1,
-            "filled_quantity": 0,
-            "price": 2500,
-        }],
+        orders=[
+            {
+                "orderid": "RECOVERED-1",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "product": "MIS",
+                "action": "BUY",
+                "status": "OPEN",
+                "quantity": 1,
+                "filled_quantity": 0,
+                "price": 2500,
+            }
+        ],
         positions=[],
         holdings=[],
         observed_at="2026-07-15T09:32:00+00:00",
@@ -808,11 +839,15 @@ def test_unknown_outcome_resolution_rejects_a_refresh_marker_not_adopted_by_ledg
     from flinttrade_data.audit_logger import AuditLogger
 
     ledger, attempt_id = _unknown_ledger(home)
-    runner = _StubRunner(payloads=[{
-        "adapter_id": "dhan",
-        "account_id": "personal",
-        "snapshot_generation": 999,
-    }])
+    runner = _StubRunner(
+        payloads=[
+            {
+                "adapter_id": "dhan",
+                "account_id": "personal",
+                "snapshot_generation": 999,
+            }
+        ]
+    )
     app = _app(
         runner=runner,
         ORDER_LIFECYCLE_LEDGER=ledger,
@@ -891,40 +926,46 @@ def test_unknown_multi_order_resolution_accepts_an_explicit_partial_partition(ho
     ledger.record_broker_snapshot(
         adapter_id="upstox",
         account_id="personal",
-        orders=[{
-            "orderid": "PARTIAL-1",
-            "symbol": "RELIANCE",
-            "exchange": "NSE",
-            "product": "MIS",
-            "action": "BUY",
-            "status": "OPEN",
-            "quantity": 1,
-            "filled_quantity": 0,
-            "price": 2500,
-        }],
+        orders=[
+            {
+                "orderid": "PARTIAL-1",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "product": "MIS",
+                "action": "BUY",
+                "status": "OPEN",
+                "quantity": 1,
+                "filled_quantity": 0,
+                "price": 2500,
+            }
+        ],
         positions=[],
         holdings=[],
         observed_at="2026-07-15T09:31:00+00:00",
     )
     audit = AuditLogger(str(home / "audit"))
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=_ResolutionRouter(selectors=("upstox:personal",)),
-        BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
-        AUDIT=audit,
-    ).test_client().post(
-        f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
-        json={
-            "broker": "upstox",
-            "account_id": "personal",
-            "business_date": "2026-07-15",
-            "outcome": "confirmed_partial",
-            "broker_order_ids": ["PARTIAL-1"],
-            "broker_order_item_indexes": [0],
-            "not_applied_item_indexes": [1],
-            "confirmation": f"CONFIRM PARTIAL upstox:personal:{attempt_id}",
-            "note": "Fresh broker order book contains only the first child",
-        },
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=_ResolutionRouter(selectors=("upstox:personal",)),
+            BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
+            AUDIT=audit,
+        )
+        .test_client()
+        .post(
+            f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
+            json={
+                "broker": "upstox",
+                "account_id": "personal",
+                "business_date": "2026-07-15",
+                "outcome": "confirmed_partial",
+                "broker_order_ids": ["PARTIAL-1"],
+                "broker_order_item_indexes": [0],
+                "not_applied_item_indexes": [1],
+                "confirmation": f"CONFIRM PARTIAL upstox:personal:{attempt_id}",
+                "note": "Fresh broker order book contains only the first child",
+            },
+        )
     )
 
     assert response.status_code == 200
@@ -1041,17 +1082,19 @@ def test_fresh_evidence_conflict_returns_pending_resolution_metadata(home: Path)
     ledger.record_broker_snapshot(
         adapter_id="dhan",
         account_id="personal",
-        orders=[{
-            "orderid": "LATE-MATCH-1",
-            "symbol": "RELIANCE",
-            "exchange": "NSE",
-            "product": "MIS",
-            "action": "BUY",
-            "status": "OPEN",
-            "quantity": 1,
-            "filled_quantity": 0,
-            "price": 2500,
-        }],
+        orders=[
+            {
+                "orderid": "LATE-MATCH-1",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "product": "MIS",
+                "action": "BUY",
+                "status": "OPEN",
+                "quantity": 1,
+                "filled_quantity": 0,
+                "price": 2500,
+            }
+        ],
         positions=[],
         holdings=[],
         observed_at="2026-07-15T09:32:00+00:00",
@@ -1121,23 +1164,27 @@ def test_resolved_attempt_stays_blocked_when_current_router_had_no_matching_memo
     ledger, attempt_id = _unknown_ledger(home)
     router = _ResolutionRouter(clear_result=False)
     audit = AuditLogger(str(home / "audit"))
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=router,
-        BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
-        AUDIT=audit,
-    ).test_client().post(
-        f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
-        json={
-            "broker": "dhan",
-            "account_id": "personal",
-            "business_date": "2026-07-15",
-            "outcome": "confirmed_not_applied",
-            "broker_order_ids": [],
-            "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
-            "note": "Fresh broker order book contains no matching order",
-        },
-        headers=_live_headers(),
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=router,
+            BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
+            AUDIT=audit,
+        )
+        .test_client()
+        .post(
+            f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
+            json={
+                "broker": "dhan",
+                "account_id": "personal",
+                "business_date": "2026-07-15",
+                "outcome": "confirmed_not_applied",
+                "broker_order_ids": [],
+                "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
+                "note": "Fresh broker order book contains no matching order",
+            },
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 503
@@ -1167,23 +1214,27 @@ def test_legacy_boolean_router_clear_result_cannot_complete_resolution(home: Pat
     ledger, attempt_id = _unknown_ledger(home)
     audit = AuditLogger(str(home / "audit"))
     router = _LegacyBooleanClearRouter()
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=router,
-        BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
-        AUDIT=audit,
-    ).test_client().post(
-        f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
-        json={
-            "broker": "dhan",
-            "account_id": "personal",
-            "business_date": "2026-07-15",
-            "outcome": "confirmed_not_applied",
-            "broker_order_ids": [],
-            "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
-            "note": "Fresh broker order book contains no matching order",
-        },
-        headers=_live_headers(),
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=router,
+            BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
+            AUDIT=audit,
+        )
+        .test_client()
+        .post(
+            f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
+            json={
+                "broker": "dhan",
+                "account_id": "personal",
+                "business_date": "2026-07-15",
+                "outcome": "confirmed_not_applied",
+                "broker_order_ids": [],
+                "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
+                "note": "Fresh broker order book contains no matching order",
+            },
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 503
@@ -1260,23 +1311,27 @@ def test_resolving_outcome_does_not_hide_unrelated_critical_ledger_health(home: 
     ledger, attempt_id = _unknown_ledger(home)
     ledger.mark_health_critical("independent ledger integrity fault")
     audit = AuditLogger(str(home / "audit"))
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=_ResolutionRouter(),
-        BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
-        AUDIT=audit,
-    ).test_client().post(
-        f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
-        json={
-            "broker": "dhan",
-            "account_id": "personal",
-            "business_date": "2026-07-15",
-            "outcome": "confirmed_not_applied",
-            "broker_order_ids": [],
-            "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
-            "note": "Fresh broker order book contains no matching order",
-        },
-        headers=_live_headers(),
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=_ResolutionRouter(),
+            BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
+            AUDIT=audit,
+        )
+        .test_client()
+        .post(
+            f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
+            json={
+                "broker": "dhan",
+                "account_id": "personal",
+                "business_date": "2026-07-15",
+                "outcome": "confirmed_not_applied",
+                "broker_order_ids": [],
+                "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
+                "note": "Fresh broker order book contains no matching order",
+            },
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 200
@@ -1321,23 +1376,27 @@ def test_resolution_count_excludes_unknown_outcomes_outside_operator_acl(home: P
     ledger.mark_invoked(hidden_attempt, observed_at=observed)
     ledger.mark_outcome_unknown(hidden_attempt, "TimeoutError", observed_at=observed)
     audit = AuditLogger(str(home / "audit"))
-    response = _app(
-        ORDER_LIFECYCLE_LEDGER=ledger,
-        BROKER_ROUTER=_ResolutionRouter(selectors=("dhan:personal",)),
-        BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
-        AUDIT=audit,
-    ).test_client().post(
-        f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
-        json={
-            "broker": "dhan",
-            "account_id": "personal",
-            "business_date": "2026-07-15",
-            "outcome": "confirmed_not_applied",
-            "broker_order_ids": [],
-            "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
-            "note": "Fresh broker order book contains no matching order",
-        },
-        headers=_live_headers(),
+    response = (
+        _app(
+            ORDER_LIFECYCLE_LEDGER=ledger,
+            BROKER_ROUTER=_ResolutionRouter(selectors=("dhan:personal",)),
+            BROKER_ROUTER_REBUILD_LOCK=__import__("threading").RLock(),
+            AUDIT=audit,
+        )
+        .test_client()
+        .post(
+            f"/api/v1/reconciliation/outcomes/{attempt_id}/resolve",
+            json={
+                "broker": "dhan",
+                "account_id": "personal",
+                "business_date": "2026-07-15",
+                "outcome": "confirmed_not_applied",
+                "broker_order_ids": [],
+                "confirmation": f"CONFIRM NOT_APPLIED dhan:personal:{attempt_id}",
+                "note": "Fresh broker order book contains no matching order",
+            },
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 200

@@ -194,9 +194,7 @@ def test_stale_handoff_acknowledgement_cannot_delete_a_concurrent_rotation(tmp_p
     db_path = tmp_path / "ticks.duckdb"
     original = _storage(str(db_path))
     original_id = original.get_tick_replay_cursor().store_id
-    original.connection.execute(
-        "DELETE FROM flinttrade_storage_metadata WHERE key = 'tick_pruned_ingest_high_water'"
-    )
+    original.connection.execute("DELETE FROM flinttrade_storage_metadata WHERE key = 'tick_pruned_ingest_high_water'")
     original.close()
 
     acknowledging = _storage(str(db_path))
@@ -319,9 +317,7 @@ def test_lineage_metadata_reset_rolls_back_as_one_transaction(
         "UPDATE flinttrade_storage_metadata SET value = '2099-01-01T00:00:00+00:00' "
         "WHERE key = 'tick_pruned_before_utc'"
     )
-    metadata_before = dict(
-        original.connection.execute("SELECT key, value FROM flinttrade_storage_metadata").fetchall()
-    )
+    metadata_before = dict(original.connection.execute("SELECT key, value FROM flinttrade_storage_metadata").fetchall())
     original.close()
 
     recovered = StorageManager(str(db_path))

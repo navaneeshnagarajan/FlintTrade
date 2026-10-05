@@ -13,7 +13,7 @@
  *   - /settings loads and shows the settings sidebar
  *   - Clicking "Appearance" activates that section
  *   - Clicking "Skill & Experience" activates that section
- *   - Deep-link via hash (/settings#api) activates the correct section
+ *   - Deep-link via hash (/settings#brokers) activates the correct section
  */
 
 import { test, expect, type Page, type Request } from '@playwright/test';
@@ -91,7 +91,7 @@ test.describe('Settings page', () => {
   test('section tabs contain expected sections', async ({ page }) => {
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
-    for (const label of ['General', 'Appearance', 'Broker Gateway', 'Skill & Experience', 'Report Bug', 'About']) {
+    for (const label of ['General', 'Appearance', 'Brokers', 'Skill & Experience', 'Report Bug', 'About']) {
       await expect(sectionTabs.getByText(label, { exact: true })).toBeVisible();
     }
   });
@@ -119,69 +119,18 @@ test.describe('Settings page', () => {
     await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
-  test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
-    await page.goto('/settings#api');
+  test('deep-link /settings#brokers activates Brokers section', async ({ page }) => {
+    await page.goto('/settings#brokers');
     await page
       .getByRole('tablist', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
 
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
-    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker Gateway' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Brokers' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('Broker Gateway edits stay local until one explicit complete save', async ({ page }) => {
-    const posts: Array<Record<string, unknown>> = [];
-    await page.route('**/ft-api/v1/config/openalgo', async (route) => {
-      if (route.request().method() === 'POST') {
-        posts.push(route.request().postDataJSON() as Record<string, unknown>);
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ status: 'ok', message: 'saved' }),
-        });
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          status: 'success',
-          data: {
-            api_key: 'browser-existing-key',
-            api_key_configured: true,
-            api_key_last4: '-key',
-            host: 'http://127.0.0.1:5000',
-            port: 5000,
-            ws_port: 8765,
-          },
-        }),
-      });
-    });
-    // The shared beforeEach has already loaded /settings. Use a distinct query
-    // so this is a full document navigation after the route mock is installed,
-    // rather than a hash-only navigation that reuses the failed initial read.
-    await page.goto('/settings?openalgo-mock=1#api');
 
-    const host = page.getByLabel('OpenAlgo-compatible URL');
-    const apiKey = page.getByLabel('OpenAlgo-compatible API key');
-    await expect(host).toHaveValue('http://127.0.0.1:5000');
-    await expect(apiKey).toHaveValue('');
-    await expect(page.getByText(/A key is saved ending in -key/i)).toBeVisible();
-
-    await host.fill('https://openalgo.local');
-    await page.getByLabel('REST port').fill('5010');
-    expect(posts).toHaveLength(0);
-
-    await page.getByRole('button', { name: 'Save Connection' }).click();
-    await expect.poll(() => posts.length).toBe(1);
-    expect(posts[0]).toEqual({
-      host: 'https://openalgo.local',
-      port: '5010',
-      ws_port: '8765',
-    });
-    await expect(page.getByText('Connection settings saved.', { exact: true })).toBeVisible();
-  });
 
   test('managed Ollama update, rollback, uninstall, and reinstall preserve the model inventory', async ({ page }) => {
     const operations: Array<{ path: string; admissionId: string; responseStatus: number }> = [];

@@ -168,9 +168,7 @@ def assert_installation_state_disjoint(
 ) -> None:
     """Reject a mutable archive/restore path that overlaps installation lineage."""
     selected_root = (
-        Path(installation_root).expanduser()
-        if installation_root is not None
-        else stable_application_state_root()
+        Path(installation_root).expanduser() if installation_root is not None else stable_application_state_root()
     )
     root = Path(os.path.normcase(os.path.abspath(selected_root)))
     candidate = Path(os.path.normcase(os.path.abspath(Path(path).expanduser())))
@@ -217,10 +215,7 @@ def _assert_owned_directory(
         or stat.S_ISLNK(path_stat.st_mode)
         or _is_reparse_point(path_stat)
         or (callable(getuid) and path_stat.st_uid != getuid())
-        or (
-            expected is not None
-            and (path_stat.st_dev, path_stat.st_ino) != (expected.st_dev, expected.st_ino)
-        )
+        or (expected is not None and (path_stat.st_dev, path_stat.st_ino) != (expected.st_dev, expected.st_ino))
     ):
         raise InstallationStateError("installation state root is unsafe")
     if os.name == "nt" and require_hardened:
@@ -401,9 +396,7 @@ class InstallationState:
         binding_exists = self._path_exists_no_follow(self._binding_path)
         if binding_exists:
             try:
-                binding_payload = json.loads(
-                    read_hardened_owner_owned_text(self._binding_path, max_bytes=1024)
-                )
+                binding_payload = json.loads(read_hardened_owner_owned_text(self._binding_path, max_bytes=1024))
             except Exception as exc:
                 raise InstallationStateError("installation identity binding is malformed") from exc
             if binding_payload.get("phase") == "preparing":
@@ -443,9 +436,7 @@ class InstallationState:
 
     def _recover_preparing_identity(self, payload: object) -> None:
         if self._path_exists_no_follow(self.root / "ditto-legacy-migration.json"):
-            raise InstallationStateError(
-                "installation identity preparation cannot coexist with a migration receipt"
-            )
+            raise InstallationStateError("installation identity preparation cannot coexist with a migration receipt")
         if not isinstance(payload, dict) or set(payload) != {
             "phase",
             "installation_id",

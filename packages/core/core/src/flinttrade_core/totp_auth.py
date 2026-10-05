@@ -518,7 +518,9 @@ class TOTPAuth:
             self._db_path, self._key_path = _resolve_totp_pair()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._hasher = argon2.PasswordHasher(
-            time_cost=3, memory_cost=65536, parallelism=4,
+            time_cost=3,
+            memory_cost=65536,
+            parallelism=4,
         )
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._init_db()
@@ -659,8 +661,7 @@ class TOTPAuth:
             import qrcode.image.svg as qr_svg
         except ImportError as exc:
             raise ImportError(
-                "qrcode[svg] is required for QR code generation. "
-                "Install with: pip install 'qrcode[svg]'"
+                "qrcode[svg] is required for QR code generation. Install with: pip install 'qrcode[svg]'"
             ) from exc
 
         factory = qr_svg.SvgPathImage

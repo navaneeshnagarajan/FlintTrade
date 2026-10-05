@@ -61,15 +61,11 @@ def _run_raw_batch(items: list[BatchInput]) -> list[object]:
 
 
 def _run_object_batch_with_config(config: SpreadConfig, premiums: list[list[float]]) -> list[object]:
-    return run_spreads_batch(
-        [(SpreadBacktest("invalid", config), [1, 2], premiums, [True, False], [False, True])]
-    )
+    return run_spreads_batch([(SpreadBacktest("invalid", config), [1, 2], premiums, [True, False], [False, True])])
 
 
 def _run_raw_batch_with_config(config: SpreadConfig, premiums: list[list[float]]) -> list[object]:
-    return run_batch(
-        [("invalid", config, [1, 2], premiums, [True, False], [False, True])]
-    )
+    return run_batch([("invalid", config, [1, 2], premiums, [True, False], [False, True])])
 
 
 @pytest.fixture(params=[_run_object_batch, _run_raw_batch], ids=["run_spreads_batch", "run_batch"])
@@ -233,8 +229,7 @@ def test_spread_binding_signatures_and_docs_match_python_contract() -> None:
         "(call_strike, put_strike, lot_size=50, short=True, initial_capital=100000.0, fees=0.001)"
     )
     assert str(inspect.signature(iron_condor_config)) == (
-        "(short_call, long_call, short_put, long_put, lot_size=50, "
-        "initial_capital=100000.0, fees=0.001)"
+        "(short_call, long_call, short_put, long_put, lot_size=50, initial_capital=100000.0, fees=0.001)"
     )
     assert "OptionType.Call" in (OptionType.__doc__ or "")
     assert "OptionType.Put" in (OptionType.__doc__ or "")

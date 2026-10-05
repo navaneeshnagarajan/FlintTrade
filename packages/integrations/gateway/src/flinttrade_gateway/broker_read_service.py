@@ -85,7 +85,6 @@ from flinttrade_engine.request_context import RequestContext
 from .registry import (
     BrokerRegistry,
     ConnectedRegistrySession,
-    OpenAlgoDefaultCompatibilitySessionVersion,
 )
 from .session_provider import AuthenticatingSessionProvider
 
@@ -139,7 +138,7 @@ _ROLE_OPERATIONS = {
 class _Grant:
     selector: BrokerSelector
     role: BrokerDataRole | None
-    binding: SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion
+    binding: SessionVersion
     context: RequestContext
     verify_current_authority: Callable[[], RequestContext | None] | None
     allowed: frozenset[_Operation]
@@ -386,12 +385,12 @@ class BrokerReadOwner:
 
     def _current_binding(
         self, selector: BrokerSelector
-    ) -> SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion:
+    ) -> SessionVersion:
         self._provider.current_authority_for(selector)
         state = self._registry.snapshot_exact_state(selector)
         if state is None or state.status != "connected" or state.binding is None:
             raise RegistrySessionUnavailable
-        if type(state.binding) not in (SessionVersion, OpenAlgoDefaultCompatibilitySessionVersion):
+        if type(state.binding) is not SessionVersion:
             raise RegistrySessionUnavailable
         return state.binding
 
@@ -506,9 +505,9 @@ class BrokerReadOwner:
     @classmethod
     def _provenance(
         cls,
-        binding: SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion, role: BrokerDataRole | None
+        binding: SessionVersion, role: BrokerDataRole | None
     ) -> BrokerReadProvenance:
-        if type(binding) not in (SessionVersion, OpenAlgoDefaultCompatibilitySessionVersion):
+        if type(binding) is not SessionVersion:
             raise ValueError
         registry = binding.registry_version
         if type(registry) is not RegistrySelectorVersion:
@@ -1388,14 +1387,14 @@ class BrokerReadOwner:
             try:
                 if type(raw) is not list or len(raw) != len(request.positions):
                     raise ValueError
-                copied = self._portfolio_rows(raw, request.positions, grant.selector.adapter_id == "openalgo")
+                copied = self._portfolio_rows(raw, request.positions)
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             return self._published(grant, copied)
         finally:
             self._end(grant)
 
-    def _portfolio_rows(self, raw: list[object], requested: tuple[PortfolioPositionRef, ...], openalgo: bool):
+    def _portfolio_rows(self, raw: list[object], requested: tuple[PortfolioPositionRef, ...]):
         expected = {(item.exchange, item.symbol): item for item in requested}
         if len(expected) != len(requested):
             raise ValueError
@@ -1411,7 +1410,7 @@ class BrokerReadOwner:
             instrument_id = self._text(row, "instrument_id")
             if expected_row.instrument_id is not None and instrument_id != expected_row.instrument_id:
                 raise ValueError
-            if expected_row.instrument_id is None and not openalgo and instrument_id is None:
+            if expected_row.instrument_id is None and instrument_id is None:
                 raise ValueError
             if instrument_id is not None:
                 if instrument_id in seen_ids:

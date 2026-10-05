@@ -1,7 +1,7 @@
 /**
  * Visible "Example" mark for fabricated Home and Invest figures.
  *
- * ProvenanceBadge stays quiet for Sample. A card that still draws placeholder
+ * A card that still draws placeholder
  * numbers needs this word on the figure, so it cannot be read as the Practice
  * account.
  */

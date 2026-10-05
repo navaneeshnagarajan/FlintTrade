@@ -20,12 +20,29 @@ import {
   calculatePositionNetPremium,
   computePayoff,
   computePayoffSummary,
+  computeEquityCurve,
+  computeMetrics,
   formatPositionSublabel,
   hasExplicitZeroPremium,
   hasUnsetPremium,
   pnlAtExpiry,
   validateLegs,
 } from "../utils";
+
+describe("local signal valuation", () => {
+  it.each([NaN, Infinity, -Infinity, 0, -5])("keeps the last valid mark across an unusable close (%s)", (invalid) => {
+    const bars = [{ close: 100 }, { close: 110 }, { close: invalid }, { close: 120 }];
+    const signals = [{ bar: 0, type: "BUY" as const }, { bar: 2, type: "SELL" as const }];
+    expect(computeEquityCurve(bars, signals).map(point => point.equity)).toEqual([10_000, 11_000, 11_000, 12_000]);
+    expect(computeMetrics(bars.slice(0, 3), signals).totalReturn).toBeCloseTo(10);
+  });
+
+  it("does not fill or carry a buy signal from an unusable bar", () => {
+    const bars = [{ close: NaN }, { close: 100 }, { close: 120 }];
+    expect(computeEquityCurve(bars, [{ bar: 0, type: "BUY" }]).map(point => point.equity))
+      .toEqual([10_000, 10_000, 10_000]);
+  });
+});
 
 function leg(partial: Partial<Leg> & Pick<Leg, "action" | "optionType" | "strike">): Leg {
   return {

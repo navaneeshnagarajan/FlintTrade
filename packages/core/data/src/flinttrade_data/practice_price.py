@@ -33,18 +33,13 @@ _IST = ZoneInfo("Asia/Kolkata")
 PRICE_SOURCE_LTP = "ltp"
 PRICE_SOURCE_LAST_CLOSE = "last_close"
 
-OPTION_PRICE_STALE = (
-    "Option prices go stale outside market hours. Try again when the market opens."
-)
+OPTION_PRICE_STALE = "Option prices go stale outside market hours. Try again when the market opens."
 
 
 def practice_price_unavailable(symbol: str) -> str:
     """Plain refusal when a Practice market order has nothing to fill against."""
     name = str(symbol).strip().upper() or "this symbol"
-    return (
-        f"No price for {name} right now. "
-        "Practice needs a live price or a recent close."
-    )
+    return f"No price for {name} right now. Practice needs a live price or a recent close."
 
 
 def format_price_age(age_s: int) -> str:

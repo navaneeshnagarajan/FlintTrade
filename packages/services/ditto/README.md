@@ -33,6 +33,10 @@ root workspace.
 python -m pytest packages/services/ditto/tests/ -v --import-mode=importlib
 ```
 
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
+
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in

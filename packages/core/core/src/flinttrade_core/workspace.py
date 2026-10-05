@@ -462,19 +462,13 @@ def _migrate_legacy_ditto_state(
                     "credentials": legacy_vault,
                 }
                 present_source_names = {
-                    name
-                    for name, source in legacy_sources.items()
-                    if _path_present_no_follow(source)
+                    name for name, source in legacy_sources.items() if _path_present_no_follow(source)
                 }
                 if present_source_names != set(receipt["sources"]):
-                    raise WorkspaceStateMigrationError(
-                        "Legacy Ditto SQLite source set changed after snapshot"
-                    )
+                    raise WorkspaceStateMigrationError("Legacy Ditto SQLite source set changed after snapshot")
                 for name, identity in receipt["sources"].items():
                     if not _sqlite_source_matches_identity(legacy_sources[name], identity):
-                        raise WorkspaceStateMigrationError(
-                            "Legacy Ditto SQLite source changed after snapshot"
-                        )
+                        raise WorkspaceStateMigrationError("Legacy Ditto SQLite source changed after snapshot")
                 receipt["phase"] = "consumed"
                 _write_ditto_receipt(receipt_path, receipt)
                 hook("consumed")
@@ -488,7 +482,9 @@ def _migrate_legacy_ditto_state(
                         continue
                     snapshot = Path(snapshot_name)
                     if not _safe_regular_file(snapshot, require_hardened=True):
-                        raise WorkspaceStateMigrationError("Could not preserve legacy Ditto state; recovery snapshot missing")
+                        raise WorkspaceStateMigrationError(
+                            "Could not preserve legacy Ditto state; recovery snapshot missing"
+                        )
                     expected_hash = receipt["sources"][name]["snapshot_sha256"]
                     if _sha256_file(snapshot, require_hardened=True) != expected_hash:
                         raise WorkspaceStateMigrationError("Legacy Ditto recovery snapshot digest changed")
@@ -496,13 +492,19 @@ def _migrate_legacy_ditto_state(
                     if receipt["sources"][name]["in_place"]:
                         if _path_present_no_follow(destination):
                             if not _sqlite_source_matches_identity(destination, receipt["sources"][name]):
-                                raise WorkspaceStateMigrationError("In-place legacy Ditto target changed after snapshot")
+                                raise WorkspaceStateMigrationError(
+                                    "In-place legacy Ditto target changed after snapshot"
+                                )
                             continue
                     if _path_present_no_follow(destination):
-                        if not _safe_regular_file(destination, require_hardened=True) or _sha256_file(
-                            destination,
-                            require_hardened=True,
-                        ) != expected_hash:
+                        if (
+                            not _safe_regular_file(destination, require_hardened=True)
+                            or _sha256_file(
+                                destination,
+                                require_hardened=True,
+                            )
+                            != expected_hash
+                        ):
                             raise WorkspaceStateMigrationError(
                                 "Ditto migration found ambiguous workspace state; originals were preserved"
                             )
@@ -718,9 +720,7 @@ def _durably_barrier_directory_entry(path: Path, *, newly_created: bool) -> None
         durable_unlink(marker)
     except Exception as exc:
         boundary = "new" if newly_created else "existing"
-        raise WorkspaceStateMigrationError(
-            f"Could not durably commit {boundary} Ditto target directory"
-        ) from exc
+        raise WorkspaceStateMigrationError(f"Could not durably commit {boundary} Ditto target directory") from exc
 
 
 def _windows_directory_barrier_required() -> bool:
@@ -765,15 +765,18 @@ def _sqlite_source_matches_identity(source: Path, identity: dict[str, object]) -
         source_digest, source_stat = digest_owner_owned_regular_file_identity(source)
     except (OSError, PermissionError):
         return False
-    if any(
-        getattr(source_stat, attribute) != identity[key]
-        for attribute, key in (
-            ("st_dev", "device"),
-            ("st_ino", "inode"),
-            ("st_size", "size"),
-            ("st_mtime_ns", "mtime_ns"),
+    if (
+        any(
+            getattr(source_stat, attribute) != identity[key]
+            for attribute, key in (
+                ("st_dev", "device"),
+                ("st_ino", "inode"),
+                ("st_size", "size"),
+                ("st_mtime_ns", "mtime_ns"),
+            )
         )
-    ) or source_digest != identity["sha256"]:
+        or source_digest != identity["sha256"]
+    ):
         return False
     actual_sidecars: dict[str, dict[str, object]] = {}
     for suffix in ("-wal", "-shm", "-journal"):
@@ -809,9 +812,7 @@ def _read_ditto_receipt(
         claimed_checksum = receipt.pop("journal_sha256")
         from hashlib import sha256
 
-        actual_checksum = sha256(
-            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        actual_checksum = sha256(json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         if claimed_checksum != actual_checksum:
             raise ValueError("journal checksum mismatch")
         if receipt.get("installation_id") != str(state.installation_id):
@@ -885,9 +886,7 @@ def _validate_ditto_source_identity(identity: object) -> None:
         raise ValueError("invalid source placement")
     for digest_key in ("sha256", "snapshot_sha256"):
         digest = identity[digest_key]
-        if not isinstance(digest, str) or len(digest) != 64 or any(
-            char not in "0123456789abcdef" for char in digest
-        ):
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("invalid source digest")
     sidecars = identity["sidecars"]
     if not isinstance(sidecars, dict) or not set(sidecars).issubset({"-wal", "-shm", "-journal"}):
@@ -901,15 +900,10 @@ def _validate_ditto_source_identity(identity: object) -> None:
             "sha256",
         }:
             raise ValueError("invalid sidecar generation")
-        if any(
-            type(sidecar[key]) is not int or sidecar[key] < 0
-            for key in ("device", "inode", "size", "mtime_ns")
-        ):
+        if any(type(sidecar[key]) is not int or sidecar[key] < 0 for key in ("device", "inode", "size", "mtime_ns")):
             raise ValueError("invalid sidecar generation")
         digest = sidecar["sha256"]
-        if not isinstance(digest, str) or len(digest) != 64 or any(
-            char not in "0123456789abcdef" for char in digest
-        ):
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("invalid sidecar digest")
 
 
@@ -918,9 +912,7 @@ def _write_ditto_receipt(path: Path, receipt: dict[str, object]) -> None:
     payload.pop("journal_sha256", None)
     from hashlib import sha256
 
-    payload["journal_sha256"] = sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    payload["journal_sha256"] = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     write_secret_text(path, json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
 
 
@@ -1029,9 +1021,7 @@ def copy_legacy_database_once(
             logger.info("Migrated legacy %s from %s to %s", label, legacy, target)
     except (FileLockTimeout, OSError) as exc:
         logger.error("Could not migrate legacy %s %s -> %s: %s", label, legacy, target, exc)
-        raise WorkspaceStateMigrationError(
-            f"Could not preserve legacy {label}; source retained at {legacy}"
-        ) from exc
+        raise WorkspaceStateMigrationError(f"Could not preserve legacy {label}; source retained at {legacy}") from exc
     finally:
         _remove_staged_file(candidate)
         for _source, _destination, staged in sidecars:
@@ -1147,9 +1137,7 @@ def copy_legacy_directory_once(
         raise
     except (FileLockTimeout, OSError) as exc:
         logger.error("Could not migrate legacy %s %s -> %s: %s", label, legacy, target, exc)
-        raise WorkspaceStateMigrationError(
-            f"Could not preserve legacy {label}; source retained at {legacy}"
-        ) from exc
+        raise WorkspaceStateMigrationError(f"Could not preserve legacy {label}; source retained at {legacy}") from exc
     finally:
         shutil.rmtree(candidate, ignore_errors=True)
 
@@ -1336,9 +1324,7 @@ class Workspace:
         self._config = snapshot.as_dict()
         self._version = snapshot.version
         if self._config.get("version") != WORKSPACE_VERSION:
-            raise RuntimeError(
-                f"workspace not migrated to {WORKSPACE_VERSION}; got {self._config.get('version')!r}"
-            )
+            raise RuntimeError(f"workspace not migrated to {WORKSPACE_VERSION}; got {self._config.get('version')!r}")
         return self._config
 
     def save(self, config: dict[str, Any] | None = None) -> None:
@@ -1346,7 +1332,9 @@ class Workspace:
         self._home.mkdir(parents=True, exist_ok=True)
         candidate = self._config if config is None else config
         self._config = write_workspace_config(self.workspace_dir, candidate, expected_version=self._version)
-        self._version = WorkspaceVersion(uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"])
+        self._version = WorkspaceVersion(
+            uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"]
+        )
 
     def initialise(self, config: dict[str, Any] | None = None) -> None:
         """First-time setup — create dirs, write default config.
@@ -1399,7 +1387,9 @@ class Workspace:
             node[parts[-1]] = value
 
         self._config = update_workspace_config(self.workspace_dir, apply)
-        self._version = WorkspaceVersion(uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"])
+        self._version = WorkspaceVersion(
+            uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"]
+        )
 
     def update(
         self,
@@ -1407,7 +1397,9 @@ class Workspace:
     ) -> dict[str, Any]:
         """Apply one caller-owned mutation to the latest workspace transaction."""
         self._config = update_workspace_config(self.workspace_dir, updater)
-        self._version = WorkspaceVersion(uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"])
+        self._version = WorkspaceVersion(
+            uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"]
+        )
         return copy.deepcopy(self._config)
 
     def ensure_directories(self) -> None:

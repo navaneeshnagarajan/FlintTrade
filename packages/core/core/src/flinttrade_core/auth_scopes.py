@@ -43,8 +43,6 @@ DEFAULT_SESSION_SCOPES: tuple[str, ...] = LEGACY_NO_SCOPE_SESSION_SCOPES + (
     "admin.services.write",
     "admin.accounts.read",
     "admin.accounts.write",
-    "admin.config.openalgo.read",
-    "admin.config.openalgo.write",
     "admin.backup.read",
     "admin.backup.write",
 )
@@ -94,7 +92,7 @@ def require_scope(scope: str) -> Callable[[Callable[..., Any]], Callable[..., An
 
                 payload = decode_token(token)
             except Exception:
-                expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
+                expected_key = os.environ.get("FLINTTRADE_API_KEY", "")
                 if expected_key and hmac.compare_digest(token, expected_key):
                     return fn(*args, **kwargs)
                 return (

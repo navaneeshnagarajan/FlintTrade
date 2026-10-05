@@ -1,4 +1,4 @@
-"""Tests for the OpenAlgo symbol converter.
+"""Tests for the broker symbol converter.
 
 All tests use synthetic data — no API calls or broker connections required.
 """
@@ -12,12 +12,12 @@ import pytest
 from flinttrade_screener.symbol_converter import (
     InstrumentType,
     Segment,
-    build_openalgo_symbol,
+    build_canonical_symbol,
     detect_segment,
     format_expiry_date,
     normalise_base,
     parse_expiry_date,
-    parse_openalgo_symbol,
+    parse_canonical_symbol,
 )
 
 
@@ -63,7 +63,7 @@ class TestParseExpiryDate:
             parse_expiry_date("2024-03-28")
 
     def test_invalid_month(self) -> None:
-        with pytest.raises(ValueError, match="Unknown month"):
+        with pytest.raises(ValueError, match="Invalid expiry date"):
             parse_expiry_date("28XXX24")
 
 
@@ -94,78 +94,78 @@ class TestNormaliseBase:
 
 
 # ---------------------------------------------------------------------------
-# build_openalgo_symbol
+# build_canonical_symbol
 # ---------------------------------------------------------------------------
 
 class TestBuildSymbol:
-    """Tests for build_openalgo_symbol."""
+    """Tests for build_canonical_symbol."""
 
     def test_equity(self) -> None:
-        assert build_openalgo_symbol("RELIANCE") == "RELIANCE"
+        assert build_canonical_symbol("RELIANCE") == "RELIANCE"
 
     def test_future(self) -> None:
-        assert build_openalgo_symbol("NIFTY", date(2024, 3, 28)) == "NIFTY28MAR24FUT"
+        assert build_canonical_symbol("NIFTY", date(2024, 3, 28)) == "NIFTY28MAR24FUT"
 
     def test_call_option(self) -> None:
-        result = build_openalgo_symbol("NIFTY", date(2024, 3, 28), 20800, "CE")
+        result = build_canonical_symbol("NIFTY", date(2024, 3, 28), 20800, "CE")
         assert result == "NIFTY28MAR2420800CE"
 
     def test_put_option(self) -> None:
-        result = build_openalgo_symbol("BANKNIFTY", date(2024, 3, 28), 48000, "PE")
+        result = build_canonical_symbol("BANKNIFTY", date(2024, 3, 28), 48000, "PE")
         assert result == "BANKNIFTY28MAR2448000PE"
 
     def test_decimal_strike_cds(self) -> None:
-        result = build_openalgo_symbol("USDINR", date(2024, 3, 28), 85.50, "CE")
+        result = build_canonical_symbol("USDINR", date(2024, 3, 28), 85.50, "CE")
         assert result == "USDINR28MAR2485.5CE"
 
     def test_mcx_commodity(self) -> None:
-        result = build_openalgo_symbol("CRUDEOIL", date(2024, 3, 28), 9000, "CE")
+        result = build_canonical_symbol("CRUDEOIL", date(2024, 3, 28), 9000, "CE")
         assert result == "CRUDEOIL28MAR249000CE"
 
     def test_stock_option(self) -> None:
-        result = build_openalgo_symbol("RELIANCE", date(2025, 4, 24), 2800, "CE")
+        result = build_canonical_symbol("RELIANCE", date(2025, 4, 24), 2800, "CE")
         assert result == "RELIANCE24APR252800CE"
 
     def test_alias_resolution(self) -> None:
-        result = build_openalgo_symbol("NIFTY 50", date(2024, 3, 28))
+        result = build_canonical_symbol("NIFTY 50", date(2024, 3, 28))
         assert result == "NIFTY28MAR24FUT"
 
     def test_strike_without_expiry_raises(self) -> None:
         with pytest.raises(ValueError, match="Cannot specify strike"):
-            build_openalgo_symbol("NIFTY", strike=20800)
+            build_canonical_symbol("NIFTY", strike=20800)
 
     def test_option_type_without_strike_raises(self) -> None:
         with pytest.raises(ValueError, match="Both strike and option_type"):
-            build_openalgo_symbol("NIFTY", date(2024, 3, 28), option_type="CE")
+            build_canonical_symbol("NIFTY", date(2024, 3, 28), option_type="CE")
 
     def test_invalid_option_type_raises(self) -> None:
         with pytest.raises(ValueError, match="option_type must be CE or PE"):
-            build_openalgo_symbol("NIFTY", date(2024, 3, 28), 20800, "XX")
+            build_canonical_symbol("NIFTY", date(2024, 3, 28), 20800, "XX")
 
 
 # ---------------------------------------------------------------------------
-# parse_openalgo_symbol
+# parse_canonical_symbol
 # ---------------------------------------------------------------------------
 
 class TestParseSymbol:
-    """Tests for parse_openalgo_symbol."""
+    """Tests for parse_canonical_symbol."""
 
     def test_equity(self) -> None:
-        parts = parse_openalgo_symbol("RELIANCE")
+        parts = parse_canonical_symbol("RELIANCE")
         assert parts.base == "RELIANCE"
         assert parts.instrument_type == InstrumentType.EQ
         assert parts.expiry_date is None
         assert parts.strike is None
 
     def test_future(self) -> None:
-        parts = parse_openalgo_symbol("NIFTY28MAR24FUT")
+        parts = parse_canonical_symbol("NIFTY28MAR24FUT")
         assert parts.base == "NIFTY"
         assert parts.instrument_type == InstrumentType.FUT
         assert parts.expiry_date == date(2024, 3, 28)
         assert parts.strike is None
 
     def test_call_option(self) -> None:
-        parts = parse_openalgo_symbol("NIFTY28MAR2420800CE")
+        parts = parse_canonical_symbol("NIFTY28MAR2420800CE")
         assert parts.base == "NIFTY"
         assert parts.instrument_type == InstrumentType.CE
         assert parts.expiry_date == date(2024, 3, 28)
@@ -173,7 +173,7 @@ class TestParseSymbol:
         assert parts.option_type == "CE"
 
     def test_put_option(self) -> None:
-        parts = parse_openalgo_symbol("BANKNIFTY28MAR2448000PE")
+        parts = parse_canonical_symbol("BANKNIFTY28MAR2448000PE")
         assert parts.base == "BANKNIFTY"
         assert parts.instrument_type == InstrumentType.PE
         assert parts.expiry_date == date(2024, 3, 28)
@@ -181,34 +181,34 @@ class TestParseSymbol:
         assert parts.option_type == "PE"
 
     def test_cds_decimal_strike(self) -> None:
-        parts = parse_openalgo_symbol("USDINR28MAR2485.5CE")
+        parts = parse_canonical_symbol("USDINR28MAR2485.5CE")
         assert parts.base == "USDINR"
         assert parts.strike == 85.5
         assert parts.option_type == "CE"
 
     def test_mcx_option(self) -> None:
-        parts = parse_openalgo_symbol("CRUDEOIL28MAR249000CE")
+        parts = parse_canonical_symbol("CRUDEOIL28MAR249000CE")
         assert parts.base == "CRUDEOIL"
         assert parts.strike == 9000.0
         assert parts.expiry_date == date(2024, 3, 28)
 
     def test_single_digit_day(self) -> None:
-        parts = parse_openalgo_symbol("NIFTY3APR2520800CE")
+        parts = parse_canonical_symbol("NIFTY3APR2520800CE")
         assert parts.base == "NIFTY"
         assert parts.expiry_date == date(2025, 4, 3)
         assert parts.strike == 20800.0
 
     def test_stock_future(self) -> None:
-        parts = parse_openalgo_symbol("RELIANCE28MAR24FUT")
+        parts = parse_canonical_symbol("RELIANCE28MAR24FUT")
         assert parts.base == "RELIANCE"
         assert parts.instrument_type == InstrumentType.FUT
 
     def test_invalid_symbol_raises(self) -> None:
         with pytest.raises(ValueError, match="Cannot parse"):
-            parse_openalgo_symbol("12345INVALID")
+            parse_canonical_symbol("12345INVALID")
 
     def test_original_preserved(self) -> None:
-        parts = parse_openalgo_symbol("NIFTY28MAR2420800CE")
+        parts = parse_canonical_symbol("NIFTY28MAR2420800CE")
         assert parts.original == "NIFTY28MAR2420800CE"
 
 
@@ -236,9 +236,9 @@ class TestRoundtrip:
         strike: float,
         option_type: str,
     ) -> None:
-        sym = build_openalgo_symbol(base, expiry, strike, option_type)
-        parts = parse_openalgo_symbol(sym)
-        rebuilt = build_openalgo_symbol(parts.base, parts.expiry_date, parts.strike, parts.option_type)
+        sym = build_canonical_symbol(base, expiry, strike, option_type)
+        parts = parse_canonical_symbol(sym)
+        rebuilt = build_canonical_symbol(parts.base, parts.expiry_date, parts.strike, parts.option_type)
         assert rebuilt == sym
 
     @pytest.mark.parametrize(
@@ -249,15 +249,15 @@ class TestRoundtrip:
         ],
     )
     def test_future_roundtrip(self, base: str, expiry: date) -> None:
-        sym = build_openalgo_symbol(base, expiry)
-        parts = parse_openalgo_symbol(sym)
-        rebuilt = build_openalgo_symbol(parts.base, parts.expiry_date)
+        sym = build_canonical_symbol(base, expiry)
+        parts = parse_canonical_symbol(sym)
+        rebuilt = build_canonical_symbol(parts.base, parts.expiry_date)
         assert rebuilt == sym
 
     def test_equity_roundtrip(self) -> None:
-        sym = build_openalgo_symbol("TCS")
-        parts = parse_openalgo_symbol(sym)
-        rebuilt = build_openalgo_symbol(parts.base)
+        sym = build_canonical_symbol("TCS")
+        parts = parse_canonical_symbol(sym)
+        rebuilt = build_canonical_symbol(parts.base)
         assert rebuilt == sym
 
 

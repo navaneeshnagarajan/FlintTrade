@@ -30,7 +30,7 @@ def _ai_route_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch: Fixture used to set and automatically restore the variables.
     """
     monkeypatch.setenv("MASTER_PASSWORD", "test-master")
-    monkeypatch.setenv("OPENALGO_API_KEY", "test")
+    monkeypatch.setenv("BROKER_API_KEY", "test")
     monkeypatch.setenv("FLINTTRADE_TOTP_KEY", "test-key")
 
 

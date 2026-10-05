@@ -20,15 +20,19 @@ pytestmark = pytest.mark.unit
 _ALLOWED_ORDER_ROUTE = ("POST", "/api/v1/orders/place")
 
 # Historical sandbox writers. Remounting any of them fails this test.
-_REMOVED_ORDER_ROUTES = frozenset({
-    ("POST", "/v1/sandbox/order"),
-    ("POST", "/v1/sandbox/square-off"),
-})
+_REMOVED_ORDER_ROUTES = frozenset(
+    {
+        ("POST", "/v1/sandbox/order"),
+        ("POST", "/v1/sandbox/square-off"),
+    }
+)
 
-_SANDBOX_FILL_METHODS = frozenset({
-    "check_pending_fills",
-    "square_off_all",
-})
+_SANDBOX_FILL_METHODS = frozenset(
+    {
+        "check_pending_fills",
+        "square_off_all",
+    }
+)
 _SANDBOX_PLACE_METHODS = frozenset({"place_order"})
 # ``process_tick`` fills resting Practice orders. Other packages use the same
 # method name for signals and order-flow, so only the sandbox receivers count.

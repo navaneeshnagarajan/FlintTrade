@@ -4,23 +4,19 @@
  * The bulk-download manager only downloads ENABLED watchlist symbols, but the
  * watchlist had no terminal surface at all — a fresh operator's "Download 30d"
  * hit an empty list (HTTP 400) with no way to fix it from the UI. This panel
- * closes the loop: list / add / remove symbols, plus an Excel import
- * (symbol, exchange, optional interval columns) feeding the same watchlist.
+ * closes the loop: list / add / remove symbols feeding the same watchlist.
  *
  *   GET    /ft-api/v1/historify/watchlist
  *   POST   /ft-api/v1/historify/watchlist
  *   DELETE /ft-api/v1/historify/watchlist
- *   POST   /api/v1/integration/excel/import/upload  (via uploadExcel)
  */
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ListPlus, Trash2, Upload, Loader2 } from "lucide-react";
+import { ListPlus, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { uploadExcel } from "@/services/ftApi";
 import { buildHeaders } from "@/services/ftApi.helpers";
-import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { SectionTitle } from "./shared";
 
 const BASE = "/ft-api/v1/historify";
@@ -63,39 +59,11 @@ async function removeItem(item: { symbol: string; exchange: string }): Promise<v
   }
 }
 
-/**
- * Map imported Excel rows onto watchlist entries. Header matching is
- * case-insensitive; rows without a symbol AND exchange are skipped (counted
- * so the operator sees exactly what was ignored — nothing silent).
- */
-export function rowsToWatchlistEntries(rows: Record<string, unknown>[]): {
-  entries: { symbol: string; exchange: string; interval: string }[];
-  skipped: number;
-} {
-  const entries: { symbol: string; exchange: string; interval: string }[] = [];
-  let skipped = 0;
-  for (const row of rows) {
-    const lookup: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(row)) lookup[key.toLowerCase().trim()] = value;
-    const symbol = String(lookup["symbol"] ?? "").trim().toUpperCase();
-    const exchange = String(lookup["exchange"] ?? "").trim().toUpperCase();
-    const interval = String(lookup["interval"] ?? "1d").trim() || "1d";
-    if (!symbol || !exchange) {
-      skipped += 1;
-      continue;
-    }
-    entries.push({ symbol, exchange, interval });
-  }
-  return { entries, skipped };
-}
-
 export function WatchlistManagerPanel() {
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [symbol, setSymbol] = useState("");
   const [exchange, setExchange] = useState("NSE");
   const [interval, setInterval] = useState("1d");
-  const [importError, setImportError] = useState<string | null>(null);
 
   const watchlistQuery = useQuery({
     queryKey: ["historify", "watchlist"],
@@ -117,56 +85,6 @@ export function WatchlistManagerPanel() {
     onSuccess: refresh,
   });
 
-  const importMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const rows = await uploadExcel(file); // backend reads the FIRST sheet
-      const { entries, skipped } = rowsToWatchlistEntries(rows);
-      if (entries.length === 0) {
-        throw new Error(
-          "No usable rows — the sheet needs 'symbol' and 'exchange' columns.",
-        );
-      }
-      // Add each entry independently: one bad row must not report the whole
-      // import as failed after earlier rows already landed.
-      let added = 0;
-      const failures: string[] = [];
-      for (const entry of entries) {
-        try {
-          await addItem(entry);
-          added += 1;
-        } catch (err) {
-          failures.push(`${entry.symbol} (${err instanceof Error ? err.message : "failed"})`);
-        }
-      }
-      return { added, skipped, failures };
-    },
-    onSuccess: ({ added, skipped, failures }) => {
-      const parts = [
-        `Added ${added} symbol${added === 1 ? "" : "s"} to the download watchlist`,
-      ];
-      if (skipped > 0) parts.push(`${skipped} row${skipped === 1 ? "" : "s"} skipped (missing symbol/exchange)`);
-      if (failures.length > 0) parts.push(`${failures.length} failed: ${failures.join(", ")}`);
-      const body = parts.join("; ") + ".";
-
-      setImportError(failures.length > 0 ? body : null);
-      emitNotification({
-        category: failures.length > 0 ? "alert" : "system",
-        title: failures.length > 0 ? "Watchlist import partly failed" : "Watchlist import complete",
-        body,
-      });
-    },
-    onError: (err: Error) => {
-      setImportError(err.message);
-      emitNotification({
-        category: "alert",
-        title: "Watchlist import failed",
-        body: err.message,
-      });
-    },
-    // Refresh regardless — a partial import HAS changed the list.
-    onSettled: refresh,
-  });
-
   const items = watchlistQuery.data ?? [];
 
   return (
@@ -175,10 +93,7 @@ export function WatchlistManagerPanel() {
 
       <div className="p-3 rounded-lg bg-surface-card border border-border-default space-y-3">
         <p className="text-xs text-text-muted leading-snug">
-          Symbols the historical download manager fetches. Add them here, or import a
-          spreadsheet with <code className="font-mono">symbol</code>,{" "}
-          <code className="font-mono">exchange</code> and optional{" "}
-          <code className="font-mono">interval</code> columns.
+          Symbols the historical download manager fetches. Add and remove them here.
         </p>
 
         {/* Add form */}
@@ -227,33 +142,7 @@ export function WatchlistManagerPanel() {
             )}
             Add
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importMutation.isPending}
-            className="gap-1.5"
-          >
-            {importMutation.isPending ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Upload size={13} />
-            )}
-            Import from Excel
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            className="sr-only"
-            aria-label="Import watchlist from Excel"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) importMutation.mutate(file);
-              e.target.value = "";
-            }}
-          />
+
         </form>
 
         {addMutation.isError && (
@@ -261,12 +150,6 @@ export function WatchlistManagerPanel() {
             {addMutation.error instanceof Error ? addMutation.error.message : "Failed to add symbol"}
           </p>
         )}
-        {importError && (
-          <p role="alert" className="text-xs text-loss">
-            {importError}
-          </p>
-        )}
-
         {/* Watchlist table */}
         {watchlistQuery.isLoading ? (
           <p className="text-xs text-text-muted">Loading watchlist…</p>

@@ -63,4 +63,4 @@ Adapts to current volatility — wider SL in volatile markets.
 
 ## Margin Management
 Always maintain minimum 30% free margin buffer. Never deploy >70% of available margin.
-Monitor using `/api/v1/funds` before each new position.
+Monitor using the connected native account funds reader before each new position.

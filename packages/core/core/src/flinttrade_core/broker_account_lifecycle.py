@@ -115,6 +115,7 @@ def _require_sync_wait(timeout: float) -> None:
 
 def _launch(future: Future, operation: Callable[[], Any]) -> None:
     """Start only an already-running genuine future, with no cancellable wrapper."""
+
     def run() -> None:
         try:
             future.set_result(operation())
@@ -139,12 +140,21 @@ class BrokerAccountLifecycleOwner:
     no provider calls, awaits, drain or cleanup. Use run_worker for blocking work.
     """
 
-    def __init__(self, workspace_path: Path, backend_proof: BackendLeaseProof, *,
-                 retire_generations: Callable[[float], bool], rebuild_lock: object) -> None:
+    def __init__(
+        self,
+        workspace_path: Path,
+        backend_proof: BackendLeaseProof,
+        *,
+        retire_generations: Callable[[float], bool],
+        rebuild_lock: object,
+    ) -> None:
         proof = require_backend_lease_proof(backend_proof)
         path = Path(workspace_path).resolve()
-        if (path != proof.workspace_path or not callable(retire_generations)
-                or inspect.iscoroutinefunction(retire_generations)):
+        if (
+            path != proof.workspace_path
+            or not callable(retire_generations)
+            or inspect.iscoroutinefunction(retire_generations)
+        ):
             raise RuntimeError("account_lifecycle_authority_invalid")
         if not callable(getattr(rebuild_lock, "acquire", None)) or not callable(getattr(rebuild_lock, "release", None)):
             raise RuntimeError("account_lifecycle_fence_invalid")
@@ -190,15 +200,17 @@ class BrokerAccountLifecycleOwner:
             raise RuntimeError("account_mutation_lease_settled")
         return operation
 
-    def begin(self, operation_id: UUID, selector: BrokerSelector, *,
-              durable_claim_release: Callable[[], None] | None = None) -> AccountMutationLease:
+    def begin(
+        self, operation_id: UUID, selector: BrokerSelector, *, durable_claim_release: Callable[[], None] | None = None
+    ) -> AccountMutationLease:
         """Borrow the one active lane; same exact identity returns its original lease."""
         self._require_process()
         if type(operation_id) is not UUID or operation_id.version != 4 or operation_id.variant != RFC_4122:
             raise ValueError("account_operation_id_invalid")
         _validate_selector(selector)
         if durable_claim_release is not None and (
-                not callable(durable_claim_release) or inspect.iscoroutinefunction(durable_claim_release)):
+            not callable(durable_claim_release) or inspect.iscoroutinefunction(durable_claim_release)
+        ):
             raise TypeError("account_durable_claim_callback_invalid")
         with self._rebuild_lock:
             require_backend_lease_proof(self._proof)
@@ -216,7 +228,8 @@ class BrokerAccountLifecycleOwner:
                     raise RuntimeError("account_mutation_already_settled")
                 lease = AccountMutationLease()
                 self._operations[lease] = _Operation(
-                    operation_id, selector, durable_claim_release=durable_claim_release)
+                    operation_id, selector, durable_claim_release=durable_claim_release
+                )
                 self._active = lease
                 return lease
 
@@ -231,10 +244,16 @@ class BrokerAccountLifecycleOwner:
             thread_id = threading.get_ident()
             rebuild = self._rebuild_intent
             account_current = self._active is None or (
-                self._publication_thread == thread_id and not self._operations[self._active].abandoned)
-            return self._accepting and account_current and (
-                rebuild is None or (rebuild.thread_id == thread_id and rebuild.depth > 0
-                                    and self._rebuild_scope_current(rebuild)))
+                self._publication_thread == thread_id and not self._operations[self._active].abandoned
+            )
+            return (
+                self._accepting
+                and account_current
+                and (
+                    rebuild is None
+                    or (rebuild.thread_id == thread_id and rebuild.depth > 0 and self._rebuild_scope_current(rebuild))
+                )
+            )
 
     def legacy_mutation_admission_allowed(self) -> bool:
         """A rotation/auth borrower cannot use an occupied account or rebuild lane."""
@@ -246,19 +265,24 @@ class BrokerAccountLifecycleOwner:
         with self._condition:
             return self._accepting and self._active is None and self._rebuild_intent is None
 
-    def begin_rebuild(self, *, retire_generations: Callable[[float], bool],
-                      publication_current: Callable[[], bool]) -> RuntimeRebuildLease:
+    def begin_rebuild(
+        self, *, retire_generations: Callable[[float], bool], publication_current: Callable[[], bool]
+    ) -> RuntimeRebuildLease:
         """Reserve runtime-only generation intent; no UUID, selector or store claim."""
         self._require_process()
-        if any(not callable(callback) or inspect.iscoroutinefunction(callback)
-               for callback in (retire_generations, publication_current)):
+        if any(
+            not callable(callback) or inspect.iscoroutinefunction(callback)
+            for callback in (retire_generations, publication_current)
+        ):
             raise TypeError("account_rebuild_callback_invalid")
         with self._rebuild_lock:
             require_backend_lease_proof(self._proof)
             with self._condition:
                 thread_id = threading.get_ident()
-                if not self._accepting or (self._active is not None and (
-                        self._publication_thread != thread_id or self._operations[self._active].abandoned)):
+                if not self._accepting or (
+                    self._active is not None
+                    and (self._publication_thread != thread_id or self._operations[self._active].abandoned)
+                ):
                     raise RuntimeError("account_rebuild_busy")
                 existing = self._rebuild_intent
                 if existing is not None:
@@ -267,8 +291,9 @@ class BrokerAccountLifecycleOwner:
                     existing.depth += 1
                     return existing.token
                 token = RuntimeRebuildLease()
-                self._rebuild_intent = _RebuildIntent(token, thread_id, retire_generations, publication_current,
-                                                     mutation_lease=self._active)
+                self._rebuild_intent = _RebuildIntent(
+                    token, thread_id, retire_generations, publication_current, mutation_lease=self._active
+                )
                 return token
 
     def current_rebuild(self) -> RuntimeRebuildLease | None:
@@ -276,14 +301,22 @@ class BrokerAccountLifecycleOwner:
         self._require_process()
         with self._condition:
             intent = self._rebuild_intent
-            return (intent.token if intent is not None and intent.depth > 0
-                    and intent.thread_id == threading.get_ident() else None)
+            return (
+                intent.token
+                if intent is not None and intent.depth > 0 and intent.thread_id == threading.get_ident()
+                else None
+            )
 
     def _rebuild(self, token: RuntimeRebuildLease) -> _RebuildIntent:
         self._require_process()
         intent = self._rebuild_intent
-        if (type(token) is not RuntimeRebuildLease or intent is None or intent.token is not token
-                or intent.thread_id != threading.get_ident() or intent.depth == 0):
+        if (
+            type(token) is not RuntimeRebuildLease
+            or intent is None
+            or intent.token is not token
+            or intent.thread_id != threading.get_ident()
+            or intent.depth == 0
+        ):
             raise RuntimeError("account_rebuild_lease_invalid")
         return intent
 
@@ -292,8 +325,12 @@ class BrokerAccountLifecycleOwner:
         lease = intent.mutation_lease
         if lease is None:
             return self._active is None
-        return (self._active is lease and self._publication_thread == threading.get_ident()
-                and not self._operations[lease].abandoned and not self._operations[lease].settled)
+        return (
+            self._active is lease
+            and self._publication_thread == threading.get_ident()
+            and not self._operations[lease].abandoned
+            and not self._operations[lease].settled
+        )
 
     def publish_rebuild_if_current(self, token: RuntimeRebuildLease, callback: Callable[[], Any]) -> Any:
         """Revalidate exact runtime generation after unlocked drain, then publish locally."""
@@ -304,8 +341,18 @@ class BrokerAccountLifecycleOwner:
             require_backend_lease_proof(self._proof)
             with self._condition:
                 intent = self._rebuild(token)
-                if not self._accepting or not self._rebuild_scope_current(intent) or (intent.worker is not None and (
-                        not intent.worker.done() or intent.worker.exception() is not None or intent.worker.result() is not True)):
+                if (
+                    not self._accepting
+                    or not self._rebuild_scope_current(intent)
+                    or (
+                        intent.worker is not None
+                        and (
+                            not intent.worker.done()
+                            or intent.worker.exception() is not None
+                            or intent.worker.result() is not True
+                        )
+                    )
+                ):
                     raise RuntimeError("account_rebuild_publication_revoked")
             if intent.publication_current() is not True:
                 raise RuntimeError("account_rebuild_generation_conflict")
@@ -349,6 +396,7 @@ class BrokerAccountLifecycleOwner:
                 launch = False
         if launch:
             future.add_done_callback(lambda _future: self._finish_rebuild(intent))
+
             def retire(wait: float) -> bool:
                 result = intent.retire(wait)
                 if type(result) is not bool:
@@ -356,6 +404,7 @@ class BrokerAccountLifecycleOwner:
                         result.close()
                     raise TypeError("account_generation_retirement_invalid")
                 return result
+
             try:
                 zero_drained = retire(0.0)
             except BaseException as exc:  # noqa: BLE001 - retain the failed real bridge
@@ -387,10 +436,7 @@ class BrokerAccountLifecycleOwner:
                     raise RuntimeError("account_mutation_publication_revoked")
                 if any(not worker.done() for worker in operation.workers):
                     raise RuntimeError("account_mutation_worker_pending")
-                if any(
-                    worker.cancelled() or worker.exception() is not None
-                    for worker in operation.workers
-                ):
+                if any(worker.cancelled() or worker.exception() is not None for worker in operation.workers):
                     raise RuntimeError("account_mutation_worker_failed")
                 retired = operation.retirement_worker
                 if retired is not None and (retired.exception() is not None or retired.result() is not True):
@@ -451,9 +497,14 @@ class BrokerAccountLifecycleOwner:
         with self._condition:
             self._condition.notify_all()
 
-    def run_worker(self, lease: AccountMutationLease, operation: Callable[[], Any], *,
-                   accept_result: Callable[[Any], None] | None = None,
-                   before_dispatch: Callable[[], None] | None = None) -> Future:
+    def run_worker(
+        self,
+        lease: AccountMutationLease,
+        operation: Callable[[], Any],
+        *,
+        accept_result: Callable[[Any], None] | None = None,
+        before_dispatch: Callable[[], None] | None = None,
+    ) -> Future:
         """Reserve custody before dispatch; accept late results before real completion.
 
         An async adapter may run in this bridge via asyncio.run. Its existing
@@ -461,7 +512,8 @@ class BrokerAccountLifecycleOwner:
         """
         self._require_process()
         if before_dispatch is not None and (
-                not callable(before_dispatch) or inspect.iscoroutinefunction(before_dispatch)):
+            not callable(before_dispatch) or inspect.iscoroutinefunction(before_dispatch)
+        ):
             raise TypeError("account_dispatch_callback_invalid")
         with self._rebuild_lock:
             require_backend_lease_proof(self._proof)
@@ -479,6 +531,7 @@ class BrokerAccountLifecycleOwner:
                 except BaseException as error:
                     future.set_exception(error)
                     return future
+
             def run() -> Any:
                 require_backend_lease_proof(self._proof)
                 result = operation()
@@ -490,6 +543,7 @@ class BrokerAccountLifecycleOwner:
                         self.retain_candidate(lease, result, None)
                         raise
                 return result
+
             _launch(future, run)
             return future
 
@@ -513,12 +567,14 @@ class BrokerAccountLifecycleOwner:
         if cleanup is not None and (not callable(cleanup) or inspect.iscoroutinefunction(cleanup)):
             raise TypeError("account_candidate_cleanup_invalid")
 
-    def retain_candidate(self, lease: AccountMutationLease, candidate: object,
-                         cleanup: Callable[[object], None] | None) -> CleanupTicket:
+    def retain_candidate(
+        self, lease: AccountMutationLease, candidate: object, cleanup: Callable[[object], None] | None
+    ) -> CleanupTicket:
         """Reserve raw identity owner-wide; only an exact same-lane replay deduplicates."""
         self._require_process()
         self._validate_cleanup(cleanup)
         from flinttrade_gateway.registry import RetiredRegistryCandidate  # noqa: PLC0415
+
         raw = candidate.session if type(candidate) is RetiredRegistryCandidate else candidate
         with self._condition:
             operation = self._operation(lease)
@@ -535,8 +591,9 @@ class BrokerAccountLifecycleOwner:
             self._condition.notify_all()
             return ticket
 
-    def transfer_candidate_to_registry(self, lease: AccountMutationLease, ticket: CleanupTicket,
-                                       registry_owner: Any) -> None:
+    def transfer_candidate_to_registry(
+        self, lease: AccountMutationLease, ticket: CleanupTicket, registry_owner: Any
+    ) -> None:
         """Bind live registry ownership while retaining the explicit cleanup contract.
 
         Call synchronously inside publish_if_current, after registry publication.
@@ -547,12 +604,18 @@ class BrokerAccountLifecycleOwner:
         with self._condition:
             operation = self._operation(lease)
             candidate = operation.candidates.get(ticket)
-            if candidate is None or candidate.worker is not None or candidate.complete or candidate.registry_owner is not None:
+            if (
+                candidate is None
+                or candidate.worker is not None
+                or candidate.complete
+                or candidate.registry_owner is not None
+            ):
                 raise RuntimeError("account_candidate_ticket_invalid")
             payload = candidate.payload
         if self._publication_thread != threading.get_ident():
             raise RuntimeError("account_candidate_transfer_invalid")
         from flinttrade_gateway.registry import RegistryPublicationOwner  # noqa: PLC0415
+
         if type(registry_owner) is not RegistryPublicationOwner:
             raise RuntimeError("account_candidate_transfer_invalid")
         binding = registry_owner.live_candidate_version(payload)
@@ -562,22 +625,31 @@ class BrokerAccountLifecycleOwner:
             candidate.registry_owner = registry_owner
             candidate.registry_binding = binding
 
-    def _retired_candidate(self, payload: Any, previous: _Candidate | None,
-                           cleanup: Callable[[object], None] | None, registry_owner: Any) -> _Candidate:
+    def _retired_candidate(
+        self, payload: Any, previous: _Candidate | None, cleanup: Callable[[object], None] | None, registry_owner: Any
+    ) -> _Candidate:
         """Build a replacement without consuming any previous custody."""
         self._require_process()
         effective = cleanup
         if previous is not None and previous.cleanup is not None:
             local_cleanup, original_payload = previous.cleanup, previous.payload
+
             def inherited_cleanup(_retired: object) -> None:
                 return local_cleanup(original_payload)
-            effective = inherited_cleanup
-        return _Candidate(payload, effective, release=registry_owner.release_retired_candidate,
-                          raw_payload=payload.session)
 
-    def _transfer_retirement(self, lease: AccountMutationLease, operation: _Operation,
-                             registry_owner: Any, receipt: object,
-                             cleanup: Callable[[object], None] | None) -> CleanupTicket:
+            effective = inherited_cleanup
+        return _Candidate(
+            payload, effective, release=registry_owner.release_retired_candidate, raw_payload=payload.session
+        )
+
+    def _transfer_retirement(
+        self,
+        lease: AccountMutationLease,
+        operation: _Operation,
+        registry_owner: Any,
+        receipt: object,
+        cleanup: Callable[[object], None] | None,
+    ) -> CleanupTicket:
         """One same-ticket move, with precise rollback if registry acceptance fails."""
         self._require_process()
         move: dict[str, Any] = {}
@@ -586,11 +658,13 @@ class BrokerAccountLifecycleOwner:
             if duplicate is not None:
                 if duplicate[0] is not registry_owner:
                     from .account_mutation_contracts import RegistryCapabilityError  # noqa: PLC0415
+
                     raise RegistryCapabilityError
                 return duplicate[1]
 
         def accept(payload: Any) -> CleanupTicket:
             from .account_mutation_contracts import RegistryCapabilityError  # noqa: PLC0415
+
             if payload.selector != operation.selector or not payload.managed:
                 raise RegistryCapabilityError
             raw = payload.session
@@ -599,7 +673,8 @@ class BrokerAccountLifecycleOwner:
                 previous = None if previous_entry is None else previous_entry[2]
                 if previous is not None:
                     if previous.raw_payload is not raw or (
-                            previous.registry_owner is not None and previous.registry_owner is not registry_owner):
+                        previous.registry_owner is not None and previous.registry_owner is not registry_owner
+                    ):
                         raise RegistryCapabilityError
                     if previous.worker is not None and not previous.worker.done():
                         raise RuntimeError("account_candidate_cleanup_pending")
@@ -607,8 +682,13 @@ class BrokerAccountLifecycleOwner:
                 ticket = CleanupTicket() if previous_entry is None else previous_entry[1]
                 prior_operation = None if previous_entry is None else self._operations[previous_entry[0]]
                 # Construct everything first; retain rollback authority before the move.
-                move.update(raw=raw, previous_entry=previous_entry, replacement=replacement,
-                            ticket=ticket, prior_operation=prior_operation)
+                move.update(
+                    raw=raw,
+                    previous_entry=previous_entry,
+                    replacement=replacement,
+                    ticket=ticket,
+                    prior_operation=prior_operation,
+                )
                 self._custody_moves.add(id(raw))
                 if prior_operation is not None and prior_operation is not operation:
                     prior_operation.candidates.pop(ticket)
@@ -639,12 +719,19 @@ class BrokerAccountLifecycleOwner:
                     self._custody_moves.discard(id(move["raw"]))
                 self._condition.notify_all()
 
-    def retain_retirement(self, lease: AccountMutationLease, registry_owner: Any, receipt: object, *,
-                          cleanup: Callable[[object], None] | None = None) -> CleanupTicket:
+    def retain_retirement(
+        self,
+        lease: AccountMutationLease,
+        registry_owner: Any,
+        receipt: object,
+        *,
+        cleanup: Callable[[object], None] | None = None,
+    ) -> CleanupTicket:
         """Atomically move raw/prepared/live custody into one exact retired ticket."""
         self._require_process()
         self._validate_cleanup(cleanup)
         from flinttrade_gateway.registry import RegistryPublicationOwner  # noqa: PLC0415
+
         if type(registry_owner) is not RegistryPublicationOwner:
             raise RuntimeError("account_registry_owner_invalid")
         with self._rebuild_lock:
@@ -672,11 +759,13 @@ class BrokerAccountLifecycleOwner:
             operation.retirement_worker = future
             operation.workers.add(future)
         future.add_done_callback(lambda _future: self._notify())
+
         def retire() -> bool:
             # Callback contract: zero wait revokes BOTH reads and writes.
             if self._drain_generations(0.0):
                 return True
             return bool(self._drain_generations(timeout)) if timeout else False
+
         _launch(future, retire)
         return future
 
@@ -707,7 +796,8 @@ class BrokerAccountLifecycleOwner:
         self._require_process()
         retirement = self._shutdown_retirement if not self._accepting else operation.retirement_worker
         return retirement is None or (
-            retirement.done() and retirement.exception() is None and retirement.result() is True)
+            retirement.done() and retirement.exception() is None and retirement.result() is True
+        )
 
     def _start_cleanup(self, operation: _Operation, attempted: set[CleanupTicket]) -> None:
         self._require_process()
@@ -716,9 +806,13 @@ class BrokerAccountLifecycleOwner:
             if not self._generations_drained(operation) or any(not worker.done() for worker in operation.workers):
                 return
             for ticket, candidate in operation.candidates.items():
-                if (candidate.complete or candidate.registry_owner is not None
-                        or candidate.cleanup is None or ticket in attempted
-                        or id(candidate.raw_payload) in self._custody_moves):
+                if (
+                    candidate.complete
+                    or candidate.registry_owner is not None
+                    or candidate.cleanup is None
+                    or ticket in attempted
+                    or id(candidate.raw_payload) in self._custody_moves
+                ):
                     continue
                 prior = candidate.worker
                 if prior is not None and (not prior.done() or prior.exception() is None):
@@ -728,6 +822,7 @@ class BrokerAccountLifecycleOwner:
                 candidate.worker = future
                 launches.append((future, ticket, candidate))
         for future, ticket, candidate in launches:
+
             def clean(candidate: _Candidate = candidate) -> None:
                 result = candidate.cleanup(candidate.payload)
                 if result is not None:
@@ -736,6 +831,7 @@ class BrokerAccountLifecycleOwner:
                     raise RuntimeError("account_candidate_cleanup_incomplete")
                 if candidate.release is not None:
                     candidate.release(candidate.payload)
+
             def finished(future: Future, ticket: CleanupTicket = ticket, candidate: _Candidate = candidate) -> None:
                 with self._condition:
                     if future.exception() is None:
@@ -749,6 +845,7 @@ class BrokerAccountLifecycleOwner:
                         candidate.cleanup = None
                         candidate.release = None
                     self._condition.notify_all()
+
             future.add_done_callback(finished)
             _launch(future, clean)
 
@@ -763,8 +860,11 @@ class BrokerAccountLifecycleOwner:
             raise TypeError("account_durable_disposition_invalid")
         with self._rebuild_lock:
             with self._condition:
-                if (type(lease) is AccountMutationLease and lease in self._operations
-                        and self._operations[lease].settled):
+                if (
+                    type(lease) is AccountMutationLease
+                    and lease in self._operations
+                    and self._operations[lease].settled
+                ):
                     return True
                 operation = self._operation(lease)
                 # A terminal settlement attempt closes publication before local
@@ -774,9 +874,11 @@ class BrokerAccountLifecycleOwner:
             with self._condition:
                 if not self._generations_drained(operation) or any(not worker.done() for worker in operation.workers):
                     return False
-                if any((not candidate.complete and candidate.registry_owner is None)
-                       or (candidate.worker is not None and not candidate.worker.done())
-                       for candidate in operation.candidates.values()):
+                if any(
+                    (not candidate.complete and candidate.registry_owner is None)
+                    or (candidate.worker is not None and not candidate.worker.done())
+                    for candidate in operation.candidates.values()
+                ):
                     return False
                 if operation.durable_claim_release is not None:
                     if not durable_disposition:
@@ -801,8 +903,12 @@ class BrokerAccountLifecycleOwner:
         self._require_process()
         with self._condition:
             operation = self._operations.get(lease)
-            if (operation is None or not operation.settled or self._active is lease
-                    or operation.durable_claim_release is not None):
+            if (
+                operation is None
+                or not operation.settled
+                or self._active is lease
+                or operation.durable_claim_release is not None
+            ):
                 raise RuntimeError("account_mutation_lease_unforgettable")
             del self._operations[lease]
 
@@ -813,10 +919,14 @@ class BrokerAccountLifecycleOwner:
             return
         try:
             with self._condition:
-                live = tuple((lease, operation, candidate) for lease, operation in self._operations.items()
-                             for candidate in operation.candidates.values()
-                             if not candidate.complete and candidate.registry_owner is not None)
+                live = tuple(
+                    (lease, operation, candidate)
+                    for lease, operation in self._operations.items()
+                    for candidate in operation.candidates.values()
+                    if not candidate.complete and candidate.registry_owner is not None
+                )
             from .account_mutation_contracts import RegistryVersionConflict  # noqa: PLC0415
+
             for lease, operation, candidate in live:
                 publication = candidate.registry_owner
                 payload = candidate.payload
@@ -825,7 +935,8 @@ class BrokerAccountLifecycleOwner:
                 if current == binding:
                     try:
                         result = publication.remove_session_for_exact(
-                            binding.selector, expected_registry=binding.registry_version)
+                            binding.selector, expected_registry=binding.registry_version
+                        )
                     except RegistryVersionConflict:
                         receipt = publication.retirement_for_candidate(payload)
                     else:
@@ -855,13 +966,15 @@ class BrokerAccountLifecycleOwner:
         self._rebuild_lock.release()
         with self._condition:
             retirement = self._shutdown_retirement
-            if retirement is None or (retirement.done() and (
-                    retirement.exception() is not None or retirement.result() is not True)):
+            if retirement is None or (
+                retirement.done() and (retirement.exception() is not None or retirement.result() is not True)
+            ):
                 retirement = _running_future()
                 self._shutdown_retirement = retirement
                 launch = True
             else:
                 launch = False
+
         def launch_retirement(future: Future) -> None:
             try:
                 zero_drained = self._drain_generations(0.0)
@@ -871,8 +984,7 @@ class BrokerAccountLifecycleOwner:
                 if zero_drained:
                     future.set_result(True)
                 else:
-                    _launch(future, lambda: bool(self._drain_generations(
-                        max(0.0, deadline - time.monotonic()))))
+                    _launch(future, lambda: bool(self._drain_generations(max(0.0, deadline - time.monotonic()))))
             future.add_done_callback(lambda _future: self._notify())
 
         if launch:
@@ -885,13 +997,21 @@ class BrokerAccountLifecycleOwner:
             for _, operation in operations:
                 self._start_cleanup(operation, attempted)
             with self._condition:
-                ready = (self._rebuild_intent is None and not self._custody_moves and retirement.done()
-                         and retirement.exception() is None and retirement.result() is True)
+                ready = (
+                    self._rebuild_intent is None
+                    and not self._custody_moves
+                    and retirement.done()
+                    and retirement.exception() is None
+                    and retirement.result() is True
+                )
                 for lease, operation in operations:
                     pending = not self._generations_drained(operation) or any(
-                        not worker.done() for worker in operation.workers)
-                    pending = pending or any(not item.complete or (item.worker is not None and not item.worker.done())
-                                             for item in operation.candidates.values())
+                        not worker.done() for worker in operation.workers
+                    )
+                    pending = pending or any(
+                        not item.complete or (item.worker is not None and not item.worker.done())
+                        for item in operation.candidates.values()
+                    )
                     pending = pending or operation.durable_claim_release is not None
                     if not pending:
                         operation.settled = True
@@ -904,10 +1024,18 @@ class BrokerAccountLifecycleOwner:
                         if _OWNERS.get(self._key) is self:
                             _OWNERS.pop(self._key)
                     return True
-                if (retirement.done() and retirement.exception() is None and retirement.result() is True
-                        and any(op.durable_claim_release is not None for _, op in operations)
-                        and all(self._generations_drained(op) and all(worker.done() for worker in op.workers)
-                                and all(item.complete for item in op.candidates.values()) for _, op in operations)):
+                if (
+                    retirement.done()
+                    and retirement.exception() is None
+                    and retirement.result() is True
+                    and any(op.durable_claim_release is not None for _, op in operations)
+                    and all(
+                        self._generations_drained(op)
+                        and all(worker.done() for worker in op.workers)
+                        and all(item.complete for item in op.candidates.values())
+                        for _, op in operations
+                    )
+                ):
                     return False
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -929,10 +1057,17 @@ class BrokerAccountLifecycleOwner:
                     launch = True
                 else:
                     retry_launch = False
-                if any(item.cleanup is None and not item.complete for _, op in operations for item in op.candidates.values()):
+                if any(
+                    item.cleanup is None and not item.complete
+                    for _, op in operations
+                    for item in op.candidates.values()
+                ):
                     return False
-                if any(item.worker is not None and item.worker.done() and item.worker.exception() is not None
-                       for _, op in operations for item in op.candidates.values()):
+                if any(
+                    item.worker is not None and item.worker.done() and item.worker.exception() is not None
+                    for _, op in operations
+                    for item in op.candidates.values()
+                ):
                     return False
                 if not retry_launch:
                     self._condition.wait(remaining)
@@ -969,10 +1104,15 @@ class BrokerAccountLifecycleOwner:
             candidates = tuple(item for operation in operations for item in operation.candidates.values())
             rebuild = self._rebuild_intent
             return AccountLifecycleSnapshot(
-                self._accepting, self._active is not None or rebuild is not None,
+                self._accepting,
+                self._active is not None or rebuild is not None,
                 sum(not worker.done() for operation in operations for worker in operation.workers)
                 + int(rebuild is not None and rebuild.worker is not None and not rebuild.worker.done()),
-                sum((not item.complete and (not self._accepting or item.registry_owner is None))
-                    or (item.worker is not None and not item.worker.done()) for item in candidates),
+                sum(
+                    (not item.complete and (not self._accepting or item.registry_owner is None))
+                    or (item.worker is not None and not item.worker.done())
+                    for item in candidates
+                ),
                 sum(not item.complete and item.cleanup is None for item in candidates),
-                sum(not item.complete and item.registry_owner is not None for item in candidates))
+                sum(not item.complete and item.registry_owner is not None for item in candidates),
+            )

@@ -4,7 +4,7 @@
  * THREE presentations of ONE position book, chosen by the workspace panel
  * parameter `params.view`:
  *   • "table" (default) — the sortable book with the gated write verbs
- *     (per-row square-off, per-row convert, book-level exit-all) and the Excel
+ *     (per-row square-off, per-row convert, book-level exit-all) and the book
  *     export.
  *   • "net"             — same-symbol rows netted while the net quantity is
  *     still open. A symbol whose legs are all at quantity 0 is flat and
@@ -55,7 +55,6 @@ import { useMemo, useState, useCallback, useEffect, useRef, memo } from "react";
 import {
   Clock,
   Layers,
-  FileDown,
   LogOut,
   Repeat,
   SquareX,
@@ -81,7 +80,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FlintSegmentTracker } from "@flinttrade/design-system";
-import { downloadExcel } from "@/services/ftApi.data";
 import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
@@ -815,7 +813,6 @@ function PositionsWidget(props: WidgetProps) {
   const [exitAllIntent, setExitAllIntent] = useState<ExitAllActionIntent | null>(null);
   const [unexpectedKeys, setUnexpectedKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [flipToast, setFlipToast] = useState<string | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
   const heldSignsRef = useRef<Map<string, 1 | -1>>(new Map());
   const signsPrimedRef = useRef(false);
   const signsScopeRef = useRef(readIdentity.scopeKey);
@@ -884,12 +881,10 @@ function PositionsWidget(props: WidgetProps) {
     && readIdentity.brokerType === activeAccount.broker
     && readIdentity.accountId === activeAccount.account_id
     && readIdentity.scopeKey === `live:${brokerAccountKey(activeAccount)}`;
-  const exactOpenAlgoBook = readIdentity.brokerType === "openalgo"
-    && readIdentity.accountId === "default";
   const canMutateBook = appMode === "live" && queryUi.canRefetch && !isError;
   const practiceBookReady = appMode === "practice" && queryUi.canRefetch && !isError;
   const canSquareOff = practiceBookReady || (
-    canMutateBook && (exactActiveNativeBook || exactOpenAlgoBook)
+    canMutateBook && exactActiveNativeBook
   );
   const canUseNativePositionVerbs = canMutateBook && exactActiveNativeBook;
   const canExitAll = practiceBookReady || canUseNativePositionVerbs;
@@ -1041,41 +1036,6 @@ function PositionsWidget(props: WidgetProps) {
     },
     [props.api],
   );
-
-  const handleExport = useCallback(async () => {
-    if (rows.length === 0) return;
-    setIsExporting(true);
-    try {
-      const count = await downloadExcel(
-        rows.map((row) => ({
-          symbol: row.symbol,
-          exchange: row.exchange,
-          product: row.product,
-          quantity: row.quantity,
-          avgPrice: row.averagePrice,
-          ltp: row.ltp,
-          pnl: row.mtm,
-          exposure: row.exposure,
-          sector: row.sector,
-        })),
-        "Positions",
-        "positions.xlsx",
-      );
-      emitNotification({
-        category: "system",
-        title: "Positions exported",
-        body: `Downloaded ${count} position${count === 1 ? "" : "s"} to positions.xlsx.`,
-      });
-    } catch (err) {
-      emitNotification({
-        category: "alert",
-        title: "Export failed",
-        body: err instanceof Error ? err.message : "Could not export positions to Excel.",
-      });
-    } finally {
-      setIsExporting(false);
-    }
-  }, [rows]);
 
   const handleOpenChart = useCallback(
     (row: PositionRow) => {
@@ -1451,18 +1411,6 @@ function PositionsWidget(props: WidgetProps) {
                 ))}
               </SelectContent>
             </Select>
-          )}
-          {queryUi.canRefetch && !queryUi.isFrozen && rows.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void handleExport()}
-              disabled={isExporting}
-              aria-label="Export positions to Excel"
-              title="Export positions to Excel"
-              className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-40"
-            >
-              <FileDown size={12} className={isExporting ? "animate-pulse" : ""} />
-            </button>
           )}
           {canExitAll && rows.some((row) => row.quantity !== 0) && (
             <Button

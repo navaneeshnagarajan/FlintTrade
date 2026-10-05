@@ -31,10 +31,7 @@ def _find_method(tree: ast.AST, class_name: str, method_name: str) -> ast.AST | 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == class_name:
             for sub in node.body:
-                if (
-                    isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef))
-                    and sub.name == method_name
-                ):
+                if isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef)) and sub.name == method_name:
                     return sub
     return None
 
@@ -58,8 +55,7 @@ def test_start_launches_reconciliation_runner() -> None:
     assert start is not None, "FlintTradeApp._start_owned not found"
 
     assert _calls_named(start, "ReconciliationRunner"), (
-        "_start_owned() must construct the engine ReconciliationRunner over the "
-        "RECONCILE_TARGETS provider"
+        "_start_owned() must construct the engine ReconciliationRunner over the RECONCILE_TARGETS provider"
     )
     assert _calls_named(start, "create_task"), (
         "_start_owned() must launch the runner via asyncio.create_task so it runs as "
@@ -75,8 +71,7 @@ def test_stop_stops_reconciliation_runner() -> None:
     refs = [
         n
         for n in ast.walk(stop_once)
-        if isinstance(n, ast.Attribute)
-        and n.attr in ("_reconciliation_runner", "_reconciliation_task")
+        if isinstance(n, ast.Attribute) and n.attr in ("_reconciliation_runner", "_reconciliation_task")
     ]
     assert refs, "_stop_once() must stop/cancel the reconciliation runner"
 

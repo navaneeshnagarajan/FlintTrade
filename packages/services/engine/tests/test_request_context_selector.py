@@ -3,7 +3,7 @@
 A principal may be bound to exactly one ``(adapter_id, account_id)`` selector,
 carried as the canonical composite string ``'adapter_id:account_id'`` (identity
 X7). ``parse_selector`` splits on the FIRST colon only, so account ids that
-themselves contain colons (e.g. an OpenAlgo sub-account) survive intact.
+themselves contain colons (e.g. an broker sub-account) survive intact.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def test_parse_selector_basic() -> None:
 
 def test_parse_selector_splits_on_first_colon_only() -> None:
     # The account id keeps any further colons; only the first colon delimits.
-    assert parse_selector("openalgo:zerodha:sub") == ("openalgo", "zerodha:sub")
+    assert parse_selector("broker:zerodha:sub") == ("broker", "zerodha:sub")
 
 
 @pytest.mark.parametrize("bad", ["bad", "", ":account", "adapter:", ":"])

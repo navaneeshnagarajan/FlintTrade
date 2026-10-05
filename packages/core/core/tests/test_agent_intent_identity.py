@@ -58,7 +58,7 @@ def session(monkeypatch, tmp_path):
         TESTING=True,
         # Neither object exposes a broker write method. Tests only persist intents.
         BROKER_ROUTER=object(),
-        OPENALGO_CLIENT=object(),
+        BROKER_CLIENT=object(),
         SAFETY=SafetySystem(SafetyConfig(check_market_hours=False)),
         SAFETY_CONFIG_READY=True,
         PENDING_ORDER_QUEUE=queue,
@@ -69,7 +69,9 @@ def session(monkeypatch, tmp_path):
     )
     app.register_blueprint(routes.agent_bp)
     try:
-        response = app.test_client().post("/api/v1/ai/agent/start", json={"symbols": ["RELIANCE"]})
+        response = app.test_client().post(
+            "/api/v1/ai/agent/start", json={"symbols": ["RELIANCE"], "broker": "dhan", "account_id": "primary"}
+        )
         assert response.status_code == 202, response.get_json()
         yield SimpleNamespace(queue=queue, sink=captured["entry_intent_sink"], trader=captured["trader"])
     finally:
@@ -130,8 +132,9 @@ async def test_terminal_intention_allows_fresh_same_symbol_generation(session, t
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field,value", [("quantity", "2"), ("action", Action.SELL),
-                                         ("price", "2499"), ("admission_note", "new rationale")])
+@pytest.mark.parametrize(
+    "field,value", [("quantity", "2"), ("action", Action.SELL), ("price", "2499"), ("admission_note", "new rationale")]
+)
 async def test_changed_order_cannot_silently_reuse_pending_intention(session, field, value):
     first = await session.sink(_order(), _context())
     with pytest.raises(ActionCenterError, match="different|conflict|pending"):
@@ -300,7 +303,7 @@ async def test_real_live_acknowledged_exit_cannot_create_second_entry_intention(
     decision = _GatedDecision(True, _GatedOrderResponse("synthetic-exit-ack"))
     agent = AutonomousTrader(
         llm_client=object(),
-        openalgo_client=SimpleNamespace(quotes=AsyncMock(return_value={"ltp": 90.0})),
+        broker_client=SimpleNamespace(quotes=AsyncMock(return_value={"ltp": 90.0})),
         config=AgentConfig(symbols=["RELIANCE"]),
         order_executor=SimpleNamespace(route_order=AsyncMock(return_value=decision)),
     )
@@ -310,8 +313,12 @@ async def test_real_live_acknowledged_exit_cannot_create_second_entry_intention(
     session.queue.claim_for_dispatch(first["id"])
     session.queue.mark_approved(first["id"], broker_order_id="synthetic-entry-ack")
     await agent.record_approved_entry(
-        symbol="RELIANCE", action="BUY", quantity=1,
-        entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+        symbol="RELIANCE",
+        action="BUY",
+        quantity=1,
+        entry_price=100.0,
+        stop_loss=95.0,
+        take_profit=110.0,
     )
     if exit_path == "monitor":
         await agent.monitor({"symbol": "RELIANCE", **agent.state.position_details["RELIANCE"]})
@@ -327,8 +334,10 @@ async def test_real_live_acknowledged_exit_cannot_create_second_entry_intention(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field,value", [("account_id", "other"), ("source", "other"),
-                                         ("intent_type", "exit"), ("order_params", '{"quantity": "2"}')])
+@pytest.mark.parametrize(
+    "field,value",
+    [("account_id", "other"), ("source", "other"), ("intent_type", "exit"), ("order_params", '{"quantity": "2"}')],
+)
 async def test_conflicting_persisted_payload_cannot_coalesce(session, field, value):
     await session.sink(_order(), _context())
     with session.queue._lock:  # noqa: SLF001

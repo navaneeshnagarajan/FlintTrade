@@ -41,7 +41,7 @@ _SAMPLE_RESULTS = [
 
 
 def _mock_client(results: object) -> MagicMock:
-    """Build a mock OpenAlgoClient with a stubbed search() method."""
+    """Build a mock BrokerClient with a stubbed search() method."""
     mock = MagicMock()
     mock.search = AsyncMock(return_value={"status": "success", "data": results})
     mock.close = AsyncMock()
@@ -72,7 +72,7 @@ class TestSearchRoute:
     def test_basic_search_returns_results(self, client) -> None:  # type: ignore[no-untyped-def]
         """Valid query returns results list with status=success."""
         mock = _mock_client(_SAMPLE_RESULTS)
-        with patch("flinttrade_historical.search_routes.resolve_openalgo_client", return_value=(mock, True)):
+        with patch("flinttrade_historical.search_routes.resolve_broker_client", return_value=(mock, True)):
             response = client.get("/api/v1/search?q=RELI")
         assert response.status_code == 200
         data = response.get_json()
@@ -84,7 +84,7 @@ class TestSearchRoute:
     def test_exchange_filter_applied(self, client) -> None:  # type: ignore[no-untyped-def]
         """?exchange=NSE filters results to NSE-only entries."""
         mock = _mock_client(_SAMPLE_RESULTS)
-        with patch("flinttrade_historical.search_routes.resolve_openalgo_client", return_value=(mock, True)):
+        with patch("flinttrade_historical.search_routes.resolve_broker_client", return_value=(mock, True)):
             response = client.get("/api/v1/search?q=RELI&exchange=NSE")
         data = response.get_json()
         assert data["exchange"] == "NSE"
@@ -94,7 +94,7 @@ class TestSearchRoute:
     def test_limit_applied(self, client) -> None:  # type: ignore[no-untyped-def]
         """?limit=1 caps results at 1 entry."""
         mock = _mock_client(_SAMPLE_RESULTS)
-        with patch("flinttrade_historical.search_routes.resolve_openalgo_client", return_value=(mock, True)):
+        with patch("flinttrade_historical.search_routes.resolve_broker_client", return_value=(mock, True)):
             response = client.get("/api/v1/search?q=RELI&limit=1")
         data = response.get_json()
         assert data["count"] == 1

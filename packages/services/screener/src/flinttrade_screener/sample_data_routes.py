@@ -431,22 +431,22 @@ _LOT_SIZE_TABLE: dict[str, int] = FALLBACK_LOT_SIZES
 # over the full-symbol lookup when it comes from a strictly better source.
 _SOURCE_RANK: dict[str, int] = {"default": 0, "fallback": 1, "live": 2}
 
-# Shared resolver instance, rebuilt only if the app's OpenAlgo client is
+# Shared resolver instance, rebuilt only if the app's broker client is
 # swapped (e.g. a settings hot-reload constructs a fresh client).
 _resolver: LotSizeResolver | None = None
 _resolver_client_id: int | None = None
 
 
 def _get_resolver() -> LotSizeResolver | None:
-    """Return a shared LotSizeResolver bound to the app's OpenAlgo client.
+    """Return a shared LotSizeResolver bound to the app's broker client.
 
     Returns:
-        The resolver, or ``None`` when the app has no ``OPENALGO_CLIENT``
+        The resolver, or ``None`` when the app has no ``BROKER_CLIENT``
         configured (e.g. bare test apps) — callers then use the built-in
         fallback table directly.
     """
     global _resolver, _resolver_client_id  # noqa: PLW0603
-    client = current_app.config.get("OPENALGO_CLIENT")
+    client = current_app.config.get("BROKER_CLIENT")
     if client is None:
         return None
     if _resolver is None or _resolver_client_id != id(client):
@@ -494,9 +494,9 @@ def get_lot_size() -> Any:
     """Return the lot size for a derivatives symbol.
 
     Resolution order (via :class:`flinttrade_screener.lot_sizes.LotSizeResolver`
-    when the app has an OpenAlgo client configured):
+    when the app has an broker client configured):
 
-    1. Broker symbol master (OpenAlgo ``instruments``, 24-hour cache) for the
+    1. Broker symbol master (broker ``instruments``, 24-hour cache) for the
        full symbol — an exact option/future contract resolves directly.
     2. Symbol master for the base underlying (expiry suffix stripped).
     3. The resolver's built-in fallback table (shared with
@@ -523,7 +523,7 @@ def get_lot_size() -> Any:
         lot_size = resolution.lot_size if resolution.source != "default" else 0
         is_sample = resolution.source != "live"
     else:
-        # No OpenAlgo client configured — built-in fallback table only.
+        # No broker client configured — built-in fallback table only.
         lot_size = _LOT_SIZE_TABLE.get(base, 0)
         is_sample = True
 

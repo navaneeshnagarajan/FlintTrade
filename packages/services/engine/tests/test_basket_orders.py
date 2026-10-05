@@ -1,6 +1,6 @@
 """Tests for packages/services/engine/src/basket_orders.py.
 
-All broker/router interactions are mocked — no live OpenAlgo required.
+All broker/router interactions are mocked — no live broker required.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
 
 
 _PRINCIPAL = BracketPrincipal(
-    actor_id="tester", jti="jti-1", adapter_id="openalgo", account_id="default"
+    actor_id="tester", jti="jti-1", adapter_id="broker", account_id="default"
 )
 
 

@@ -150,9 +150,7 @@ const persistedSetupProgressSchema = z.object({
   persona: personaEnum.nullable(),
   connection: z
     .object({
-      host: z.string().optional(),
-      port: z.string().optional(),
-      wsPort: z.string().optional(),
+      brokerConnected: z.boolean().optional(),
     })
     .nullable(),
   trading: z
@@ -234,8 +232,8 @@ function loadProgress(): SetupProgress | null {
       // secrets left by previous versions are removed on first load.
       totpUri: "",
       backupCodes: [],
-      connection: persisted.connection
-        ? { ...persisted.connection, apiKey: "" }
+      connection: typeof persisted.connection?.brokerConnected === "boolean"
+        ? { brokerConnected: persisted.connection.brokerConnected }
         : null,
       currentStep: requiredStepFor({
         accountCreated: persisted.accountCreated,
@@ -257,9 +255,7 @@ function saveProgress(progress: SetupProgress): void {
       persona: progress.persona,
       connection: progress.connection
         ? {
-            host: progress.connection.host,
-            port: progress.connection.port,
-            wsPort: progress.connection.wsPort,
+            brokerConnected: progress.connection.brokerConnected,
           }
         : null,
       trading: progress.trading,

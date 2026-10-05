@@ -154,7 +154,7 @@ describe("LearnRoute", () => {
     expect(screen.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
     expect(screen.getByText(/Choose Practice from the Mode menu/)).toBeInTheDocument();
     expect(screen.getByRole("tabpanel")).toHaveClass("min-w-0");
-    expect(screen.getByRole("tabpanel")).not.toHaveTextContent(/OpenAlgo|sandbox|Kotak|funded unlock/i);
+    expect(screen.getByRole("tabpanel")).not.toHaveTextContent(/sandbox|Kotak|funded unlock/i);
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 

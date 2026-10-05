@@ -199,8 +199,7 @@ def test_audit_events_reads_requested_day(client, app):
 def test_audit_events_pagination(client, app):
     """``limit``/``offset`` page the newest-first list; ``total`` is the full count."""
     app.config["AUDIT"].read_day.return_value = [
-        {"ts": f"2026-04-19T10:00:0{i}+05:30", "event_type": "ORDER_PLACED", "strategy": str(i)}
-        for i in range(5)
+        {"ts": f"2026-04-19T10:00:0{i}+05:30", "event_type": "ORDER_PLACED", "strategy": str(i)} for i in range(5)
     ]
     resp = client.get("/v1/audit/events?date=2026-04-19&limit=2&offset=0")
     body = resp.get_json()["data"]

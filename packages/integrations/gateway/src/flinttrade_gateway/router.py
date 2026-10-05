@@ -579,9 +579,8 @@ class BrokerRouter:
         engine bracket routes) can read the running execution default without
         reaching into the private ``_config`` chain. The raw selector string is
         returned; callers parse it themselves (the gateway must not import
-        ``parse_selector`` from the engine layer) and keep their own
-        ``("openalgo", "default")`` fallback. Returns ``None`` when no config is
-        bound or the default is unset/empty.
+        ``parse_selector`` from the engine layer). Returns ``None`` when the
+        router has no configuration or no execution account is selected.
         """
         if self._config is None:
             return None

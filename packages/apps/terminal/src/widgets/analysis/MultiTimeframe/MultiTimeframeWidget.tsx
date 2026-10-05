@@ -21,6 +21,7 @@ import { Layers, ChevronDown, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useMarketDataScope, requireCurrentMarketDataScope } from "@/hooks/useDataScope";
 import { getHistory } from "@/services/api";
 import { getMultiTimeframe } from "@/services/ftApi.analysis";
 import type { MtfBar, MtfSignal } from "@/services/ftApi.analysis";
@@ -84,7 +85,7 @@ const SYMBOLS = Object.keys(SAMPLE);
 
 const INDEX_SYMBOLS = new Set(["NIFTY", "BANKNIFTY"]);
 
-/** OpenAlgo history needs the index exchange for index underlyings. */
+/** broker history needs the index exchange for index underlyings. */
 function exchangeFor(symbol: string): string {
   return INDEX_SYMBOLS.has(symbol) ? "NSE_INDEX" : "NSE";
 }
@@ -103,17 +104,22 @@ function isoDaysAgo(days: number): string {
 }
 
 /** Fetch live bars for every configured timeframe and run the analyser. */
-async function fetchMtfAnalysis(symbol: string) {
+async function fetchMtfAnalysis(symbol: string, signal: AbortSignal, scope: string) {
   const exchange = exchangeFor(symbol);
   const end = new Date().toISOString().slice(0, 10);
   const entries = await Promise.all(
     TF_CONFIG.map(async ({ tf, days }) => {
-      const bars = await getHistory(symbol, exchange, tf, isoDaysAgo(days), end);
+      const bars = await getHistory(symbol, exchange, tf, isoDaysAgo(days), end, signal, scope);
       return [tf, (bars ?? []) as MtfBar[]] as const;
     }),
   );
+  requireCurrentMarketDataScope(scope);
+  signal.throwIfAborted();
   const data = Object.fromEntries(entries) as Record<string, MtfBar[]>;
-  return getMultiTimeframe(symbol, data);
+  const result = await getMultiTimeframe(symbol, data, signal);
+  requireCurrentMarketDataScope(scope);
+  signal.throwIfAborted();
+  return result;
 }
 
 /** Map an analyser signal to the widget's display row. */
@@ -233,13 +239,14 @@ function ConfluenceBadge({ bullish, bearish, total }: ConfluenceBadgeProps) {
 function MultiTimeframeWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
+  const scope = useMarketDataScope();
   const [symbol, setSymbol] = useState("NIFTY");
   const [showMenu, setShowMenu] = useState(false);
 
   // Live multi-timeframe analysis — only fetched once a broker is connected.
   const { data: liveAnalysis } = useQuery({
-    queryKey: ["mtf", symbol],
-    queryFn: () => fetchMtfAnalysis(symbol),
+    queryKey: ["mtf", scope, isConnected, symbol],
+    queryFn: ({ signal }) => fetchMtfAnalysis(symbol, signal, scope),
     enabled: isConnected,
     staleTime: 60_000,
     refetchInterval: isConnected ? 60_000 : false,
@@ -285,7 +292,7 @@ function MultiTimeframeWidget() {
           >
             Live
           </span>
-        ) : null}
+        ) : <span role="status" className="ml-1 px-1.5 py-0.5 text-xxs text-warning border border-warning/30 rounded">Sample data</span>}
         <div className="flex-1" />
 
         {/* Symbol selector */}

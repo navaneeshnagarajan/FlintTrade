@@ -59,11 +59,11 @@ class BrokerAccountPatch:
         _validate_selector(self.selector)
         if (
             type(self.kind) is not AccountMutationKind
-            or self.selector.adapter_id == "openalgo"
             or type(self.data_roles) is not tuple
             or any(type(role) is not str or role not in _DATA_ROLES for role in self.data_roles)
             or len(set(self.data_roles)) != len(self.data_roles)
-            or self.kind is not AccountMutationKind.CONNECT and self.data_roles
+            or self.kind is not AccountMutationKind.CONNECT
+            and self.data_roles
             or (self.kind is AccountMutationKind.REMOVE and self.read_only is not None)
             or (self.kind is not AccountMutationKind.REMOVE and type(self.read_only) is not bool)
         ):
@@ -129,7 +129,8 @@ class BrokerAccountWorkspace:
             try:
                 operation = (
                     self._store.active_operation(self._capability)
-                    if operation_id is None else self._store.operation(operation_id)
+                    if operation_id is None
+                    else self._store.operation(operation_id)
                 )
                 if (
                     operation is not None
@@ -170,7 +171,9 @@ class BrokerAccountWorkspace:
         return marker
 
     def _committed_coherent(
-        self, snapshot: WorkspaceSnapshot, operation_id: UUID | None = None,
+        self,
+        snapshot: WorkspaceSnapshot,
+        operation_id: UUID | None = None,
     ) -> BrokerAccountWitness:
         """Fence positively foreign state against the trusted committed head.
 
@@ -268,8 +271,15 @@ class BrokerAccountWorkspace:
 
             def stamp(actual):
                 return BrokerAccountWitness(
-                    1, intent.workspace_instance, intent.vault_incarnation, intent.operation_id, 0,
-                    intent.before_digest, intent.before_digest, actual.version, broker_workspace_version(actual),
+                    1,
+                    intent.workspace_instance,
+                    intent.vault_incarnation,
+                    intent.operation_id,
+                    0,
+                    intent.before_digest,
+                    intent.before_digest,
+                    actual.version,
+                    broker_workspace_version(actual),
                 ).to_dict()
 
             snapshot = commit(lambda config: config, stamp)
@@ -287,6 +297,7 @@ class BrokerAccountWorkspace:
 
     def assert_coherent(self) -> WorkspaceSnapshot:
         """Require matching workspace marker, vault anchor and broker domain."""
+
         def check(snapshot, _commit):
             self._coherent(snapshot)
             return snapshot
@@ -294,8 +305,11 @@ class BrokerAccountWorkspace:
         return self._locked(check)
 
     def _commit(
-        self, operation_id: UUID, patch: BrokerAccountPatch,
-        snapshot: WorkspaceSnapshot, commit: Callable[..., WorkspaceSnapshot],
+        self,
+        operation_id: UUID,
+        patch: BrokerAccountPatch,
+        snapshot: WorkspaceSnapshot,
+        commit: Callable[..., WorkspaceSnapshot],
     ) -> BrokerAccountWitness:
         operation = self._store.operation(operation_id)
         marker = self._marker(snapshot)
@@ -346,8 +360,15 @@ class BrokerAccountWorkspace:
 
         def stamp(actual):
             return BrokerAccountWitness(
-                1, marker.workspace_instance, marker.vault_incarnation, operation_id, marker.epoch + 1,
-                material.before_digest, material.after_digest, actual.version, broker_workspace_version(actual),
+                1,
+                marker.workspace_instance,
+                marker.vault_incarnation,
+                operation_id,
+                marker.epoch + 1,
+                material.before_digest,
+                material.after_digest,
+                actual.version,
+                broker_workspace_version(actual),
             ).to_dict()
 
         return self._marker(commit(patch.apply, stamp))
@@ -377,6 +398,7 @@ class BrokerAccountWorkspace:
 
     def recover(self) -> tuple[AccountMutationReceipt, ...]:
         """Recover deterministic local effects, retaining runtime-owner custody."""
+
         def recover_locked(snapshot, commit):
             head = self._store.head()
             if head is None:
@@ -423,12 +445,17 @@ class BrokerAccountWorkspace:
         The caller holds the lifecycle disposition fence. An attempted CAS
         without readable exact decision evidence remains uncertain and owned.
         """
+
         def abandon_locked(snapshot, commit):
             operation = self._store.operation(operation_id)
             if operation.receipt is not None:
                 active = self._store.active_operation(self._capability)
-                if (operation.state is AccountOperationStage.COMMITTED and not operation.abandoned
-                        and active is not None and active.operation_id == operation_id):
+                if (
+                    operation.state is AccountOperationStage.COMMITTED
+                    and not operation.abandoned
+                    and active is not None
+                    and active.operation_id == operation_id
+                ):
                     self._store.abandon(operation_id, committed=True, reason=reason)
                 return operation.receipt
             marker = self._marker(snapshot)
@@ -456,7 +483,9 @@ class BrokerAccountWorkspace:
         return self._operation_locked(operation_id, abandon_locked)
 
     def with_current_authority[T](
-        self, operation_id: UUID, callback: Callable[[WorkspaceSnapshot, CredentialVersion], T],
+        self,
+        operation_id: UUID,
+        callback: Callable[[WorkspaceSnapshot, CredentialVersion], T],
     ) -> T:
         """Run one short synchronous callback against exact committed authority.
 

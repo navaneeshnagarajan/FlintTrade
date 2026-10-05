@@ -14,6 +14,10 @@ import "@testing-library/jest-dom";
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
 }));
+vi.mock("@/hooks/useDataScope", () => ({
+  useMarketDataScope: () => "explore:mock",
+  requireCurrentMarketDataScope: vi.fn(),
+}));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
@@ -81,7 +85,7 @@ describe("MultiTimeframeWidget", () => {
   it("shows the Sample data badge when broker disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
   it("does not fetch when broker disconnected", () => {
@@ -117,14 +121,14 @@ describe("MultiTimeframeWidget", () => {
     renderWidget();
 
     await waitFor(() => expect(mockGetMtf).toHaveBeenCalled());
-    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("badge discloses that no live source is wired via its accessible name (sample mode)", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
   });
 
   it("renders all four timeframe rows", () => {

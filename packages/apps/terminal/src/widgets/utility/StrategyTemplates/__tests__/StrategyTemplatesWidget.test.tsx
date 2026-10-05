@@ -154,10 +154,10 @@ describe("StrategyTemplatesWidget", () => {
   it("shows correct card details for Iron Condor", () => {
     render(<StrategyTemplatesWidget />);
     expect(screen.getByText("Iron Condor")).toBeTruthy();
-    // "Net credit" is no longer unique — the two credit verticals carry it too
-    // — so assert it on the Iron Condor card itself.
     const card = screen.getByLabelText("Load Iron Condor strategy template");
-    expect(within(card).getByText("Net credit")).toBeTruthy();
-    expect(within(card).getByText("Width − Net credit")).toBeTruthy();
+    expect(within(card).getByText("Entry premium received")).toBeInTheDocument();
+    expect(within(card).getByText("Larger wing width less entry credit")).toBeInTheDocument();
+    expect(within(card).getByText("Sell an inner put and call, protected by outer wings.")).toBeInTheDocument();
+    expect(within(card).getByLabelText("Strategy legs").textContent).toBe("+PE−PE−CE+CE");
   });
 });

@@ -79,9 +79,10 @@ describe("TickSpeedWidget", () => {
     expect(screen.getByText("Tick Speed")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("labels illustrative metrics as Example when the feed is unavailable", () => {
     render(<TickSpeedWidget />);
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Example");
+    expect(screen.getByRole("status")).toHaveAccessibleName("Illustrative Example metrics; no admitted feed");
   });
 
   it("renders Ticks / second metric label", () => {

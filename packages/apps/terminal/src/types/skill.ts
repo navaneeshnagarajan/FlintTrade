@@ -41,7 +41,6 @@ export interface DomainMetrics {
     optimizationsRun: number;
   };
   automate: {
-    flowsCreated: number;
     alertsSet: number;
     strategiesUploaded: number;
   };

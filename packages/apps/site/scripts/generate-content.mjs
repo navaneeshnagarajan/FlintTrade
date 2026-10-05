@@ -640,7 +640,7 @@ async function main() {
 
   const commands = [
     { label: 'Install project dependencies', command: 'make setup' },
-    { label: 'Start terminal and OpenAlgo', command: 'make dev' },
+    { label: 'Start terminal and FlintTrade backend', command: 'make dev' },
     { label: 'Run all Python tests', command: 'make test' },
     { label: 'Run focused terminal build', command: 'cd packages/apps/terminal && npm run build' },
     { label: 'Run terminal unit tests', command: 'cd packages/apps/terminal && npm run test' },

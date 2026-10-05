@@ -468,7 +468,7 @@ class TestSignalsStream:
         from flinttrade_ai.signal_routes import _request_stream_auth_revalidator
 
         monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+        monkeypatch.delenv("BROKER_API_KEY", raising=False)
         with patch(
             "flinttrade_core.auth_routes.decode_token",
             side_effect=ValueError("JWT secret is not configured"),

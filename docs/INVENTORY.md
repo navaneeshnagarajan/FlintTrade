@@ -60,13 +60,11 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 
 | Item | Status | Notes |
 |---|---|---|
-| OpenAlgo bridge adapter (orders + market data) | ✅ | First-class optional bridge path; ~45 endpoints |
 | Smart routing suggestions | ✅ | Capability metadata + recommendation engine + Account-Manager UI |
 | — Dhan: rolling-options history + documented L20 depth feed | 🟡 | Rolling-options history is encoded in routing capabilities; Dhan's L20 depth remains feed-only until FlintTrade wires a runtime depth snapshot bridge (`market_depth_runtime_ready=false`). |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
 | Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan and Upstox are connectable after live verification and emergency-planner coverage. INDmoney's fail-closed planner is locally verified but it remains coming soon pending an authoritative restart-time regular/smart-parent discriminator, a broker-atomic reduce-only close primitive, and a funded/live-market order-safety proof. Kotak Neo is connectable for Connected (read) / API smoke on the exact v3 Git runtime; its async SFeed and order-feed lifecycle is wired and locally synthetic-tested, while the historical live evidence remains REST reads only. Live-account/market-hours feed, funded-order safety, Live catalogue promotion, and cross-platform proof remain outstanding; Live place stays fail-closed. Neo has no sandbox (never offer Neo Practice). Groww retains its documented live blockers. |
-| Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Generic terminal place/modify/cancel now route to the active native account when no OpenAlgo key is configured, but funded live native order placement remains unproven because verification used no-funds/closed-market accounts. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 
 ## AI Agent
@@ -95,8 +93,8 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains use strict exchange, expiry, row, Greek and lot-size provenance through the configured broker path; incomplete or contradictory inputs fail closed to a labelled sample/unavailable state |
-| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | Live via `/api/v1/history` + screener analysers (`/v1/analytics/*`, `/api/v1/analytics/correlation`); Live chip when the feed is live; Sample chips retired in favour of the Mode honesty line |
-| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | Sourced from the live IV-smile feed (`getFtIVSmile`); greeks Black–Scholes-derived (shared with GreeksSurface); pure unit-tested transforms; Live chip when the feed is live; Sample chips retired in favour of the Mode honesty line |
+| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | History and analysis reads are scoped to the selected native account and mode; explicit source badges identify Sample/Example fallbacks. Native HTTP reads remain unavailable until cutover activation. |
+| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | IV-smile analysis and shared Black–Scholes transforms use explicit source badges and loading/unavailable states. Native HTTP reads remain unavailable until cutover activation. |
 | Vol-surface, straddle-PnL analysis | 🟡 | Honest sample only (need multi-expiry / candle source) |
 
 ## Data & Infra
@@ -104,7 +102,7 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 | Item | Status | Notes |
 |---|---|---|
 | Historical download + time-remaining + safety monitor | ✅ | `HistoricalDownloadPanel` (ETA, free-disk, refused/aborted) |
-| Live tick capture to storage | ✅ | `TickRecorder` (opt-in via `FLINTTRADE_TICK_CAPTURE`) |
+| Native tick capture to storage | 🟡 | Unavailable pending a native stream source. Retained local tick storage and processing remain available; an environment flag does not enable capture. |
 | Daily DB optimise + tick retention | ✅ | Nightly cron (CHECKPOINT/ANALYZE + prune); scheduler started |
 | Per-broker customisable API rate limits | ✅ | Config + live-apply UI |
 | Live order-flow footprint | ✅ | Aggregator fed from the tick stream (Lee-Ready side classification); honest synthetic fallback |
@@ -116,7 +114,6 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 
 | Item | Status | Notes |
 |---|---|---|
-| Account Manager (brokers + daily reauth + OpenAlgo state) | ✅ | `AccountStatusPanel` ↔ `/accounts/status` (live ping); tested |
 | Profile Manager (in unified settings, quick-settings + profile button) | ✅ | `ProfileSection`; both entry points tested |
 | Notification System (central manager, drives action) | ✅ | NotificationCentre + dispatchers + remediation actions + e2e test |
 | Unified Settings | ✅ | `SettingsRoute`, 19 sections, deep-linkable |
@@ -125,8 +122,8 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 
 | Item | Status | Notes |
 |---|---|---|
-| Automate pillar (webhooks / flow builder / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (generic HMAC-signed custom webhooks, flow builder, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
-| Ditto multi-account mirror (account mirroring / margin / trailing SL / risk manager) | ✅ | `/ditto` route + backend `/ditto/*` (`operations_routes.py`); natively reimplemented AlgoMirror patterns |
+| Automate pillar (webhooks / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (generic HMAC-signed custom webhooks, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
+| Native copy trading | Unavailable | Account metadata is retained; mirroring, risk execution and linking remain unavailable pending a native safety design. |
 | Invest & Learn routes | ✅ | `/invest` (mutual funds / SIP / net worth) and `/learn` (guided learning) protected routes |
 
 ## Known backlog (built-but-unreachable / referenced-not-built / blocked)
@@ -135,9 +132,6 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 |---|---|---|
 | SmartOrderRouter (liquidity-aware TWAP slicing) | ✅ | Wired end-to-end: `POST /api/v1/orders/smart-route` (background job + live polling) → every child order independently traverses SafetySystem → `gate_order` → `BrokerRouter` via `GatedChildExecutor`; "Smart Order" terminal widget; OFF by default (`brokers.smart_routing.enabled`), live-mode only |
 | Analytics endpoints: VWAP bands / pairs / MTF | ✅ | Compute endpoints built + tested **and now reached by their widgets** — live intraday/daily bars via `getHistory`, honest sample fallback |
-| Excel export (browser download) | ✅ | Streaming `/export/download` + `downloadExcel` + "Export to Excel" button in the Positions widget (Notification System feedback) |
-| Excel portfolio report (browser download) | ✅ | Streaming `/portfolio/report/download` + `downloadPortfolioReport` + "Portfolio Report" button in the Holdings widget (Positions+Holdings+Summary; Notification System feedback) |
-| Excel import (browser upload) | ✅ | Multipart `/import/upload` + `uploadExcel` + Settings → Data watchlist import (feeds the historify download watchlist; Notification System feedback) |
 | Download-watchlist manager UI | ✅ | Settings → Data: list / add / remove the symbols the bulk downloader fetches (was previously API-only — fresh installs had no way to populate it) |
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | ✅ | "Historical Chain" widget — archived expiries → grouped CE/PE chain; honest empty state |
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |

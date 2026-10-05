@@ -30,12 +30,12 @@ def _populate_workspace(ws: Path) -> None:
     (ws / "workspace.json").write_text('{"theme": "graphite"}', encoding="utf-8")
     (ws / "api_analyzer.duckdb").write_bytes(b"\x00" * 16)
     (ws / "data" / "bhavcopy" / "equity").mkdir(parents=True)
-    (ws / "data" / "bhavcopy" / "equity" / "cm05SEP2026bhav.csv").write_text("symbol,exchange\nFIXTURE,NSE\n", encoding="utf-8")
+    (ws / "data" / "bhavcopy" / "equity" / "cm05SEP2026bhav.csv").write_text(
+        "symbol,exchange\nFIXTURE,NSE\n", encoding="utf-8"
+    )
     audit = ws / "archive" / "audit"
     audit.mkdir(parents=True)
-    (audit / "audit_2026-04-15.jsonl").write_text(
-        '{"ts":"2026-04-15","event_type":"LOGIN"}\n', encoding="utf-8"
-    )
+    (audit / "audit_2026-04-15.jsonl").write_text('{"ts":"2026-04-15","event_type":"LOGIN"}\n', encoding="utf-8")
     (ws / "master_password").write_text("secret", encoding="utf-8")
     (ws / "api_key_pepper").write_text("pepper", encoding="utf-8")
     (ws / "jwt_secret").write_text("jwt", encoding="utf-8")
@@ -446,7 +446,9 @@ class TestRestoreBackup:
 
         with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
             WorkspaceBackup(workspace_dir=target / ".flinttrade").restore_backup(
-                archive, target_dir=target, force=True,
+                archive,
+                target_dir=target,
+                force=True,
             )
 
         assert live_ledger.read_bytes() == b"live-admission-state"

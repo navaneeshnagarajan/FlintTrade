@@ -22,7 +22,9 @@ _SYMBOL = "NIFTY30SEP2625000CE"
 
 
 def _receipt(context):
-    canonical = json.dumps(context.market_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    canonical = json.dumps(
+        context.market_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
     context.receipt["input_digest"] = hashlib.sha256(canonical.encode()).hexdigest()
     return context
 
@@ -35,7 +37,9 @@ def _derivative(exchange="NFO", lot_size=65):
     context.market_data["lot_size"] = {
         "request": {"exchange": exchange, "symbols": [_SYMBOL]},
         "value": {"symbol": _SYMBOL, "exchange": exchange, "lot_size": lot_size, "instrument_id": None},
-        "provenance": provenance, "observed_at": datetime.now(UTC).isoformat(), "source_as_of": None,
+        "provenance": provenance,
+        "observed_at": datetime.now(UTC).isoformat(),
+        "source_as_of": None,
     }
     return _receipt(context)
 
@@ -48,8 +52,9 @@ def _derivative_order(**kwargs):
 async def test_non_lot_quantity_refuses_before_laya(runtime, monkeypatch, quantity):
     runtime.context = _derivative()
     monkeypatch.setattr(process_laya(), "admit", lambda *_: pytest.fail("Invalid lot quantity reached Laya"))
-    result = await runtime.create().place_order(symbol=_SYMBOL, exchange="NFO", product="NRML", action="BUY",
-                                                quantity=quantity)
+    result = await runtime.create().place_order(
+        symbol=_SYMBOL, exchange="NFO", product="NRML", action="BUY", quantity=quantity
+    )
     assert result["code"] == "practice_lot_quantity_invalid"
     assert runtime.sandbox.get_orders() == []
 
@@ -76,6 +81,7 @@ async def test_option_receipt_cannot_bypass_canonical_market_session(runtime, se
 
     runtime.context = _derivative()
     if session != "missing":
+
         def market_open(*_args, **_kwargs):
             if session == "unavailable":
                 raise RuntimeError("synthetic scheduler failure")
@@ -109,10 +115,26 @@ async def test_exact_option_reduction_retains_canonical_closed_session_refusal(r
     assert len(runtime.sandbox.get_trades()) == 1
 
 
-@pytest.mark.parametrize("damage", [
-    "missing", "no_provenance", "different_provenance", "wrong_role", "wrong_symbol", "wrong_exchange",
-    "wrong_request", "zero", "bool", "too_large", "stale", "future", "source_stale", "digest", "identity",
-])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "no_provenance",
+        "different_provenance",
+        "wrong_role",
+        "wrong_symbol",
+        "wrong_exchange",
+        "wrong_request",
+        "zero",
+        "bool",
+        "too_large",
+        "stale",
+        "future",
+        "source_stale",
+        "digest",
+        "identity",
+    ],
+)
 async def test_unrecognised_or_stale_lot_receipt_refuses_before_laya(runtime, monkeypatch, damage):
     context = _derivative()
     record = context.market_data["lot_size"]
@@ -195,9 +217,17 @@ async def test_active_shared_kill_blocks_entries_before_market_reads(runtime):
     assert runtime.sandbox.get_orders() == []
 
 
-@pytest.mark.parametrize("invalid", [None, object(), SimpleNamespace(passed=True),
-    SafetyResult("PASS", "L5_KILL"), SafetyResult(SafetyVerdict.PASS, "L1_ORDER"),
-    SafetyResult("INVALID", "L5_KILL")])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        object(),
+        SimpleNamespace(passed=True),
+        SafetyResult("PASS", "L5_KILL"),
+        SafetyResult(SafetyVerdict.PASS, "L1_ORDER"),
+        SafetyResult("INVALID", "L5_KILL"),
+    ],
+)
 async def test_unrecognised_kill_verdict_fails_closed(runtime, monkeypatch, invalid):
     monkeypatch.setattr(runtime.app.config["SAFETY"].l5_kill, "validate", lambda: invalid)
     result = await runtime.create().route_order(_order())
@@ -212,8 +242,10 @@ async def test_missing_or_raising_kill_fails_closed(runtime, monkeypatch, failur
     if failure == "missing":
         runtime.app.config.pop("SAFETY")
     else:
+
         def broken():
             raise RuntimeError("private failure")
+
         monkeypatch.setattr(runtime.app.config["SAFETY"].l5_kill, "validate", broken)
     result = await runtime.create().route_order(_order())
     assert not result.passed
