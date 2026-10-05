@@ -116,7 +116,11 @@ test("public demo saves and restores presets through the legacy manager entry", 
     // retains all four, and removing one occurrence must preserve the others.
     const forkName = "Synthetic four-chart browser preset";
     await manager.getByRole("button", { name: "Fork Multi Chart", exact: true }).click();
-    await expect(forkForm.getByRole("button", { name: "Remove Chart", exact: true })).toHaveCount(4);
+    await expect(forkForm.getByText("Create a copy, then edit its contents.", { exact: true })).toBeVisible();
+    await expect(forkForm.getByLabel("Description", { exact: true })).toHaveAttribute("readonly", "");
+    await expect(forkForm.getByText("Chart", { exact: true })).toHaveCount(4);
+    await expect(forkForm.getByRole("button", { name: "Remove Chart", exact: true })).toHaveCount(0);
+    await expect(forkForm.getByRole("button", { name: "Toggle widget list", exact: true })).toHaveCount(0);
     await forkForm.getByLabel("Name", { exact: false }).fill(forkName);
     await forkForm.getByRole("button", { name: "Save", exact: true }).click();
     await expect(forkForm).not.toBeVisible();

@@ -2537,6 +2537,9 @@ Saved presets retains create, edit, fork, import, export and delete controls; ex
 `/settings#presets` links open desk management. AI save status appears only on the
 AI page.
 
+Fork creates a named copy with the same description and widgets. Open Edit on the
+copy to change its contents.
+
 In the public demo, custom presets are saved only in the current browser and are
 not synced to an installed account. Export a preset as JSON to keep a portable copy.
 Installed builds continue to save presets through their local FlintTrade backend.
