@@ -71,9 +71,17 @@ export function listPublicDemoPresets(): { presets: WorkspacePresetRecord[] } {
   return { presets: [...builtInPresets(), ...readCustomPresets()] };
 }
 
+function assertUniqueName(name: string, presets: StoredPreset[], currentId?: string): void {
+  const normalised = name.toLowerCase();
+  const collision = WORKSPACE_PRESETS.some((preset) => preset.name.toLowerCase() === normalised)
+    || presets.some((preset) => preset.id !== currentId && preset.name.toLowerCase() === normalised);
+  if (collision) throw new Error(`A preset named '${name}' already exists`);
+}
+
 export function createPublicDemoPreset(payload: CreatePresetPayload): WorkspacePresetRecord {
   const parsed = payloadSchema.parse(payload);
   const presets = readCustomPresets();
+  assertUniqueName(parsed.name, presets);
   const now = new Date().toISOString();
   const preset: StoredPreset = {
     ...parsed,
@@ -101,6 +109,7 @@ export function updatePublicDemoPreset(id: string, payload: UpdatePresetPayload)
   // Ignore omitted fields, matching the backend's partial-update contract.
   const fields = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
   const parsed = payloadSchema.parse({ ...presets[index], ...fields });
+  if ("name" in fields) assertUniqueName(parsed.name, presets, id);
   const updated: StoredPreset = { ...presets[index], ...parsed, updated_at: new Date().toISOString() };
   presets[index] = updated;
   writeCustomPresets(presets);

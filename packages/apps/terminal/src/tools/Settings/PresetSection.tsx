@@ -195,7 +195,7 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
                 {name}
                 <button
                   type="button"
-                  onClick={() => toggle(id)}
+                  onClick={() => onChange(selected.filter((_, occurrence) => occurrence !== index))}
                   aria-label={`Remove ${name}`}
                   className="hover:text-loss transition-colors"
                 >

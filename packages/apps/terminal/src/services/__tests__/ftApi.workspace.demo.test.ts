@@ -71,6 +71,21 @@ describe("public-demo workspace presets", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("rejects case-insensitive name collisions across built-ins, custom presets and forks", async () => {
+    const created = await createPreset(draft);
+    const second = await createPreset({ ...draft, name: "Second synthetic preset" });
+    const original = localStorage.getItem(STORAGE_KEY);
+    await expect(createPreset({ ...draft, name: ` ${draft.name.toUpperCase()} ` })).rejects.toThrow(/already exists/i);
+    await expect(createPreset({ ...draft, name: WORKSPACE_PRESETS[0].name.toLowerCase() })).rejects.toThrow(/already exists/i);
+    await expect(updatePreset(second.id, { name: draft.name.toUpperCase() })).rejects.toThrow(/already exists/i);
+    await expect(updatePreset(second.id, { name: WORKSPACE_PRESETS[0].name.toUpperCase() })).rejects.toThrow(/already exists/i);
+    await expect(forkPreset(WORKSPACE_PRESETS[0].id, draft.name.toUpperCase())).rejects.toThrow(/already exists/i);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(original);
+    await expect(updatePreset(created.id, { name: draft.name.toUpperCase() }))
+      .resolves.toMatchObject({ id: created.id, name: draft.name.toUpperCase() });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed records and ambiguous duplicate identities", async () => {
     const created = await createPreset(draft);
     for (const presets of [[{ ...created, widgets: [{}] }], [created, created]]) {

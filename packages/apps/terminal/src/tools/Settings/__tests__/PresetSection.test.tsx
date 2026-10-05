@@ -210,6 +210,8 @@ describe("PresetSection", () => {
       render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: "Fork Multi Chart" }));
       expect(screen.getAllByRole("button", { name: "Remove Chart" })).toHaveLength(4);
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove Chart" })[1]);
+      expect(screen.getAllByRole("button", { name: "Remove Chart" })).toHaveLength(3);
       expect(consoleError).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();

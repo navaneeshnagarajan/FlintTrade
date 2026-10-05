@@ -113,7 +113,7 @@ test("public demo saves and restores presets through the legacy manager entry", 
     await expect(manager.getByText("Failed to load presets:", { exact: false })).toHaveCount(0);
 
     // Multi Chart intentionally repeats the chart widget four times. Forking
-    // and reopening must retain all four selected chips without client errors.
+    // retains all four, and removing one occurrence must preserve the others.
     const forkName = "Synthetic four-chart browser preset";
     await manager.getByRole("button", { name: "Fork Multi Chart", exact: true }).click();
     await expect(forkForm.getByRole("button", { name: "Remove Chart", exact: true })).toHaveCount(4);
@@ -122,6 +122,12 @@ test("public demo saves and restores presets through the legacy manager entry", 
     await expect(forkForm).not.toBeVisible();
     await manager.getByRole("button", { name: `Edit ${forkName}`, exact: true }).click();
     await expect(editForm.getByRole("button", { name: "Remove Chart", exact: true })).toHaveCount(4);
+    await editForm.getByRole("button", { name: "Remove Chart", exact: true }).nth(1).click();
+    await expect(editForm.getByRole("button", { name: "Remove Chart", exact: true })).toHaveCount(3);
+    await editForm.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(editForm).not.toBeVisible();
+    await manager.getByRole("button", { name: `Edit ${forkName}`, exact: true }).click();
+    await expect(editForm.getByRole("button", { name: "Remove Chart", exact: true })).toHaveCount(3);
     await editForm.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(editForm).not.toBeVisible();
 
@@ -145,6 +151,25 @@ test("public demo saves and restores presets through the legacy manager entry", 
     await expect(editForm).not.toBeVisible();
     await expect(manager.getByRole("button", { name: `Edit ${editedName}`, exact: true })).toBeVisible();
     await expect(manager.getByRole("button", { name: `Edit ${initialName}`, exact: true })).toHaveCount(0);
+
+    // Case-insensitive duplicate refusal must preserve the unsaved draft and
+    // leave exactly one matching saved card in the local catalogue.
+    const duplicateName = editedName.toUpperCase();
+    const duplicateDescription = "Synthetic duplicate draft survives refusal";
+    await manager.getByRole("button", { name: "Create a new workspace preset", exact: true }).click();
+    await newForm.getByLabel("Name", { exact: false }).fill(duplicateName);
+    await newForm.getByLabel("Description", { exact: true }).fill(duplicateDescription);
+    await newForm.getByRole("button", { name: "Toggle widget list", exact: true }).click();
+    await newForm.getByRole("button", { name: "Watchlist", exact: true }).click();
+    await newForm.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(manager.getByText(/already exists/i)).toBeVisible();
+    await expect(newForm).toBeVisible();
+    await expect(newForm.getByLabel("Name", { exact: false })).toHaveValue(duplicateName);
+    await expect(newForm.getByLabel("Description", { exact: true })).toHaveValue(duplicateDescription);
+    await expect(newForm.getByRole("button", { name: "Remove Watchlist", exact: true })).toBeVisible();
+    await expect(manager.getByRole("button", { name: /^Edit Synthetic browser preset edited$/i })).toHaveCount(1);
+    await newForm.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(newForm).not.toBeVisible();
 
     const expectSavedPreset = async (): Promise<void> => {
       await expect(savedNotice).toBeVisible();
