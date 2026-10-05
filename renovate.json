@@ -63,7 +63,7 @@
         "/^packages/core/core/src/flinttrade_core/ollama_runtime\\.py$/"
       ],
       "matchStrings": [
-        "(?m)^_OLLAMA_VERSION\\s*=\\s*\"(?<currentValue>v\\d+\\.\\d+\\.\\d+)\""
+        "(?m)^_OLLAMA_VERSION(?:\\s*:\\s*[^=\\n]+)?\\s*=\\s*\"(?<currentValue>v\\d+\\.\\d+\\.\\d+)\"\\s*$"
       ],
       "depNameTemplate": "ollama/ollama",
       "datasourceTemplate": "github-releases",

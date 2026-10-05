@@ -229,6 +229,38 @@ def test_renovate_tracks_the_ollama_pin_for_hand_regeneration() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("assignment", "expected_pin"),
+    [
+        ('_OLLAMA_VERSION = "v0.35.0"', "v0.35.0"),
+        ('_OLLAMA_VERSION: str = "v0.35.0"', "v0.35.0"),
+        ('_OLLAMA_VERSION: Final[str] = "v0.35.0"', "v0.35.0"),
+        ("_OLLAMA_VERSION = compute_version()", None),
+        ("_OLLAMA_VERSION: str = compute_version()", None),
+        ('_OLLAMA_VERSION = "v0.35.0" + suffix', None),
+    ],
+    ids=["plain", "typed", "typed-final", "computed", "typed-computed", "concatenated"],
+)
+def test_ollama_freshness_and_renovate_accept_the_same_pin_syntax(
+    module: ModuleType, tmp_path: pathlib.Path, assignment: str, expected_pin: str | None
+) -> None:
+    """A supported literal must remain discoverable; computed values must fail loudly."""
+    runtime = tmp_path / "ollama_runtime.py"
+    text = f"# Managed runtime version\n{assignment}\n"
+    runtime.write_text(text, encoding="utf-8")
+    module._OLLAMA_RUNTIME = runtime
+    report = module.Report()
+    assert module._ollama_pin(report) == expected_pin
+    assert report.failed is (expected_pin is None)
+
+    config = json.loads((_REPO / "renovate.json").read_text(encoding="utf-8"))
+    manager = next(m for m in config["customManagers"] if m.get("depNameTemplate") == "ollama/ollama")
+    (match_string,) = manager["matchStrings"]
+    match = re.search(match_string.replace("(?<", "(?P<"), text)
+    assert (match.group("currentValue") if match else None) == expected_pin
+
+
+@pytest.mark.unit
 def test_an_unreachable_source_is_skipped_not_failed(module: ModuleType) -> None:
     """A network blip must never redden an unrelated pull request."""
     _stub_fetch(module, {})
