@@ -52,7 +52,11 @@ export async function readLlmConfig(): Promise<LlmConfigResponse> {
     headers: buildHeaders(false),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json() as Promise<LlmConfigResponse>;
+  const payload = await response.json() as LlmConfigResponse;
+  if (!isAcceptedLlmConfigStatus(payload.status)) {
+    throw new Error(payload.message || `HTTP ${response.status}`);
+  }
+  return payload;
 }
 
 export async function persistLlmConfigPatch(

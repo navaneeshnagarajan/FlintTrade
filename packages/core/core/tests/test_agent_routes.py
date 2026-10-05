@@ -403,6 +403,50 @@ def test_start_uses_configured_execution_default_when_target_omitted(live_auth):
     assert executor._request_ctx.selector == "upstox:U1"  # noqa: SLF001
 
 
+@pytest.mark.asyncio
+async def test_agent_acknowledgement_keeps_audit_without_recording_fill(
+    live_auth, monkeypatch, backend_lease_proof
+):
+    """The route-wired child executor receives no authoritative fill facts."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from flinttrade_core.models import Action, Order
+
+    router = MagicMock()
+    router.backend_lease_proof = backend_lease_proof
+    router.place_order = AsyncMock(return_value="AGENT-ACK")
+    app = _make_app(router)
+    app.config["SAFETY"].check_order = MagicMock(return_value=[])
+    store = MagicMock()
+    audit = MagicMock()
+    app.config.update(TRADE_STORAGE=store, AUDIT=audit)
+    state = SimpleNamespace(
+        total_balance=100000.0,
+        daily_pnl=0.0,
+        starting_capital=100000.0,
+        ltp_for=lambda _order: 100.0,
+        admission_for=lambda _index: SimpleNamespace(
+            positions=[], used_margin=0.0, net_delta=0.0, net_vega=0.0
+        ),
+    )
+    monkeypatch.setattr(
+        "flinttrade_core.smart_order_routes.gather_portfolio_state", AsyncMock(return_value=state)
+    )
+    monkeypatch.setattr("flinttrade_core.auth_routes._is_jti_revoked", lambda _jti: False)
+
+    response = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+    assert response.status_code == 202
+    executor = _FakeTrader.instances[-1].kwargs["order_executor"]
+    decision = await executor.route_order(Order(symbol="RELIANCE", quantity="1", price="100", action=Action.BUY))
+
+    assert decision.passed, decision.error
+    router.place_order.assert_awaited_once()
+    audit.log_event.assert_called_once()
+    assert audit.log_event.call_args.args == ("ORDER_PLACED",)
+    store.insert_trade.assert_not_called()
+
+
 def test_double_start_409(live_auth):
     app = _make_app()
     client = app.test_client()

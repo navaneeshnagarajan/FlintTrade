@@ -14,13 +14,14 @@ tests need no JWT minting; the guard tests build an app with
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from flask import Flask
+from flask import Flask, request
 
-from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
+from flinttrade_engine.bracket_order import BracketOrderError, BracketOrderService, BracketPrincipal
 
 pytestmark = pytest.mark.unit
 
@@ -87,7 +88,7 @@ def _make_service(success: bool = True, bracket_id: str = "br-001") -> MagicMock
     return svc
 
 
-def _make_app(svc: MagicMock | None, testing: bool = True) -> Flask:
+def _make_app(svc: BracketOrderService | MagicMock | None, testing: bool = True) -> Flask:
     """Build a Flask app with the bracket blueprint registered.
 
     Args:
@@ -175,6 +176,18 @@ def guarded_client(service, pinned_jwt_secret):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("method,endpoint", [("POST", "/bracket"), ("DELETE", "/bracket/br-001")])
+@pytest.mark.parametrize("raw_body", ["[]", "[1]", "null", '"text"', "false", "0", "{not json"])
+def test_bracket_body_must_be_a_json_object(client, service, method, endpoint, raw_body) -> None:
+    response = client.open(
+        f"/api/v1/orders{endpoint}", method=method, data=raw_body, content_type="application/json"
+    )
+    assert response.status_code == 400
+    assert "JSON object" in response.get_json()["message"]
+    service.place_bracket.assert_not_called()
+    service.cancel_bracket.assert_not_called()
+
+
 class TestPlaceBracket:
     def test_place_success_returns_201(self, client, service) -> None:
         """A valid stop-loss bracket is admitted and placed.
@@ -224,6 +237,103 @@ class TestPlaceBracket:
         assert resp.status_code == 422
         assert resp.get_json()["code"] == "broker_held_unsupported"
         service.place_bracket.assert_not_called()
+
+    def test_conflicting_entry_types_are_rejected_before_admission(self, client, service, monkeypatch) -> None:
+        from flinttrade_engine.laya import process_laya
+
+        admit = MagicMock(wraps=process_laya().admit)
+        monkeypatch.setattr(process_laya(), "admit", admit)
+        response = client.post(
+            "/api/v1/orders/bracket",
+            json={**_BRACKET_BODY, "entry": {**_ENTRY, "order_type": "LIMIT", "pricetype": "MARKET", "price": 100}},
+        )
+        assert response.status_code == 400
+        admit.assert_not_called()
+        service.place_bracket.assert_not_called()
+
+    @pytest.mark.parametrize("type_fields", [
+        {"order_type": " limit ", "pricetype": "LIMIT"},
+        {"order_type": "LIMIT", "pricetype": " limit "},
+        {"order_type": "limit"},
+        {"pricetype": "limit"},
+    ])
+    def test_entry_aliases_agree_for_admission_and_service(self, client, service, monkeypatch, type_fields) -> None:
+        from flinttrade_engine.laya import process_laya
+
+        admit = MagicMock(wraps=process_laya().admit)
+        monkeypatch.setattr(process_laya(), "admit", admit)
+        response = client.post(
+            "/api/v1/orders/bracket",
+            json={**_BRACKET_BODY, "entry": {**_ENTRY, **type_fields, "price": 100}},
+        )
+        assert response.status_code == 201, response.get_json()
+        assert admit.call_args_list[0].args[0].order_type == "LIMIT"
+        assert service.place_bracket.call_args.args[0]["pricetype"] == "LIMIT"
+
+    @pytest.mark.parametrize("price,expected", [(0, "MARKET"), ("0", "MARKET"), (100, "LIMIT")])
+    def test_entry_default_type_agrees_with_service(self, client, service, monkeypatch, price, expected) -> None:
+        from flinttrade_engine.laya import process_laya
+
+        admit = MagicMock(wraps=process_laya().admit)
+        monkeypatch.setattr(process_laya(), "admit", admit)
+        response = client.post(
+            "/api/v1/orders/bracket", json={**_BRACKET_BODY, "entry": {**_ENTRY, "price": price}}
+        )
+        assert response.status_code == 201, response.get_json()
+        forwarded = service.place_bracket.call_args.args[0]
+        service_type = forwarded.get("pricetype", "MARKET" if float(forwarded["price"]) == 0 else "LIMIT")
+        assert admit.call_args_list[0].args[0].order_type == service_type == expected
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(
+        "type_fields",
+        [
+            {},
+            {"order_type": ""},
+            {"order_type": None},
+            {"pricetype": ""},
+            {"pricetype": None},
+            {"order_type": "", "pricetype": None},
+            {"order_type": None, "pricetype": ""},
+            {"order_type": " ", "pricetype": "\t"},
+        ],
+    )
+    @pytest.mark.parametrize("price,expected", [(0, "MARKET"), ("0", "MARKET"), (100, "LIMIT")])
+    def test_empty_entry_aliases_match_real_service_defaults_without_mutating_body(
+        self, monkeypatch, pinned_jwt_secret, type_fields, price, expected
+    ) -> None:
+        from flinttrade_core.auth_routes import _create_token
+        from flinttrade_engine.laya import process_laya
+
+        place_leg = MagicMock(side_effect=["ENTRY-1", "EXIT-1"])
+        service = BracketOrderService(place_leg=place_leg)
+        app = _make_app(service, testing=False)
+        decoded_bodies = []
+
+        @app.before_request
+        def capture_body():
+            body = request.get_json()
+            decoded_bodies.append((body, deepcopy(body)))
+
+        admit = MagicMock(wraps=process_laya().admit)
+        monkeypatch.setattr(process_laya(), "admit", admit)
+        token = _create_token("operator", mode="live", live_mode_unlocked=True)
+        response = app.test_client().post(
+            "/api/v1/orders/bracket",
+            json={"entry": {**_ENTRY, **type_fields, "price": price}, "stoploss": 90},
+            headers=_bearer(token),
+        )
+
+        assert response.status_code == 201, response.get_json()
+        assert [call.args[0].order_type for call in admit.call_args_list] == [expected, "SL"]
+        assert place_leg.call_count == 2
+        assert [call.args[0].pricetype.value for call in place_leg.call_args_list] == [expected, "SL"]
+        bracket = service.get_bracket(response.get_json()["data"]["bracket_id"])
+        assert bracket is not None
+        assert bracket.entry_pricetype == expected
+        assert bracket.entry_price == float(price)
+        original, snapshot = decoded_bodies[0]
+        assert original == snapshot
 
     def test_place_missing_entry_returns_400(self, client) -> None:
         """Missing entry field returns HTTP 400.

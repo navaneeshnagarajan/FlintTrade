@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,6 +24,107 @@ _DEFAULT_CAPITAL = 1_000_000.0
 def engine() -> SandboxEngine:
     """Fresh in-memory SandboxEngine for each test."""
     return SandboxEngine(db_path=":memory:")
+
+
+@pytest.mark.unit
+class TestModifyOrder:
+    @pytest.mark.parametrize(
+        "quantity",
+        [
+            1.9,
+            True,
+            False,
+            "1.9",
+            "bad",
+            "",
+            "NaN",
+            "Infinity",
+            0,
+            -1,
+            [],
+            {},
+            float("nan"),
+            float("inf"),
+            -float("inf"),
+            Decimal("2.000000000000000001"),
+            Decimal("NaN"),
+            Decimal("Infinity"),
+            Fraction(3, 2),
+        ],
+    )
+    def test_invalid_quantity_leaves_the_book_unchanged(self, engine: SandboxEngine, quantity: Any) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        result = engine.modify_order(placed["order_id"], quantity=quantity, price=110.0)
+
+        assert result["status"] == "REJECTED"
+        assert "quantity" in result["message"].lower()
+        assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
+
+    @pytest.mark.parametrize(
+        "quantity,expected",
+        [(2, 2), (2.0, 2), ("2", 2), (" 2 ", 2), ("+2", 2), ("1_0", 10), (Decimal("2"), 2), (Fraction(4, 2), 2)],
+    )
+    def test_whole_quantities_update_quantity_and_margin(
+        self, engine: SandboxEngine, quantity: Any, expected: int
+    ) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+
+        result = engine.modify_order(placed["order_id"], quantity=quantity, price=110.0)
+
+        assert result["status"] == "PENDING"
+        order = engine.get_orders()[0]
+        assert order["quantity"] == expected
+        assert order["price"] == 110.0
+        assert engine.get_capital()["used_margin"] == pytest.approx(expected * 110.0)
+
+    @pytest.mark.parametrize("changes", [{}, {"quantity": None}])
+    def test_omitted_and_none_quantities_keep_existing_quantity(
+        self, engine: SandboxEngine, changes: dict[str, Any]
+    ) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+
+        result = engine.modify_order(placed["order_id"], price=110.0, **changes)
+
+        assert result["status"] == "PENDING"
+        order = engine.get_orders()[0]
+        assert order["quantity"] == 5
+        assert order["price"] == 110.0
+        assert order["order_type"] == "LIMIT"
+
+    def test_valid_quantity_still_cannot_exceed_available_capital(self, engine: SandboxEngine) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        before = (engine.get_orders(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        result = engine.modify_order(placed["order_id"], quantity="1000000")
+
+        assert result["status"] == "REJECTED"
+        assert "capital" in result["message"].lower()
+        assert (engine.get_orders(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
+
+    def test_valid_quantity_still_respects_other_pending_sells(self, engine: SandboxEngine) -> None:
+        assert engine.place_order("INFY", "NSE", "BUY", 10, 100.0)["status"] == "COMPLETE"
+        placed = engine.place_order("INFY", "NSE", "SELL", 5, 110.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        assert engine.place_order("INFY", "NSE", "SELL", 4, 120.0, order_type="LIMIT")["status"] == "PENDING"
+        before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        result = engine.modify_order(placed["order_id"], quantity="7")
+
+        assert result["status"] == "REJECTED"
+        assert "uncovered position" in result["message"].lower()
+        assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
 
 
 # ---------------------------------------------------------------------------

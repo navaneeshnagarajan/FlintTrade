@@ -129,6 +129,114 @@ def client(flask_app):
         yield c
 
 
+@pytest.fixture()
+def pending_practice_order(flask_app, client, monkeypatch):
+    """A real resting order to detect any unintended write on rejected input."""
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    engine = SandboxEngine(db_path=":memory:")
+    monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", engine)
+    monkeypatch.setitem(flask_app.config, "TICK_RECORDER", MagicMock())
+    try:
+        response = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "quantity": 5, "order_type": "LIMIT", "price": 100},
+            headers=_auth_headers(mode="practice"),
+        )
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["status"] == "PENDING"
+        yield engine, response.get_json()["order_id"]
+    finally:
+        engine.close()
+
+
+@pytest.mark.parametrize("endpoint", ["place", "modify", "cancel", "cancel-all"])
+@pytest.mark.parametrize("raw_body", ["[]", "[1]", "null", '"text"', '""', "false", "true", "0", "{not json", " "])
+def test_invalid_json_never_changes_the_practice_book(client, pending_practice_order, endpoint, raw_body):
+    engine, _ = pending_practice_order
+    before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+
+    response = client.post(
+        f"/api/v1/orders/{endpoint}", data=raw_body, headers=_auth_headers(mode="practice")
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "error"
+    assert "JSON object" in response.get_json()["message"]
+    assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+
+
+@pytest.mark.parametrize("raw_body", ["", "{}"])
+def test_cancel_all_preserves_absent_and_empty_object_bodies(client, pending_practice_order, raw_body):
+    engine, _ = pending_practice_order
+    response = client.post(
+        "/api/v1/orders/cancel-all", data=raw_body, headers=_auth_headers(mode="practice")
+    )
+    assert response.status_code == 200
+    assert engine.get_orders()[0]["status"] == "CANCELLED"
+
+
+@pytest.mark.parametrize("quantity", [1.9, True, False, "1.9", None, "bad", 0, -1, [], {}, float("inf"), float("nan"), "²"])
+def test_practice_modify_rejects_non_positive_whole_quantities(
+    client, pending_practice_order, monkeypatch, quantity
+):
+    engine, order_id = pending_practice_order
+    modify = MagicMock(wraps=engine.modify_order)
+    monkeypatch.setattr(engine, "modify_order", modify)
+    before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+
+    response = client.post(
+        "/api/v1/orders/modify",
+        json={"order_id": order_id, "quantity": quantity, "price": 110},
+        headers=_auth_headers(mode="practice"),
+    )
+
+    assert response.status_code == 400
+    assert "quantity" in response.get_json()["message"].lower()
+    modify.assert_not_called()
+    assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+
+
+@pytest.mark.parametrize("quantity,expected", [(2, 2), (2.0, 2), ("2", 2), (" 2 ", 2), ("+2", 2), ("1_0", 10)])
+def test_practice_modify_accepts_whole_quantities(client, pending_practice_order, quantity, expected):
+    engine, order_id = pending_practice_order
+    response = client.post(
+        "/api/v1/orders/modify",
+        json={"order_id": order_id, "quantity": quantity},
+        headers=_auth_headers(mode="practice"),
+    )
+    assert response.status_code == 200, response.get_json()
+    assert engine.get_orders()[0]["quantity"] == expected
+
+
+def test_practice_modify_keeps_omitted_quantity(client, pending_practice_order):
+    engine, order_id = pending_practice_order
+    response = client.post(
+        "/api/v1/orders/modify",
+        json={"order_id": order_id, "price": 110},
+        headers=_auth_headers(mode="practice"),
+    )
+    assert response.status_code == 200, response.get_json()
+    assert engine.get_orders()[0]["quantity"] == 5
+    assert engine.get_orders()[0]["price"] == 110
+
+
+@pytest.mark.parametrize("order_type,pricetype", [("LIMIT", "SL"), (" sl ", "limit")])
+def test_practice_modify_rejects_conflicting_types(client, pending_practice_order, monkeypatch, order_type, pricetype):
+    engine, order_id = pending_practice_order
+    modify = MagicMock(wraps=engine.modify_order)
+    monkeypatch.setattr(engine, "modify_order", modify)
+    before = engine.get_orders()
+    response = client.post(
+        "/api/v1/orders/modify",
+        json={"order_id": order_id, "order_type": order_type, "pricetype": pricetype, "trigger_price": 99},
+        headers=_auth_headers(mode="practice"),
+    )
+    assert response.status_code == 400
+    modify.assert_not_called()
+    assert engine.get_orders() == before
+
+
 def _auth_headers(
     mode: str | None = None,
     *,

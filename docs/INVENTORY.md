@@ -90,7 +90,7 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 | Operating modes: Practice and Live | ✅ | Connected (read) is a broker status, not a Mode. Example is sample data, not a Mode. The public web demo is Demo (example data). Practice places a simulated order. Widget catalogue count remains 71. The old sample-data URL is not a first-class installed screen. |
 | Professional charts + indicators | ✅ | `widgets/analysis/Chart/` on the lightweight-charts library |
 | Practice mode | ✅ | Practice controls (capital + place simulated order) |
-| Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
+| Trade journal | Partial | `TradeJournalTool` reads recorded executions; authoritative native fill ingestion is not connected. Submission acknowledgements remain in the audit trail, not the fill journal. |
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains use strict exchange, expiry, row, Greek and lot-size provenance through the configured broker path; incomplete or contradictory inputs fail closed to a labelled sample/unavailable state |
 | Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | History and analysis reads are scoped to the selected native account and mode; explicit source badges identify Sample/Example fallbacks. Native HTTP reads remain unavailable until cutover activation. |

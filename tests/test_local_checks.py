@@ -5,6 +5,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import random
+import shutil
+import string
 import subprocess
 import sys
 from pathlib import Path
@@ -115,6 +119,42 @@ def test_secret_scan_reports_locations_without_disclosing_the_value(tmp_path: Pa
     output = captured.out + captured.err
     assert "config.py:1" in output
     assert secret not in output
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("prefix", ["sk-", "sk-proj-", "sk-ant-api03-", "broker"])
+@pytest.mark.parametrize("suffix", [".py", ".js", ".ts", ".tsx", ".mjs", ".cjs", ".toml"])
+def test_secret_scan_cli_covers_common_credentials_in_git_inventory(
+    prefix: str, suffix: str, tmp_path: Path,
+) -> None:
+    """Tracked and unignored credentials fail with locations only; ignored files stay excluded."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    scanner = scripts / SCRIPT.name
+    shutil.copyfile(SCRIPT, scanner)
+    # Generate synthetic values at runtime, so the test source is not itself a credential fixture.
+    body = "".join(random.Random(17).choices(string.ascii_letters + string.digits, k=48))
+    secret = (prefix if prefix != "broker" else "") + body
+    assignment = "BROKER_" + "API_KEY" if prefix == "broker" else "token"
+    payload = f"# synthetic credential\n{assignment} = {secret!r}\n"
+    tracked, untracked, ignored = (f"{name}{suffix}" for name in ("tracked", "untracked", "ignored"))
+    for relative in (tracked, untracked, ignored):
+        (tmp_path / relative).write_text(payload, encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(ignored + "\n", encoding="utf-8")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env |= {"HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    for args in (["init", "-q"], ["add", "--", tracked]):
+        subprocess.run(["git", *args], cwd=tmp_path, env=env, check=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, str(scanner), "--secrets"], cwd=tmp_path, env=env,
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    # Do not use secret values in assertions: even a regression must not echo them.
+    if secret in result.stdout + result.stderr:
+        pytest.fail("The scanner disclosed synthetic credential material")
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [f"Potential secret: {tracked}:2", f"Potential secret: {untracked}:2"]
+    assert result.stderr == ""
 
 
 @pytest.mark.unit
@@ -315,6 +355,55 @@ def test_fixed_gate_cannot_hide_a_failure_through_inherited_pytest_options(
     output = capsys.readouterr()
     assert "Gate did not pass" in output.err
     assert "Full local gate passed" not in output.out
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable shim; pytest environment contract is platform independent")
+@pytest.mark.parametrize("addopts", ["-p pytest_timeout", "-p no:pytest_timeout", "-p no:xdist -n 2"])
+def test_public_check_cli_plans_plugins_against_the_gate_environment(addopts: str, tmp_path: Path) -> None:
+    """The real gate must clear interactive flags before both planning and execution."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("ft.py", "broker_sdk_environment.py", "check_local.py", "check_changes.py"):
+        shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+    for name in (
+        "check-version-consistency.py", "check-site-url-consistency.py", "check-brokers-lock.py",
+        "generate-notice.py", "check-no-git-deps.py", "check-uv-lock-export-drift.py",
+    ):
+        (scripts / name).write_text("# External prerequisite fixture.\n", encoding="utf-8")
+    for directory in ("packages", "tests", "scripts/__tests__", "bin"):
+        (tmp_path / directory).mkdir(exist_ok=True)
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "tests/test_gate.py").write_text(
+        "import os\n\n\n"
+        "def test_gate(request):\n"
+        "    assert os.environ['PYTEST_ADDOPTS'] == ''\n"
+        "    assert request.config.getoption('timeout') > 0\n"
+        "    assert request.config.getoption('timeout_method') == 'thread'\n"
+        "    assert request.config.getoption('numprocesses', default=None) is None\n",
+        encoding="utf-8",
+    )
+    corepack = tmp_path / "bin/corepack"
+    corepack.write_text(f"#!{sys.executable}\n# External Node checks fixture.\n", encoding="utf-8")
+    corepack.chmod(0o755)
+    git = shutil.which("git")
+    assert git is not None
+    (tmp_path / "bin/git").symlink_to(git)
+    env = {name: value for name, value in os.environ.items() if not name.startswith(("PYTEST_XDIST_", "GIT_"))}
+    env |= {
+        "HOME": str(tmp_path), "USERPROFILE": str(tmp_path), "PATH": str(tmp_path / "bin"),
+        "PYTEST_ADDOPTS": addopts, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_PLUGINS": "",
+        "FLINTTRADE_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+    }
+    subprocess.run([git, "init", "-q"], cwd=tmp_path, env=env, check=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, str(scripts / "ft.py"), "check", "--full", "--workers", "0"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+    assert "Full local gate passed." in result.stdout
 
 
 @pytest.mark.unit

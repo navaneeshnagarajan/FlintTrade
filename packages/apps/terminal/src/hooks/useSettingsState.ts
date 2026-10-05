@@ -12,7 +12,6 @@ import { emitNotification } from "@/components/NotificationCentre/useNotificatio
 import {
   persistLlmConfigPatch,
   readLlmConfig,
-  isAcceptedLlmConfigStatus,
   type LlmConfigPatch,
   type LlmConfigResponse,
 } from "@/services/ftApi.llm";
@@ -87,9 +86,6 @@ export interface SettingsLlmReadiness {
 export async function probeSettingsLlmReadiness(): Promise<SettingsLlmReadiness> {
   try {
     const payload = await readLlmConfig();
-    if (!isAcceptedLlmConfigStatus(payload.status)) {
-      return { hydration: llmHydrationFailureState(), provider: "" };
-    }
     const provider = String(payload.data?.provider ?? "").trim();
     return {
       hydration: provider ? "ready" : "empty",
@@ -200,7 +196,6 @@ export function useSettingsState(): SettingsState {
     last4: "",
   });
   const restartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingLlmPatchRef = useRef<Partial<LlmData>>({});
   // LLM edits accumulated since the last backend flush, plus the debounce timer.
   // Persistence is debounced (never per keystroke) — see LLM_PERSIST_DEBOUNCE_MS.
   const unsavedLlmPatchRef = useRef<Partial<LlmData>>({});
@@ -223,7 +218,6 @@ export function useSettingsState(): SettingsState {
   });
 
   const applyLlmCredentialMetadata = useCallback((payload: LlmConfigResponse) => {
-    if (!isAcceptedLlmConfigStatus(payload.status)) return;
     const data = payload.data ?? {};
     if (typeof data.api_key_configured !== "boolean") return;
     setLlmCredentialMetadata({
@@ -250,11 +244,6 @@ export function useSettingsState(): SettingsState {
     void readLlmConfig()
       .then((payload) => {
         if (cancelled || providerRevision !== llmProviderRevisionRef.current) return;
-        if (!isAcceptedLlmConfigStatus(payload.status)) {
-          llmHydratedRef.current = false;
-          setLlmHydrationState(llmHydrationFailureState());
-          return;
-        }
         applyLlmCredentialMetadata(payload);
         if (!useSettingsStore.getState().llmSetupPending) {
           const data = payload.data ?? {};
@@ -318,7 +307,6 @@ export function useSettingsState(): SettingsState {
   }, []);
 
   const applyAuthoritativeLlm = useCallback((payload: LlmConfigResponse) => {
-    if (!isAcceptedLlmConfigStatus(payload.status)) return;
     applyLlmCredentialMetadata(payload);
     const data = payload.data ?? {};
     const current = useSettingsStore.getState().llm;
@@ -585,15 +573,11 @@ export function useSettingsState(): SettingsState {
       && normaliseLlmHost(currentProvider, value).trim()
         !== normaliseLlmHost(currentProvider, currentLlm.host).trim();
     if (hostDestinationChanged) llmFieldRevisionsRef.current.apiKey += 1;
-    // Reflect the edit in the store immediately (responsive field) and record
-    // it for both the late-hydration merge and the pending backend flush.
-    const pendingPatch = { ...pendingLlmPatchRef.current, [field]: value };
+    // Reflect the edit in the store immediately to keep the field responsive.
     const localPatch: Partial<LlmData> = { [field]: value };
     if (hostDestinationChanged) {
-      delete pendingPatch.apiKey;
       localPatch.apiKey = "";
     }
-    pendingLlmPatchRef.current = pendingPatch;
     useSettingsStore.getState().setLLM(localPatch);
 
     const invalidHost = field === "host" && providerConfig?.requiresHost && !value.trim();

@@ -72,6 +72,54 @@ describe("ftApi.llm", () => {
     });
   });
 
+  it("rejects an HTTP-success LLM read with an error envelope and preserves the backend message", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({
+      status: "error",
+      message: "LLM configuration requires an authenticated session",
+      data: { provider: "openai" },
+    }));
+
+    await expect(readLlmConfig()).rejects.toThrow("LLM configuration requires an authenticated session");
+  });
+
+  it.each([undefined, "", "ok", "success"])(
+    "preserves the full accepted LLM read envelope with status %s",
+    async (status) => {
+      const payload = {
+        ...(status === undefined ? {} : { status }),
+        message: "Stored LLM configuration",
+        data: { provider: "openai", model: "gpt-4o", api_key_configured: true },
+      };
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(payload));
+
+      await expect(readLlmConfig()).resolves.toEqual(payload);
+    },
+  );
+
+  it.each(["error", "pending"])(
+    "rejects an unaccepted LLM read status %s without a backend message",
+    async (status) => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({ status }));
+
+      await expect(readLlmConfig()).rejects.toThrow("HTTP 200");
+    },
+  );
+
+  it("rejects an unsuccessful HTTP LLM read even with an accepted envelope", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({ status: "ok" }, 401));
+
+    await expect(readLlmConfig()).rejects.toThrow("HTTP 401");
+  });
+
+  it("rejects an HTTP-success LLM write with an error envelope", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({
+      status: "error",
+      message: "workspace locked",
+    }));
+
+    await expect(persistLlmConfigPatch({ model: "gpt-4o" })).rejects.toThrow("workspace locked");
+  });
+
   it("tests Grok through the authenticated backend without clearing a hydrated secret", async () => {
     storeState.token = "jwt-token";
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({

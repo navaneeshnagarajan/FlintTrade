@@ -286,6 +286,127 @@ def test_routed_order_non_integer_quantity_returns_400(backend_lease_proof) -> N
     router.place_order.assert_not_called()
 
 
+@pytest.mark.parametrize("endpoint", ["/api/v1/orders/place", "/api/v1/orders/dhan/place"])
+@pytest.mark.parametrize(
+    ("order_type", "pricetype"),
+    [("LIMIT", "MARKET"), ("market", " limit ")],
+)
+def test_conflicting_place_types_are_rejected_before_admission(
+    backend_lease_proof, monkeypatch, endpoint, order_type, pricetype
+) -> None:
+    from flinttrade_engine.laya import process_laya
+
+    laya = process_laya()
+    admit = MagicMock(wraps=laya.admit)
+    monkeypatch.setattr(laya, "admit", admit)
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="MUST-NOT-PLACE")
+    safety = _passing_safety()
+    app = _app(backend_lease_proof, broker_router=router, safety=safety)
+
+    response = app.test_client().post(
+        endpoint,
+        json={**_LIVE_BODY, "order_type": order_type, "pricetype": pricetype, "price": 100},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 400
+    admit.assert_not_called()
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/orders/place", "/api/v1/orders/dhan/place"])
+@pytest.mark.parametrize(
+    "type_fields",
+    [
+        {"order_type": " limit ", "pricetype": "LIMIT"},
+        {"order_type": "LIMIT", "pricetype": " limit "},
+        {"order_type": "limit"},
+        {"pricetype": "LIMIT"},
+        {"order_type": "", "pricetype": "LIMIT"},
+        {"order_type": "LIMIT", "pricetype": None},
+        {},
+    ],
+)
+def test_place_aliases_admit_and_dispatch_the_same_type(
+    backend_lease_proof, monkeypatch, endpoint, type_fields
+) -> None:
+    from flinttrade_engine.laya import process_laya
+
+    laya = process_laya()
+    admit = MagicMock(wraps=laya.admit)
+    monkeypatch.setattr(laya, "admit", admit)
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="NATIVE-TYPE")
+    app = _app(backend_lease_proof, broker_router=router)
+    app.config["BROKER_CLIENT"] = _fake_client(
+        [], quotes=[{"symbol": "RELIANCE", "exchange": "NSE", "ltp": 100}]
+    )
+    body = {key: value for key, value in _LIVE_BODY.items() if key != "order_type"}
+
+    response = app.test_client().post(
+        endpoint, json={**body, **type_fields, "price": 100}, headers=_live_headers()
+    )
+
+    assert response.status_code == 200, response.get_json()
+    expected = "LIMIT" if type_fields else "MARKET"
+    assert admit.call_args.args[0].order_type == expected
+    assert router.place_order.await_args.kwargs["order"].pricetype.value == expected
+
+
+@pytest.mark.parametrize("method,endpoint", [
+    ("POST", "/place"), ("POST", "/dhan/place"),
+    ("POST", "/modify"), ("POST", "/dhan/modify"),
+    ("POST", "/cancel"), ("POST", "/dhan/cancel"), ("POST", "/cancel-all"),
+    ("POST", "/options"), ("POST", "/options-multi"),
+    ("POST", "/gtt-place"), ("POST", "/gtt-modify"), ("POST", "/gtt-cancel"),
+    ("POST", "/forever"), ("PUT", "/forever/pending"), ("DELETE", "/forever/pending"),
+    ("PUT", "/super/pending"), ("DELETE", "/super/pending"),
+    ("POST", "/triggers"), ("PUT", "/triggers/pending"), ("DELETE", "/triggers/pending"),
+    ("POST", "/multi"), ("DELETE", "/smart/pending"),
+    ("POST", "/basket"), ("POST", "/split"), ("POST", "/options-strategy"),
+])
+@pytest.mark.parametrize("raw_body", ["[]", "[1]", "null", '"text"', "false", "0", "{not json"])
+def test_live_body_handlers_refuse_invalid_json_before_dispatch(
+    backend_lease_proof, method, endpoint, raw_body
+) -> None:
+    router = MagicMock()
+    safety = _passing_safety()
+    app = _app(backend_lease_proof, broker_router=router, safety=safety)
+    app.config["BASKET_EXECUTOR"] = basket = MagicMock()
+    app.config["SPLIT_EXECUTOR"] = split = MagicMock()
+    response = app.test_client().open(
+        f"/api/v1/orders{endpoint}", method=method, data=raw_body, headers=_live_headers()
+    )
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "error"
+    assert "JSON object" in response.get_json()["message"]
+    assert router.mock_calls == []
+    assert basket.mock_calls == []
+    assert split.mock_calls == []
+    safety.check_order.assert_not_called()
+
+
+@pytest.mark.parametrize("family,verb", [
+    ("forever", "cancel_forever"), ("super", "cancel_super_order"),
+    ("triggers", "cancel_conditional_trigger"), ("smart", "cancel_smart_order"),
+])
+@pytest.mark.parametrize("raw_body", ["", "{}"])
+def test_extended_delete_preserves_optional_object_body(backend_lease_proof, family, verb, raw_body) -> None:
+    router = MagicMock()
+    router.execute_gated = AsyncMock(return_value={"status": "success"})
+    app = _app(backend_lease_proof, broker_router=router)
+    response = app.test_client().delete(
+        f"/api/v1/orders/{family}/pending?broker=dhan&account_id=default",
+        data=raw_body,
+        headers=_live_headers(),
+    )
+    assert response.status_code == 200, response.get_json()
+    assert router.execute_gated.await_args.kwargs["verb"] == verb
+    assert router.execute_gated.await_args.kwargs["hint"].account_id == "default"
+
+
 def test_routed_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="NATIVE-999")
@@ -839,14 +960,17 @@ def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.Mo
 
 
 # ---------------------------------------------------------------------------
-# Trade journal producer — a successful live dispatch records the executed
-# order in the same DuckDB store the /trades/journal route reads (was empty in
-# Live because nothing ever wrote to it).
+# Order acknowledgements are not fill evidence. Submission audits survive,
+# but the shared trade store must not receive fabricated executions.
 # ---------------------------------------------------------------------------
 
 
-def test_routed_happy_path_journals_the_trade(tmp_path: object, backend_lease_proof) -> None:
-    """A successful live order is appended to the shared trade store."""
+@pytest.mark.unit
+@pytest.mark.parametrize("order_type,price", [("MARKET", 0), ("LIMIT", 100)])
+def test_routed_acknowledgement_is_audited_without_recording_a_fill(
+    tmp_path, backend_lease_proof, order_type, price
+) -> None:
+    """Neither a market acknowledgement nor an unfilled limit is a trade."""
     import threading
     from flinttrade_data.storage import StorageManager
 
@@ -856,27 +980,32 @@ def test_routed_happy_path_journals_the_trade(tmp_path: object, backend_lease_pr
     router = MagicMock()
     router.place_order = AsyncMock(return_value="NATIVE-555")
     app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
+    app.config["BROKER_CLIENT"].multi_quotes.return_value = [
+        SimpleNamespace(symbol="RELIANCE", exchange="NSE", ltp=100.0, prev_close=100.0, previous_close_trusted=True)
+    ]
     app.config["TRADE_STORAGE"] = store
     app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+    audit = MagicMock()
+    app.config["AUDIT"] = audit
 
-    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
-    assert resp.status_code == 200
+    try:
+        resp = app.test_client().post(
+            "/api/v1/orders/dhan/place",
+            json={**_LIVE_BODY, "order_type": order_type, "price": price},
+            headers=_live_headers(),
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["orderid"] == "NATIVE-555"
+        today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+        assert store.get_trades_by_date(today) == []
+        audit.log_event.assert_called_once()
+        assert audit.log_event.call_args.args == ("ORDER_PLACED",)
+    finally:
+        store.close()
 
-    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
-    rows = store.get_trades_by_date(today)
-    store.close()
 
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["orderid"] == "NATIVE-555"
-    assert row["symbol"] == "RELIANCE"
-    assert row["action"] == "BUY"
-    assert int(row["quantity"]) == 1
-    assert row["strategy"] == "manual"
-
-
-def test_journal_failure_never_breaks_the_order(backend_lease_proof) -> None:
-    """H-class best-effort: a journal store that raises still returns 200."""
+def test_acknowledgement_does_not_access_the_fill_store(backend_lease_proof) -> None:
+    """Submission has no dependency on the execution journal."""
     import threading
 
     bad_store = MagicMock()
@@ -891,7 +1020,7 @@ def test_journal_failure_never_breaks_the_order(backend_lease_proof) -> None:
     resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 200
     assert resp.get_json()["orderid"] == "NATIVE-444"
-    bad_store.insert_trade.assert_called_once()
+    bad_store.insert_trade.assert_not_called()
 
 
 def test_routed_happy_path_does_not_duplicate_router_owned_lifecycle_recording(backend_lease_proof) -> None:
@@ -926,6 +1055,37 @@ _MODIFY_BODY = {
     "product": "MIS",
     "order_type": "LIMIT",
 }
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/orders/modify", "/api/v1/orders/dhan/modify"])
+def test_live_modify_rejects_conflicting_types_before_admission(backend_lease_proof, monkeypatch, endpoint) -> None:
+    from flinttrade_engine.laya import process_laya
+
+    admit = MagicMock(wraps=process_laya().admit)
+    monkeypatch.setattr(process_laya(), "admit", admit)
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value="MUST-NOT-MODIFY")
+    safety = _passing_safety()
+    app = _app(backend_lease_proof, broker_router=router, safety=safety)
+    response = app.test_client().post(
+        endpoint, json={**_MODIFY_BODY, "pricetype": "MARKET"}, headers=_live_headers()
+    )
+    assert response.status_code == 400
+    admit.assert_not_called()
+    safety.check_order.assert_not_called()
+    router.modify_order.assert_not_called()
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/orders/modify", "/api/v1/orders/dhan/modify"])
+def test_live_modify_preserves_equivalent_type_aliases(backend_lease_proof, endpoint) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value="NATIVE-1")
+    app = _app(backend_lease_proof, broker_router=router)
+    response = app.test_client().post(
+        endpoint, json={**_MODIFY_BODY, "order_type": "limit", "pricetype": " LIMIT "}, headers=_live_headers()
+    )
+    assert response.status_code == 200, response.get_json()
+    assert router.modify_order.await_args.kwargs["changes"]["pricetype"] == "LIMIT"
 
 
 def _real_kotak_route_stack(backend_lease_proof, *, order_row=None):

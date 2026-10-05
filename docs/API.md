@@ -285,11 +285,16 @@ The blueprint mounts at `/api/v1/strategies`. Backed by the
 
 ### Trade journal (`/ft-api/api/v1/trades/*`)
 
-Source: `packages/core/core/src/flinttrade_core/operations_routes.py`. Every
-executed live order is appended to a shared DuckDB store by the gated order
-dispatch, so the journal populates in Live mode. (Live P&L is computed
-client-side in the MTM Monitor widget from real positions; the previously
-documented in-memory `pnl-tracker` endpoints were unfed and were removed.)
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`. The
+journal reads recorded executions from the shared DuckDB store. A successful
+order submission is **not** a fill: manual, webhook and autonomous-agent
+acknowledgements retain their submission audit events but do not insert the
+requested price and quantity as an executed trade. Authoritative native fill
+ingestion is not connected to this store yet, so new live submissions do not
+populate the execution journal. Existing rows are retained unchanged; older
+submission-derived rows are not retroactively verified as fills. Practice fills
+remain owned by the local sandbox. Live P&L is computed client-side in the MTM
+Monitor widget from real positions.
 
 | Endpoint | Purpose |
 |---|---|

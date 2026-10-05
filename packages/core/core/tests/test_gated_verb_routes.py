@@ -1229,6 +1229,114 @@ def test_trigger_modify_happy_path(*, backend_lease_factory) -> None:
     assert kw["payload"]["alert_id"] == "AL-1"
 
 
+@pytest.mark.parametrize("endpoint", ["/api/v1/orders/place", "/api/v1/orders/dhan/place"])
+@pytest.mark.parametrize("order_type,pricetype", [(" slm ", "SL-M"), ("SL-M", " slm ")])
+def test_place_stop_market_aliases_agree_for_laya_and_router(
+    monkeypatch, backend_lease_factory, endpoint, order_type, pricetype
+) -> None:
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    laya = process_laya()
+    laya.set_status(DecisionStatus.READY)
+    admit = MagicMock(wraps=laya.admit)
+    monkeypatch.setattr(laya, "admit", admit)
+    safety = _passing_safety()
+    router = _gated_router()
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+
+    response = client.post(
+        endpoint,
+        json={
+            **_TRIGGER_BODY["orders"][0],
+            "broker": "dhan",
+            "order_type": order_type,
+            "pricetype": pricetype,
+            "trigger_price": 2890,
+        },
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200, response.get_json()
+    admit.assert_called_once()
+    safety.check_order.assert_called_once()
+    router.place_order.assert_awaited_once()
+    assert admit.call_args.args[0].order_type == "SL-M"
+    assert safety.check_order.call_args.args[0].pricetype.value == "SL-M"
+    assert router.place_order.await_args.kwargs["order"].pricetype.value == "SL-M"
+
+
+@pytest.mark.parametrize("order_type,pricetype", [("LIMIT", "MARKET"), ("MARKET", "LIMIT")])
+@pytest.mark.parametrize("conflicting_leg", [0, 1])
+def test_trigger_modify_conflicting_types_rejected_before_safety_or_gate(
+    monkeypatch, backend_lease_factory, order_type, pricetype, conflicting_leg
+) -> None:
+    import flinttrade_engine.safety as safety_module
+
+    router = _gated_router(result=None)
+    safety = _passing_safety()
+    gate = MagicMock(wraps=safety_module.gate_broker_write)
+    monkeypatch.setattr(safety_module, "gate_broker_write", gate)
+    admission = MagicMock(wraps=safety.order_admission)
+    monkeypatch.setattr(safety, "order_admission", admission)
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+    orders = [{**_TRIGGER_BODY["orders"][0]}, {**_TRIGGER_BODY["orders"][0]}]
+    orders[conflicting_leg].update(order_type=order_type, pricetype=pricetype, price=2900)
+
+    response = client.put(
+        "/api/v1/orders/triggers/AL-1", json={**_TRIGGER_BODY, "orders": orders}, headers=_live_headers()
+    )
+
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json() == {"status": "error", "message": "Trigger validation failed"}
+    admission.assert_not_called()
+    safety.check_order.assert_not_called()
+    safety.l5_kill.validate.assert_not_called()
+    gate.assert_not_called()
+    router.execute_gated.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "type_fields,expected",
+    [
+        ({"order_type": " limit ", "pricetype": "LIMIT"}, "LIMIT"),
+        ({"order_type": "LIMIT", "pricetype": " limit "}, "LIMIT"),
+        ({"order_type": " limit "}, "LIMIT"),
+        ({"pricetype": " limit "}, "LIMIT"),
+        ({"order_type": " slm ", "pricetype": "SL-M"}, "SL-M"),
+        ({"order_type": "SL-M", "pricetype": " slm "}, "SL-M"),
+        ({}, "MARKET"),
+    ],
+)
+def test_trigger_modify_aliases_reach_safety_and_gate_as_the_same_typed_order(
+    monkeypatch, backend_lease_factory, type_fields, expected
+) -> None:
+    import flinttrade_engine.safety as safety_module
+
+    router = _gated_router(result=None)
+    safety = _passing_safety()
+    gate = MagicMock(wraps=safety_module.gate_broker_write)
+    monkeypatch.setattr(safety_module, "gate_broker_write", gate)
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+    leg = {**_TRIGGER_BODY["orders"][0], **type_fields, "price": 2900, "trigger_price": 2890}
+
+    response = client.put(
+        "/api/v1/orders/triggers/AL-1", json={**_TRIGGER_BODY, "orders": [leg]}, headers=_live_headers()
+    )
+
+    assert response.status_code == 200, response.get_json()
+    safety.check_order.assert_called_once()
+    gate.assert_called_once()
+    router.execute_gated.assert_awaited_once()
+    checked_order = safety.check_order.call_args.args[0]
+    assert checked_order.pricetype.value == expected
+    dispatched = router.execute_gated.await_args.kwargs
+    assert dispatched["verb"] == "modify_conditional_trigger"
+    assert dispatched["payload"]["orders"] == [checked_order]
+    assert gate.call_args.args[1] == dispatched["payload"]
+    assert isinstance(dispatched["safety_ctx"], safety_module.SafetyContext)
+
+
 def test_trigger_cancel_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
     client = _app(

@@ -23,9 +23,9 @@ class TickDispatcher:
     non-asyncio thread (e.g. broker SDK callback threads).
 
     Args:
-        maxsize: Maximum depth of the internal inbound queue.  Older
-            ticks are dropped (queue full) rather than blocking the
-            broker callback thread.
+        maxsize: Maximum depth of the internal inbound queue. Incoming
+            ticks are dropped when the queue is full rather than blocking
+            the broker callback thread; the polling snapshot still updates.
     """
 
     def __init__(self, maxsize: int = 10_000) -> None:
@@ -44,9 +44,9 @@ class TickDispatcher:
     def enqueue(self, tick: dict[str, Any]) -> None:
         """Accept a tick from a broker adapter.
 
-        Safe to call from any thread.  If the inbound queue is full the
-        tick is silently dropped (oldest-tick-drop strategy) to avoid
-        blocking the caller.
+        Safe to call from any thread once :meth:`run` has started. If the
+        inbound queue is full, the incoming tick is dropped without blocking
+        the caller. The latest polling snapshot still records that tick.
 
         Args:
             tick: Raw tick dict.  Must contain at least ``"symbol"`` and
@@ -59,22 +59,19 @@ class TickDispatcher:
 
         loop = self._loop
         if loop is not None and loop.is_running():
-            try:
-                loop.call_soon_threadsafe(self._queue.put_nowait, tick)
-            except asyncio.QueueFull:
-                logger.warning(
-                    "TickDispatcher inbound queue full — dropping tick for %s",
-                    latest_key,
-                )
+            loop.call_soon_threadsafe(self._enqueue_nowait, tick, latest_key)
         else:
-            # Called from within the asyncio thread (e.g. tests)
-            try:
-                self._queue.put_nowait(tick)
-            except asyncio.QueueFull:
-                logger.warning(
-                    "TickDispatcher inbound queue full — dropping tick for %s",
-                    latest_key,
-                )
+            self._enqueue_nowait(tick, latest_key)
+
+    def _enqueue_nowait(self, tick: dict[str, Any], latest_key: str) -> None:
+        """Handle backpressure where the queue operation actually executes."""
+        try:
+            self._queue.put_nowait(tick)
+        except asyncio.QueueFull:
+            logger.warning(
+                "TickDispatcher inbound queue full — dropping tick for %s",
+                latest_key,
+            )
 
     async def run(self) -> None:
         """Main dispatch loop.  Run as an asyncio Task.
