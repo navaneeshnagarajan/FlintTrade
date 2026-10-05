@@ -17,7 +17,7 @@ Write multi-line issue bodies and comments to a temporary UTF-8 file and pass it
 
 When a skill says "publish to the issue tracker", create a GitHub issue. When it says "fetch the relevant ticket", read the full issue and comments with `gh issue view <number> --comments`.
 
-Working designs remain under `.local/specs/<area>/` with `DESIGN_LOG.md`, as required by the repository guidelines. GitHub holds publishable specs and actionable tickets; preserve the local design record. `PLAN.md` remains the curated public roadmap, `.local/agent-context/PLAN.md` the detailed working plan, and `changelog.md` the record of shipped code.
+Working designs and design logs follow the spec-first workflow in `AGENTS.md`. GitHub holds publishable specs and actionable tickets; preserve the working design record. `PLAN.md` remains the curated public roadmap; follow `AGENTS.md` for the detailed working plan, and use `changelog.md` for shipped code only.
 
 ## Pull requests as a triage surface
 

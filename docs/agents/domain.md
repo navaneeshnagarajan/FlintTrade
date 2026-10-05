@@ -27,4 +27,4 @@ If a proposal contradicts an existing ADR, identify the ADR and explain why the 
 
 ## Preserve the design workflow
 
-Domain docs complement the existing design record. Working designs remain in `.local/specs/<area>/` with `DESIGN_LOG.md`; `PLAN.md` is the curated public roadmap, `.local/agent-context/PLAN.md` the detailed working plan, and `changelog.md` records shipped code only.
+Domain docs complement the existing design record. Follow the spec-first workflow in `AGENTS.md` for working designs, design logs and the detailed working plan; `PLAN.md` is the curated public roadmap, and `changelog.md` records shipped code only.
