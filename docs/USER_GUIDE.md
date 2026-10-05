@@ -363,9 +363,8 @@ AI and terminal surfaces read that Practice book. Practice never leaks a live
 broker order. Live stays fail-closed until native read smoke is trusted and
 funded unlock is explicit. OpenAlgo is a Settings fallback only — not the
 primary connect CTA. Setup's primary connect action is **Continue without
-a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn → Practice Trading
-never offers Neo Practice — Kotak Neo has no sandbox. Operator copy is
-`Live read only until funded unlock.`
+a broker**. Learn → Practice Trading explains this built-in simulated path;
+no broker connection or broker sandbox is required.
 
 **Mode, session, and sample data.** Practice and Live name the session Mode.
 **Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
@@ -898,8 +897,8 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    front-month future. Select it.
 5. Set Quantity to 1 lot. After you select the future, Order Pad
    auto-fills Quantity from that instrument's current lot size — do
-   not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
-   figures separately. Choose **MARKET**. Side = **BUY**.
+   not hardcode 50. Learn Glossary follows the loaded instrument master
+   rather than fixed example figures. Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
    The sandbox order appears in the **Positions** widget immediately; the
    **Orders** widget shows it as filled (simulated). **Example Buy** on
@@ -971,28 +970,21 @@ BUY / Confirm SELL chrome. Practice and Live open Confirm only
 when the Mode allows it and a gateway is configured. The
 backend refuses an example-data order if the UI slips (FT-TRADE-009).
 
-### Learn → Practice Trading (OpenAlgo fallback)
+### Learn → Practice Trading
 
-This is a fallback path, not the primary Practice fills path. The
-shipped path is Practice on `/trade`, with simulated fills
-and no real money. With example data, `/learn` → **Practice
-Trading** still walks through optional OpenAlgo broker Practice /
-sandbox setup when you need that fallback. **Dhan Sandbox** remains
-optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
-“Neo Practice”. Operator copy is `Live read only until funded unlock.`
-The tab shows "How to start Practice Trading", helper
-text "Configure OpenAlgo in Settings → Broker Gateway.", and an
-**Open Settings → Broker Gateway** button that navigates to
-`/settings#api`. The CTA does not send operators to Settings →
-Brokers (`/settings#brokers`). Point the Broker Gateway at that
-OpenAlgo Practice instance only as fallback paper, then return to
-native Practice simulated fills for Practice and AI analysis.
+The tab explains: “Practice is built in. Open the Trade desk and place a
+simulated order, no broker needed.” Choose **Practice** from the Mode menu,
+then use **Open Trade desk** to open `/trade`. The link preserves the selected
+Mode; it does not silently switch to Practice or Live. Use the Order Pad to
+place a simulated order, then review simulated orders, positions and P&L.
+Practice uses virtual funds, and simulated fills do not guarantee the same
+results in Live trading. Broker sandbox setup is not a prerequisite.
 
-With example data, `/learn` → Glossary → Lot Size, the glossary teaches dated
-Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
-MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
-link to circular NSE/FAOP/70616. Learn market facts that exchanges
-revise must ship dated, not as forever hardcodes.
+Under `/learn` → Glossary → Lot Size, the index-lot line follows the loaded
+instrument master, with contract expiry months where available. When a
+newer master loads, the line updates with it. The **Verify on NSE** link remains available. Check
+the selected instrument's current lot size before placing an order; dated
+example figures are not a substitute for the current master.
 
 ### Learn → Resource Hub (local documents)
 
@@ -1120,7 +1112,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
-| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
+| `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`; choose Practice in the Mode menu before placing a simulated order. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automate — flows, schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Automate → Automation Settings. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
@@ -1713,11 +1705,15 @@ quantity on its own. The hub has three sub-tools:
 
 Visual flow builder (drag-and-drop nodes) for "when X happens, do Y"
 automations. Nodes include market-data events, broker events, and actions such
-as sending a notification or running a local script.
+as sending a notification or running a local script. **New Flow** and
+**From Template** appear once in the toolbar, including when no flows are saved.
 
 ### Cron
 
-Time-based automations on the **Schedules** tab. Examples:
+Time-based automations on the **Schedules** tab. Jobs use readable names;
+**Show system jobs** reveals maintenance jobs such as connection health checks,
+backups and data cleanup. This checkbox only filters the list and never pauses
+or resumes a job. Custom jobs remain visible by default. Examples:
 
 - Run pre-market screener at 9:00 AM IST every weekday.
 - Snapshot positions to a CSV at 3:30 PM IST.
@@ -1798,6 +1794,12 @@ Live orders and mirror start.
 Practice is not muted by that strip. A Practice place is refused when
 Practice itself is Down. Kill All stays reachable. Chat being offline
 does not close Live.
+
+The sidebar has one **AI Centre** entry. Home’s **Chat with AI** and the
+Ctrl+K **Ask AI** tab open the same `/ai` conversation. TopBar **Ask AI** opens
+the contextual tutor using that same conversation history; its route and widget
+context are retained. The tutor does not float over app content when closed.
+The Settings tab is named **AI**, with the existing `/settings#llm` link.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
@@ -1904,11 +1906,13 @@ startup.
 
 ---
 
-## 10. Ditto multi-account walkthrough
+## 10. Accounts walkthrough
 
-Open `/ditto`. Ditto is FlintTrade's multi-account orchestration module for
-testing account relationships, sizing rules, and risk overrides in one local
-workspace.
+Open **Accounts** (`/ditto`) for broker connections, mirroring and account-level
+risk. With no mirroring accounts registered, the page explains **Connect a broker
+to mirror accounts** and offers **Add Account** for an OpenAlgo-compatible account.
+Existing native broker status remains visible. A failed account-service request
+still shows an error and **Retry**; it is not presented as an empty account list.
 
 ### Three views
 
@@ -1974,7 +1978,7 @@ least 1). The Settings reminder has **Show** and **Hide**. It has no
 |---|---|---|
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); example data keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
@@ -2031,7 +2035,7 @@ the desk says **Sign in to reset this account. You'll need your password.**
 With an authenticator enrolled it says **Sign in to reset this account.
 You'll need your password and authenticator code.**
 
-With example data, `/settings` → **LLM Config**, an unconfigured session
+With example data, `/settings` → **AI**, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
 guidance `Example uses example data and cannot load or persist LLM secrets.` This is not a
 broken session; configure a provider in Live or Practice on this machine.
@@ -2291,7 +2295,7 @@ Stop-Process -Id <pid>
 
 ### "No LLM provider configured" or "AI settings could not be loaded"
 
-With example data, `/settings` → LLM Config, the empty state "No LLM provider
+With example data, `/settings` → AI, the empty state "No LLM provider
 configured" is expected for an unconfigured session. Example data
 cannot load or persist LLM secrets. Use **Retry**, or configure a
 provider in Live or Practice on this machine.

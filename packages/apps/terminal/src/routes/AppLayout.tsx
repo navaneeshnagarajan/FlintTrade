@@ -124,9 +124,9 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
           <ArrowRight className="size-5" strokeWidth={2} />
         </div>
         <div className="space-y-2">
-          <h1 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
+          <h2 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
             FlintTrade is designed for desktop
-          </h1>
+          </h2>
           <p className="text-sm text-text-secondary leading-relaxed">
             For the best experience, use a screen wider than 768px. The workspace, charts, and data grids require more horizontal space.
           </p>

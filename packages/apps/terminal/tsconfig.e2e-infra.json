@@ -24,6 +24,7 @@
     "e2e/workspace-lifecycle.spec.ts",
     "e2e/order-pad-practice.spec.ts",
     "e2e/agent-practice.spec.ts",
+    "e2e/learn-ai-polish.spec.ts",
     "e2e/visual-a11y.spec.ts",
     "e2e/visual/support.ts",
     "e2e/visual/desk-mocks.ts"

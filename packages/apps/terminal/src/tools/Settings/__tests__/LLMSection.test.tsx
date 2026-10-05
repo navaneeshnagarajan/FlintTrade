@@ -3156,7 +3156,7 @@ describe("LLMSection provider configuration", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No LLM provider configured");
     expect(screen.getByText(/cannot load or persist LLM secrets/i)).toBeInTheDocument();
     expect(screen.getByText(/not a broken session/i)).toBeInTheDocument();
-    expect(screen.getByText(/Open Settings → LLM Config in Live or Practice/i)).toBeInTheDocument();
+    expect(screen.getByText(/Open Settings → AI in Live or Practice/i)).toBeInTheDocument();
     expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "LLM provider" })).not.toBeInTheDocument();
     expect(localAi.getStatus).not.toHaveBeenCalled();
