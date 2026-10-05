@@ -2235,6 +2235,8 @@ def _prepare_broker_dependencies(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    coherence_verifier: Callable | None = None,
+    enrollment_required: Callable[[], bool] | None = None,
 ) -> _BrokerRuntimeDependencies:
     """Prepare the single provider, adapter map and limiter shared by reads and writes.
 
@@ -2301,11 +2303,13 @@ def _prepare_broker_dependencies(
     def compatibility_authority():
         if owner is None or workspace_path is None:
             raise RegistrySessionUnavailable
-        return owner.seal_openalgo_default_compatibility_authority(read_workspace_snapshot(workspace_path))
+        current = coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(workspace_path)
+        return owner.seal_openalgo_default_compatibility_authority(current)
 
     session_provider = AuthenticatingSessionProvider(
         registry, config.account_acls, workspace_snapshot=workspace_snapshot, workspace_path=workspace_path,
         credential_version_for=credential_version_for, compatibility_authority_for=compatibility_authority,
+        coherence_verifier=coherence_verifier, enrollment_required=enrollment_required,
     )
     if owner is not None and workspace_snapshot is not None and workspace_snapshot.version is not None:
         owner.set_execution_default_projection(
@@ -2361,7 +2365,7 @@ def _prepare_broker_dependencies(
                 expected_registry=registry.snapshot_selector(BrokerSelector("openalgo", "default")),
                 authority=authority, client=openalgo_client, broker=None, label="OpenAlgo",
             )
-            current = read_workspace_snapshot(workspace_path)
+            current = coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(workspace_path)
             if not openalgo_client.matches_workspace_openalgo(current):
                 owner.abandon_prepared_candidate(receipt)
                 raise RegistrySessionUnavailable
@@ -2516,6 +2520,8 @@ def build_broker_router(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    coherence_verifier: Callable | None = None,
+    enrollment_required: Callable[[], bool] | None = None,
     backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Construct a router through exactly one shared dependency preparation."""
@@ -2533,6 +2539,8 @@ def build_broker_router(
         workspace_path=workspace_path,
         registry_publication_owner=registry_publication_owner,
         credential_version_for=credential_version_for,
+        coherence_verifier=coherence_verifier,
+        enrollment_required=enrollment_required,
     )
     if on_native_activated is not None:
         try:
@@ -2556,6 +2564,155 @@ def _broker_router_drain_timeout(app: Flask) -> float:
         return max(0.0, float(raw_timeout))
     except (TypeError, ValueError):
         return 10.0
+
+
+def broker_account_lifecycle_owner_for(app: Flask, workspace_path: Path) -> Any:
+    """Explicit inert composition seam; native routes/schedulers never invoke it."""
+    from .broker_account_lifecycle import BrokerAccountLifecycleOwner  # noqa: PLC0415
+
+    proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
+    existing = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if existing is not None:
+        if type(existing) is not BrokerAccountLifecycleOwner:
+            raise RuntimeError("account_lifecycle_owner_invalid")
+        existing.assert_bound(workspace_path, proof)
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    with lock:
+        owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+        if owner is None:
+            owner = BrokerAccountLifecycleOwner(
+                workspace_path, app.config.get("BACKEND_LEASE_PROOF"),
+                retire_generations=lambda timeout: retire_broker_dependencies(app, timeout=timeout),
+                rebuild_lock=lock,
+            )
+            app.extensions["flinttrade.broker_account_lifecycle_owner"] = owner
+        elif type(owner) is not BrokerAccountLifecycleOwner:
+            raise RuntimeError("account_lifecycle_owner_invalid")
+        owner.assert_bound(workspace_path, app.config.get("BACKEND_LEASE_PROOF"))
+        return owner
+
+
+def _account_publication_allowed(app: Flask) -> bool:
+    """Consult custody under the already-shared rebuild/publication fence."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    return owner is None or owner.legacy_publication_allowed()
+
+
+def _broker_generation_snapshot(app: Flask) -> tuple[Any, Any, Any, Any]:
+    return (app.extensions.get("flinttrade_broker_dependencies"),
+            app.extensions.get("flinttrade_broker_dependencies_draining"),
+            app.config.get("BROKER_ROUTER"), app.config.get("BROKER_ROUTER_DRAINING"))
+
+
+def _begin_enrolled_broker_rebuild(app: Flask) -> Any:
+    """Capture exact original objects in an explicit runtime-only owner intent."""
+    owner = app.extensions["flinttrade.broker_account_lifecycle_owner"]
+    owner.current_rebuild()  # Process fence before any possibly inherited application lock.
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    if not lock.acquire(timeout=_broker_router_drain_timeout(app)):
+        raise RuntimeError("account_rebuild_busy")
+    try:
+        original = _broker_generation_snapshot(app)
+        phase = {"drained": False}
+        def retire(timeout: float) -> bool:
+            drained = _retire_owned_broker_dependencies(app, timeout=timeout, expected=original)
+            if drained:
+                phase["drained"] = True
+            return drained
+        def current() -> bool:
+            expected = (None, None, None, None) if phase["drained"] else original
+            return all(left is right for left, right in zip(_broker_generation_snapshot(app), expected, strict=True))
+        return owner.begin_rebuild(retire_generations=retire, publication_current=current)
+
+    finally:
+        lock.release()
+
+def _publish_enrolled_configuration(app: Flask, callback: Callable[[], Any]) -> Any:
+    """Fence only short local config publication, after exact unlocked retirement."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if owner is None:
+        return callback()
+    token = owner.current_rebuild()
+    if token is None:
+        raise RuntimeError("account_rebuild_lease_invalid")
+    return owner.publish_rebuild_if_current(token, callback)
+
+
+def _retire_owned_broker_dependencies(app: Flask, *, timeout: float,
+                                     expected: tuple[Any, Any, Any, Any] | None = None) -> bool:
+    """Detach/revoke exact generations, release the fence, then wait and revalidate."""
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    deadline = time.monotonic() + timeout
+    if not lock.acquire(timeout=timeout):
+        return False
+    try:
+        active, draining, active_router, router = _broker_generation_snapshot(app)
+        if expected is not None:
+            original_active, original_draining, original_router, original_draining_router = expected
+            target = original_active if original_active is not None else original_draining
+            target_router = original_router if original_router is not None else original_draining_router
+            if ((active is not None and active is not original_active)
+                    or (draining is not None and draining is not target)
+                    or (active_router is not None and active_router is not original_router)
+                    or (router is not None and router is not target_router)):
+                return False
+            draining, router = target, target_router
+        elif active is not None:
+            if draining is not None and draining is not active:
+                return False
+            draining = active
+        if expected is None and active_router is not None:
+            if router is not None and router is not active_router:
+                return False
+            router = active_router
+        app.extensions.pop("flinttrade_broker_dependencies", None)
+        if draining is not None:
+            app.extensions["flinttrade_broker_dependencies_draining"] = draining
+        app.config["BROKER_ROUTER"] = None
+        if router is not None:
+            app.config["BROKER_ROUTER_DRAINING"] = router
+        app.config["NATIVE_ADAPTERS"] = {}
+        app.config["ACTIVE_BROKER_ADAPTERS"] = {}
+        app.config["RECONCILE_TARGETS"] = None
+    finally:
+        lock.release()
+
+    def drain(owner: Any, method: str, wait: float) -> bool:
+        if owner is None:
+            return True
+        callback = getattr(owner, method, None)
+        try:
+            return bool(callback(timeout=wait)) if callable(callback) else False
+        except Exception as exc:  # noqa: BLE001 - retain exact resources, never render SDK details
+            logger.critical("Owned broker retirement failed (%s)", type(exc).__name__)
+            return False
+
+    reads = getattr(draining, "read_owner", None)
+    reads_done = drain(reads, "close", 0.0)
+    writes_done = drain(router, "revoke_and_drain", 0.0)
+    remaining = max(0.0, deadline - time.monotonic())
+    if not reads_done and remaining > 0:
+        reads_done = drain(reads, "close", remaining)
+    remaining = max(0.0, deadline - time.monotonic())
+    if not writes_done and remaining > 0:
+        writes_done = drain(router, "revoke_and_drain", remaining)
+    if not reads_done or not writes_done:
+        return False
+    if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        return False
+    try:
+        active_now, draining_now, router_now, draining_router_now = _broker_generation_snapshot(app)
+        if (active_now is not None or router_now is not None
+                or (draining_now is not None and draining_now is not draining)
+                or (draining_router_now is not None and draining_router_now is not router)):
+            return False
+        if draining_now is draining:
+            app.extensions.pop("flinttrade_broker_dependencies_draining", None)
+        if draining_router_now is router:
+            app.config["BROKER_ROUTER_DRAINING"] = None
+        return True
+    finally:
+        lock.release()
 
 
 def retire_broker_router_generation(app: Flask, *, timeout: float | None = None) -> bool:
@@ -2615,6 +2772,13 @@ def retire_broker_router_generation(app: Flask, *, timeout: float | None = None)
 
 def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> bool:
     """Invalidate and drain the exact shared read/write dependency generation."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if owner is not None:
+        drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
+        token = owner.current_rebuild()
+        if token is not None and drain_timeout > 0:
+            return owner.retire_rebuild_generations(token, drain_timeout)
+        return _retire_owned_broker_dependencies(app, timeout=drain_timeout)
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
     deadline = time.monotonic() + drain_timeout
@@ -2695,6 +2859,15 @@ def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> b
 
 
 def _publish_broker_dependencies(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
+    """Publish under the common lifecycle/rebuild fence when explicitly composed."""
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    with lock:
+        if not _account_publication_allowed(app):
+            return False
+        return _publish_broker_dependencies_locked(app, dependencies)
+
+
+def _publish_broker_dependencies_locked(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
     """Publish one validated dependency record and borrowed compatibility views."""
     if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True:
         return False
@@ -2845,6 +3018,8 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
             retire_broker_dependencies(app, timeout=0.0)
 
     try:
+        if not _account_publication_allowed(app):
+            return False
         if app.extensions.get("flinttrade_broker_dependencies") is not dependencies:
             return False
         if (
@@ -2904,11 +3079,32 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
         rebuild_lock.release()
 
 
-def configure_broker_router(
+def configure_broker_router(app: Flask, registry: Any, credential_store: Any, openalgo_client: Any) -> bool:
+    """Enrolled rebuilds own a runtime intent across unlocked drain and final publication."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if owner is None:
+        return _configure_broker_router_locked(app, registry, credential_store, openalgo_client)
+    try:
+        token = _begin_enrolled_broker_rebuild(app)
+    except RuntimeError:
+        return False
+    try:
+        if not owner.retire_rebuild_generations(token, _broker_router_drain_timeout(app)):
+            return False
+        return owner.publish_rebuild_if_current(token, lambda: _configure_broker_router_locked(
+            app, registry, credential_store, openalgo_client, retire_first=False))
+    except RuntimeError:
+        return False
+    finally:
+        owner.end_rebuild(token)
+
+
+def _configure_broker_router_locked(
     app: Flask,
     registry: Any,
     credential_store: Any,
     openalgo_client: Any,
+    *, retire_first: bool = True,
 ) -> bool:
     """Refresh shared broker dependencies once, then independently attempt writes."""
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
@@ -2917,11 +3113,13 @@ def configure_broker_router(
         logger.critical("BrokerRouter rebuild timed out waiting for the routing-generation lease")
         return False
     try:
+        if not _account_publication_allowed(app):
+            return False
         if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
             logger.warning("BrokerRouter rebuild refused while the runtime is shutting down")
             retire_broker_dependencies(app)
             return False
-        if not retire_broker_dependencies(app, timeout=rebuild_timeout):
+        if retire_first and not retire_broker_dependencies(app, timeout=rebuild_timeout):
             logger.critical("Broker dependency refresh aborted because the prior generation did not drain")
             return False
 
@@ -2938,6 +3136,21 @@ def configure_broker_router(
             target_workspace = _workspace_dir()
             run_migrations(target_workspace)
             workspace_snapshot = read_workspace_snapshot(target_workspace)
+            enrollment_required = (
+                credential_store.account_protocol_enrolled if type(credential_store) is CredentialStore else None
+            )
+            coherence_verifier = None
+            if ("_broker_account_store" in workspace_snapshot.config
+                    or enrollment_required is not None and enrollment_required()):
+                from flinttrade_gateway.account_transaction_store import AccountTransactionStore  # noqa: PLC0415
+                from .broker_account_workspace import BrokerAccountWorkspace  # noqa: PLC0415
+
+                proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
+                account_store = AccountTransactionStore(
+                    credential_store, workspace_path=target_workspace, backend_proof=proof,
+                )
+                coherence_verifier = BrokerAccountWorkspace(target_workspace, account_store, proof).assert_coherent
+                workspace_snapshot = coherence_verifier()
             brokers_cfg = workspace_snapshot.as_dict().get("brokers")
             effective_brokers = brokers_cfg or default_workspace_config()["brokers"]
             native_attest_ok, native_has_credentials = _native_activation_checks(credential_store)
@@ -2969,6 +3182,8 @@ def configure_broker_router(
                 workspace_path=target_workspace,
                 registry_publication_owner=registry_publication_owner_for(app, registry),
                 credential_version_for=credential_version_reader(credential_store),
+                coherence_verifier=coherence_verifier,
+                enrollment_required=enrollment_required,
             )
             from flinttrade_gateway.broker_read_service import create_broker_read_owner  # noqa: PLC0415
 
@@ -2993,8 +3208,11 @@ def configure_broker_router(
         # broker authority. Do not publish if any workspace writer raced the build.
         try:
             broker_authority_unchanged = (
-                broker_workspace_version(read_workspace_snapshot(target_workspace))
+                broker_workspace_version(
+                    coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(target_workspace)
+                )
                 == broker_workspace_version(workspace_snapshot)
+                and (coherence_verifier is not None or enrollment_required is None or not enrollment_required())
             )
         except Exception:
             broker_authority_unchanged = False
@@ -5365,10 +5583,22 @@ def create_flask_app(
         @wraps(handler)
         def serialised(*args: Any, **kwargs: Any) -> Any:
             with openalgo_config_lock:
+                owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+                if owner is not None:
+                    try:
+                        token = _begin_enrolled_broker_rebuild(app)
+                    except RuntimeError:
+                        return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
+                    try:
+                        return handler(*args, **kwargs)
+                    finally:
+                        owner.end_rebuild(token)
                 rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
                 if not rebuild_lock.acquire(timeout=_broker_router_drain_timeout(app)):
                     return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
                 try:
+                    if not _account_publication_allowed(app):
+                        return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
                     return handler(*args, **kwargs)
                 finally:
                     rebuild_lock.release()
@@ -5582,7 +5812,7 @@ def create_flask_app(
             prior_dependencies = app.extensions.get("flinttrade_broker_dependencies")
             if dependency_refresh_requested and not retire_broker_dependencies(app):
                 return jsonify({"status": "error", "message": "Broker routing could not drain"}), 503
-            ws.update(update_openalgo)
+            _publish_enrolled_configuration(app, lambda: ws.update(update_openalgo))
             candidate_settings = candidate["settings"]
         except (TypeError, ValueError):
             return jsonify(
@@ -5616,12 +5846,13 @@ def create_flask_app(
         broker_router_rebuilt: bool | None = None
         try:
             new_settings = candidate_settings
-            if isinstance(old_client, OpenAlgoClient):
-                new_client = old_client.reconfigure(new_settings)
-            else:
-                new_client = OpenAlgoClient(new_settings)
-            app.config["CLIENT"] = new_client
-            app.config["OPENALGO_CLIENT"] = new_client
+            def reload_client() -> Any:
+                new_client = (old_client.reconfigure(new_settings) if isinstance(old_client, OpenAlgoClient)
+                              else OpenAlgoClient(new_settings))
+                app.config["CLIENT"] = new_client
+                app.config["OPENALGO_CLIENT"] = new_client
+                return new_client
+            new_client = _publish_enrolled_configuration(app, reload_client)
             broker_reads_refreshed_without_writes = False
             if dependency_refresh_requested:
                 broker_router_rebuilt = configure_broker_router(app, registry, credential_store, new_client) is True
@@ -6349,7 +6580,8 @@ def _start_rotation_scheduler(app: Flask, *, fail_closed: bool = False) -> None:
 
 
 def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) -> None:
-    """Stop new refresh jobs, revoke publication, and drain admitted refreshes."""
+    """Stop new refresh jobs, drain admitted refreshes, then retire broker dependencies."""
+    deadline = time.monotonic() + (30.0 if timeout is None else max(0.0, timeout))
     rotation_scheduler = app.config.get("ROTATION_SCHEDULER")
     scheduler_error: Exception | None = None
     if rotation_scheduler is not None and getattr(rotation_scheduler, "running", False):
@@ -6372,8 +6604,13 @@ def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) ->
         close_and_drain = getattr(admission, "close_and_drain", None)
         if not callable(close_and_drain):
             raise RuntimeError("native session rotation admission owner is invalid")
+        drain_timeout = min(drain_timeout, max(0.0, deadline - time.monotonic()))
         if not close_and_drain(drain_timeout):
             raise TimeoutError("native session rotation did not drain")
+
+    lifecycle_owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if lifecycle_owner is not None and not lifecycle_owner.close_and_drain(max(0.0, deadline - time.monotonic())):
+        raise TimeoutError("broker account lifecycle did not drain")
     if scheduler_error is not None:
         raise scheduler_error
 

@@ -495,6 +495,13 @@ Operators should also configure any limits available in their broker dashboard.
 
 - Broker login, OAuth, TOTP, and exchange access remain broker-side concerns.
 - Native-adapter broker credentials live in the encrypted gateway vault.
+- The account transaction foundation retains unknown authentication outcomes
+  rather than retrying them. Its vault and workspace evidence must remain
+  coherent before a read generation can be exposed. Redacted terminal audit
+  events have durable pending delivery and stable IDs; audit export never
+  repeats authentication or order work. Production native account HTTP
+  mutations remain `503`, and native HTTP reads remain `409` until their
+  separate cutovers land.
 - The OpenAlgo-compatible bridge stores only the OpenAlgo API key in FlintTrade;
   broker authentication remains inside OpenAlgo.
 - Secrets should be file-backed under your platform workspace directory
