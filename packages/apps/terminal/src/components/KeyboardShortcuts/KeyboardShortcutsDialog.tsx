@@ -57,7 +57,7 @@ export const SHORTCUT_ENTRIES: ShortcutEntry[] = [
   },
   {
     id: "open-settings",
-    label: "Open settings",
+    label: "Open Quick Settings",
     keys: ["Ctrl", ","],
     category: "Navigation",
   },

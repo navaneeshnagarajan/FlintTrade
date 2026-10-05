@@ -91,7 +91,7 @@ test.describe('Settings page', () => {
   test('section tabs contain expected sections', async ({ page }) => {
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
-    for (const label of ['General', 'Appearance', 'Broker Gateway', 'Skill & Experience', 'Report Bug', 'About']) {
+    for (const label of ['General', 'Appearance', 'Broker', 'Skill & Experience', 'Report Bug', 'About']) {
       await expect(sectionTabs.getByText(label, { exact: true })).toBeVisible();
     }
   });
@@ -119,18 +119,20 @@ test.describe('Settings page', () => {
     await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
-  test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
+  test('deep-link /settings#api activates Broker with its Advanced editor', async ({ page }) => {
     await page.goto('/settings#api');
     await page
       .getByRole('tablist', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
 
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
-    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker Gateway' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('heading', { name: 'OpenAlgo bridge' })).toBeVisible();
+    await expect(sectionTabs.getByRole('tab', { name: 'Broker Gateway' })).toHaveCount(0);
   });
 
-  test('Broker Gateway edits stay local until one explicit complete save', async ({ page }) => {
+  test('OpenAlgo bridge edits stay local until one explicit complete save', async ({ page }) => {
     const posts: Array<Record<string, unknown>> = [];
     await page.route('**/ft-api/v1/config/openalgo', async (route) => {
       if (route.request().method() === 'POST') {

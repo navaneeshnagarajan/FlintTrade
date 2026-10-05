@@ -224,7 +224,7 @@ reads as a working operator path.
    OpenAlgo-compatible bridge only (not your broker's key).
 4. **Set the OpenAlgo key in FlintTrade.** Broker connect is not a required
    first-run step. After the Practice desk is open, use the optional broker
-   panel (**OpenAlgo Bridge**) or Settings → Broker Gateway, then paste the
+   panel (**OpenAlgo Bridge**) or Settings → Broker → Advanced, then paste the
    OpenAlgo URL and API key. The app stores these settings in the OS workspace
    and hot-reloads the backend client. If the URL does not include a port, set
    REST Port (default `5000`); the WebSocket Port defaults to `8765`.
@@ -1983,8 +1983,8 @@ least 1). The Settings reminder has **Show** and **Hide**. It has no
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
-| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); example data keeps that control disarmed. |
-| **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
+| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives in Settings → Telegram (**Send Test**); example data keeps that control disarmed. |
+| **Risk & Safety** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
 On `/settings#security`, **Quick-unlock PIN** is the 6-digit PIN that
 Quick Unlock and the Live switch both ask for. The PIN is optional at
@@ -2266,7 +2266,7 @@ that nothing is pending.
 ### "Connection refused" on the OpenAlgo port
 
 OpenAlgo is not running, or it is bound to a different port. In Settings →
-Broker Gateway, keep the port in the Gateway URL or set REST Port when the URL
+Broker → Advanced, keep the port in the Gateway URL or set REST Port when the URL
 omits it.
 
 ```bash
@@ -2515,3 +2515,24 @@ powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps
 ```
 
 Both accept the same purge flag (`--purge` / `-Purge`).
+
+
+### Where settings live
+
+Open Settings from the sidebar, your avatar, or Tools. Ctrl+, (Command+, on macOS)
+opens Quick Settings for common display preferences. Appearance has one colour-mode
+selector and one glass-effect toggle.
+
+Broker shows the currently listed connected accounts. Connection alone does not
+enable live orders. The optional OpenAlgo editor is under Advanced; existing
+`/settings#api` links still open that editor. Leverage appears only with a connected
+broker outside Example mode.
+
+Risk & Safety owns daily-loss thresholds, global safety caps, the confirmed kill
+switch and account-scoped opening-capital/reset controls. Automate and the Trade
+desk link to it. Telegram setup and test messages live in Settings → Telegram.
+
+Manage workspaces on the Trade desk includes built-in templates and Saved presets.
+Saved presets retains create, edit, fork, import, export and delete controls; existing
+`/settings#presets` links open desk management. AI save status appears only on the
+AI page.

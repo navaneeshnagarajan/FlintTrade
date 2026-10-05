@@ -60,11 +60,11 @@ export const DEFAULT_HOTKEYS: HotkeyBinding[] = [
   },
   {
     id: "open-settings",
-    action: "Open settings",
+    action: "Open Quick Settings",
     category: "global",
     keys: ["Ctrl", ","],
     customizable: false,
-    description: "Open the Settings tool overlay",
+    description: "Open Quick Settings",
   },
 
   // Scalper — position management
