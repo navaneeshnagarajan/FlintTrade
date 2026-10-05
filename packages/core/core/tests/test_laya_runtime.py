@@ -1551,14 +1551,18 @@ def runtime_root_checkpoint(staging: Path) -> Path:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("has_checkpoint", [False, True])
 def test_start_without_a_pinned_commit_says_cant_verify_and_attempts_no_download(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_checkpoint: bool
 ) -> None:
     import dataclasses
 
     policy = dataclasses.replace(load_policy(), revision="main")
     monkeypatch.setattr("flinttrade_engine.laya_decision.load_policy", lambda: policy)
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
+    if has_checkpoint:
+        _accept_pinned_digests(monkeypatch, policy)
+        _write_pinned_tree(tmp_path / "runtime" / "laya" / "checkpoint")
     downloads: list[object] = []
     launched: list[object] = []
     runtime = LayaRuntime(

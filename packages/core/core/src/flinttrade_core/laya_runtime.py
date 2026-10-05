@@ -1165,6 +1165,12 @@ class LayaRuntime:
             process_laya().clear_sticky_refusal()
             if _api_key_file_missing(self._key_path):
                 self._refuse_missing_key()
+            # Cached bytes do not make a mutable policy revision a commit pin.
+            # Refuse before either reusing the checkpoint or downloading it.
+            if not _is_pinned_commit(str(policy.revision)):
+                self._refuse_before_launch(
+                    ArtifactCheck(ok=False, reason="unverified", revision=str(policy.revision), sha256="")
+                )
             self._settle_checkpoint_dirs()
             weighed = self._weigh_before_launch(policy)
             if self._artifact_checker is None and self._checkpoint_needs_download(policy, weighed):
