@@ -20,6 +20,7 @@ overrides:
   js-yaml: 4.3.2
   maplibre-gl: 6.8.0
   postcss: 8.5.23
+  probe-image-size: 7.4.0
   sharp: 0.35.4
   undici: 7.30.0
   '@xmldom/xmldom': 0.8.15
