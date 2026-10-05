@@ -147,3 +147,11 @@ overrides:
   # 0.6.0-0.6.10; 0.6.11 is the 0.6-line backport (0.8.3 is already in the
   # tree via @types/three). three-stdlib still requests 0.6.10.
   'fflate@<0.6.11': 0.6.11
+  # GHSA-ch52-4w7c-c8xp / CVE-2026-93748: max-stale can disclose another
+  # user's cached response. Affected <= 4.2.0. 4.3.0 is outside that range
+  # (published 2026-10-04). cacheable-request and make-fetch-happen still
+  # request 4.2.0.
+  http-cache-semantics: 4.3.0
+  # GHSA-gjj5-9665-rwrc / CVE-2026-104861: quadratic SVG parse DoS, patched
+  # in 7.4.0. plotly.js still requests 7.3.0.
+  probe-image-size: 7.4.0
