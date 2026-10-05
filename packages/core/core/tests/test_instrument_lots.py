@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -357,18 +357,30 @@ def test_ui_label_and_order_check_agree_after_a_revision(
 
 
 @pytest.mark.unit
-def test_failed_download_writes_an_empty_excerpt(tmp_path: Path) -> None:
-    from flinttrade_core.instrument_lot_master import build_excerpt, write_excerpt
+def test_failed_download_writes_an_empty_excerpt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from flinttrade_core import instrument_lot_master
+
+    fetched_at = datetime.fromisoformat("2026-09-29T13:13:13+05:30")
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fetched_at.astimezone(tz) if tz is not None else fetched_at.replace(tzinfo=None)
+
+    monkeypatch.setattr(instrument_lot_master, "datetime", FixedClock)
 
     def _downloader(_url: str) -> str:
         raise OSError("offline")
 
-    payload = build_excerpt(downloader=_downloader, as_of=date(2026, 9, 29))
+    payload = instrument_lot_master.build_excerpt(downloader=_downloader, as_of=date(2026, 9, 29))
     assert payload["rows"] == []
     assert payload["source"]
-    assert payload["fetched_at"]
+    assert payload["fetched_at"] == "2026-09-29T13:13:13+05:30"
     destination = tmp_path / "excerpt.json"
-    write_excerpt(destination, payload)
+    instrument_lot_master.write_excerpt(destination, payload)
     written = json.loads(destination.read_text(encoding="utf-8"))
+    assert written == payload
     assert written["rows"] == []
-    assert "13" not in destination.read_text(encoding="utf-8")
+    # A legitimate timestamp may contain a synthetic test ID's digits. Only
+    # security-ID fields in instrument rows can represent an invented contract.
+    assert _security_ids(written).isdisjoint(_SYNTHETIC_IDS)
