@@ -697,7 +697,9 @@ setattr(target, name, die_after)
 asyncio.run(harness.coordinator.mutate(request, timeout=5.0))
 """
     environment = dict(os.environ, SYNTHETIC_BOUNDARY=boundary)
-    environment["PYTHONPATH"] = os.environ["PYTHONPATH"] + os.pathsep + support_path
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (os.environ.get("PYTHONPATH"), support_path) if part
+    )
     process = subprocess.run([sys.executable, "-c", script], env=environment, capture_output=True, text=True, timeout=20)
     assert process.returncode == 23, process.stderr
     identity = json.loads((tmp_path / "public-identity.json").read_text())
