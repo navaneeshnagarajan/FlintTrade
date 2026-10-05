@@ -79,7 +79,11 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setLayaDownloadProgress: (layaDownloadBytes: number | null, layaDownloadTotal: number | null) => void;
   /** The order gate refused because Laya is Down. The chip must not stay Ready. */
   noteLayaDown: () => void;
-  /** A stop or start is not confirmed yet. The chip says Checking, not the last label. */
+  /**
+   * Start Laya was accepted, or a place was admitted while the chip was not
+   * Ready or Degraded, and no ping has confirmed the gate yet. The chip says
+   * Checking, not the last label.
+   */
   noteLayaUnconfirmed: () => void;
   /** Clear or set Checking without moving the epoch. A confirmed ping clears it. */
   setLayaChecking: (layaChecking: boolean) => void;
