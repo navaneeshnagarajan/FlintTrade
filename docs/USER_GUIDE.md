@@ -288,12 +288,16 @@ gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
 successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
 Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
 on latest stable 2.2.0. Neo runs exact upstream `main`
-`5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`, with `v3.0.7` at
+`9a37488d77dc96442ee2a90ef78462e688cf4856`, with `v3.0.7` at
 `53cccc45fe56a193b30ffce3c03c71c5c0378538` as the release baseline. Install
-`kotakneoapi`, never the old `neo-api-client` distribution; Python imports
+runtime `kotakneoapi` 3.0.8; explicit `release_version` 3.0.7 retains the
+stable compatibility evidence. Never install the old `neo-api-client`
+distribution; Python imports
 still use `neo_api_client`. Live place stays fail-closed. Sandbox proof is
 unavailable because Neo offers no sandbox; live-account/market-hours feed,
 funded-order, Live-promotion, and cross-platform proof remain open.
+The runtime update is verified offline only; earlier non-funded activation
+evidence does not verify this SDK version against a real account.
 
 ---
 

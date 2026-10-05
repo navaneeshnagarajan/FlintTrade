@@ -39,6 +39,8 @@ export type LayaHeartbeat = "ready" | "degraded" | "down";
 export interface PingProbe {
   localPing: "ok" | "transport" | "http_error";
   transportReason: TransportReason | null;
+  /** True only for a successful, recognised Laya heartbeat. Defaults do not confirm backend identity. */
+  layaHeartbeatValid: boolean;
   /** Live-facing status. Null when the heartbeat did not name Laya. Never implied Ready. */
   laya: LayaHeartbeat | null;
   /** Sidecar status for Practice. Null when the heartbeat omitted it. */
@@ -53,6 +55,12 @@ export interface PingProbe {
   layaDownloadBytes: number | null;
   /** Bytes expected while `layaReason` is `downloading`. Null otherwise. */
   layaDownloadTotal: number | null;
+  /** True only when an Ollama ping says the runtime is still unconfirmed. Absent means false. */
+  layaChecking: boolean;
+  /** `ollama` only when the ping names that route. Trust only with layaHeartbeatValid. */
+  layaRoute: "ollama" | null;
+  /** True only when the ping says FlintTrade installed Ollama. Trust only with layaHeartbeatValid. */
+  layaManaged: boolean;
 }
 
 const LAYA_REASON_CODES = new Set([
@@ -108,6 +116,24 @@ function byteCount(value: unknown): number | null {
   return value;
 }
 
+/** True only for a boolean `true`. A missing field stays false, which is the sidecar ping. */
+export function layaCheckingFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_checking?: unknown }).laya_checking === true;
+}
+
+/** `ollama` only for that exact string. Any other value keeps the sidecar copy. */
+export function layaRouteFromBody(body: unknown): "ollama" | null {
+  if (body === null || typeof body !== "object") return null;
+  return (body as { laya_route?: unknown }).laya_route === "ollama" ? "ollama" : null;
+}
+
+/** True only for a boolean `true`. A missing field is not a managed install. */
+export function layaManagedFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_managed?: unknown }).laya_managed === true;
+}
+
 /** Done and total bytes. Both must be present, or both are null. */
 export function layaDownloadProgressFromBody(body: unknown): { done: number | null; total: number | null } {
   if (body === null || typeof body !== "object") return { done: null, total: null };
@@ -118,12 +144,22 @@ export function layaDownloadProgressFromBody(body: unknown): { done: number | nu
   return { done, total };
 }
 
+/** An omitted route selects the legacy sidecar only on a recognised Laya heartbeat. */
+function isLayaHeartbeat(body: unknown): boolean {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const record = body as { status?: unknown; laya?: unknown; laya_route?: unknown; laya_managed?: unknown };
+  if (record.status !== "ok" || layaStatusValue(record.laya) === null) return false;
+  if (record.laya_route === undefined) return true;
+  return record.laya_route === "ollama" && typeof record.laya_managed === "boolean";
+}
+
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {
   try {
     const resp = await fetchImpl(`${getBase()}/api/v1/ping`, { method: "GET", cache: "no-store" });
     if (!resp.ok) {
       return {
         localPing: "http_error",
+        layaHeartbeatValid: false,
         transportReason: null,
         laya: null,
         layaPractice: null,
@@ -132,12 +168,16 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
         layaPort: 8000,
         layaDownloadBytes: null,
         layaDownloadTotal: null,
+        layaChecking: false,
+        layaRoute: null,
+        layaManaged: false,
       };
     }
     const body: unknown = await resp.json().catch(() => null);
     const progress = layaDownloadProgressFromBody(body);
     return {
       localPing: "ok",
+      layaHeartbeatValid: isLayaHeartbeat(body),
       transportReason: null,
       laya: layaHeartbeatFromBody(body),
       layaPractice: layaPracticeFromBody(body),
@@ -146,10 +186,14 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaPort: layaPortFromBody(body),
       layaDownloadBytes: progress.done,
       layaDownloadTotal: progress.total,
+      layaChecking: layaCheckingFromBody(body),
+      layaRoute: layaRouteFromBody(body),
+      layaManaged: layaManagedFromBody(body),
     };
   } catch (err) {
     return {
       localPing: "transport",
+      layaHeartbeatValid: false,
       transportReason: transportReasonFromError(err),
       laya: null,
       layaPractice: null,
@@ -158,6 +202,9 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       layaPort: 8000,
       layaDownloadBytes: null,
       layaDownloadTotal: null,
+      layaChecking: false,
+      layaRoute: null,
+      layaManaged: false,
     };
   }
 }
