@@ -375,6 +375,10 @@ def validate_probe_result(result: Mapping[str, Any], track: SdkTrack) -> None:
         raise ContractError("Kotak Neo offline API contract probe did not complete")
     if result.get("read_contract_ok") is not True:
         raise ContractError("Kotak Neo offline read contract probe did not complete")
+    if result.get("read_failure_contract_ok") is not True:
+        raise ContractError("Kotak Neo offline read failure contract probe did not complete")
+    if result.get("feed_cancellation_contract_ok") is not True:
+        raise ContractError("Kotak Neo offline feed cancellation contract probe did not complete")
 
 
 def parse_probe_output(stdout: str) -> dict[str, Any]:
@@ -392,13 +396,16 @@ def parse_probe_output(stdout: str) -> dict[str, Any]:
 _PROBE_SCRIPT = r"""
 from __future__ import annotations
 
+import asyncio
 import importlib.metadata as md
 import inspect
 import json
 import os
 import re
+import selectors
 import socket
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -437,6 +444,7 @@ else:
 import httpx
 import neo_api_client
 import neo_api_client.neo_api as neo_module
+import neo_api_client.websocket.feed.client as feed_module
 from neo_api_client import NeoAPI
 from neo_api_client.websocket.feed import (
     SFeedIndex,
@@ -449,6 +457,7 @@ from neo_api_client.websocket.orderfeed import OrderFeedWebSocket, OrderUpdate, 
 
 from flinttrade_gateway.brokers import kotakneo_streaming
 from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession, validate_read_envelope
+from flinttrade_core.exceptions import BrokerInternal
 
 
 def canonical(name):
@@ -627,19 +636,27 @@ position_has_ltp = True
 
 
 class FakePortfolio:
+    failure = None
+
     def __init__(self, _api_client):
         pass
 
     def portfolio_holdings(self):
+        if self.failure is not None:
+            raise self.failure
         read_calls["holdings"] += 1
         return {"data": [{"exchangeIdentifier": "SYNTHETIC-TOKEN", "averagePrice": 100.0}]}
 
 
 class FakePositions:
+    failure = None
+
     def __init__(self, _api_client):
         pass
 
     def position_init(self):
+        if self.failure is not None:
+            raise self.failure
         read_calls["positions"] += 1
         position = {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2"}
         if position_has_ltp:
@@ -681,6 +698,59 @@ assert all(inspect.isclass(model) for model in (SFeedScrip, SFeedScripLite, SFee
 facade = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
 facade._neo = neo
 facade._closed = False
+
+
+def require_canonical_read_failure(method):
+    try:
+        getattr(facade, method)()
+    except BrokerInternal as error:
+        assert type(error) is BrokerInternal
+        assert "cache-private-detail" not in str(error)
+        assert "AttributeError" not in str(error)
+        assert "PermissionError" not in str(error)
+        assert "has no attribute" not in str(error)
+    else:
+        raise AssertionError(f"failed {method} became a successful read")
+
+
+# Both SDK tracks must keep errors inside the redacted gateway taxonomy.
+for service, method, failure in (
+    (FakePositions, "positions", AttributeError("cache-private-detail")),
+    (FakePortfolio, "holdings", PermissionError("cache-private-detail")),
+):
+    service.failure = failure
+    try:
+        require_canonical_read_failure(method)
+    finally:
+        service.failure = None
+
+if md.version("kotakneoapi") == "3.0.8":
+    # Exercise the actual new disk-cache reader, not a stubbed exception.
+    from neo_api_client.utils import holdings_cache
+
+    cache_path = holdings_cache._cache_path(neo.configuration.ucc, date.today())
+    assert cache_path.resolve().is_relative_to(Path.home().resolve())
+    cache_path.write_text("[]", encoding="utf-8")
+    neo._holdings_cache = None
+    neo._holdings_cache_date = None
+    require_canonical_read_failure("positions")
+
+    # A successful synthetic portfolio response must not become empty/zero
+    # holdings when the real SDK's cache write fails. Preserve every other
+    # Path.write_text call and restore the method even if an assertion fails.
+    original_write = Path.write_text
+
+    def denied_cache_write(path, *args, **kwargs):
+        if path == cache_path:
+            raise PermissionError("cache-private-detail")
+        return original_write(path, *args, **kwargs)
+
+    Path.write_text = denied_cache_write
+    try:
+        require_canonical_read_failure("holdings")
+    finally:
+        Path.write_text = original_write
+
 market_feed = facade.create_websocket(
     max_reconnect_attempts=0,
     max_connect_retries=0,
@@ -706,6 +776,123 @@ assert callable(facade.logout_sdk)
 assert callable(facade.close_rest)
 for legacy in ("subscribe", "un_subscribe", "subscribe_to_orderfeed"):
     assert not hasattr(KotakNeoSdkSession, legacy), legacy
+
+
+async def require_callback_cancellation_and_cleanup():
+    original_decode = feed_module.decode_packet
+
+    def failed_decode(*_args):
+        raise ValueError("synthetic malformed frame")
+
+    def failed_callback(*_args):
+        raise RuntimeError("synthetic callback failure")
+
+    def cancelled_callback(*_args):
+        raise asyncio.CancelledError
+
+    class SyntheticSocket:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    async def blocked_receiver(started):
+        started.set()
+        await asyncio.Event().wait()
+
+    feed_module.decode_packet = failed_decode
+    try:
+        market_feed.on_error = failed_callback
+        if md.version("kotakneoapi") == "3.0.8":
+            assert market_feed._decode_packet(b"synthetic") is None
+        else:
+            try:
+                market_feed._decode_packet(b"synthetic")
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("release callback behaviour changed")
+
+        market_feed.on_error = cancelled_callback
+        try:
+            market_feed._decode_packet(b"synthetic")
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("market callback swallowed cancellation")
+
+        order_feed.on_disconnect = cancelled_callback
+        try:
+            await order_feed._handle_disconnect()
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("order callback swallowed cancellation")
+    finally:
+        feed_module.decode_packet = original_decode
+        market_feed.on_error = None
+        order_feed.on_disconnect = None
+        for feed in (market_feed, order_feed):
+            socket = SyntheticSocket()
+            started = asyncio.Event()
+            receiver = asyncio.create_task(blocked_receiver(started))
+            await started.wait()
+            feed._ws = socket
+            feed._receive_task = receiver
+            await feed.close()
+            assert receiver.cancelled()
+            assert feed._receive_task is None
+            assert feed._ws is None
+            assert feed.is_connected is False
+            assert socket.close_calls == 1
+
+
+class NoIOSelector(selectors.BaseSelector):
+    "Schedule ready synthetic tasks without sockets or real I/O."
+
+    def __init__(self):
+        self.turns = 0
+
+    def register(self, *_args):
+        raise AssertionError("real I/O is forbidden in the callback probe")
+
+    def unregister(self, *_args):
+        raise AssertionError("real I/O is forbidden in the callback probe")
+
+    def get_map(self):
+        return {}
+
+    def select(self, timeout=None):
+        self.turns += 1
+        assert self.turns <= 256, "callback probe exceeded its scheduling bound"
+        assert timeout == 0, "callback probe stalled without a ready task"
+        return []
+
+
+class NoSocketEventLoop(asyncio.SelectorEventLoop):
+    def __init__(self):
+        super().__init__(selector=NoIOSelector())
+
+    def _make_self_pipe(self):
+        # No threads, OS events or real sockets participate in this probe.
+        # Keep the all-socket process audit guard unchanged, including asyncio's
+        # usual wake-up socketpair. Base _write_to_self safely sees None.
+        self._ssock = self._csock = None
+
+    def _close_self_pipe(self):
+        pass
+
+    def _deny_io(self, *_args, **_kwargs):
+        raise AssertionError("real I/O is forbidden in the callback probe")
+
+    add_reader = add_writer = _deny_io
+    sock_recv = sock_recv_into = sock_recvfrom = sock_recvfrom_into = _deny_io
+    sock_sendall = sock_sendto = sock_connect = sock_accept = sock_sendfile = _deny_io
+
+
+with asyncio.Runner(loop_factory=NoSocketEventLoop) as runner:
+    runner.run(require_callback_cancellation_and_cleanup())
 
 main_envelope = {"stat": "Ok", "stCode": 200, "data": [], "rateLimit": {"remaining": 2}}
 release_envelope = {"data": {
@@ -735,6 +922,8 @@ print(json.dumps({
     "cwd_files": cwd_files,
     "contract_ok": True,
     "read_contract_ok": True,
+    "read_failure_contract_ok": True,
+    "feed_cancellation_contract_ok": True,
 }, sort_keys=True))
 """
 

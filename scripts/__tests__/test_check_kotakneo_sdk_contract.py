@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import json
+import socket
 import subprocess
 import tomllib
 from pathlib import Path
@@ -81,11 +84,84 @@ def _snapshot(
         "cwd_files": [],
         "contract_ok": True,
         "read_contract_ok": True,
+        "read_failure_contract_ok": True,
+        "feed_cancellation_contract_ok": True,
     }
 
 
 def test_validate_probe_accepts_exact_git_distribution() -> None:
     checker.validate_probe_result(_snapshot(), checker.TRACKS[0])
+
+
+def _probe_loop_classes():
+    nodes = ast.parse(checker._PROBE_SCRIPT).body
+    classes = [
+        node for node in nodes if isinstance(node, ast.ClassDef) and node.name in {"NoIOSelector", "NoSocketEventLoop"}
+    ]
+    assert len(classes) == 2
+    imports = ast.parse("import asyncio\nimport selectors\n").body
+    namespace = {}
+    exec(
+        compile(ast.Module(body=[*imports, *classes], type_ignores=[]), "<real-offline-probe-loop>", "exec"), namespace
+    )
+    return namespace["NoIOSelector"], namespace["NoSocketEventLoop"]
+
+
+def test_actual_probe_loop_preserves_task_cancellation_without_a_socket(monkeypatch) -> None:
+    _, loop_class = _probe_loop_classes()
+
+    def forbidden_socketpair(*_args, **_kwargs):
+        pytest.fail("the offline probe must not construct a wake-up socketpair")
+
+    monkeypatch.setattr(socket, "socketpair", forbidden_socketpair)
+
+    async def probe():
+        started = asyncio.Event()
+
+        async def receiver():
+            started.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(receiver())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert task.cancelled()
+
+    with asyncio.Runner(loop_factory=loop_class) as runner:
+        runner.run(probe())
+
+
+def test_actual_probe_loop_refuses_io_stalls_and_unbounded_progress() -> None:
+    selector_class, loop_class = _probe_loop_classes()
+    loop = loop_class()
+    try:
+        for method in (
+            "add_reader",
+            "add_writer",
+            "sock_recv",
+            "sock_recv_into",
+            "sock_recvfrom",
+            "sock_recvfrom_into",
+            "sock_sendall",
+            "sock_sendto",
+            "sock_connect",
+            "sock_accept",
+            "sock_sendfile",
+        ):
+            with pytest.raises(AssertionError, match="real I/O is forbidden"):
+                getattr(loop, method)(None)
+    finally:
+        loop.close()
+
+    with pytest.raises(AssertionError, match="stalled"):
+        selector_class().select(None)
+    selector = selector_class()
+    for _ in range(256):
+        assert selector.select(0) == []
+    with pytest.raises(AssertionError, match="scheduling bound"):
+        selector.select(0)
 
 
 @pytest.mark.parametrize(
@@ -139,6 +215,10 @@ def test_validate_probe_accepts_exact_git_distribution() -> None:
         (lambda row: row.update(contract_ok=False), "contract"),
         (lambda row: row.update(read_contract_ok=False), "read contract"),
         (lambda row: row.pop("read_contract_ok"), "read contract"),
+        (lambda row: row.update(read_failure_contract_ok=False), "read failure contract"),
+        (lambda row: row.pop("read_failure_contract_ok"), "read failure contract"),
+        (lambda row: row.update(feed_cancellation_contract_ok=False), "feed cancellation contract"),
+        (lambda row: row.pop("feed_cancellation_contract_ok"), "feed cancellation contract"),
     ],
 )
 def test_validate_probe_rejects_unattested_or_ambiguous_install(mutate, message: str) -> None:
