@@ -420,6 +420,18 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     setToolsOpen(false);
   }, []);
 
+  useEffect(() => {
+    const handleQuickSettings = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== "," || event.altKey) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      setMoreOpen(false);
+      openQuickSettings(hideDeskRibbon ? compactQuickRef.current : toolsRef.current);
+    };
+    window.addEventListener("keydown", handleQuickSettings);
+    return () => window.removeEventListener("keydown", handleQuickSettings);
+  }, [hideDeskRibbon, openQuickSettings]);
+
   // Maintain broker connection status from either OpenAlgo bridge ping or a
   // live native/gateway broker session. This store still drives older widgets.
   //

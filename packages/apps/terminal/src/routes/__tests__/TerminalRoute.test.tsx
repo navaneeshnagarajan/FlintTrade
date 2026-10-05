@@ -355,6 +355,12 @@ describe("TerminalRoute", () => {
     expect(shell).toHaveClass("box-border");
   });
 
+  it("links the desk safety tray to Risk & Safety", () => {
+    renderTerminalRoute();
+    fireEvent.click(screen.getByRole("button", { name: "Risk & Safety" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/settings#risk");
+  });
+
   it("keeps the kill switch in reserved trade-route layout space", () => {
     mockTradingState.totalPnl = -3000;
 
@@ -409,6 +415,8 @@ describe("TerminalRoute", () => {
 
     expect(screen.getByRole("status", { name: /kill switch status: active/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /kill switch is active/i })).toHaveTextContent("Kill Active");
+    expect(screen.queryByText("L5 ACTIVE")).not.toBeInTheDocument();
+    expect(screen.getByText("Kill switch active")).toBeVisible();
   });
 
   it("renders an explicit loading state instead of inactive before L5 loads", () => {

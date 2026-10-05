@@ -61,6 +61,8 @@ vi.mock("../hooks/useWorkspaceLifecycle", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+vi.mock("@/tools/Settings/PresetSection", () => ({ PresetSection: () => <div>Saved preset controls<input aria-label="Preset draft" defaultValue="" /></div> }));
+
 import PresetPicker from "../PresetPicker";
 
 // ---------------------------------------------------------------------------
@@ -81,9 +83,33 @@ describe("PresetPicker", () => {
     mockLayoutState.getTabLayout.mockReturnValue({ source: "stored-active-tab" });
   });
 
+  it("keeps saved preset management and its draft in the desk dialog", async () => {
+    render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Saved presets" }));
+    expect(await screen.findByText("Saved preset controls")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Preset draft"), { target: { value: "Synthetic draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Built-in templates" }));
+    expect(screen.getByText("Saved preset controls")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Saved presets" }));
+    expect(screen.getByLabelText("Preset draft")).toHaveValue("Synthetic draft");
+  });
+
+  it("keeps a saved preset draft when cancelling New from Template", async () => {
+    render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Saved presets" }));
+    const draft = await screen.findByLabelText("Preset draft");
+    fireEvent.change(draft, { target: { value: "Synthetic draft" } });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace actions" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole("menuitem", { name: "New from Template" }));
+    expect(screen.getByRole("dialog", { name: "New Workspace from Template" })).toBeVisible();
+    expect(screen.getByRole("button", { name: new RegExp(WORKSPACE_PRESETS[0]!.name) })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Preset draft")).toHaveValue("Synthetic draft");
+  });
+
   it("renders the dialog title when open", () => {
     render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText("Choose a Workspace Template")).toBeInTheDocument();
+    expect(screen.getByText("Manage workspaces")).toBeInTheDocument();
   });
 
   it("surfaces corrupt layout storage and skips metadata reconciliation", () => {
@@ -134,7 +160,7 @@ describe("PresetPicker", () => {
 
   it("does not render when closed", () => {
     render(<PresetPicker isOpen={false} onClose={vi.fn()} />);
-    expect(screen.queryByText("Choose a Workspace Template")).not.toBeInTheDocument();
+    expect(screen.queryByText("Manage workspaces")).not.toBeInTheDocument();
   });
 
   it("refreshes an open Rename dialog when the active workspace changes", async () => {
@@ -215,7 +241,7 @@ describe("PresetPicker", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Workspace could not be saved: quota exceeded",
     );
-    expect(screen.getByText("Choose a Workspace Template")).toBeInTheDocument();
+    expect(screen.getByText("Manage workspaces")).toBeInTheDocument();
   });
 
   it("clones the stored active layout while the live model is still bound to the previous tab", () => {

@@ -66,6 +66,11 @@ vi.mock("@/components/theme/BackgroundPicker", () => ({
   BackgroundPicker: () => <div data-testid="bg-picker">BackgroundPicker</div>,
 }));
 
+// Keep layout wrappers transparent; these tests mock the theme store.
+vi.mock("@/components/ui/GlassCard", () => ({
+  GlassCard: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 // TanStack Query (SecuritySection + RiskSection)
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
@@ -80,6 +85,9 @@ vi.mock("@tanstack/react-query", () => ({
   }),
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
+    cancelQueries: vi.fn(),
+    getQueryData: vi.fn(),
+    setQueryData: vi.fn(),
   }),
 }));
 
@@ -97,6 +105,8 @@ vi.mock("@/services/ftApi", () => ({
   getSafetyConfigForTarget: vi.fn(),
   resetDailyPnLState: vi.fn(),
   updateSafetyConfig: vi.fn(),
+  activateKillSwitch: vi.fn(),
+  resetKillSwitch: vi.fn(),
   getHealth: vi.fn(),
   getTrafficStats: vi.fn(),
   getLatencyStats: vi.fn(),
@@ -239,7 +249,7 @@ describe("ConnectionSection", () => {
   it("renders with host input and section title", () => {
     renderConnectionSection();
 
-    expect(screen.getByText("Broker Gateway")).toBeInTheDocument();
+    expect(screen.getByText("OpenAlgo bridge")).toBeInTheDocument();
     expect(screen.getByLabelText("OpenAlgo-compatible URL")).toBeInTheDocument();
     expect(screen.getByLabelText("REST port")).toBeInTheDocument();
     expect(screen.getByLabelText("WebSocket port")).toBeInTheDocument();
@@ -301,18 +311,9 @@ describe("ConnectionSection", () => {
     }));
   });
 
-  it("offers a setup wizard entry point that navigates to /setup", () => {
+  it("keeps setup in its own route", () => {
     renderConnectionSection();
-
-    const listener = vi.fn();
-    window.addEventListener("flinttrade:navigate", listener);
-    try {
-      fireEvent.click(screen.getByRole("button", { name: /open setup wizard/i }));
-      expect(listener).toHaveBeenCalledTimes(1);
-      expect((listener.mock.calls[0][0] as CustomEvent<string>).detail).toBe("/setup");
-    } finally {
-      window.removeEventListener("flinttrade:navigate", listener);
-    }
+    expect(screen.queryByRole("button", { name: /open setup wizard/i })).not.toBeInTheDocument();
   });
 });
 
@@ -321,14 +322,12 @@ describe("ConnectionSection", () => {
 // ---------------------------------------------------------------------------
 
 describe("AppearanceSection", () => {
-  it("renders with theme picker and colour mode buttons", () => {
+  it("delegates colour and glass controls to ThemePicker", () => {
     render(<AppearanceSection />);
 
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByTestId("theme-picker")).toBeInTheDocument();
-    expect(screen.getByLabelText("Light mode")).toBeInTheDocument();
-    expect(screen.getByLabelText("Dark mode")).toBeInTheDocument();
-    expect(screen.getByLabelText("System mode")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Light mode")).not.toBeInTheDocument();
   });
 });
 
@@ -367,7 +366,7 @@ describe("RiskSection", () => {
       />,
     );
 
-    expect(screen.getByText("Risk Limits")).toBeInTheDocument();
+    expect(screen.getByText("Risk & Safety")).toBeInTheDocument();
     expect(screen.getByLabelText("Position lot reference")).toBeInTheDocument();
     expect(screen.getByLabelText("MTM stoploss in INR")).toBeInTheDocument();
     expect(screen.getByLabelText("MTM profit target in INR")).toBeInTheDocument();

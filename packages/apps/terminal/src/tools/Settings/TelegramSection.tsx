@@ -13,6 +13,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send, RefreshCw, CheckCircle2, AlertTriangle, Save } from "lucide-react";
 import { FieldRow, TextInput, Toggle, SectionTitle } from "./shared";
+import { Input } from "@/components/ui/input";
+import { useModeStore } from "@/stores/modeStore";
 import { Button } from "@/components/ui/button";
 import { sendTelegram } from "@/services/api";
 import { persistTelegramConfig, readTelegramConfig } from "@/services/ftApi.telegram";
@@ -29,6 +31,8 @@ interface TelegramSectionProps {
 }
 
 export function TelegramSection({ settings, onChangeField }: TelegramSectionProps) {
+  const isExplore = useModeStore((state) => state.mode === "explore");
+  const [testMessage, setTestMessage] = useState("FlintTrade test message — your Telegram integration is working!");
   const [testStatus, setTestStatus] = useState<"idle" | "success" | "error">("idle");
   const [testError, setTestError]   = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
@@ -107,8 +111,8 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
   });
 
   const testMutation = useMutation({
-    mutationFn: () =>
-      sendTelegram("FlintTrade test message — your Telegram integration is working!", {
+    mutationFn: (message: string) =>
+      sendTelegram(message, {
         botToken: settings.botToken,
         chatId: settings.chatId,
       }),
@@ -124,9 +128,16 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
     },
   });
 
-  const handleTestSend = useCallback(() => {
-    testMutation.mutate();
-  }, [testMutation]);
+  const canTest = !isExplore
+    && settings.enabled
+    && Boolean(settings.botToken.trim() || tokenStored)
+    && Boolean(settings.chatId.trim())
+    && Boolean(testMessage.trim())
+    && !testMutation.isPending;
+  const handleTestSend = () => {
+    if (!canTest) return;
+    testMutation.mutate(testMessage.trim());
+  };
 
   const canSave =
     !saveMutation.isPending
@@ -177,8 +188,35 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
         />
       </FieldRow>
 
+      <FieldRow label="Test message">
+        <Input
+          value={testMessage}
+          onChange={(event) => {
+            if (!isExplore) setTestMessage(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              handleTestSend();
+            }
+          }}
+          aria-label="Telegram test message"
+          placeholder="Enter test message…"
+          readOnly={isExplore}
+          disabled={testMutation.isPending}
+          className="h-8 text-xs"
+        />
+        {isExplore ? (
+          <p className="text-xs text-text-muted">
+            Telegram tests are blocked for Example. Switch to Practice or Live with Telegram configured to send a real test.
+          </p>
+        ) : (!settings.enabled || !(settings.botToken.trim() || tokenStored) || !settings.chatId.trim()) && (
+          <p className="text-xs text-text-muted">Configure Telegram first</p>
+        )}
+      </FieldRow>
+
       {/* Save + Test */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="default"
           size="sm"
@@ -200,30 +238,20 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
           {saveMutation.isPending ? "Saving..." : "Save"}
         </Button>
 
-        {settings.enabled && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleTestSend}
-            disabled={
-              testMutation.isPending
-              || !settings.enabled
-              // The backend send route falls back to the STORED config when
-              // credentials are omitted, so a freshly-saved token (cleared
-              // from browser memory) still supports Test Send.
-              || !(settings.botToken.trim() || tokenStored)
-              || !settings.chatId.trim()
-            }
-            className="flex items-center gap-1.5 text-xs h-7"
-          >
-            {testMutation.isPending ? (
-              <RefreshCw size={11} className="animate-spin" />
-            ) : (
-              <Send size={11} />
-            )}
-            {testMutation.isPending ? "Sending..." : "Test Send"}
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleTestSend}
+          disabled={!canTest}
+          className="flex items-center gap-1.5 text-xs h-7"
+        >
+          {testMutation.isPending ? (
+            <RefreshCw size={11} className="animate-spin" />
+          ) : (
+            <Send size={11} />
+          )}
+          {testMutation.isPending ? "Sending..." : "Test Send"}
+        </Button>
 
         {tokenStored && (
           <Button

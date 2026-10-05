@@ -18,7 +18,7 @@
  *    (name, createdAt) and reference back to a tab id.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import {
   Zap, Grid3x3, Star, BarChart3, ShieldAlert, TrendingUp,
   Sigma, Map, Bot, PieChart, Globe, Gauge, Box,
@@ -51,6 +51,8 @@ import {
   useWorkspaceLifecycle,
   WorkspaceStorageError,
 } from "./hooks/useWorkspaceLifecycle";
+
+const SavedPresets = lazy(() => import("@/tools/Settings/PresetSection").then((module) => ({ default: module.PresetSection })));
 
 // ---------------------------------------------------------------------------
 // Icon map
@@ -230,6 +232,15 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
 
   const { cloneWorkspace, newFromTemplate, renameWorkspace, deleteWorkspace } = useWorkspaceLifecycle();
 
+  const [showSavedPresets, setShowSavedPresets] = useState(false);
+  const [savedPresetsOpened, setSavedPresetsOpened] = useState(false);
+  useEffect(() => {
+    if (!isOpen) {
+      setShowSavedPresets(false);
+      setSavedPresetsOpened(false);
+    }
+  }, [isOpen]);
+
   // Sub-dialog state
   const [showRename, setShowRename] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -357,84 +368,29 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
   );
 
   // ---------------------------------------------------------------------------
-  // Render — template clone sub-dialog
-  // ---------------------------------------------------------------------------
-
-  if (showTemplateClone) {
-    return (
-      <Dialog open onOpenChange={(o) => { if (!o) setShowTemplateClone(false); }}>
-        <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
-          <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default shrink-0">
-            <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
-              New Workspace from Template
-            </DialogTitle>
-            <DialogDescription className="text-xs text-text-muted mt-0.5">
-              Creates a new named workspace tab using the chosen template layout.
-            </DialogDescription>
-          </DialogHeader>
-          {visibleError && (
-            <p role="alert" className="mx-4 rounded border border-red-800 bg-red-950/60 px-3 py-2 text-xs text-red-200">
-              {visibleError}
-            </p>
-          )}
-          <div className="p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0">
-            {WORKSPACE_PRESETS.map((preset) => {
-              const Icon: LucideIcon = ICON_MAP[preset.icon] ?? Box;
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => handleNewFromTemplate(preset.id)}
-                  className="flex items-start gap-3 p-4 rounded-lg border border-border-default hover:border-accent/50 hover:bg-surface-hover transition-colors text-left group"
-                >
-                  <div className="mt-0.5 shrink-0 p-2 rounded-md bg-surface-hover group-hover:bg-accent/10 transition-colors">
-                    <Icon size={18} className="text-text-secondary group-hover:text-accent transition-colors" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-text-primary leading-tight">{preset.name}</p>
-                    <p className="text-xs text-text-muted mt-1 leading-snug">{preset.description}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <div className="px-6 pb-4 shrink-0 flex justify-end border-t border-border-default pt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowTemplateClone(false)}
-              className="h-7 text-xs text-text-muted hover:text-text-primary"
-            >
-              Cancel
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  // ---------------------------------------------------------------------------
   // Render — main preset picker
   // ---------------------------------------------------------------------------
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { if (showTemplateClone) setShowTemplateClone(false); else onClose(); } }}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
           {/* Header with lifecycle menu */}
           <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default shrink-0">
             <div className="flex items-center justify-between">
               <div>
                 <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
-                  Choose a Workspace Template
+                  {showTemplateClone ? "New Workspace from Template" : "Manage workspaces"}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-text-muted mt-0.5">
-                  Selecting a template replaces the current layout. Your saved workspaces
-                  are not affected.
+                  {showTemplateClone
+                    ? "Creates a new named workspace tab using the chosen template layout."
+                    : "Selecting a template replaces the current layout. Your saved workspaces are not affected."}
                 </DialogDescription>
               </div>
 
               {/* Workspace lifecycle dropdown */}
-              <DropdownMenu>
+              {!showTemplateClone && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
@@ -481,7 +437,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
                     Delete "{activeTab?.name ?? "Workspace"}"
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu>}
             </div>
           </DialogHeader>
 
@@ -491,8 +447,53 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
             </p>
           )}
 
-          {/* Preset grid */}
+          {showTemplateClone && (
+            <>
           <div className="p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0">
+            {WORKSPACE_PRESETS.map((preset) => {
+              const Icon: LucideIcon = ICON_MAP[preset.icon] ?? Box;
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => handleNewFromTemplate(preset.id)}
+                  className="flex items-start gap-3 p-4 rounded-lg border border-border-default hover:border-accent/50 hover:bg-surface-hover transition-colors text-left group"
+                >
+                  <div className="mt-0.5 shrink-0 p-2 rounded-md bg-surface-hover group-hover:bg-accent/10 transition-colors">
+                    <Icon size={18} className="text-text-secondary group-hover:text-accent transition-colors" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-text-primary leading-tight">{preset.name}</p>
+                    <p className="text-xs text-text-muted mt-1 leading-snug">{preset.description}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="px-6 pb-4 shrink-0 flex justify-end border-t border-border-default pt-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowTemplateClone(false)}
+              className="h-7 text-xs text-text-muted hover:text-text-primary"
+            >
+              Cancel
+            </Button>
+          </div>
+            </>
+          )}
+
+          <div hidden={showTemplateClone} className={showTemplateClone ? "hidden" : "flex gap-2 px-4 pt-3"} aria-label="Workspace views">
+            <Button variant={showSavedPresets ? "outline" : "secondary"} onClick={() => setShowSavedPresets(false)}>Built-in templates</Button>
+            <Button variant={showSavedPresets ? "secondary" : "outline"} onClick={() => { setSavedPresetsOpened(true); setShowSavedPresets(true); }}>Saved presets</Button>
+          </div>
+          {savedPresetsOpened && (
+            <div hidden={!showSavedPresets || showTemplateClone} className="p-4 overflow-y-auto">
+              <Suspense fallback={<p role="status">Loading saved presets…</p>}><SavedPresets /></Suspense>
+            </div>
+          )}
+
+          {/* Preset grid */}
+          <div hidden={showSavedPresets || showTemplateClone} className={showSavedPresets || showTemplateClone ? "hidden" : "p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0"}>
             {WORKSPACE_PRESETS.map((preset) => {
               const Icon: LucideIcon = ICON_MAP[preset.icon] ?? Box;
               return (

@@ -112,7 +112,7 @@ function KillSwitchPill() {
           : "Live order routing is halted, but one or more broker flattening actions did not complete. Review broker state before resetting.",
         action: {
           label: flattenComplete ? "Review kill switch" : "Retry emergency actions",
-          href: "/automate",
+          href: "/settings#risk",
         },
       });
     },
@@ -202,8 +202,8 @@ function KillSwitchPill() {
               {isNearLimit && !killSwitchActive
                 ? `-₹${Math.abs(totalPnl).toFixed(0)}`
                 : killSwitchActive
-                ? "L5 ACTIVE"
-                : "L5"}
+                ? "Kill switch active"
+                : "Kill switch"}
             </span>
           </div>
           <span className="text-xs text-text-secondary">{statusText}</span>
@@ -1061,6 +1061,7 @@ export default function TerminalRoute() {
       )}
 
       {/* Explicit Layer 5 control, shown once account MTM reaches the warning level */}
+      <Button variant="outline" size="sm" className="self-end" onClick={() => navigate("/settings#risk")}>Risk &amp; Safety</Button>
       <KillSwitchPill />
 
     </div>

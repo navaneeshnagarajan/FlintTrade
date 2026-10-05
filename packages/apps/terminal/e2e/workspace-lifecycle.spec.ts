@@ -67,7 +67,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await expect(switcher).toBeVisible();
 
   await page.getByRole("button", { name: "Manage workspaces" }).click();
-  await expect(page.getByRole("dialog", { name: "Choose a Workspace Template" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Manage workspaces" })).toBeVisible();
   await page.getByRole("button", { name: "Workspace actions" }).click();
   await page.getByRole("menuitem", { name: "New from Template" }).click();
   await expect(page.getByRole("dialog", { name: "New Workspace from Template" })).toBeVisible();
