@@ -82,10 +82,12 @@ def get_activity() -> tuple[Response, int]:
         for e in entries
     ]
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "entries": payload,
-            "count": len(payload),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "entries": payload,
+                "count": len(payload),
+            },
+        }
+    ), 200

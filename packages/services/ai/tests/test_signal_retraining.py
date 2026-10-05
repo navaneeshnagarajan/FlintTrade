@@ -969,7 +969,7 @@ def test_pipeline_fetch_bars_honours_requested_lookback_window() -> None:
     client = MagicMock()
     client.history = AsyncMock(return_value=[])
     client.close = AsyncMock()
-    pipeline = SignalPipeline(openalgo_client=client)
+    pipeline = SignalPipeline(broker_client=client)
 
     pipeline.fetch_bars("NIFTY", "NSE_INDEX", 365)
 

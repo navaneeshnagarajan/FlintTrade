@@ -198,7 +198,9 @@ class ChartPreferences:
         )
         logger.debug(
             "ChartPreferences.save_indicator_set: user=%s name=%s count=%d",
-            user_id, name, len(indicators),
+            user_id,
+            name,
+            len(indicators),
         )
 
     def load_indicator_set(
@@ -293,9 +295,7 @@ class ChartPreferences:
             """,
             [user_id, layout_name, json.dumps(layout), now],
         )
-        logger.debug(
-            "ChartPreferences.save_layout: user=%s layout=%s", user_id, layout_name
-        )
+        logger.debug("ChartPreferences.save_layout: user=%s layout=%s", user_id, layout_name)
 
     def load_layout(
         self,

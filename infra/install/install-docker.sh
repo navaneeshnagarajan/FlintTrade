@@ -181,7 +181,6 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     {
         echo "# FlintTrade Docker/server fallback environment."
         echo "# Native desktop and normal source runs use Setup/Settings instead."
-        echo "# OpenAlgo bridge settings should be configured in the app UI unless"
         echo "# this container must run before the UI is available."
     } > "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/.env"
@@ -310,7 +309,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:5000/api/;
+        proxy_pass http://127.0.0.1:5100/api/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -321,14 +320,6 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    }
-
-    location /ws {
-        proxy_pass http://127.0.0.1:8765;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
     }
 }
 NGINX_EOF
@@ -417,12 +408,8 @@ echo ""
 echo "  Application URLs:"
 if [ -n "${DOMAIN_NAME:-}" ]; then
     echo "    Terminal:   https://$DOMAIN_NAME"
-    echo "    OpenAlgo:   https://$DOMAIN_NAME/api/"
-    echo "    WebSocket:  wss://$DOMAIN_NAME/ws"
 else
     echo "    Terminal:   http://localhost:5173"
-    echo "    OpenAlgo:   http://localhost:5000"
-    echo "    WebSocket:  ws://localhost:8765"
 fi
 echo ""
 echo "  Management commands:"
@@ -438,6 +425,6 @@ echo "    Backups:    /var/backups/flinttrade/"
 echo ""
 echo "  Next steps:"
 echo "    1. Visit the terminal URL and complete Setup"
-echo "    2. Configure OpenAlgo URL/API key in Settings -> Broker Gateway if needed"
-echo "    3. Keep broker credentials inside OpenAlgo or the encrypted FlintTrade vault"
+echo "    2. Configure available native accounts in Settings -> Brokers"
+echo "    3. Keep broker credentials in the encrypted FlintTrade vault"
 echo ""

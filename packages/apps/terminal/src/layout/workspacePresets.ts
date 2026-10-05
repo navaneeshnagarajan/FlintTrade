@@ -273,7 +273,7 @@ function buildSectorView(): IJsonModel {
 // │Strategy        │              │
 // │ Templates      │              │
 // └────────────────┴──────────────┘
-// Flow Builder lives at /automate — the chart stands in as analysis surface.
+// Automation uses its dedicated schedules and strategy monitor route.
 // ---------------------------------------------------------------------------
 function buildOrderAutomation(): IJsonModel {
   return workspaceJson(

@@ -2,7 +2,7 @@
  * ConnectionStep — optional broker step in the setup wizard.
  *
  * Monday primary path (FT-MONDAY-001): continue without a broker. Practice
- * fills use FlintTrade's native SandboxEngine. OpenAlgo and native brokers
+ * fills use FlintTrade's native SandboxEngine. Native brokers
  * stay Settings/fallback only — never the primary connect CTA.
  *
  * Exports: ConnectionStep (schema/helpers live in connectionForm.ts for Fast Refresh)
@@ -12,7 +12,6 @@ import { useState } from "react";
 import { ArrowRight, CheckCheck, Info } from "lucide-react";
 
 import { BrokerConnect } from "@/components/account/BrokerConnect";
-import { OpenAlgoConnectionForm } from "@/components/account/OpenAlgoConnectionForm";
 import { Button } from "@/components/ui/button";
 import { useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
@@ -23,7 +22,7 @@ import {
   isMondayReadBroker,
 } from "@/lib/connectedReadChrome";
 
-type ConnectionMode = "openalgo" | "direct";
+type ConnectionMode = "direct";
 
 interface TabButtonProps {
   active: boolean;
@@ -49,20 +48,8 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
   );
 }
 
-/**
- * Synthetic ConnectionFormValues used when proceeding from Direct Connect.
- * Host/key are left as placeholder values — the gateway adapter handles auth
- * independently and the actual broker sessions live in brokerStore.
- */
-const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
-  host: "http://127.0.0.1:5100",
-  port: "5100",
-  apiKey: "direct-connect",
-  wsPort: "8765",
-};
-
 function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
-  return account.status === "connected" && account.read_only !== true;
+  return account.source === "native" && account.status === "connected" && account.read_only !== true;
 }
 
 function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
@@ -75,7 +62,7 @@ function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
 }
 
 function isReadOnlyConnectedBrokerAccount(account: BrokerAccount): boolean {
-  return account.status === "connected" && account.read_only === true;
+  return account.source === "native" && account.status === "connected" && account.read_only === true;
 }
 
 interface DirectConnectPanelProps {
@@ -129,7 +116,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         type="button"
         className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
         disabled={!canContinue}
-        onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
+        onClick={() => onComplete({ brokerConnected: true })}
       >
         <CheckCheck className="size-4 mr-2" />
         {canContinue ? "Continue" : "Connect Dhan or Neo for Connected (read)"}
@@ -153,7 +140,6 @@ interface ConnectionStepProps {
 export function ConnectionStep({
   onComplete,
   onContinueWithoutBroker,
-  defaultValues,
 }: ConnectionStepProps) {
   const [mode, setMode] = useState<ConnectionMode | null>(null);
 
@@ -162,7 +148,7 @@ export function ConnectionStep({
       onContinueWithoutBroker();
       return;
     }
-    onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" });
+    onComplete({ brokerConnected: false });
   }
 
   return (
@@ -181,7 +167,7 @@ export function ConnectionStep({
           <ArrowRight className="size-4 ml-2" />
         </Button>
         <p className="text-xs text-text-muted text-center">
-          OpenAlgo and native brokers stay in Settings as a fallback — not the
+          Native brokers stay in Settings as a fallback — not the
           primary Practice path.
         </p>
       </div>
@@ -198,17 +184,8 @@ export function ConnectionStep({
           <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
             FlintTrade Native
           </TabButton>
-          <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
-            OpenAlgo Bridge
-          </TabButton>
         </div>
 
-        {mode === "openalgo" && (
-          <p className="text-xs text-text-muted">
-            Settings fallback only — not the primary connect path. Practice
-            still uses simulated fills, with no real money.
-          </p>
-        )}
         {mode === "direct" && (
           <p className="text-xs text-text-muted">
             Native Dhan + Kotak Neo stays {CONNECTED_READ_LABEL}. Successful
@@ -217,11 +194,7 @@ export function ConnectionStep({
           </p>
         )}
 
-        {mode === "openalgo" ? (
-          <OpenAlgoConnectionForm defaultValues={defaultValues} onSaved={onComplete} />
-        ) : mode === "direct" ? (
-          <DirectConnectPanel onComplete={onComplete} />
-        ) : null}
+        {mode === "direct" && <DirectConnectPanel onComplete={onComplete} />}
       </div>
     </div>
   );

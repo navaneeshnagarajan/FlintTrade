@@ -152,30 +152,7 @@ for (const draftMode of ["new", "edit"] as const) {
       // A 30-second journey can see twenty 1.5-second ticks, plus mounts.
       pingCalls: { minimum: 1, maximum: 24 },
     });
-    syntheticApi.register({
-      name: "read empty Settings bridge configuration",
-      method: "GET",
-      path: "/ft-api/v1/config/openalgo",
-      expectedCalls: { minimum: 1, maximum: 4 },
-      handler: (request) => {
-        expect(request.url()).toBe("http://localhost:5173/ft-api/v1/config/openalgo");
-        expect(request.postData()).toBeNull();
-        expect(request.headers()["x-api-key"]).toBeUndefined();
-        return {
-          json: {
-            status: "success",
-            data: {
-              host: "",
-              port: 5000,
-              ws_port: 8765,
-              api_key: "",
-              api_key_configured: false,
-              api_key_last4: "",
-            },
-          },
-        };
-      },
-    });
+
     syntheticApi.register({
       name: "read synthetic Mode menu status",
       method: "GET",

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import importlib
-import inspect
 
 import pytest
 
 import flinttrade_gateway
 from flinttrade_core.models import Fund, Order, OrderResponse, Position, Quote
 from flinttrade_gateway.brokers._base import BrokerAdapter
-from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter
 from flinttrade_gateway.registry import BrokerRegistry
 
 
@@ -28,7 +26,6 @@ def test_package_root_exports_only_canonical_broker_surfaces() -> None:
     """Root imports must resolve to the live registry/adapter/core-model stack."""
     assert flinttrade_gateway.BrokerRegistry is BrokerRegistry
     assert flinttrade_gateway.BrokerAdapter is BrokerAdapter
-    assert flinttrade_gateway.OpenAlgoAdapter is OpenAlgoAdapter
     assert flinttrade_gateway.Order is Order
     assert flinttrade_gateway.OrderResponse is OrderResponse
     assert flinttrade_gateway.Position is Position
@@ -57,14 +54,10 @@ def test_broker_interface_module_is_retired() -> None:
         importlib.import_module("flinttrade_gateway.broker_interface")
 
 
-def test_public_openalgo_adapter_is_async_and_router_guarded() -> None:
-    """The package-level OpenAlgo surface is the async BrokerAdapter, not a sync shim."""
-    adapter = flinttrade_gateway.OpenAlgoAdapter
-    assert issubclass(adapter, BrokerAdapter)
-    with pytest.raises(TypeError):
-        adapter()  # A concrete sealed-session resolver is mandatory.
-    assert inspect.iscoroutinefunction(adapter.place_order)
-    assert "_router_token" in inspect.signature(adapter.place_order).parameters
+def test_retired_adapter_is_not_importable() -> None:
+    assert not hasattr(flinttrade_gateway, "OpenAlgoAdapter")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("flinttrade_gateway.brokers.openalgo")
 
 
 def test_public_registry_exposes_no_order_write_methods() -> None:

@@ -4,7 +4,7 @@ Frontend and backend are tested in isolation with mocks. Two drifts slip
 through both suites green yet break production:
 
 1. **Async-client shape** — code + tests drive ``router.client.<method>()`` on a
-   MagicMock, so a rename/removal of an :class:`OpenAlgoClient` method is invisible
+   MagicMock, so a rename/removal of an :class:`BrokerClient` method is invisible
    to those tests. This asserts the methods callers depend on still exist and are
    still coroutines.
 2. **Route existence** — the frontend calls ``/api/v1/<x>`` (or ``/v1/<x>``), but the
@@ -33,26 +33,39 @@ FTAPI_DIR = ROOT / "packages" / "apps" / "terminal" / "src" / "services"
 # ---------------------------------------------------------------------------
 
 
-def test_openalgo_client_exposes_expected_async_methods() -> None:
-    from flinttrade_core.openalgo_client import OpenAlgoClient
+def test_broker_client_exposes_expected_async_methods() -> None:
+    from flinttrade_core.broker_client import BrokerClient
 
     # Methods production code + MagicMock-based tests depend on. A rename here
-    # would keep every mock test green while breaking the real order/data path.
+    # would keep every mock test green while breaking the read consumer contract.
     expected_async = {
-        "place_order", "place_smart_order", "modify_order", "cancel_order",
-        "cancel_all_orders", "close_position", "order_status",
-        "positionbook", "orderbook", "tradebook", "holdings", "funds", "margin",
-        "quotes", "depth", "history", "option_chain", "expiry", "ping", "close",
+        "order_status",
+        "positionbook",
+        "orderbook",
+        "tradebook",
+        "holdings",
+        "funds",
+        "margin",
+        "quotes",
+        "depth",
+        "history",
+        "option_chain",
+        "expiry",
+        "ping",
+        "close",
     }
+    reader = BrokerClient()
     for name in sorted(expected_async):
-        method = getattr(OpenAlgoClient, name, None)
-        assert method is not None, f"OpenAlgoClient.{name} is gone — callers/mocks depend on it"
-        assert inspect.iscoroutinefunction(method), f"OpenAlgoClient.{name} is no longer async"
+        method = getattr(reader, name, None)
+        assert method is not None, f"BrokerClient.{name} is gone — callers/mocks depend on it"
+        assert inspect.iscoroutinefunction(method), f"BrokerClient.{name} is no longer async"
+
+    assert not any(hasattr(reader, name) for name in ("place_order", "modify_order", "cancel_order"))
 
     # run_sync is the SYNC entry point that marshals a client coroutine onto the
     # client's own persistent loop (the Telegram bot + Flask routes rely on it).
-    run_sync = getattr(OpenAlgoClient, "run_sync", None)
-    assert callable(run_sync), "OpenAlgoClient.run_sync missing — sync callers depend on it"
+    run_sync = getattr(BrokerClient, "run_sync", None)
+    assert callable(run_sync), "BrokerClient.run_sync missing — sync callers depend on it"
     assert not inspect.iscoroutinefunction(run_sync), "run_sync must stay synchronous"
 
 
@@ -112,6 +125,5 @@ def test_frontend_ftapi_routes_exist_in_backend() -> None:
     )
     assert not missing, (
         f"{len(missing)} ftApi-called route(s) have NO matching backend rule "
-        f"(the /v1 vs /api/v1 wiring bug, or a dropped blueprint):\n  "
-        + "\n  ".join(missing)
+        f"(the /v1 vs /api/v1 wiring bug, or a dropped blueprint):\n  " + "\n  ".join(missing)
     )

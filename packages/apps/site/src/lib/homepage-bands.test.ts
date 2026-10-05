@@ -262,7 +262,7 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     const pilotSource = [wrapperSource, webglSource, capabilitySource, chapterSource].join('\n');
     expect(pilotSource).not.toMatch(/https?:\/\//);
     expect(pilotSource).not.toMatch(/TextureLoader|CubeTextureLoader|FontLoader|fetch\(|XMLHttpRequest|WebSocket/);
-    expect(pilotSource).not.toMatch(/OpenAlgoClient|place_order|placeOrder|BrokerRouter|gate_order/);
+    expect(pilotSource).not.toMatch(/place_order|placeOrder|BrokerRouter|gate_order/);
     expect(pilotSource).not.toMatch(/packages\/apps\/terminal|demo-app/);
     expect(pilotSource).not.toContain('@react-three');
   });

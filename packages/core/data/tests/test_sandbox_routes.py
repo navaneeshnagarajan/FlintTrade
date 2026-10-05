@@ -261,13 +261,16 @@ class TestMergedSandboxSurface:
 
     def test_place_and_square_off_are_not_mounted(self, client):
         """Paper placement is not a sandbox route."""
-        placed = client.post("/v1/sandbox/order", json={
-            "symbol": "NIFTY",
-            "exchange": "NSE",
-            "action": "BUY",
-            "quantity": 1,
-            "price": 100.0,
-        })
+        placed = client.post(
+            "/v1/sandbox/order",
+            json={
+                "symbol": "NIFTY",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": 1,
+                "price": 100.0,
+            },
+        )
         squared = client.post("/v1/sandbox/square-off", json={"latest_ticks": {"NSE:NIFTY": 100.0}})
 
         assert placed.status_code == 404

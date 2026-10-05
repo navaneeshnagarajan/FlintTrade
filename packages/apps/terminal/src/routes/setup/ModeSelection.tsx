@@ -68,14 +68,14 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
       maxWidth="lg"
       eyebrow="First Time Setup"
       title="Welcome to FlintTrade"
-      subtitle="Connect the recommended OpenAlgo bridge, or use a verified native broker. Takes under two minutes."
+      subtitle="Connect a supported native broker. Takes under two minutes."
     >
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ModeCard
             title="Quick Setup"
             subtitle="2 steps - connect and go"
-            description="Choose OpenAlgo or a verified native broker, pick your persona, then start trading."
+            description="Choose a supported native broker, pick your persona, then start trading."
             badge="~1 min"
             icon={<Zap className="size-5" />}
             onClick={() => onSelect("quick")}

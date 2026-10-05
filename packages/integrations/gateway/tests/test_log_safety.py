@@ -8,7 +8,6 @@ import logging
 import pytest
 
 from flinttrade_gateway.log_safety import account_ref, selector_ref
-from flinttrade_gateway.session import BrokerSession
 from flinttrade_gateway.ticker import BrokerTicker
 
 
@@ -63,23 +62,6 @@ def test_registry_exact_mutations_emit_no_payload_logs(tmp_path, caplog):
     fixture.close()
 
 
-def test_broker_session_logs_without_raw_account_id(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
-    class FakeAdapter:
-        def authenticate(self, _credentials):  # type: ignore[no-untyped-def]
-            return "token", None
-
-    raw_account = "DHAN-PRIVATE-ACCOUNT-12345"
-    monkeypatch.setattr("flinttrade_gateway.session.load_broker_adapter", lambda _broker: FakeAdapter())
-    session = BrokerSession(raw_account, "dhan", "Private label")
-
-    with caplog.at_level(logging.INFO, logger="flinttrade.gateway.session"):
-        session.authenticate({"access_token": "secret"})
-        session.disconnect()
-
-    logs = "\n".join(caplog.messages)
-    assert raw_account not in logs
-    assert "Private label" not in logs
-    assert "account#" in logs
 
 
 def test_ticker_logs_without_raw_account_id(caplog: pytest.LogCaptureFixture) -> None:

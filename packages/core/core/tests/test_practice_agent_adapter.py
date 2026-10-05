@@ -41,8 +41,14 @@ def _module():
 
 
 def _order(**overrides):
-    body = {"symbol": "RELIANCE", "exchange": Exchange.NSE, "action": Action.BUY,
-            "quantity": "1", "product": Product.MIS, "pricetype": PriceType.MARKET}
+    body = {
+        "symbol": "RELIANCE",
+        "exchange": Exchange.NSE,
+        "action": Action.BUY,
+        "quantity": "1",
+        "product": Product.MIS,
+        "pricetype": PriceType.MARKET,
+    }
     body.update(overrides)
     return Order(**body)
 
@@ -50,18 +56,45 @@ def _order(**overrides):
 def _context(symbol="RELIANCE", exchange="NSE"):
     now = datetime.now(UTC).isoformat()
     instrument = {"symbol": symbol, "exchange": exchange, "instrument_id": None}
-    return BrokerAnalysisContext({
-        "symbol": symbol, "exchange": exchange,
-        "quote": {"value": {"instrument": instrument, "available": True, "ltp": 123.5,
-                            "open": 120.0, "high": 124.0, "low": 119.0,
-                            "volume": 10, "prev_close": 120.0},
-                  "observed_at": now, "source_as_of": None},
-        "depth": {"value": {"instrument": instrument, "bids": [{"price": 123.0, "quantity": 2}],
-                             "asks": [{"price": 124.0, "quantity": 1}]}, "observed_at": now},
-        "historical": {"request": {"interval": "5m"}, "value": {"instrument": instrument, "interval": "5m",
-                                  "bars": [{"timestamp": now, "open": 120.0, "high": 124.0,
-                                            "low": 119.0, "close": 123.5, "volume": 10}]}},
-    }, {"event_id": "synthetic-input-receipt", "input_digest": "a" * 64})
+    return BrokerAnalysisContext(
+        {
+            "symbol": symbol,
+            "exchange": exchange,
+            "quote": {
+                "value": {
+                    "instrument": instrument,
+                    "available": True,
+                    "ltp": 123.5,
+                    "open": 120.0,
+                    "high": 124.0,
+                    "low": 119.0,
+                    "volume": 10,
+                    "prev_close": 120.0,
+                },
+                "observed_at": now,
+                "source_as_of": None,
+            },
+            "depth": {
+                "value": {
+                    "instrument": instrument,
+                    "bids": [{"price": 123.0, "quantity": 2}],
+                    "asks": [{"price": 124.0, "quantity": 1}],
+                },
+                "observed_at": now,
+            },
+            "historical": {
+                "request": {"interval": "5m"},
+                "value": {
+                    "instrument": instrument,
+                    "interval": "5m",
+                    "bars": [
+                        {"timestamp": now, "open": 120.0, "high": 124.0, "low": 119.0, "close": 123.5, "volume": 10}
+                    ],
+                },
+            },
+        },
+        {"event_id": "synthetic-input-receipt", "input_digest": "a" * 64},
+    )
 
 
 @pytest.fixture
@@ -73,18 +106,40 @@ def runtime(tmp_path, monkeypatch, backend_lease_proof):
     app = Flask(__name__)
     sandbox = SandboxEngine(str(tmp_path / "practice.sqlite3"), initial_capital=100_000.0)
     sentinels = [_LiveSentinel() for _ in range(3)]
-    app.config.update(DATA_SANDBOX_ENGINE=sandbox, RATE_LIMITER=RateLimiter(),
-                      BACKEND_LEASE_PROOF=backend_lease_proof, RUNTIME_ACCEPTING_REQUESTS=True,
-                      CLIENT=sentinels[0], OPENALGO_CLIENT=sentinels[1], BROKER_ROUTER=sentinels[2],
-                      TICK_RECORDER=None, SAFETY=SafetySystem())
+    app.config.update(
+        DATA_SANDBOX_ENGINE=sandbox,
+        RATE_LIMITER=RateLimiter(),
+        BACKEND_LEASE_PROOF=backend_lease_proof,
+        RUNTIME_ACCEPTING_REQUESTS=True,
+        CLIENT=sentinels[0],
+        BROKER_CLIENT=sentinels[1],
+        BROKER_ROUTER=sentinels[2],
+        TICK_RECORDER=None,
+        SAFETY=SafetySystem(),
+    )
     app.register_blueprint(order_routes.orders_bp)
     process_laya().set_status(DecisionStatus.READY)
-    state = SimpleNamespace(app=app, sandbox=sandbox, revoked=revoked, sentinels=sentinels,
-                            context=_context(), reads=[], events=[], stopped=False)
+    state = SimpleNamespace(
+        app=app,
+        sandbox=sandbox,
+        revoked=revoked,
+        sentinels=sentinels,
+        context=_context(),
+        reads=[],
+        events=[],
+        stopped=False,
+    )
 
     def token(**overrides):
-        claims = {"sub": "operator", "jti": "practice-session", "type": "session", "mode": "practice",
-                  "iat": int(time.time()), "exp": int(time.time()) + 3600, "scopes": ["admin.accounts.read"]}
+        claims = {
+            "sub": "operator",
+            "jti": "practice-session",
+            "type": "session",
+            "mode": "practice",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "scopes": ["admin.accounts.read"],
+        }
         claims.update(overrides)
         return jwt.encode(claims, _KEY, algorithm="HS256")
 
@@ -131,10 +186,14 @@ async def test_real_sandbox_fill_uses_observed_price_and_returns_trader_decision
 async def test_receipted_ltp_ignores_caller_price_basis_and_stored_close(runtime, monkeypatch):
     from flinttrade_data import practice_price
 
-    monkeypatch.setattr(practice_price, "lookup_stored_last_close",
-                        lambda *_: pytest.fail("Validated agent LTP fell back to stored close"))
-    result = await runtime.create().place_order(symbol="RELIANCE", exchange="NSE", product="MIS",
-                                                action="BUY", quantity=1, price=9999, price_basis="last_close")
+    monkeypatch.setattr(
+        practice_price,
+        "lookup_stored_last_close",
+        lambda *_: pytest.fail("Validated agent LTP fell back to stored close"),
+    )
+    result = await runtime.create().place_order(
+        symbol="RELIANCE", exchange="NSE", product="MIS", action="BUY", quantity=1, price=9999, price_basis="last_close"
+    )
     assert result["status"] == "COMPLETE"
     assert result["fill_price"] == 123.5
     assert result["price_source"] == "ltp"
@@ -144,8 +203,9 @@ async def test_reads_reuse_authorised_context_and_preserve_unknown_source_freshn
     adapter = runtime.create()
     quotes = await adapter.quotes(symbol="RELIANCE", exchange="NSE")
     depth = await adapter.depth(symbol="RELIANCE", exchange="NSE")
-    history = await adapter.history(symbol="RELIANCE", exchange="NSE", interval="5m",
-                                    start_date="2026-09-27", end_date="2026-09-30")
+    history = await adapter.history(
+        symbol="RELIANCE", exchange="NSE", interval="5m", start_date="2026-09-27", end_date="2026-09-30"
+    )
     assert quotes["data"]["ltp"] == 123.5
     assert quotes["source_as_of"] is None
     assert depth["data"]["bids"][0]["quantity"] == 2
@@ -154,8 +214,17 @@ async def test_reads_reuse_authorised_context_and_preserve_unknown_source_freshn
     assert not hasattr(adapter, "balance")
 
 
-@pytest.mark.parametrize("claims", [{"mode": "live"}, {"mode": "explore"}, {"type": "reset"},
-                                     {"exp": int(time.time()) - 10}, {"exp": None}, {"jti": ""}])
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"mode": "live"},
+        {"mode": "explore"},
+        {"type": "reset"},
+        {"exp": int(time.time()) - 10},
+        {"exp": None},
+        {"jti": ""},
+    ],
+)
 def test_only_full_valid_practice_session_can_construct_adapter(runtime, claims):
     with pytest.raises(_module().PracticeAgentError):
         runtime.create(session_token=runtime.token(**claims))
@@ -189,10 +258,19 @@ async def test_revocation_during_quote_read_blocks_dispatch(runtime, monkeypatch
     assert runtime.sandbox.get_orders() == []
 
 
-@pytest.mark.parametrize("patch", [
-    {"ltp": None}, {"ltp": 0}, {"ltp": -1}, {"ltp": float("nan")}, {"ltp": float("inf")},
-    {"ltp": True}, {"available": False}, {"instrument": {"symbol": "OTHER", "exchange": "NSE"}},
-])
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"ltp": None},
+        {"ltp": 0},
+        {"ltp": -1},
+        {"ltp": float("nan")},
+        {"ltp": float("inf")},
+        {"ltp": True},
+        {"available": False},
+        {"instrument": {"symbol": "OTHER", "exchange": "NSE"}},
+    ],
+)
 async def test_invalid_quote_cannot_fill_sandbox(runtime, patch):
     runtime.context.market_data["quote"]["value"].update(patch)
     result = await runtime.create().route_order(_order())
@@ -327,8 +405,9 @@ async def test_practice_mode_is_immutable_and_live_kwarg_is_refused(runtime):
     assert adapter.mode == "practice"
     with pytest.raises(AttributeError):
         adapter.mode = "live"
-    result = await adapter.place_order(symbol="RELIANCE", exchange="NSE", product="MIS", action="BUY",
-                                       quantity=1, mode="live")
+    result = await adapter.place_order(
+        symbol="RELIANCE", exchange="NSE", product="MIS", action="BUY", quantity=1, mode="live"
+    )
     assert result["code"] == "practice_order_invalid"
     assert runtime.sandbox.get_orders() == []
 
@@ -464,7 +543,9 @@ async def test_unsupported_depth_is_an_explicit_data_error(runtime):
 async def test_noncomplete_or_malformed_success_is_reconciliation_required(runtime, monkeypatch):
     from flask import jsonify
 
-    monkeypatch.setattr(order_routes, "place_order", lambda: (jsonify({"status": "PENDING", "order_id": "pending"}), 200))
+    monkeypatch.setattr(
+        order_routes, "place_order", lambda: (jsonify({"status": "PENDING", "order_id": "pending"}), 200)
+    )
     adapter = runtime.create()
     decision = await adapter.route_order(_order())
     assert not decision.passed
@@ -473,7 +554,9 @@ async def test_noncomplete_or_malformed_success_is_reconciliation_required(runti
 
 
 async def test_read_client_uses_real_exact_authority_collector_without_live_writes(
-    tmp_path, monkeypatch, backend_lease_proof,
+    tmp_path,
+    monkeypatch,
+    backend_lease_proof,
 ):
     from uuid import uuid4
 
@@ -483,7 +566,7 @@ async def test_read_client_uses_real_exact_authority_collector_without_live_writ
     from flinttrade_core.broker_identity import BrokerSelector, CredentialVersion
     from flinttrade_core.broker_read_port import BalanceEvidence, BalanceSnapshot
     from flinttrade_core.config import Settings
-    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.broker_client import BrokerClient
     from flinttrade_core.workspace_migrations import broker_workspace_version, compare_and_swap_workspace
     from flinttrade_data.audit_logger import AuditLogger
     from flinttrade_gateway.broker_read_service import create_broker_read_owner
@@ -503,10 +586,21 @@ async def test_read_client_uses_real_exact_authority_collector_without_live_writ
 
         async def historical(self, session, read_request):
             calls.append(("historical", session.selector))
-            return {"symbol": "RELIANCE", "exchange": "NSE", "interval": "5m", "bars": [
-                {"timestamp": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(), "open": 120.0,
-                 "high": 124.0, "low": 119.0, "close": 123.5, "volume": 10},
-            ]}
+            return {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "interval": "5m",
+                "bars": [
+                    {
+                        "timestamp": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+                        "open": 120.0,
+                        "high": 124.0,
+                        "low": 119.0,
+                        "close": 123.5,
+                        "volume": 10,
+                    },
+                ],
+            }
 
         async def balance_snapshot(self, session):
             calls.append(("balance", session.selector))
@@ -521,10 +615,13 @@ async def test_read_client_uses_real_exact_authority_collector_without_live_writ
     def configure(config):
         config["brokers"]["registered"] = list(selectors)
         config["brokers"]["execution"] = {"default": "dhan:Execution"}
-        config["brokers"]["data"].update(quote="dhan:Quotes", historical="upstox:History",
-                                         option_chains="dhan:Quotes", ticks="dhan:Quotes")
-        config["brokers"]["account_acls"] = {"dhan": {"Quotes": ["operator"], "Execution": ["operator"]},
-                                              "upstox": {"History": ["operator"]}}
+        config["brokers"]["data"].update(
+            quote="dhan:Quotes", historical="upstox:History", option_chains="dhan:Quotes", ticks="dhan:Quotes"
+        )
+        config["brokers"]["account_acls"] = {
+            "dhan": {"Quotes": ["operator"], "Execution": ["operator"]},
+            "upstox": {"History": ["operator"]},
+        }
 
     workspace = compare_and_swap_workspace(workspace_path, None, configure)
     routing = RoutingConfig.from_workspace(workspace.as_dict()["brokers"])
@@ -533,15 +630,25 @@ async def test_read_client_uses_real_exact_authority_collector_without_live_writ
     for raw in selectors:
         selector = BrokerSelector(*raw.split(":"))
         credentials[selector] = CredentialVersion(selector, uuid4(), 1)
-        authority = ManagedSessionAuthority(credentials[selector], workspace.version, broker_workspace_version(workspace))
+        authority = ManagedSessionAuthority(
+            credentials[selector], workspace.version, broker_workspace_version(workspace)
+        )
         session = Session("synthetic-market-read-session", time.time() + 3600, selector.account_id, selector.adapter_id)
         candidate = publication.prepare_session_candidate(
-            selector, session, expected_registry=registry.snapshot_selector(selector), authority=authority,
-            broker=selector.adapter_id, label=selector.account_id, client=object(),
+            selector,
+            session,
+            expected_registry=registry.snapshot_selector(selector),
+            authority=authority,
+            broker=selector.adapter_id,
+            label=selector.account_id,
+            client=object(),
         )
         publication.publish_prepared_candidate(candidate, current_authority=authority)
     provider = AuthenticatingSessionProvider(
-        registry, routing.account_acls, workspace_snapshot=workspace, workspace_path=workspace_path,
+        registry,
+        routing.account_acls,
+        workspace_snapshot=workspace,
+        workspace_path=workspace_path,
         credential_version_for=credentials.__getitem__,
     )
     app = Flask(__name__)
@@ -554,29 +661,64 @@ async def test_read_client_uses_real_exact_authority_collector_without_live_writ
             super().__init__(**kwargs, trust_env=False, transport=httpx.MockTransport(unexpected_http))
 
     monkeypatch.setattr(httpx, "AsyncClient", NoNetworkClient)
-    client = OpenAlgoClient(Settings(openalgo_api_key=""))
+    client = BrokerClient(Settings(dhan_api_key=""))
     adapters = {"dhan": MarketSource(), "upstox": MarketSource()}
-    owner = create_broker_read_owner(registry=registry, session_provider=provider, adapters=adapters,
-                                     workspace_path=workspace_path, rate_limiter=None,
-                                     runtime_accepting_requests=lambda: True)
+    owner = create_broker_read_owner(
+        registry=registry,
+        session_provider=provider,
+        adapters=adapters,
+        workspace_path=workspace_path,
+        rate_limiter=None,
+        runtime_accepting_requests=lambda: True,
+    )
     audit = AuditLogger(str(tmp_path / "audit"))
     sandbox = SandboxEngine(str(tmp_path / "sandbox.sqlite3"), initial_capital=100_000.0)
     dependencies = _BrokerRuntimeDependencies(
-        registry, routing, workspace.as_dict()["brokers"], provider, adapters, None, None, workspace,
-        workspace_path, client, adapters, publication, owner,
+        registry,
+        routing,
+        workspace.as_dict()["brokers"],
+        provider,
+        adapters,
+        None,
+        None,
+        workspace,
+        workspace_path,
+        client,
+        adapters,
+        publication,
+        owner,
     )
     app.extensions["flinttrade_broker_dependencies"] = dependencies
     app.extensions["flinttrade.registry_publication_owner"] = publication
     live_router = _LiveSentinel()
-    app.config.update(CLIENT=client, OPENALGO_CLIENT=client, REGISTRY=registry, ACTIVE_BROKER_ADAPTERS=adapters,
-                      AUDIT=audit, RUNTIME_ACCEPTING_REQUESTS=True, DATA_SANDBOX_ENGINE=sandbox,
-                      RATE_LIMITER=RateLimiter(), BROKER_ROUTER=live_router, SAFETY=SafetySystem(),
-                      BACKEND_LEASE_PROOF=backend_lease_proof)
+    app.config.update(
+        CLIENT=client,
+        BROKER_CLIENT=client,
+        REGISTRY=registry,
+        ACTIVE_BROKER_ADAPTERS=adapters,
+        AUDIT=audit,
+        RUNTIME_ACCEPTING_REQUESTS=True,
+        DATA_SANDBOX_ENGINE=sandbox,
+        RATE_LIMITER=RateLimiter(),
+        BROKER_ROUTER=live_router,
+        SAFETY=SafetySystem(),
+        BACKEND_LEASE_PROOF=backend_lease_proof,
+    )
     monkeypatch.setattr(auth_routes, "_get_jwt_secret", lambda: _KEY)
     monkeypatch.setattr(auth_routes, "_get_auth_service", lambda: None)
-    token = jwt.encode({"sub": "operator", "jti": "exact-account-session", "type": "session", "mode": "practice",
-                        "iat": int(time.time()), "exp": int(time.time()) + 3600,
-                        "scopes": ["admin.accounts.read"]}, _KEY, algorithm="HS256")
+    token = jwt.encode(
+        {
+            "sub": "operator",
+            "jti": "exact-account-session",
+            "type": "session",
+            "mode": "practice",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "scopes": ["admin.accounts.read"],
+        },
+        _KEY,
+        algorithm="HS256",
+    )
     process_laya().set_status(DecisionStatus.READY)
     try:
         adapter = _module().PracticeAgentAdapter(app, token)
@@ -587,11 +729,15 @@ async def test_read_client_uses_real_exact_authority_collector_without_live_writ
         decision = await adapter.route_order(_order())
         assert decision.passed
         assert decision.order_response.fill_price == 123.5
-        assert calls == [
-            ("quote", BrokerSelector("dhan", "Quotes")),
-            ("historical", BrokerSelector("upstox", "History")),
-            ("balance", BrokerSelector("dhan", "Execution")),
-        ] * 2
+        assert (
+            calls
+            == [
+                ("quote", BrokerSelector("dhan", "Quotes")),
+                ("historical", BrokerSelector("upstox", "History")),
+                ("balance", BrokerSelector("dhan", "Execution")),
+            ]
+            * 2
+        )
         app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
         assert (await adapter.route_order(_order(action=Action.SELL))).passed
         assert sandbox.get_positions() == []

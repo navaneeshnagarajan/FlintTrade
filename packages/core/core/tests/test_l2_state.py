@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -24,12 +24,42 @@ from flinttrade_core.l2_state import (
 )
 
 
+def _native_reader_config(client, **config):
+    """Bind domain-test observations to the native account/session interface."""
+    adapter = SimpleNamespace(
+        positions=lambda _session: client.positionbook(),
+        funds=lambda _session: client.funds(),
+        trade_book=lambda _session: client.tradebook(),
+        order_book=lambda _session: client.orderbook(),
+        holdings=lambda _session: client.holdings(),
+        quotes=lambda _session, symbols: client.multi_quotes(symbols),
+    )
+    if hasattr(client, "history"):
+        adapter.historical = lambda _session, params: client.history(
+            params["symbol"],
+            params["exchange"],
+            params["interval"],
+            params["from_date"],
+            params["to_date"],
+        )
+    return {
+        "NATIVE_ADAPTERS": {"dhan": adapter},
+        "REGISTRY": SimpleNamespace(get_session_for=lambda *_args: object()),
+        **config,
+    }
+
+
 def test_option_type_falls_back_to_contract_symbol_for_broker_instrument_family() -> None:
-    assert _canonical_option_type({
-        "symbol": "NIFTY30JUL2625000CE",
-        "exchange": "NFO",
-        "instrument_type": "OPTIDX",
-    }) == "CE"
+    assert (
+        _canonical_option_type(
+            {
+                "symbol": "NIFTY30JUL2625000CE",
+                "exchange": "NFO",
+                "instrument_type": "OPTIDX",
+            }
+        )
+        == "CE"
+    )
 
 
 def test_order_snapshot_fingerprint_includes_advanced_exposure_markers() -> None:
@@ -44,17 +74,20 @@ def test_order_snapshot_fingerprint_includes_advanced_exposure_markers() -> None
     }
 
     regular = _fingerprint_rows([base], "order")
-    conditional = _fingerprint_rows([
-        {
-            **base,
-            "safety_order_id": "conditional:A-1:0",
-            "raw_broker_order_id": "A-1",
-            "order_family": "conditional",
-            "leg_name": "CONDITIONAL_LEG_0",
-            "parent_order_id": "A-1",
-            "margin_unfunded": True,
-        }
-    ], "order")
+    conditional = _fingerprint_rows(
+        [
+            {
+                **base,
+                "safety_order_id": "conditional:A-1:0",
+                "raw_broker_order_id": "A-1",
+                "order_family": "conditional",
+                "leg_name": "CONDITIONAL_LEG_0",
+                "parent_order_id": "A-1",
+                "margin_unfunded": True,
+            }
+        ],
+        "order",
+    )
 
     assert regular != conditional
 
@@ -88,25 +121,31 @@ def test_position_snapshot_fingerprint_includes_option_contract_identity(field: 
 async def test_native_option_greeks_require_an_adapter_resolved_instrument_id() -> None:
     symbol = "NIFTY30JUL2625000CE"
     adapter = SimpleNamespace(
-        portfolio_greeks=AsyncMock(return_value=[{
-            "symbol": symbol,
-            "exchange": "NFO",
-            "delta": 0.52,
-            "vega": 6.4,
-        }])
+        portfolio_greeks=AsyncMock(
+            return_value=[
+                {
+                    "symbol": symbol,
+                    "exchange": "NFO",
+                    "delta": 0.52,
+                    "vega": 6.4,
+                }
+            ]
+        )
     )
 
     with pytest.raises(PortfolioSafetyStateError, match="resolved instrument identity"):
         await _portfolio_greeks(
             _AccountSource(target=adapter, session=object()),
             [],
-            [{
-                "symbol": symbol,
-                "exchange": "NFO",
-                "quantity": 75,
-                "action": "BUY",
-                "option_type": "CE",
-            }],
+            [
+                {
+                    "symbol": symbol,
+                    "exchange": "NFO",
+                    "quantity": 75,
+                    "action": "BUY",
+                    "option_type": "CE",
+                }
+            ],
         )
 
 
@@ -177,10 +216,10 @@ def test_local_daily_pnl_uses_signed_trade_cash_flow_not_broker_pnl() -> None:
     quotes = [
         {
             "symbol": "RELIANCE",
-                "exchange": "NSE",
-                "ltp": 105,
-                "prev_close": 100,
-                "previous_close_trusted": True,
+            "exchange": "NSE",
+            "ltp": 105,
+            "prev_close": 100,
+            "previous_close_trusted": True,
         },
     ]
 
@@ -241,19 +280,21 @@ def test_local_daily_pnl_rejects_untrusted_quote_previous_close() -> None:
                     "symbol": "NIFTY",
                     "exchange": "NFO",
                     "product": "NRML",
-                        "quantity": -10,
-                        "multiplier": 1,
-                        "cross_currency": False,
+                    "quantity": -10,
+                    "multiplier": 1,
+                    "cross_currency": False,
                 }
             ],
             [],
-            [{
-                "symbol": "NIFTY",
-                "exchange": "NFO",
-                "ltp": 90,
-                "prev_close": 100,
-                "previous_close_trusted": True,
-            }],
+            [
+                {
+                    "symbol": "NIFTY",
+                    "exchange": "NFO",
+                    "ltp": 90,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ],
             100.0,
         ),
         (
@@ -262,9 +303,9 @@ def test_local_daily_pnl_rejects_untrusted_quote_previous_close() -> None:
                     "symbol": "NIFTY",
                     "exchange": "NFO",
                     "product": "NRML",
-                        "quantity": -6,
-                        "multiplier": 1,
-                        "cross_currency": False,
+                    "quantity": -6,
+                    "multiplier": 1,
+                    "cross_currency": False,
                 }
             ],
             [
@@ -277,13 +318,15 @@ def test_local_daily_pnl_rejects_untrusted_quote_previous_close() -> None:
                     "price": 95,
                 },
             ],
-            [{
-                "symbol": "NIFTY",
-                "exchange": "NFO",
-                "ltp": 90,
-                "prev_close": 100,
-                "previous_close_trusted": True,
-            }],
+            [
+                {
+                    "symbol": "NIFTY",
+                    "exchange": "NFO",
+                    "ltp": 90,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ],
             80.0,
         ),
         (
@@ -298,13 +341,15 @@ def test_local_daily_pnl_rejects_untrusted_quote_previous_close() -> None:
                     "price": 100,
                 },
             ],
-            [{
-                "symbol": "SBIN",
-                "exchange": "NSE",
-                "ltp": 90,
-                "prev_close": 80,
-                "previous_close_trusted": True,
-            }],
+            [
+                {
+                    "symbol": "SBIN",
+                    "exchange": "NSE",
+                    "ltp": 90,
+                    "prev_close": 80,
+                    "previous_close_trusted": True,
+                }
+            ],
             50.0,
         ),
     ],
@@ -333,13 +378,15 @@ def test_local_daily_pnl_keeps_products_separate_while_reusing_market_quote() ->
             "price": 100,
         },
     ]
-    quotes = [{
-        "symbol": "TCS",
-        "exchange": "NSE",
-        "ltp": 110,
-        "prev_close": 90,
-        "previous_close_trusted": True,
-    }]
+    quotes = [
+        {
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "ltp": 110,
+            "prev_close": 90,
+            "previous_close_trusted": True,
+        }
+    ]
 
     assert compute_local_daily_pnl(trades, positions, quotes, holdings) == pytest.approx(80.0)
 
@@ -486,25 +533,35 @@ async def test_gather_safety_state_aggregates_authoritative_option_greeks() -> N
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[option_position]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "25000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "25000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[option_trade]),
         order_book=AsyncMock(return_value=[]),
-        quotes=AsyncMock(return_value=[{
-            "symbol": option_position["symbol"],
-            "exchange": "NFO",
-            "ltp": 105,
-        }]),
-        portfolio_greeks=AsyncMock(return_value=[{
-            "symbol": option_position["symbol"],
-            "instrument_id": option_position["instrument_id"],
-            "exchange": "NFO",
-            "delta": 0.52,
-            "vega": 6.4,
-        }]),
+        quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": option_position["symbol"],
+                    "exchange": "NFO",
+                    "ltp": 105,
+                }
+            ]
+        ),
+        portfolio_greeks=AsyncMock(
+            return_value=[
+                {
+                    "symbol": option_position["symbol"],
+                    "instrument_id": option_position["instrument_id"],
+                    "exchange": "NFO",
+                    "delta": 0.52,
+                    "vega": 6.4,
+                }
+            ]
+        ),
     )
 
     state = await gather_safety_state(
@@ -518,16 +575,18 @@ async def test_gather_safety_state_aggregates_authoritative_option_greeks() -> N
     assert state.net_vega == pytest.approx(480.0)
     adapter.portfolio_greeks.assert_awaited_once()
     greek_positions = adapter.portfolio_greeks.await_args.args[1]
-    assert greek_positions == [{
-        "symbol": option_position["symbol"],
-        "instrument_id": option_position["instrument_id"],
-        "exchange": "NFO",
-        "quantity": 75.0,
-        "option_type": "CE",
-        "expiry": "2026-07-30",
-        "strike_price": 25_000.0,
-        "underlying": "NIFTY",
-    }]
+    assert greek_positions == [
+        {
+            "symbol": option_position["symbol"],
+            "instrument_id": option_position["instrument_id"],
+            "exchange": "NFO",
+            "quantity": 75.0,
+            "option_type": "CE",
+            "expiry": "2026-07-30",
+            "strike_price": 25_000.0,
+            "underlying": "NIFTY",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -566,27 +625,37 @@ async def test_gather_safety_state_uses_prospective_post_order_option_greeks() -
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[position]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "25000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "25000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
-        quotes=AsyncMock(return_value=[{
-            "symbol": symbol,
-            "exchange": "NFO",
-            "ltp": 105,
-            "prev_close": 100,
-            "previous_close_trusted": True,
-        }]),
-        portfolio_greeks=AsyncMock(return_value=[{
-            "symbol": symbol,
-            "instrument_id": position["instrument_id"],
-            "exchange": "NFO",
-            "delta": 0.52,
-            "vega": 6.4,
-        }]),
+        quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": symbol,
+                    "exchange": "NFO",
+                    "ltp": 105,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ]
+        ),
+        portfolio_greeks=AsyncMock(
+            return_value=[
+                {
+                    "symbol": symbol,
+                    "instrument_id": position["instrument_id"],
+                    "exchange": "NFO",
+                    "delta": 0.52,
+                    "vega": 6.4,
+                }
+            ]
+        ),
     )
 
     state = await gather_safety_state(
@@ -625,32 +694,38 @@ async def test_gather_safety_state_accepts_native_token_resolved_for_new_option_
         _session: object,
         positions: list[dict[str, object]],
     ) -> list[dict[str, object]]:
-        assert positions == [{
-            "symbol": symbol,
-            "instrument_id": "",
-            "exchange": "NFO",
-            "quantity": 75.0,
-            "option_type": "CE",
-            "expiry": "",
-            "strike_price": 0.0,
-            "underlying": "",
-        }]
-        return [{
-            "symbol": symbol,
-            "instrument_id": "NSE_FO|54452",
-            "exchange": "NFO",
-            "delta": 0.52,
-            "vega": 6.4,
-        }]
+        assert positions == [
+            {
+                "symbol": symbol,
+                "instrument_id": "",
+                "exchange": "NFO",
+                "quantity": 75.0,
+                "option_type": "CE",
+                "expiry": "",
+                "strike_price": 0.0,
+                "underlying": "",
+            }
+        ]
+        return [
+            {
+                "symbol": symbol,
+                "instrument_id": "NSE_FO|54452",
+                "exchange": "NFO",
+                "delta": 0.52,
+                "vega": 6.4,
+            }
+        ]
 
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
         portfolio_greeks=AsyncMock(side_effect=resolved_greek_rows),
@@ -690,32 +765,38 @@ async def test_gather_safety_state_reads_greeks_for_dhan_call_display_alias() ->
         _session: object,
         positions: list[dict[str, object]],
     ) -> list[dict[str, object]]:
-        assert positions == [{
-            "symbol": symbol,
-            "instrument_id": "",
-            "exchange": "NFO",
-            "quantity": 100.0,
-            "option_type": "CE",
-            "expiry": "",
-            "strike_price": 0.0,
-            "underlying": "",
-        }]
-        return [{
-            "symbol": symbol,
-            "instrument_id": "100003",
-            "exchange": "NFO",
-            "delta": 0.52,
-            "vega": 6.4,
-        }]
+        assert positions == [
+            {
+                "symbol": symbol,
+                "instrument_id": "",
+                "exchange": "NFO",
+                "quantity": 100.0,
+                "option_type": "CE",
+                "expiry": "",
+                "strike_price": 0.0,
+                "underlying": "",
+            }
+        ]
+        return [
+            {
+                "symbol": symbol,
+                "instrument_id": "100003",
+                "exchange": "NFO",
+                "delta": 0.52,
+                "vega": 6.4,
+            }
+        ]
 
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
         portfolio_greeks=AsyncMock(side_effect=resolved_greek_rows),
@@ -799,20 +880,26 @@ async def test_gather_safety_state_counts_active_unfilled_option_orders_before_n
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[position]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "25000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "25000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[pending]),
-        quotes=AsyncMock(return_value=[{
-            "symbol": symbol,
-            "exchange": "NFO",
-            "ltp": 105,
-            "prev_close": 100,
-            "previous_close_trusted": True,
-        }]),
+        quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": symbol,
+                    "exchange": "NFO",
+                    "ltp": 105,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ]
+        ),
         portfolio_greeks=AsyncMock(side_effect=greek_rows),
     )
 
@@ -841,19 +928,25 @@ async def test_gather_safety_state_ignores_terminal_orders() -> None:
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
         trade_book=AsyncMock(return_value=[]),
-        order_book=AsyncMock(return_value=[{
-            "status": "COMPLETE",
-            "symbol": "NIFTY30JUL2625000CE",
-            "exchange": "NFO",
-            "product": "NRML",
-            "action": "BUY",
-            "quantity": "50",
-        }]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        order_book=AsyncMock(
+            return_value=[
+                {
+                    "status": "COMPLETE",
+                    "symbol": "NIFTY30JUL2625000CE",
+                    "exchange": "NFO",
+                    "product": "NRML",
+                    "action": "BUY",
+                    "quantity": "50",
+                }
+            ]
+        ),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         portfolio_greeks=AsyncMock(side_effect=AssertionError("terminal orders carry no exposure")),
     )
     registry = SimpleNamespace(get_session_for=lambda _adapter_id, _account_id: session)
@@ -877,11 +970,13 @@ async def test_gather_safety_state_fails_closed_without_order_book_reader() -> N
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
         trade_book=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
     )
     registry = SimpleNamespace(get_session_for=lambda _adapter_id, _account_id: session)
 
@@ -928,11 +1023,13 @@ async def test_gather_safety_state_projects_unresolved_local_reservation() -> No
         holdings=AsyncMock(return_value=[]),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         margin_calculator=AsyncMock(return_value={"required_margin": "1000"}),
     )
 
@@ -987,11 +1084,13 @@ async def test_gather_safety_state_retains_reservation_visible_as_active_order()
         holdings=AsyncMock(return_value=[]),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[active]),
-        funds=AsyncMock(return_value={
-            "used_margin": "1000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "1000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
     )
 
     state = await gather_safety_state(
@@ -1050,12 +1149,14 @@ def test_active_then_disappearing_order_reprojects_until_fill_reaches_positions(
     projected, settled = _project_unresolved_reservations(
         [reservation],
         _AccountingSnapshot(
-            positions=[{
-                "symbol": "RELIANCE",
-                "exchange": "NSE",
-                "product": "MIS",
-                "quantity": "10",
-            }],
+            positions=[
+                {
+                    "symbol": "RELIANCE",
+                    "exchange": "NSE",
+                    "product": "MIS",
+                    "quantity": "10",
+                }
+            ],
             trades=[],
             holdings=[],
             orders=[complete],
@@ -1089,11 +1190,13 @@ def test_zero_fill_terminal_reservation_settles_when_broker_omits_identity() -> 
             positions=[],
             trades=[],
             holdings=[],
-            orders=[{
-                "orderid": "OID-REJECTED",
-                "status": "REJECTED",
-                "filled_quantity": "0",
-            }],
+            orders=[
+                {
+                    "orderid": "OID-REJECTED",
+                    "status": "REJECTED",
+                    "filled_quantity": "0",
+                }
+            ],
         ),
     )
 
@@ -1160,12 +1263,14 @@ def test_cancelled_conditional_parent_settles_each_zero_fill_leg_reservation() -
             positions=[],
             trades=[],
             holdings=[],
-            orders=[{
-                "orderid": "ALERT-1",
-                "order_family": "conditional",
-                "status": "CANCELLED",
-                "filled_quantity": "0",
-            }],
+            orders=[
+                {
+                    "orderid": "ALERT-1",
+                    "order_family": "conditional",
+                    "status": "CANCELLED",
+                    "filled_quantity": "0",
+                }
+            ],
         ),
     )
 
@@ -1197,11 +1302,13 @@ def test_cancelled_conditional_parent_with_unknown_fill_remains_reserved() -> No
             positions=[],
             trades=[],
             holdings=[],
-            orders=[{
-                "orderid": "ALERT-1",
-                "order_family": "conditional",
-                "status": "CANCELLED",
-            }],
+            orders=[
+                {
+                    "orderid": "ALERT-1",
+                    "order_family": "conditional",
+                    "status": "CANCELLED",
+                }
+            ],
         ),
     )
 
@@ -1233,12 +1340,14 @@ def test_triggered_conditional_parent_remains_reserved_without_leg_identity() ->
             positions=[],
             trades=[],
             holdings=[],
-            orders=[{
-                "orderid": "ALERT-1",
-                "order_family": "conditional",
-                "status": "TRIGGERED",
-                "filled_quantity": "0",
-            }],
+            orders=[
+                {
+                    "orderid": "ALERT-1",
+                    "order_family": "conditional",
+                    "status": "TRIGGERED",
+                    "filled_quantity": "0",
+                }
+            ],
         ),
     )
 
@@ -1267,11 +1376,13 @@ async def test_native_adapter_can_require_serial_accounting_reads() -> None:
         trade_book=read_empty,
         holdings=read_empty,
         safety_order_book=read_empty,
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
     )
 
     await gather_safety_state(
@@ -1319,11 +1430,13 @@ async def test_completed_reservation_waits_for_position_propagation() -> None:
         holdings=AsyncMock(return_value=[]),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[complete]),
-        funds=AsyncMock(return_value={
-            "used_margin": "1000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "1000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
     )
 
     state = await gather_safety_state(
@@ -1352,11 +1465,13 @@ async def test_gather_safety_state_rejects_option_order_without_authoritative_gr
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
         portfolio_greeks=AsyncMock(return_value=[]),
@@ -1417,11 +1532,13 @@ async def test_gather_safety_state_checks_each_batch_leg_against_every_sibling()
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "30000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "30000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
         portfolio_greeks=AsyncMock(side_effect=greek_rows),
@@ -1518,20 +1635,26 @@ async def test_gather_safety_state_does_not_credit_an_uncertain_option_hedge() -
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[position]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "10000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "10000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[pending_hedge]),
-        quotes=AsyncMock(return_value=[{
-            "symbol": symbol,
-            "exchange": "NFO",
-            "ltp": 105,
-            "prev_close": 100,
-            "previous_close_trusted": True,
-        }]),
+        quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": symbol,
+                    "exchange": "NFO",
+                    "ltp": 105,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ]
+        ),
         portfolio_greeks=AsyncMock(side_effect=greek_rows),
     )
 
@@ -1557,11 +1680,13 @@ async def test_gather_safety_state_keeps_non_option_greeks_explicitly_zero() -> 
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
         portfolio_greeks=AsyncMock(side_effect=AssertionError("no option read expected")),
@@ -1601,26 +1726,36 @@ async def test_gather_safety_state_fails_closed_on_incomplete_option_greeks() ->
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[option_position]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "25000",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "25000",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
-        quotes=AsyncMock(return_value=[{
-            "symbol": option_position["symbol"],
-            "exchange": "NFO",
-            "ltp": 105,
-            "prev_close": 100,
-            "previous_close_trusted": True,
-        }]),
-        portfolio_greeks=AsyncMock(return_value=[{
-            "symbol": option_position["symbol"],
-            "instrument_id": option_position["instrument_id"],
-            "exchange": "NFO",
-            "delta": -0.48,
-        }]),
+        quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": option_position["symbol"],
+                    "exchange": "NFO",
+                    "ltp": 105,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ]
+        ),
+        portfolio_greeks=AsyncMock(
+            return_value=[
+                {
+                    "symbol": option_position["symbol"],
+                    "instrument_id": option_position["instrument_id"],
+                    "exchange": "NFO",
+                    "delta": -0.48,
+                }
+            ]
+        ),
     )
 
     with pytest.raises(PortfolioSafetyStateError, match="option Greek"):
@@ -1648,18 +1783,24 @@ async def test_gather_safety_state_reads_ltp_for_price_deviation_checks() -> Non
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
-        quotes=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "ltp": 3500.0,
-        }]),
+        quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "ltp": 3500.0,
+                }
+            ]
+        ),
     )
 
     state = await gather_safety_state(
@@ -1690,11 +1831,13 @@ async def test_gather_safety_state_fails_closed_when_required_order_ltp_is_missi
     adapter = SimpleNamespace(
         positions=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": "0",
-            "total_balance": "100000",
-            "opening_risk_capital": "100000",
-        }),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
         trade_book=AsyncMock(return_value=[]),
         order_book=AsyncMock(return_value=[]),
         quotes=AsyncMock(return_value=[]),
@@ -1722,102 +1865,109 @@ async def test_gather_safety_state_fails_closed_when_capital_is_unavailable() ->
     )
 
     with pytest.raises(PortfolioSafetyStateError, match="capital"):
-        await gather_safety_state({"OPENALGO_CLIENT": client}, "openalgo")
+        await gather_safety_state(_native_reader_config(client), "dhan")
 
 
 @pytest.mark.asyncio
-async def test_time_only_openalgo_trades_require_an_authoritative_started_session() -> None:
+async def test_time_only_dhan_trades_require_an_authoritative_started_session() -> None:
     ist = timezone(timedelta(hours=5, minutes=30))
     client = SimpleNamespace(
-        positionbook=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "product": "MIS",
-            "quantity": 1,
-        }]),
-        tradebook=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "product": "MIS",
-            "action": "BUY",
-            "quantity": 1,
-            "price": 100,
-            "timestamp": "09:30:00",
-        }]),
+        positionbook=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "product": "MIS",
+                    "quantity": 1,
+                }
+            ]
+        ),
+        tradebook=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "product": "MIS",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "price": 100,
+                    "timestamp": "09:30:00",
+                }
+            ]
+        ),
         orderbook=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": 0,
-            "total_balance": 100_000,
-            "opening_risk_capital": 100_000,
-        }),
-        multi_quotes=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "ltp": 110,
-        }]),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": 0,
+                "total_balance": 100_000,
+                "opening_risk_capital": 100_000,
+            }
+        ),
+        multi_quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "ltp": 110,
+                }
+            ]
+        ),
     )
-    at = datetime(2026, 7, 13, 10, 0, tzinfo=ist)
-
-    with pytest.raises(PortfolioSafetyStateError, match="Authoritative market session"):
-        await gather_safety_state({"OPENALGO_CLIENT": client}, "openalgo", at=at)
-
-    scheduler = SimpleNamespace(
-        get_market_session=lambda exchange, *, on, symbol: (
-            time(9, 15),
-            time(15, 30),
-        ) if exchange == "NSE" and on == at.date() and symbol == "TCS" else None,
-    )
-    with pytest.raises(PortfolioSafetyStateError, match="before the current session opens"):
-        await gather_safety_state(
-            {"OPENALGO_CLIENT": client, "TIME_SCHEDULER": scheduler},
-            "openalgo",
-            at=at.replace(hour=8),
-        )
-
-    state = await gather_safety_state(
-        {"OPENALGO_CLIENT": client, "TIME_SCHEDULER": scheduler},
-        "openalgo",
-        at=at,
-    )
-
-    assert state.daily_pnl == pytest.approx(10.0)
+    # Native timestamps must identify a trading date. A calendar cannot turn
+    # a time-only broker row into authoritative fill evidence.
+    with pytest.raises(PortfolioSafetyStateError, match="timestamp"):
+        await gather_safety_state(_native_reader_config(client), "dhan", at=datetime(2026, 7, 13, 10, 0, tzinfo=ist))
 
 
 @pytest.mark.asyncio
 async def test_gather_safety_state_backfills_previous_close_from_completed_daily_history() -> None:
     ist = timezone(timedelta(hours=5, minutes=30))
     client = SimpleNamespace(
-        positionbook=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "product": "MIS",
-            "quantity": 1,
-        }]),
+        positionbook=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "product": "MIS",
+                    "quantity": 1,
+                }
+            ]
+        ),
         tradebook=AsyncMock(return_value=[]),
         orderbook=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": 0,
-            "total_balance": 100000,
-            "opening_risk_capital": 100000,
-        }),
-        multi_quotes=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "ltp": 90,
-            "prev_close": 999,
-            "previous_close_trusted": False,
-        }]),
-        history=AsyncMock(return_value=[{
-            "timestamp": "2026-07-10T15:30:00+05:30",
-            "close": 100,
-        }]),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": 0,
+                "total_balance": 100000,
+                "opening_risk_capital": 100000,
+            }
+        ),
+        multi_quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "ltp": 90,
+                    "prev_close": 999,
+                    "previous_close_trusted": False,
+                }
+            ]
+        ),
+        history=AsyncMock(
+            return_value=[
+                {
+                    "timestamp": "2026-07-10T15:30:00+05:30",
+                    "close": 100,
+                }
+            ]
+        ),
     )
 
     state = await gather_safety_state(
-        {"OPENALGO_CLIENT": client},
-        "openalgo",
+        _native_reader_config(client),
+        "dhan",
         at=datetime(2026, 7, 13, 11, 0, tzinfo=ist),
     )
 
@@ -1829,35 +1979,49 @@ async def test_gather_safety_state_backfills_previous_close_from_completed_daily
 async def test_gather_safety_state_rejects_non_completed_history_candle() -> None:
     ist = timezone(timedelta(hours=5, minutes=30))
     client = SimpleNamespace(
-        positionbook=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "product": "MIS",
-            "quantity": 1,
-        }]),
+        positionbook=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "product": "MIS",
+                    "quantity": 1,
+                }
+            ]
+        ),
         tradebook=AsyncMock(return_value=[]),
         orderbook=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
-        funds=AsyncMock(return_value={
-            "used_margin": 0,
-            "total_balance": 100000,
-            "opening_risk_capital": 100000,
-        }),
-        multi_quotes=AsyncMock(return_value=[{
-            "symbol": "TCS",
-            "exchange": "NSE",
-            "ltp": 90,
-        }]),
-        history=AsyncMock(return_value=[{
-            "timestamp": "2026-07-13T09:30:00+05:30",
-            "close": 100,
-        }]),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": 0,
+                "total_balance": 100000,
+                "opening_risk_capital": 100000,
+            }
+        ),
+        multi_quotes=AsyncMock(
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "ltp": 90,
+                }
+            ]
+        ),
+        history=AsyncMock(
+            return_value=[
+                {
+                    "timestamp": "2026-07-13T09:30:00+05:30",
+                    "close": 100,
+                }
+            ]
+        ),
     )
 
     with pytest.raises(PortfolioSafetyStateError, match="non-completed session"):
         await gather_safety_state(
-            {"OPENALGO_CLIENT": client},
-            "openalgo",
+            _native_reader_config(client),
+            "dhan",
             at=datetime(2026, 7, 13, 11, 0, tzinfo=ist),
         )
 
@@ -1876,29 +2040,33 @@ def test_local_daily_pnl_uses_broker_pnl_multiplier_without_spurious_fx() -> Non
             "previous_close_trusted": True,
         }
     ]
-    quotes = [{
-        "symbol": "USDINR",
-        "exchange": "CDS",
-        "ltp": 10.1,
-        "prev_close": 10.0,
-        "previous_close_trusted": True,
-    }]
+    quotes = [
+        {
+            "symbol": "USDINR",
+            "exchange": "CDS",
+            "ltp": 10.1,
+            "prev_close": 10.0,
+            "previous_close_trusted": True,
+        }
+    ]
 
     assert compute_local_daily_pnl([], positions, quotes) == pytest.approx(100.0)
 
 
 def test_local_daily_pnl_applies_fx_only_to_explicit_cross_currency_position() -> None:
-    positions = [{
-        "symbol": "EURUSD",
-        "exchange": "CDS",
-        "product": "NRML",
-        "quantity": 1,
-        "multiplier": 1000,
-        "fx_rate": 83.25,
-        "cross_currency": True,
-        "close_price": 1.1,
-        "previous_close_trusted": True,
-    }]
+    positions = [
+        {
+            "symbol": "EURUSD",
+            "exchange": "CDS",
+            "product": "NRML",
+            "quantity": 1,
+            "multiplier": 1000,
+            "fx_rate": 83.25,
+            "cross_currency": True,
+            "close_price": 1.1,
+            "previous_close_trusted": True,
+        }
+    ]
     quotes = [{"symbol": "EURUSD", "exchange": "CDS", "ltp": 1.2}]
 
     assert compute_local_daily_pnl([], positions, quotes) == pytest.approx(8325.0)
@@ -1963,12 +2131,8 @@ def test_delivery_holding_plus_proven_day_position_reconciles_without_double_cou
 
 
 def test_delivery_overlap_without_day_accounting_fails_closed() -> None:
-    holdings = [
-        {"symbol": "TCS", "exchange": "NSE", "product": "CNC", "quantity": 10}
-    ]
-    positions = [
-        {"symbol": "TCS", "exchange": "NSE", "product": "CNC", "quantity": -3}
-    ]
+    holdings = [{"symbol": "TCS", "exchange": "NSE", "product": "CNC", "quantity": 10}]
+    positions = [{"symbol": "TCS", "exchange": "NSE", "product": "CNC", "quantity": -3}]
     trades = [
         {
             "symbol": "TCS",
@@ -2025,8 +2189,8 @@ def test_local_daily_pnl_rejects_derivative_without_multiplier() -> None:
             "symbol": "NIFTY26JULFUT",
             "exchange": "NFO",
             "ltp": 24900,
-                "prev_close": 25000,
-                "previous_close_trusted": True,
+            "prev_close": 25000,
+            "previous_close_trusted": True,
         }
     ]
 
@@ -2035,15 +2199,17 @@ def test_local_daily_pnl_rejects_derivative_without_multiplier() -> None:
 
 
 def test_local_daily_pnl_rejects_derivative_without_currency_provenance() -> None:
-    positions = [{
-        "symbol": "NIFTY26JULFUT",
-        "exchange": "NFO",
-        "product": "NRML",
-        "quantity": 1,
-        "multiplier": 25,
-        "close_price": 25000,
-        "previous_close_trusted": True,
-    }]
+    positions = [
+        {
+            "symbol": "NIFTY26JULFUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 1,
+            "multiplier": 25,
+            "close_price": 25000,
+            "previous_close_trusted": True,
+        }
+    ]
     quotes = [{"symbol": "NIFTY26JULFUT", "exchange": "NFO", "ltp": 24900}]
 
     with pytest.raises(PortfolioSafetyStateError, match="settlement-currency provenance"):
@@ -2051,16 +2217,18 @@ def test_local_daily_pnl_rejects_derivative_without_currency_provenance() -> Non
 
 
 def test_local_daily_pnl_rejects_cross_currency_position_without_fx_rate() -> None:
-    positions = [{
-        "symbol": "EURUSD",
-        "exchange": "CDS",
-        "product": "NRML",
-        "quantity": 1,
-        "multiplier": 1000,
-        "cross_currency": True,
-        "close_price": 1.1,
-        "previous_close_trusted": True,
-    }]
+    positions = [
+        {
+            "symbol": "EURUSD",
+            "exchange": "CDS",
+            "product": "NRML",
+            "quantity": 1,
+            "multiplier": 1000,
+            "cross_currency": True,
+            "close_price": 1.1,
+            "previous_close_trusted": True,
+        }
+    ]
     quotes = [{"symbol": "EURUSD", "exchange": "CDS", "ltp": 1.2}]
 
     with pytest.raises(PortfolioSafetyStateError, match="FX rate"):
@@ -2126,13 +2294,15 @@ async def test_gather_safety_state_retries_once_until_accounting_snapshot_is_sta
             }
         ),
         quotes=AsyncMock(
-            return_value=[{
-                "symbol": "TCS",
-                "exchange": "NSE",
-                "ltp": 100,
-                "prev_close": 100,
-                "previous_close_trusted": True,
-            }]
+            return_value=[
+                {
+                    "symbol": "TCS",
+                    "exchange": "NSE",
+                    "ltp": 100,
+                    "prev_close": 100,
+                    "previous_close_trusted": True,
+                }
+            ]
         ),
     )
     registry = SimpleNamespace(get_session_for=lambda _adapter_id, _account_id: session)
@@ -2149,11 +2319,11 @@ async def test_gather_safety_state_retries_once_until_accounting_snapshot_is_sta
 
 
 @pytest.mark.asyncio
-async def test_gather_safety_state_refuses_non_default_openalgo_selector() -> None:
-    with pytest.raises(PortfolioSafetyStateError, match="one configured account"):
+async def test_gather_safety_state_refuses_non_default_dhan_selector() -> None:
+    with pytest.raises(PortfolioSafetyStateError, match="reader"):
         await gather_safety_state(
-            {"OPENALGO_CLIENT": object()},
-            "openalgo",
+            {"BROKER_CLIENT": object()},
+            "dhan",
             account_id="second-account",
         )
 
@@ -2161,7 +2331,7 @@ async def test_gather_safety_state_refuses_non_default_openalgo_selector() -> No
 def test_recover_omitted_disclosed_quantity_required_for_full_replacement() -> None:
     changes: dict[str, object] = {}
     with pytest.raises(PortfolioSafetyStateError, match="disclosed quantity"):
-        _recover_omitted_modify_fields(changes, {}, {"quantity"}, "openalgo")
+        _recover_omitted_modify_fields(changes, {}, {"quantity"}, "dhan")
     with pytest.raises(PortfolioSafetyStateError, match="disclosed quantity"):
         _recover_omitted_modify_fields(changes, {}, {"quantity"}, "dhan")
 

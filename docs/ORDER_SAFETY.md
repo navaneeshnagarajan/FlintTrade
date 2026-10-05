@@ -11,12 +11,6 @@ regulatory responsibilities remain with the operator and their broker.
 
 ## Order-Gating Model
 
-Every reachable live write must mint a one-shot HMAC `SafetyContext` and
-dispatch through `BrokerRouter`. A route, widget, automation, webhook, agent,
-or script must not call a broker adapter or `OpenAlgoClient.place_order`
-directly. Placement, regular modify/cancel, and extended verbs use different
-gates — pick the matching one.
-
 **Placement.** Every order FlintTrade submits goes through admission
 when it's placed. The HTTP routes that submit an order are
 `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,
@@ -290,7 +284,7 @@ New orders stay paused. A reduce-only close is unchanged.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down. New orders are paused until it's Ready. You can still close positions.").
-That class closes a new Live place and Position Mirror start on the shared
+That class closes a new Live place on the shared
 client place path. The server decides reduce-only. A client flag is ignored.
 A close qualifies inside either place route when it is the same contract,
 the opposite side, and the quantity is no more than the open quantity minus
@@ -317,8 +311,8 @@ until dismissed.
 Anything that would flip or add to a position takes the full admit.
 `POST /api/v1/positions/exit-all` uses the same classification as a
 server-side proof before it flattens. `POST /api/v1/orders/cancel-all`
-only cancels. Layer 5 and Ditto Kill All cancel resting orders and then
-flatten; they stay reachable while Laya is Down, and they are not
+only cancels. Layer 5 cancels resting orders and then
+flattens; they stay reachable while Laya is Down, and they are not
 cancel-only. A filled reducing close can show "Closed. Exits are allowed
 while Laya is Down."
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
@@ -420,11 +414,6 @@ archive.
 
 ## Safety Layers
 
-`SafetySystem` has five layers (L1–L5). Rate limits are a separate
-HTTP/`OpenAlgoClient` control, not a sixth safety layer.
-`_check_order_locked` fail-fasts in runtime order **L5 → L4 → L1 → L2 →
-L3**: the first failing layer is the refusal the operator sees.
-
 | Layer | Purpose | Examples |
 |---|---|---|
 | L5 Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. Checked first. |
@@ -484,9 +473,7 @@ debugging and personal records; they are not a legal or regulatory attestation.
 
 | Category | Default local limit | Enforced by |
 |---|---|---|
-| Orders | 10 per second | FlintTrade order proxy: HTTP 429 `"Rate limit exceeded"` from `@rate_limit`. The OpenAlgo client additionally blocks in-process (`_RateLimiter.acquire`) before a bridge request leaves. |
 | Smart orders | 2 per second | Same split: proxy 429 plus client-side throttle. |
-| General API | 50 per second | OpenAlgo-compatible client throttle when the bridge is enabled. |
 
 Limits apply across configured exchanges for the running FlintTrade instance.
 Operators should also configure any limits available in their broker dashboard.
@@ -494,7 +481,9 @@ Operators should also configure any limits available in their broker dashboard.
 ## Sessions And Credentials
 
 - Broker login, OAuth, TOTP, and exchange access remain broker-side concerns.
+
 - Native-adapter broker credentials live in the encrypted gateway vault.
+
 - The account transaction foundation retains unknown authentication outcomes
   rather than retrying them. Its vault and workspace evidence must remain
   coherent before a read generation can be exposed. Redacted terminal audit
@@ -502,8 +491,7 @@ Operators should also configure any limits available in their broker dashboard.
   repeats authentication or order work. Production native account HTTP
   mutations remain `503`, and native HTTP reads remain `409` until their
   separate cutovers land.
-- The OpenAlgo-compatible bridge stores only the OpenAlgo API key in FlintTrade;
-  broker authentication remains inside OpenAlgo.
+
 - Secrets should be file-backed under your platform workspace directory
   (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on
   macOS, `%APPDATA%\flinttrade\` on Windows; overridden by

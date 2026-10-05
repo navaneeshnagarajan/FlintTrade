@@ -29,10 +29,9 @@ import os
 from pathlib import Path
 
 
-
 def _make_app(tmp_path: Path):
     """Create a Flask app with auth service and rate limiter active."""
-    os.environ["OPENALGO_API_KEY"] = "rate-limit-test-key"
+    os.environ["FLINTTRADE_API_KEY"] = "rate-limit-test-key"
     # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app
@@ -98,9 +97,7 @@ class TestLoginRateLimit:
             # registration (previously the deferred decoration fired before the
             # routes existed and silently wired nothing, so this test skipped
             # and login brute-force went unthrottled in production).
-            assert responses[5] == 429, (
-                f"login rate limit did not fire: {responses} (6th must be 429)"
-            )
+            assert responses[5] == 429, f"login rate limit did not fire: {responses} (6th must be 429)"
 
 
 # ---------------------------------------------------------------------------
@@ -137,9 +134,7 @@ class TestSetupRateLimit:
             # The 4th MUST be 429 — setup is limited to 3/min. (Note: the 2nd/3rd
             # legitimately return 409 "already set up" since only one account
             # exists; the limiter still counts them and trips on the 4th.)
-            assert responses[3] == 429, (
-                f"setup rate limit did not fire: {responses} (4th must be 429)"
-            )
+            assert responses[3] == 429, f"setup rate limit did not fire: {responses} (4th must be 429)"
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +179,7 @@ class TestRateLimiterConfig:
         default_limits = getattr(limiter, "_default_limits", [])
         if default_limits:
             limit_strs = [str(lim) for lim in default_limits]
-            assert any("50" in s for s in limit_strs), (
-                f"Expected '50 per second' in default limits, got: {limit_strs}"
-            )
+            assert any("50" in s for s in limit_strs), f"Expected '50 per second' in default limits, got: {limit_strs}"
 
     def test_rate_limit_decorators_stored_on_view_functions(self) -> None:
         """The @_rate_limit decorator stores limit strings on the function."""
@@ -195,9 +188,5 @@ class TestRateLimiterConfig:
         login_limits = getattr(auth_login, "_rate_limits", [])
         setup_limits = getattr(auth_setup, "_rate_limits", [])
 
-        assert "5 per minute" in login_limits, (
-            f"Expected '5 per minute' on auth_login, got: {login_limits}"
-        )
-        assert "3 per minute" in setup_limits, (
-            f"Expected '3 per minute' on auth_setup, got: {setup_limits}"
-        )
+        assert "5 per minute" in login_limits, f"Expected '5 per minute' on auth_login, got: {login_limits}"
+        assert "3 per minute" in setup_limits, f"Expected '3 per minute' on auth_setup, got: {setup_limits}"

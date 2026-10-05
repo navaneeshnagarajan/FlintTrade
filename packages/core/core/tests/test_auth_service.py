@@ -43,16 +43,20 @@ class TestAccountSetup:
         svc = AuthService(db_path=tmp_path / "auth.db")
         with pytest.raises(ValueError, match="too weak"):
             svc.setup_account(
-                username="alice", email="alice@example.com",
-                password="123", pin="123456",
+                username="alice",
+                email="alice@example.com",
+                password="123",
+                pin="123456",
             )
 
     def test_setup_rejects_non_6_digit_pin(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         with pytest.raises(ValueError, match="6 digits"):
             svc.setup_account(
-                username="alice", email="alice@example.com",
-                password="StrongP@ss123!", pin="12345",
+                username="alice",
+                email="alice@example.com",
+                password="StrongP@ss123!",
+                pin="12345",
             )
 
     def test_is_setup_returns_false_before_setup(self, tmp_path: Path):
@@ -62,8 +66,10 @@ class TestAccountSetup:
     def test_is_setup_returns_true_after_setup(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.is_setup() is True
 
@@ -71,8 +77,10 @@ class TestAccountSetup:
         svc = AuthService(db_path=tmp_path / "auth.db")
         assert svc.is_setup_finished() is False
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="",
         )
         assert svc.is_setup_finished() is False
         svc.mark_setup_finished()
@@ -102,16 +110,20 @@ class TestPasswordVerification:
     def test_verify_correct_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.verify_password("StrongP@ss123!") is True
 
     def test_verify_wrong_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.verify_password("wrong") is False
 
@@ -122,16 +134,20 @@ class TestPinVerification:
     def test_verify_correct_pin(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.verify_pin("123456") is True
 
     def test_verify_wrong_pin(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.verify_pin("000000") is False
 
@@ -169,8 +185,10 @@ class TestTOTP:
     def test_setup_generates_totp_secret(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         secret = svc.get_totp_secret()
         assert secret is not None
@@ -178,10 +196,13 @@ class TestTOTP:
 
     def test_verify_totp_with_valid_code(self, tmp_path: Path):
         import pyotp
+
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         secret = svc.get_totp_secret()
         totp = pyotp.TOTP(secret)
@@ -190,8 +211,10 @@ class TestTOTP:
     def test_verify_totp_with_invalid_code(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.verify_totp("000000") is False
 
@@ -200,17 +223,22 @@ class TestTOTP:
         provisioned but not enrolled until the operator confirms a code."""
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.is_totp_enabled() is False
 
     def test_enable_totp_requires_a_live_code(self, tmp_path: Path):
         import pyotp
+
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.enable_totp("000000") is False
         assert svc.is_totp_enabled() is False
@@ -220,10 +248,13 @@ class TestTOTP:
 
     def test_regenerate_totp_defers_enrolment_again(self, tmp_path: Path):
         import pyotp
+
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         svc.enable_totp(pyotp.TOTP(svc.get_totp_secret()).now())
         assert svc.is_totp_enabled() is True
@@ -238,8 +269,10 @@ class TestBackupCodes:
     def test_setup_generates_8_backup_codes(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         codes = svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert len(codes) == 8
         assert all(len(c) >= 8 for c in codes)
@@ -247,8 +280,10 @@ class TestBackupCodes:
     def test_backup_code_works_once(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         codes = svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.verify_backup_code(codes[0]) is True
         assert svc.verify_backup_code(codes[0]) is False  # Used, can't reuse
@@ -260,8 +295,10 @@ class TestLoginAttempts:
     def test_lockout_after_5_failures(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         for _ in range(5):
             svc.verify_password("wrong")
@@ -270,8 +307,10 @@ class TestLoginAttempts:
     def test_locked_rejects_even_correct_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         for _ in range(5):
             svc.verify_password("wrong")
@@ -284,8 +323,10 @@ class TestSetupEscapeHatches:
     def _fresh(self, tmp_path: Path) -> AuthService:
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="",
         )
         return svc
 
@@ -310,8 +351,10 @@ class TestSetupEscapeHatches:
         svc.reset_account("StrongP@ss123!")
         # Account was wiped — a fresh setup_account should succeed, not 409.
         svc.setup_account(
-            username="bob", email="bob@example.com",
-            password="AnotherP@ss123!", pin="",
+            username="bob",
+            email="bob@example.com",
+            password="AnotherP@ss123!",
+            pin="",
         )
         assert svc.get_profile()["username"] == "bob"
 
@@ -331,8 +374,10 @@ class TestSetupEscapeHatches:
         # Fresh service so the first 8 codes are the ones we capture.
         svc = AuthService(db_path=tmp_path / "auth.db")
         old_codes = svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="",
         )
         result = svc.regenerate_totp("StrongP@ss123!")
         assert result is not None
@@ -351,7 +396,7 @@ class TestSetupEscapeHatches:
 class TestPasswordChangedAtStamp:
     """update_password() must stamp ``password_changed_at`` so previously
     issued JWTs (whose ``iat`` predates the change) can be rejected at
-    decode time. Mirrors OpenAlgo v2.0.0.7's session-invalidation behaviour.
+    decode time. Mirrors native broker v2.0.0.7's session-invalidation behaviour.
     """
 
     def _fresh(self, tmp_path: Path) -> AuthService:
@@ -372,6 +417,7 @@ class TestPasswordChangedAtStamp:
 
     def test_update_password_stamps_password_changed_at(self, tmp_path: Path):
         import time as _time
+
         svc = self._fresh(tmp_path)
         before = _time.time()
         assert svc.update_password("alice", "NewStrongP@ss!234")
@@ -419,9 +465,7 @@ def _assert_already_has_operator(errors: list[BaseException]) -> None:
 def _index_names(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'index'"
-        ).fetchall()
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
     finally:
         conn.close()
     return {str(row[0]) for row in rows}
@@ -555,9 +599,7 @@ class TestAuthStoreConcurrency:
         attempts = _login_attempt_count(db_path)
         assert errors == [], f"{len(errors)} exceptions in {read_total} reads: {errors[:3]}"
         assert wrong_setup == [], f"is_setup was wrong {len(wrong_setup)} times in {read_total} reads"
-        assert missing_vault == [], (
-            f"vault state was missing or wrong {len(missing_vault)} times in {read_total} reads"
-        )
+        assert missing_vault == [], f"vault state was missing or wrong {len(missing_vault)} times in {read_total} reads"
         assert wrong_finished == [], f"setup_finished was wrong {len(wrong_finished)} times in {read_total} reads"
         assert wrong_profile == []
         assert attempts > 0, "status reads finished before any concurrent write"
@@ -680,7 +722,9 @@ class TestSingleOperatorMigration:
 
     @pytest.mark.unit
     def test_existing_duplicate_operators_are_kept_and_the_migration_is_refused(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         db_path = tmp_path / "auth.db"
         _seed_unchecked_operators(db_path, ["alice", "bob"])
@@ -691,15 +735,11 @@ class TestSingleOperatorMigration:
         assert _operator_count(db_path) == 2
         assert "account_one_operator" not in _index_names(db_path)
         assert svc.migration_blocked() == "two_operators"
-        paused = (
-            "Update paused: this database has 2 operator accounts; "
-            "FlintTrade supports one. No data was changed."
-        )
+        paused = "Update paused: this database has 2 operator accounts; FlintTrade supports one. No data was changed."
         messages = [record.message for record in caplog.records]
         assert messages.count(paused) == 1
         assert all(
-            "alice" not in message and "bob" not in message and str(db_path) not in message
-            for message in messages
+            "alice" not in message and "bob" not in message and str(db_path) not in message for message in messages
         )
         with pytest.raises(RuntimeError, match="Account already set up"):
             svc.setup_account(
@@ -711,17 +751,15 @@ class TestSingleOperatorMigration:
         assert _operator_count(db_path) == 2
         conn = sqlite3.connect(db_path)
         try:
-            names = {
-                str(row[0])
-                for row in conn.execute("SELECT username FROM account ORDER BY id")
-            }
+            names = {str(row[0]) for row in conn.execute("SELECT username FROM account ORDER BY id")}
         finally:
             conn.close()
         assert names == {"alice", "bob"}
 
     @pytest.mark.unit
     def test_existing_operator_is_setup_complete_and_a_new_operator_is_not(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         old_path = tmp_path / "old.db"
         _seed_unchecked_operators(old_path, ["alice"])

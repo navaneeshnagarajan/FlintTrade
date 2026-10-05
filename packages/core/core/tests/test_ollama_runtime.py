@@ -249,9 +249,7 @@ def _await_holder_readiness(holder: subprocess.Popen[str], ready_path: Path) -> 
     while not ready_path.exists():
         exit_code = holder.poll()
         if exit_code is not None:
-            raise AssertionError(
-                f"lease holder exited with code {exit_code} before signalling readiness: {_stderr()}"
-            )
+            raise AssertionError(f"lease holder exited with code {exit_code} before signalling readiness: {_stderr()}")
         if time.monotonic() >= deadline:
             raise AssertionError(f"lease holder never signalled readiness within {_READINESS_CEILING_SECONDS}s")
         time.sleep(0.01)
@@ -1664,9 +1662,9 @@ def test_concurrent_runtime_instances_cannot_split_process_ownership(
         monkeypatch.setattr(
             runtime,
             "_probe",
-            lambda _runtime=runtime: "0.35.0"
-            if _runtime._process is not None and _runtime._process.poll() is None
-            else None,
+            lambda _runtime=runtime: (
+                "0.35.0" if _runtime._process is not None and _runtime._process.poll() is None else None
+            ),
         )
         runtimes.append(runtime)
 
@@ -1803,9 +1801,7 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
         # shorter than the production wait makes the asserted error depend on runner
         # load, which is the defect this test was rewritten to remove. So restore the
         # real production value rather than a test ceiling.
-        monkeypatch.setattr(
-            ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", _PRODUCTION_SYNC_LIFECYCLE_WAIT
-        )
+        monkeypatch.setattr(ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", _PRODUCTION_SYNC_LIFECYCLE_WAIT)
         lease_contended.clear()
         repair_errors: list[BaseException] = []
 
@@ -2289,9 +2285,7 @@ def test_windows_native_state_open_rejects_changed_file_identity(
     class Kernel32:
         def __init__(self) -> None:
             handles = iter((10, 20, 30))
-            self.CreateFileW = NativeFunction(
-                lambda path, *_args: open_calls.append(path) or next(handles)
-            )
+            self.CreateFileW = NativeFunction(lambda path, *_args: open_calls.append(path) or next(handles))
             self.CloseHandle = NativeFunction(lambda _handle: 1)
             self.GetFileInformationByHandle = NativeFunction(self.get_info)
             self.GetFinalPathNameByHandleW = NativeFunction(self.get_final_path)
@@ -2352,9 +2346,7 @@ def test_windows_native_state_open_rejects_changed_managed_root_identity(
     class Kernel32:
         def __init__(self) -> None:
             handles = iter((10, 20, 30, 40))
-            self.CreateFileW = NativeFunction(
-                lambda path, *_args: open_calls.append(path) or next(handles)
-            )
+            self.CreateFileW = NativeFunction(lambda path, *_args: open_calls.append(path) or next(handles))
             self.CloseHandle = NativeFunction(lambda _handle: 1)
             self.GetFileInformationByHandle = NativeFunction(self.get_info)
             self.GetFinalPathNameByHandleW = NativeFunction(self.get_final_path)
@@ -2476,6 +2468,7 @@ def test_start_refuses_to_publish_a_matching_unowned_listener_that_wins_the_bind
     probes = iter([None, "0.35.0"])
 
     if os.name != "nt":
+
         def killpg(_process_group: int, sent_signal: int) -> None:
             if sent_signal == 0:
                 raise ProcessLookupError
@@ -2512,6 +2505,7 @@ def test_start_rejects_a_server_version_that_does_not_match_the_pinned_runtime(
     probes = iter([None, "0.30.0"])
 
     if os.name != "nt":
+
         def killpg(_process_group: int, sent_signal: int) -> None:
             if sent_signal == 0:
                 raise ProcessLookupError
@@ -3181,10 +3175,7 @@ def test_model_inventory_cannot_erase_a_concurrent_digest_acceptance(
             models[str(payload["destination"])] = models[str(payload["source"])]
             return None
         return {
-            "models": [
-                {"name": name, "model": name, "digest": model_digest}
-                for name, model_digest in models.items()
-            ]
+            "models": [{"name": name, "model": name, "digest": model_digest} for name, model_digest in models.items()]
         }
 
     runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
@@ -3267,9 +3258,7 @@ def test_pull_model_reports_streamed_progress(tmp_path: Path) -> None:
         tmp_path,
         probe=lambda: "0.35.0",
         puller=puller,
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]},
     )
     runtime._process = _FakeProcess()
 
@@ -3468,9 +3457,7 @@ def test_pull_model_accepts_the_aggregate_progress_sentinel(tmp_path: Path) -> N
         tmp_path,
         probe=lambda: "0.35.0",
         puller=puller,
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]},
     )
     runtime._process = _FakeProcess()
 
@@ -3501,9 +3488,7 @@ def test_pull_model_aggregates_duplicate_and_out_of_order_layer_progress(tmp_pat
         tmp_path,
         probe=lambda: "0.35.0",
         puller=puller,
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "c" * 64}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "c" * 64}]},
     )
     runtime._process = _FakeProcess()
 
@@ -3589,9 +3574,7 @@ def test_pull_model_rejects_completion_without_accounted_byte_progress(tmp_path:
         tmp_path,
         probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(0, 0, "success"),
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "a" * 64}]},
     )
     runtime._process = _FakeProcess()
 
@@ -3615,10 +3598,7 @@ def test_model_pull_preserves_digest_and_reports_later_tag_drift(tmp_path: Path)
         return {
             "models": [
                 {"name": "qwen3:8b", "model": "qwen3:8b", "digest": source_digest[0]},
-                *[
-                    {"name": name, "model": name, "digest": digest}
-                    for name, digest in copied.items()
-                ],
+                *[{"name": name, "model": name, "digest": digest} for name, digest in copied.items()],
             ]
         }
 
@@ -3670,10 +3650,7 @@ def test_changed_model_digest_requires_exact_explicit_acceptance(tmp_path: Path)
                     "model": "qwen3:8b",
                     "digest": current_digest[0],
                 },
-                *[
-                    {"name": name, "model": name, "digest": digest}
-                    for name, digest in copied.items()
-                ],
+                *[{"name": name, "model": name, "digest": digest} for name, digest in copied.items()],
             ]
         }
 
@@ -3773,9 +3750,7 @@ def test_model_pull_recognises_explicit_latest_but_still_requires_first_acceptan
         tmp_path,
         probe=lambda: "0.35.0",
         puller=lambda _model, progress: progress(1, 1, "success", f"sha256:{'a' * 64}"),
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:latest", "model": "qwen3:latest", "digest": "a" * 64}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:latest", "model": "qwen3:latest", "digest": "a" * 64}]},
     )
     runtime._process = _FakeProcess()
 
@@ -4175,13 +4150,15 @@ def test_reconciled_legacy_subjectless_model_receipt_becomes_unresolved(tmp_path
     payload = json.loads(operation_path.read_text(encoding="utf-8"))
     operation = payload["operations"][-1]
     payload["schema"] = 3
-    operation.update({
-        "state": "indeterminate",
-        "reconciled_at": operation["finished_at"],
-        "subject": None,
-        "error": "legacy unknown outcome",
-        "result": None,
-    })
+    operation.update(
+        {
+            "state": "indeterminate",
+            "reconciled_at": operation["finished_at"],
+            "subject": None,
+            "error": "legacy unknown outcome",
+            "result": None,
+        }
+    )
     operation_path.write_text(json.dumps(payload), encoding="utf-8")
 
     restarted = OllamaRuntime(tmp_path, probe=lambda: None)
@@ -5247,9 +5224,7 @@ def test_stop_forces_the_exact_owned_child_after_the_inference_grace_deadline(
     runtime = OllamaRuntime(
         tmp_path,
         probe=lambda: "0.35.0" if process.poll() is None else None,
-        request_json=lambda *_args: {
-            "models": [{"name": alias, "model": alias, "digest": digest}]
-        },
+        request_json=lambda *_args: {"models": [{"name": alias, "model": alias, "digest": digest}]},
     )
     runtime._process = process
     runtime._port = 43127
@@ -5753,9 +5728,7 @@ def test_managed_global_readiness_refuses_model_digest_drift(tmp_path: Path) -> 
     runtime = OllamaRuntime(
         tmp_path,
         probe=lambda: "0.35.0",
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "b" * 64}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": "b" * 64}]},
     )
     runtime._process = _FakeProcess()
     runtime._write_accepted_model_digests({"qwen3:8b": "a" * 64})
@@ -5787,9 +5760,7 @@ def test_legacy_mutable_tag_trust_is_not_presented_as_inference_acceptance(tmp_p
         tmp_path,
         probe=lambda: "0.35.0",
         listener_owner=lambda _process: True,
-        request_json=lambda *_args: {
-            "models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": digest}]
-        },
+        request_json=lambda *_args: {"models": [{"name": "qwen3:8b", "model": "qwen3:8b", "digest": digest}]},
     )
     runtime._process = _FakeProcess()
     runtime._port = 43127
@@ -5891,6 +5862,7 @@ def test_live_child_from_a_stale_owner_record_is_never_signalled(
         }
     )
     monkeypatch.setattr(runtime, "_process_identity_is_alive", lambda pid, created: pid == stale.pid)
+
     def terminate_stale(process: Any, **_kwargs: Any) -> None:
         terminated.append(process)
         process.returncode = 0
@@ -6289,6 +6261,7 @@ def test_stop_and_repair_refuse_to_signal_an_inherited_child(
         }
     )
     monkeypatch.setattr(runtime, "_process_identity_is_alive", lambda pid, _created: pid == stale.pid)
+
     def terminate_stale(process: Any, **_kwargs: Any) -> None:
         terminated.append(process)
         process.returncode = 0
@@ -7233,10 +7206,7 @@ def test_delete_model_removes_exact_alias_and_reconciles_trust(tmp_path: Path) -
             models.pop(model, None)
             return None
         return {
-            "models": [
-                {"name": name, "model": name, "digest": model_digest}
-                for name, model_digest in models.items()
-            ]
+            "models": [{"name": name, "model": name, "digest": model_digest} for name, model_digest in models.items()]
         }
 
     runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
@@ -7268,10 +7238,7 @@ def test_shutdown_waits_for_model_delete_reconciliation_before_cancelling(
             assert release_delete.wait(timeout=2.0)
             return None
         return {
-            "models": [
-                {"name": name, "model": name, "digest": model_digest}
-                for name, model_digest in models.items()
-            ]
+            "models": [{"name": name, "model": name, "digest": model_digest} for name, model_digest in models.items()]
         }
 
     runtime = OllamaRuntime(
@@ -7290,12 +7257,14 @@ def test_shutdown_waits_for_model_delete_reconciliation_before_cancelling(
 
     def delete() -> None:
         try:
-            result.append(runtime.run_synchronous_operation(
-                "delete_model",
-                f"adm_{'a' * 32}",
-                lambda: runtime.delete_model("qwen3:8b"),
-                operation_subject={"model": "qwen3:8b"},
-            ))
+            result.append(
+                runtime.run_synchronous_operation(
+                    "delete_model",
+                    f"adm_{'a' * 32}",
+                    lambda: runtime.delete_model("qwen3:8b"),
+                    operation_subject={"model": "qwen3:8b"},
+                )
+            )
         except BaseException as exc:  # noqa: BLE001 - asserted below
             errors.append(exc)
 
@@ -7346,12 +7315,7 @@ def test_prune_removes_only_unreferenced_flinttrade_locked_aliases(tmp_path: Pat
             deleted.append(model)
             models.pop(model, None)
             return None
-        return {
-            "models": [
-                {"name": name, "model": name, "digest": digest}
-                for name, digest in models.items()
-            ]
-        }
+        return {"models": [{"name": name, "model": name, "digest": digest} for name, digest in models.items()]}
 
     runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()
@@ -7384,10 +7348,7 @@ def test_prune_recovers_an_unrecorded_locked_alias_left_by_interrupted_acceptanc
             models.pop(model, None)
             return None
         return {
-            "models": [
-                {"name": name, "model": name, "digest": model_digest}
-                for name, model_digest in models.items()
-            ]
+            "models": [{"name": name, "model": name, "digest": model_digest} for name, model_digest in models.items()]
         }
 
     runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
@@ -7416,12 +7377,7 @@ def test_prune_reconciles_successful_deletions_when_a_later_delete_fails(tmp_pat
                 raise OllamaRuntimeError("injected Ollama delete failure")
             models.pop(str(payload["model"]), None)
             return None
-        return {
-            "models": [
-                {"name": name, "model": name, "digest": digest}
-                for name, digest in models.items()
-            ]
-        }
+        return {"models": [{"name": name, "model": name, "digest": digest} for name, digest in models.items()]}
 
     runtime = OllamaRuntime(tmp_path, probe=lambda: "0.35.0", request_json=request_json)
     runtime._process = _FakeProcess()

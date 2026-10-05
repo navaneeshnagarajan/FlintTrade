@@ -61,6 +61,7 @@ class _OperatorSessionVerificationError(RuntimeError):
         super().__init__(reason)
         self.reason = reason
 
+
 # ---------------------------------------------------------------------------
 # JWT revocation blocklist — DuckDB-backed, shared across gunicorn workers.
 # ---------------------------------------------------------------------------
@@ -188,13 +189,13 @@ def _rate_limit(limit_string: str):
 
             # Fallback: enforce with the in-memory sliding-window limiter.
             if not _check_in_memory_rate_limit(f.__name__, max_requests, window_seconds):
-                logger.warning(
-                    "Rate limit exceeded for %s from %s", f.__name__, request.remote_addr
-                )
-                return jsonify({
-                    "status": "error",
-                    "message": "Too many requests. Please try again later.",
-                }), 429
+                logger.warning("Rate limit exceeded for %s from %s", f.__name__, request.remote_addr)
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": "Too many requests. Please try again later.",
+                    }
+                ), 429
 
             return f(*args, **kwargs)
 
@@ -228,9 +229,7 @@ def install_auth_rate_limits(app: Any) -> int:
     """
     limiter = app.config.get("LIMITER")
     if limiter is None:
-        logger.warning(
-            "No LIMITER in app config — auth rate limits enforced by in-memory fallback"
-        )
+        logger.warning("No LIMITER in app config — auth rate limits enforced by in-memory fallback")
         return 0
 
     registered = 0
@@ -248,6 +247,7 @@ def install_auth_rate_limits(app: Any) -> int:
         logger.debug("Registered %d rate limit(s) on %s", len(limits), endpoint)
     logger.info("Auth blueprint: %d rate-limit rules registered with Flask-Limiter", registered)
     return registered
+
 
 # JWT config
 _JWT_SECRET_KEY = ""  # Set from env or generated at startup
@@ -416,9 +416,7 @@ def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, An
     Also checks the server-side JTI revocation blocklist so that tokens
     invalidated by logout are rejected even before expiry, and rejects
     every token whose ``iat`` predates the user's most recent password
-    change so that leaked sessions cannot survive a password reset. This
-    is the FlintTrade analogue of OpenAlgo v2.0.0.7's session-on-password-
-    change invalidation.
+    change so that leaked sessions cannot survive a password reset.
 
     Args:
         token: Encoded JWT string.
@@ -459,9 +457,7 @@ def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, An
                 # Allow a 2-second skew window so a fresh post-change token
                 # whose iat is rounded down isn't accidentally rejected.
                 if pwd_changed_at > 0.0 and iat_epoch + 2.0 < pwd_changed_at:
-                    raise jwt.InvalidTokenError(
-                        "Token issued before most recent password change"
-                    )
+                    raise jwt.InvalidTokenError("Token issued before most recent password change")
 
     # Sessions are bound to the operator id and the account epoch. Reset and
     # operator re-creation bump the epoch, so every earlier token fails here.
@@ -508,10 +504,12 @@ def verify_operator_session_token(token: str) -> VerifiedOperatorSession:
     from .auth_scopes import resolve_session_scopes  # noqa: PLC0415 - avoid import cycle
 
     signing_key = signing_key_text.encode("utf-8")
+    # These MACs bind an already verified JWT to opaque actor/session references.
+    # They are not password verifiers; AuthService hashes passwords with Argon2id.
     actor_ref = "operator:" + hmac.new(signing_key, _ACTOR_REFERENCE_DOMAIN + subject_bytes, hashlib.sha256).hexdigest()
-    session_binding = "session:" + hmac.new(
-        signing_key, _SESSION_BINDING_DOMAIN + token_bytes, hashlib.sha256
-    ).hexdigest()
+    session_binding = (
+        "session:" + hmac.new(signing_key, _SESSION_BINDING_DOMAIN + token_bytes, hashlib.sha256).hexdigest()
+    )
     return VerifiedOperatorSession(actor_ref, session_binding, resolve_session_scopes(payload))
 
 
@@ -535,22 +533,28 @@ def require_operator_session() -> tuple[Any, int] | None:
     if not token:
         token = request.headers.get("X-FlintTrade-Token", "").strip()
     if not token:
-        return jsonify({
-            "status": "error",
-            "message": "Broker account management requires a logged-in session — sign in first.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Broker account management requires a logged-in session — sign in first.",
+            }
+        ), 401
     try:
         verify_operator_session_token(token)
     except _OperatorSessionVerificationError as error:
         if error.reason == "not_full_session":
-            return jsonify({
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Broker account management requires a full login session.",
+                }
+            ), 401
+        return jsonify(
+            {
                 "status": "error",
-                "message": "Broker account management requires a full login session.",
-            }), 401
-        return jsonify({
-            "status": "error",
-            "message": "Session expired or invalid — sign in again to manage broker accounts.",
-        }), 401
+                "message": "Session expired or invalid — sign in again to manage broker accounts.",
+            }
+        ), 401
     return None
 
 
@@ -563,11 +567,13 @@ def _migration_paused_response(svc: Any) -> tuple[Any, int] | None:
     blocked = svc.migration_blocked()
     if not blocked:
         return None
-    return jsonify({
-        "status": "error",
-        "message": "FlintTrade couldn't finish updating.",
-        "migration_blocked": blocked,
-    }), 409
+    return jsonify(
+        {
+            "status": "error",
+            "message": "FlintTrade couldn't finish updating.",
+            "migration_blocked": blocked,
+        }
+    ), 409
 
 
 @auth_bp.route("/status", methods=["GET"])
@@ -583,28 +589,30 @@ def auth_status() -> tuple[Any, int]:
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
-    return jsonify({
-        "status": "success",
-        "data": {
-            "is_setup": svc.is_setup(),
-            "is_locked": svc.is_locked(),
-            "has_pin": svc.has_pin(),
-            "totp_enabled": svc.is_totp_enabled(),
-            # Non-secret first-run facts. ``vault_open`` is true when this
-            # machine already has a hardened master password (the backend
-            # provisions one at startup). ``setup_finished`` is true only
-            # after the operator has finished Setup, not merely created
-            # the account.
-            "vault_open": _vault_is_open(),
-            "setup_finished": svc.is_setup_finished(),
-            # Frozen at operator creation. Live ``vault_open`` can become
-            # true later without changing the step total.
-            "vault_presecured": svc.setup_vault_presecured(),
-            # ``two_operators`` pauses startup. Null when the desk may open.
-            # The field is a state name, not an account list.
-            "migration_blocked": svc.migration_blocked(),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "is_setup": svc.is_setup(),
+                "is_locked": svc.is_locked(),
+                "has_pin": svc.has_pin(),
+                "totp_enabled": svc.is_totp_enabled(),
+                # Non-secret first-run facts. ``vault_open`` is true when this
+                # machine already has a hardened master password (the backend
+                # provisions one at startup). ``setup_finished`` is true only
+                # after the operator has finished Setup, not merely created
+                # the account.
+                "vault_open": _vault_is_open(),
+                "setup_finished": svc.is_setup_finished(),
+                # Frozen at operator creation. Live ``vault_open`` can become
+                # true later without changing the step total.
+                "vault_presecured": svc.setup_vault_presecured(),
+                # ``two_operators`` pauses startup. Null when the desk may open.
+                # The field is a state name, not an account list.
+                "migration_blocked": svc.migration_blocked(),
+            },
+        }
+    ), 200
 
 
 @auth_bp.route("/setup", methods=["POST"])
@@ -633,11 +641,13 @@ def auth_setup() -> tuple[Any, int]:
         # Setup show the existing-operator sign-in. Other conflicts stay a
         # plain 409 with the generic message.
         if str(exc) == "Account already set up":
-            return jsonify({
-                "status": "error",
-                "code": "operator_exists",
-                "message": "Request conflicts with the current state",
-            }), 409
+            return jsonify(
+                {
+                    "status": "error",
+                    "code": "operator_exists",
+                    "message": "Request conflicts with the current state",
+                }
+            ), 409
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
 
     # Snapshot the vault before this request can open it. A missing or
@@ -658,15 +668,17 @@ def auth_setup() -> tuple[Any, int]:
     # Example data is reserved for the web demo and is not minted here.
     # Resume uses the same helper, so a reload stays on that Practice session.
     token = _mint_setup_session(username, setup_bound=svc.get_created_at())
-    return jsonify({
-        "status": "success",
-        "data": {
-            "backup_codes": backup_codes,
-            "totp_uri": svc.get_totp_provisioning_uri(),
-            "token": token,
-            "mode": "practice",
-        },
-    }), 201
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "backup_codes": backup_codes,
+                "totp_uri": svc.get_totp_provisioning_uri(),
+                "token": token,
+                "mode": "practice",
+            },
+        }
+    ), 201
 
 
 def _session_token_from_request() -> str:
@@ -719,15 +731,19 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
     try:
         payload = decode_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired or invalid — confirm with your password instead.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired or invalid — confirm with your password instead.",
+            }
+        ), 401
     if payload.get("type") != "session" or payload.get("setup_session") is not True:
-        return jsonify({
-            "status": "error",
-            "message": "A setup session is required.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "A setup session is required.",
+            }
+        ), 401
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
@@ -744,22 +760,18 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
         or not created
         or not hmac.compare_digest(bound, created)
     ):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired or invalid — confirm with your password instead.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired or invalid — confirm with your password instead.",
+            }
+        ), 401
     return payload
 
 
-_RECOVERY_REQUIRES_AUTHENTICATOR = (
-    "Account recovery requires your password and the current authenticator code."
-)
-_SIGN_IN_TO_RESET_PASSWORD = (
-    "Sign in to reset this account. You'll need your password."
-)
-_SIGN_IN_TO_RESET = (
-    "Sign in to reset this account. You'll need your password and authenticator code."
-)
+_RECOVERY_REQUIRES_AUTHENTICATOR = "Account recovery requires your password and the current authenticator code."
+_SIGN_IN_TO_RESET_PASSWORD = "Sign in to reset this account. You'll need your password."
+_SIGN_IN_TO_RESET = "Sign in to reset this account. You'll need your password and authenticator code."
 
 
 def _finished_account_recovery_refusal(svc: Any, body: dict[str, Any], token: str) -> tuple[Any, int] | None:
@@ -784,16 +796,20 @@ def _finished_account_recovery_refusal(svc: Any, body: dict[str, Any], token: st
         enrolled = True
     if _operator_session_payload(token) is None:
         if enrolled:
-            return jsonify({
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": _SIGN_IN_TO_RESET,
+                    "authenticator_enrolled": True,
+                }
+            ), 403
+        return jsonify(
+            {
                 "status": "error",
-                "message": _SIGN_IN_TO_RESET,
-                "authenticator_enrolled": True,
-            }), 403
-        return jsonify({
-            "status": "error",
-            "message": _SIGN_IN_TO_RESET_PASSWORD,
-            "authenticator_enrolled": False,
-        }), 401
+                "message": _SIGN_IN_TO_RESET_PASSWORD,
+                "authenticator_enrolled": False,
+            }
+        ), 401
     if not enrolled:
         return None
     password = str(body.get("password", ""))
@@ -876,10 +892,12 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
     if result is None:
         return jsonify({"status": "error", "message": "Invalid password."}), 401
     totp_uri, backup_codes = result
-    return jsonify({
-        "status": "success",
-        "data": {"totp_uri": totp_uri, "backup_codes": backup_codes},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"totp_uri": totp_uri, "backup_codes": backup_codes},
+        }
+    ), 200
 
 
 _VAULT_PASSWORD_MIN_CHARS = 8
@@ -949,10 +967,12 @@ def auth_setup_vault() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "The vault could not be opened."}), 500
     if existing is not None:
         set_master_password(existing)
-        return jsonify({
-            "status": "success",
-            "data": {"opened": True, "already_present": True},
-        }), 200
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"opened": True, "already_present": True},
+            }
+        ), 200
 
     body = request.get_json(silent=True) or {}
     password = body.get("master_password", "")
@@ -964,10 +984,12 @@ def auth_setup_vault() -> tuple[Any, int]:
         or len(password) < _VAULT_PASSWORD_MIN_CHARS
         or len(password.encode("utf-8")) > _VAULT_PASSWORD_MAX_BYTES
     ):
-        return jsonify({
-            "status": "error",
-            "message": "Enter a master password of at least 8 characters.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Enter a master password of at least 8 characters.",
+            }
+        ), 400
 
     try:
         write_secret_text(password_file, password)
@@ -982,10 +1004,12 @@ def auth_setup_vault() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "The vault could not be opened."}), 500
 
     set_master_password(password)
-    return jsonify({
-        "status": "success",
-        "data": {"opened": True, "already_present": False},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"opened": True, "already_present": False},
+        }
+    ), 200
 
 
 def _verify_operator_session() -> dict[str, Any] | tuple[Any, int]:
@@ -1000,10 +1024,12 @@ def _verify_operator_session() -> dict[str, Any] | tuple[Any, int]:
     try:
         payload = decode_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired or invalid — sign in again.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired or invalid — sign in again.",
+            }
+        ), 401
     if payload.get("type") != "session":
         return jsonify({"status": "error", "message": "Sign in to continue setup."}), 401
     svc = _get_auth_service()
@@ -1012,15 +1038,13 @@ def _verify_operator_session() -> dict[str, Any] | tuple[Any, int]:
     profile = svc.get_profile()
     subject = str(payload.get("sub") or "")
     expected_user = str(profile.get("username") or "")
-    if (
-        not subject
-        or not expected_user
-        or not hmac.compare_digest(subject, expected_user)
-    ):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired or invalid — sign in again.",
-        }), 401
+    if not subject or not expected_user or not hmac.compare_digest(subject, expected_user):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired or invalid — sign in again.",
+            }
+        ), 401
     return payload
 
 
@@ -1042,20 +1066,26 @@ def auth_setup_resume() -> tuple[Any, int]:
     if paused is not None:
         return paused
     if svc.is_locked():
-        return jsonify({
-            "status": "error",
-            "message": "Account locked after too many failed attempts. Reset via email.",
-        }), 423
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Account locked after too many failed attempts. Reset via email.",
+            }
+        ), 423
     if not svc.is_setup():
-        return jsonify({
-            "status": "error",
-            "message": "Create an operator before continuing setup.",
-        }), 409
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Create an operator before continuing setup.",
+            }
+        ), 409
     if svc.is_setup_finished():
-        return jsonify({
-            "status": "error",
-            "message": "Setup is already complete. Sign in.",
-        }), 409
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Setup is already complete. Sign in.",
+            }
+        ), 409
 
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
@@ -1071,10 +1101,12 @@ def auth_setup_resume() -> tuple[Any, int]:
     if not username:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     token = _mint_setup_session(username, setup_bound=svc.get_created_at())
-    return jsonify({
-        "status": "success",
-        "data": {"token": token, "username": username},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"token": token, "username": username},
+        }
+    ), 200
 
 
 @auth_bp.route("/setup/complete", methods=["POST"])
@@ -1091,20 +1123,26 @@ def auth_setup_complete() -> tuple[Any, int]:
     if not isinstance(verified, dict):
         return verified
     if not svc.is_setup():
-        return jsonify({
-            "status": "error",
-            "message": "Create an operator before finishing setup.",
-        }), 409
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Create an operator before finishing setup.",
+            }
+        ), 409
     if not _vault_is_open():
-        return jsonify({
-            "status": "error",
-            "message": "Open the vault before finishing setup.",
-        }), 409
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Open the vault before finishing setup.",
+            }
+        ), 409
     svc.mark_setup_finished()
-    return jsonify({
-        "status": "success",
-        "data": {"setup_finished": True},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"setup_finished": True},
+        }
+    ), 200
 
 
 def _tofu_authorise_login_actor(actor_id: str) -> None:
@@ -1127,7 +1165,9 @@ def _tofu_authorise_login_actor(actor_id: str) -> None:
             logger.info(
                 "Auto-authorised operator %r for %s:%s (trust-on-first-use; add "
                 "other actors explicitly in workspace.json brokers.account_acls)",
-                actor_id, claimed[0], claimed[1],
+                actor_id,
+                claimed[0],
+                claimed[1],
             )
     except Exception:  # pragma: no cover — must never break login
         logger.debug("TOFU actor authorisation skipped", exc_info=True)
@@ -1146,10 +1186,12 @@ def auth_login() -> tuple[Any, int]:
         return paused
 
     if svc.is_locked():
-        return jsonify({
-            "status": "error",
-            "message": "Account locked after too many failed attempts. Reset via email.",
-        }), 423
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Account locked after too many failed attempts. Reset via email.",
+            }
+        ), 423
 
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
@@ -1169,15 +1211,17 @@ def auth_login() -> tuple[Any, int]:
     token = _create_token(username)
     _tofu_authorise_login_actor(username)
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "token": token,
-            "username": profile.get("username"),
-            "expires_at": _next_8am_ist().isoformat(),
-            "mode": "practice",
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "token": token,
+                "username": profile.get("username"),
+                "expires_at": _next_8am_ist().isoformat(),
+                "mode": "practice",
+            },
+        }
+    ), 200
 
 
 _SESSION_MODES = frozenset({"explore", "practice", "live"})
@@ -1212,22 +1256,28 @@ def _pin_reauth_session() -> dict[str, Any] | tuple[Any, int]:
     if not session_token:
         session_token = request.headers.get("X-FlintTrade-Token", "").strip()
     if not session_token:
-        return jsonify({
-            "status": "error",
-            "message": "PIN unlock requires an active session — sign in with password and TOTP first.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "PIN unlock requires an active session — sign in with password and TOTP first.",
+            }
+        ), 401
     try:
         session_payload = decode_token(session_token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired — sign in with password and TOTP, then use the PIN.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired — sign in with password and TOTP, then use the PIN.",
+            }
+        ), 401
     if session_payload.get("type") != "session":
-        return jsonify({
-            "status": "error",
-            "message": "PIN unlock requires a full login session — sign in with password and TOTP first.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "PIN unlock requires a full login session — sign in with password and TOTP first.",
+            }
+        ), 401
     return session_payload
 
 
@@ -1242,28 +1292,32 @@ def _reject_pin(pin: str) -> tuple[Any, int] | None:
     # skipped at setup, verify_pin fails unconditionally and the old
     # blanket "Invalid PIN." sent operators chasing a PIN they never set.
     if not svc.has_pin():
-        return jsonify({
-            "status": "error",
-            "code": "pin_not_set",
-            "message": (
-                "No PIN is set for this account — the optional PIN was "
-                "skipped at setup. Create one in Settings → Security "
-                "(POST /v1/auth/pin/set), then retry."
-            ),
-        }), 409
+        return jsonify(
+            {
+                "status": "error",
+                "code": "pin_not_set",
+                "message": (
+                    "No PIN is set for this account — the optional PIN was "
+                    "skipped at setup. Create one in Settings → Security "
+                    "(POST /v1/auth/pin/set), then retry."
+                ),
+            }
+        ), 409
     return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
 
 def _totp_required_for_live() -> tuple[Any, int]:
     """The existing Live authenticator-enrolment refusal."""
-    return jsonify({
-        "status": "error",
-        "code": "totp_required",
-        "message": (
-            "Authenticator enrolment is required before Live. "
-            "Confirm a one-time code from your authenticator app, then retry."
-        ),
-    }), 403
+    return jsonify(
+        {
+            "status": "error",
+            "code": "totp_required",
+            "message": (
+                "Authenticator enrolment is required before Live. "
+                "Confirm a one-time code from your authenticator app, then retry."
+            ),
+        }
+    ), 403
 
 
 def _revoke_presented_session(session_payload: dict[str, Any]) -> tuple[Any, int] | None:
@@ -1276,18 +1330,22 @@ def _revoke_presented_session(session_payload: dict[str, Any]) -> tuple[Any, int
     old_jti = str(session_payload.get("jti") or "")
     old_exp = float(session_payload.get("exp") or 0)
     if not old_jti:
-        return jsonify({
-            "status": "error",
-            "message": "Token missing jti claim — cannot rotate the session.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Token missing jti claim — cannot rotate the session.",
+            }
+        ), 400
     try:
         _revoke_jti(old_jti, old_exp)
     except Exception:
         logger.exception("PIN unlock revocation failed | jti=%s", old_jti)
-        return jsonify({
-            "status": "error",
-            "message": "Could not revoke previous session token — try again.",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Could not revoke previous session token — try again.",
+            }
+        ), 503
     return None
 
 
@@ -1310,14 +1368,16 @@ def _issue_pin_token(
         live_mode_unlocked=live_mode_unlocked,
         mode=mode,
     )
-    return jsonify({
-        "status": "success",
-        "data": {
-            "token": token,
-            "mode": mode,
-            "live_mode_unlocked": live_mode_unlocked,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "token": token,
+                "mode": mode,
+                "live_mode_unlocked": live_mode_unlocked,
+            },
+        }
+    ), 200
 
 
 @auth_bp.route("/pin", methods=["POST"])
@@ -1347,10 +1407,12 @@ def auth_pin_verify() -> tuple[Any, int]:
 
     session_mode = _session_mode(loaded)
     if session_mode is None:
-        return jsonify({
-            "status": "error",
-            "message": "The current session has no mode to restore.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The current session has no mode to restore.",
+            }
+        ), 400
 
     svc = _get_auth_service()
     if svc is None:
@@ -1426,28 +1488,36 @@ def auth_pin_set() -> tuple[Any, int]:
     if not session_token:
         session_token = request.headers.get("X-FlintTrade-Token", "").strip()
     if not session_token:
-        return jsonify({
-            "status": "error",
-            "message": "Setting a PIN requires an active session — sign in with password and TOTP first.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Setting a PIN requires an active session — sign in with password and TOTP first.",
+            }
+        ), 401
     try:
         session_payload = decode_token(session_token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired — sign in with password and TOTP, then set the PIN.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired — sign in with password and TOTP, then set the PIN.",
+            }
+        ), 401
     if session_payload.get("type") != "session":
-        return jsonify({
-            "status": "error",
-            "message": "Setting a PIN requires a full login session — sign in with password and TOTP first.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Setting a PIN requires a full login session — sign in with password and TOTP first.",
+            }
+        ), 401
 
     if svc.is_locked():
-        return jsonify({
-            "status": "error",
-            "message": "Account locked after too many failed attempts. Try again later.",
-        }), 423
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Account locked after too many failed attempts. Try again later.",
+            }
+        ), 423
 
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
@@ -1485,22 +1555,28 @@ def auth_totp_enable() -> tuple[Any, int]:
     if not session_token:
         session_token = request.headers.get("X-FlintTrade-Token", "").strip()
     if not session_token:
-        return jsonify({
-            "status": "error",
-            "message": "Authenticator enrolment requires an active session — sign in first.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authenticator enrolment requires an active session — sign in first.",
+            }
+        ), 401
     try:
         session_payload = decode_token(session_token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return jsonify({
-            "status": "error",
-            "message": "Session expired — sign in, then enrol the authenticator.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session expired — sign in, then enrol the authenticator.",
+            }
+        ), 401
     if session_payload.get("type") != "session":
-        return jsonify({
-            "status": "error",
-            "message": "Authenticator enrolment requires a full login session.",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authenticator enrolment requires a full login session.",
+            }
+        ), 401
 
     body = request.get_json(silent=True) or {}
     totp_code = str(body.get("totp_code", ""))
@@ -1549,13 +1625,15 @@ def auth_mode_switch() -> tuple[Any, int]:
     """
     target_mode = str((request.get_json(silent=True) or {}).get("mode", "")).strip().lower()
     if target_mode != "practice":
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Only a downgrade to practice is allowed here. "
-                "Switch to Live via POST /v1/auth/live with PIN verification."
-            ),
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Only a downgrade to practice is allowed here. "
+                    "Switch to Live via POST /v1/auth/live with PIN verification."
+                ),
+            }
+        ), 400
 
     # Extract and verify the caller's existing JWT.
     auth_header = request.headers.get("Authorization", "")
@@ -1594,13 +1672,14 @@ def auth_mode_switch() -> tuple[Any, int]:
     old_exp = float(payload.get("exp", 0))
     if not old_jti:
         logger.warning(
-            "Mode-switch token missing jti claim — refusing downgrade "
-            "(cannot revoke a token without an id)",
+            "Mode-switch token missing jti claim — refusing downgrade (cannot revoke a token without an id)",
         )
-        return jsonify({
-            "status": "error",
-            "message": "Token missing jti claim — cannot perform mode downgrade.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Token missing jti claim — cannot perform mode downgrade.",
+            }
+        ), 400
 
     try:
         _revoke_jti(old_jti, old_exp)
@@ -1610,13 +1689,12 @@ def auth_mode_switch() -> tuple[Any, int]:
             "stays in Live and the stale token doesn't go quietly unrevoked | jti=%s",
             old_jti,
         )
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Could not revoke previous session token — try again. "
-                "Staying in Live mode for safety."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": ("Could not revoke previous session token — try again. Staying in Live mode for safety."),
+            }
+        ), 503
 
     # Only AFTER successful revocation do we mint the new downgraded token.
     username = str(payload.get("sub") or svc.get_profile().get("username", "user"))
@@ -1626,14 +1704,16 @@ def auth_mode_switch() -> tuple[Any, int]:
         mode=target_mode,
     )
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "token": new_token,
-            "mode": target_mode,
-            "live_mode_unlocked": False,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "token": new_token,
+                "mode": target_mode,
+                "live_mode_unlocked": False,
+            },
+        }
+    ), 200
 
 
 @auth_bp.route("/logout", methods=["POST"])
@@ -1840,7 +1920,7 @@ _OTP_STORE: dict[str, dict[str, Any]] = {}
 # {email: [epoch, epoch, ...]} — timestamps of OTP issue attempts this hour
 _OTP_REQUEST_LOG: dict[str, list[float]] = {}
 
-_OTP_TTL_SECONDS = 600          # 10 minutes
+_OTP_TTL_SECONDS = 600  # 10 minutes
 _OTP_MAX_REQUESTS_PER_HOUR = 3  # per email address
 
 
@@ -1966,9 +2046,7 @@ class EmailTransport:
         self._smtp_user = os.environ.get("SMTP_USER", "")
         self._smtp_password = os.environ.get("SMTP_PASSWORD", "")
         self._smtp_from = os.environ.get("SMTP_FROM", self._smtp_user)
-        self._ses_region = os.environ.get(
-            "AWS_SES_REGION", os.environ.get("AWS_DEFAULT_REGION", "")
-        )
+        self._ses_region = os.environ.get("AWS_SES_REGION", os.environ.get("AWS_DEFAULT_REGION", ""))
 
     def send_otp(self, email: str, otp: str) -> bool:
         """Deliver a 6-digit OTP to ``email``.
@@ -2142,10 +2220,12 @@ def auth_forgot_password_otp() -> tuple[Any, int]:
 
     # Enforce per-email hourly rate limit
     if not _otp_rate_ok(email):
-        return jsonify({
-            "status": "error",
-            "message": "Too many OTP requests. Please wait an hour before trying again.",
-        }), 429
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Too many OTP requests. Please wait an hour before trying again.",
+            }
+        ), 429
 
     # Only generate and send the OTP if the email is registered
     svc = _get_auth_service()
@@ -2158,15 +2238,15 @@ def auth_forgot_password_otp() -> tuple[Any, int]:
             sent = transport.send_otp(email, otp)
             if not sent:
                 # Don't reveal the failure to the caller — log it internally.
-                logger.error(
-                    "Failed to deliver OTP to %s — check email transport config", email
-                )
+                logger.error("Failed to deliver OTP to %s — check email transport config", email)
 
     # Always return success to avoid email-enumeration attacks
-    return jsonify({
-        "status": "success",
-        "message": "If the email is registered, a reset OTP has been sent.",
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "message": "If the email is registered, a reset OTP has been sent.",
+        }
+    ), 200
 
 
 @auth_bp.route("/reset-password-otp", methods=["POST"])
@@ -2193,16 +2273,20 @@ def auth_reset_password_otp() -> tuple[Any, int]:
     new_password = str(body.get("new_password", ""))
 
     if not email or not otp or not new_password:
-        return jsonify({
-            "status": "error",
-            "message": "email, otp, and new_password are all required.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "email, otp, and new_password are all required.",
+            }
+        ), 400
 
     if not _verify_and_consume_otp(email, otp):
-        return jsonify({
-            "status": "error",
-            "message": "Invalid or expired OTP.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Invalid or expired OTP.",
+            }
+        ), 400
 
     svc = _get_auth_service()
     if svc is None:
@@ -2228,9 +2312,7 @@ def auth_reset_password_otp() -> tuple[Any, int]:
     session_token = auth_header.removeprefix("Bearer ").strip()
     if session_token:
         try:
-            sess_payload = jwt.decode(
-                session_token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM]
-            )
+            sess_payload = jwt.decode(session_token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
             sess_jti = sess_payload.get("jti", "")
             sess_exp = float(sess_payload.get("exp", 0))
             if sess_jti:

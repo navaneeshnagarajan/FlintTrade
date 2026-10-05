@@ -65,16 +65,8 @@ vi.mock("@/hooks/useTickerFallback", () => ({
   useTickerFallback: vi.fn(),
 }));
 
-const { mockUseOpenAlgoConfigHydration } = vi.hoisted(() => ({
-  mockUseOpenAlgoConfigHydration: vi.fn(),
-}));
-
 const { mockUseBrokerAccounts } = vi.hoisted(() => ({
   mockUseBrokerAccounts: vi.fn(),
-}));
-
-vi.mock("@/hooks/useOpenAlgoConfigHydration", () => ({
-  useOpenAlgoConfigHydration: mockUseOpenAlgoConfigHydration,
 }));
 
 vi.mock("@/hooks/useBrokerAccounts", () => ({
@@ -357,14 +349,12 @@ describe("AppLayout", () => {
     renderApp();
 
     expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
-    expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(false);
     expect(mockUseBrokerAccounts).toHaveBeenCalledWith(false);
   });
 
-  it("hydrates broker config for an authenticated non-Explore session", () => {
+  it("polls native accounts for an authenticated non-Explore session", () => {
     renderApp();
 
-    expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(true);
     expect(mockUseBrokerAccounts).toHaveBeenCalledWith(true);
   });
 

@@ -13,7 +13,8 @@ import pytest
 from flinttrade_ai import llm_client, rag_pipeline, sentiment
 from flinttrade_ai.agent_backends import registry as agent_backend_registry
 from flinttrade_ai.service_profiles import ai_service_descriptors
-from flinttrade_gateway import adapter, credentials, registry
+from flinttrade_gateway import credentials, registry
+from flinttrade_gateway.brokers import native_factory
 from flinttrade_gateway.service_profiles import broker_service_descriptors
 from flinttrade_historical import data_provider
 from flinttrade_historical.service_profiles import historical_service_descriptors
@@ -45,7 +46,7 @@ def test_catalogue_route_is_authenticated_read_only_and_generic_forecast_only(mo
     assert response.status_code == 200
     body = response.get_json()
     assert body["status"] == "success"
-    assert body["data"]["count"] == 66
+    assert body["data"]["count"] == 33
     ids = {item["provider_id"] for item in body["data"]["providers"]}
     assert {
         "broker:dhan",
@@ -56,9 +57,7 @@ def test_catalogue_route_is_authenticated_read_only_and_generic_forecast_only(mo
         "embedding:sentence-transformers",
         "forecast:external-json",
     } <= ids
-    assert {provider_id for provider_id in ids if provider_id.startswith("forecast:")} == {
-        "forecast:external-json"
-    }
+    assert {provider_id for provider_id in ids if provider_id.startswith("forecast:")} == {"forecast:external-json"}
     assert mutation.status_code == 405
 
 
@@ -71,14 +70,14 @@ def test_catalogue_composition_preserves_contributor_order_and_static_payload(mo
     ids = tuple(provider.provider_id for provider in catalogue.list())
     ai_ids = tuple(provider.provider_id for provider in ai_service_descriptors())
     assert len(ai_ids) == 25
-    assert len(ids) == 66
+    assert len(ids) == 33
     assert ids[: len(ai_ids)] == ai_ids
     assert ids[len(ai_ids) : len(ai_ids) + 3] == (
-        "market-data:openalgo-history",
+        "market-data:native-history",
         "market-data:openchart",
         "market-data:yfinance",
     )
-    assert ids[-1] == "broker-bridge:openalgo"
+    assert set(ids[-5:]) == {"broker:dhan", "broker:upstox", "broker:kotakneo", "broker:indmoney", "broker:groww"}
 
     payload = catalogue.to_public_payload()
     forbidden = {"connection", "secret", "health", "readiness", "budget", "entitlement"}
@@ -99,6 +98,7 @@ def test_catalogue_composition_does_not_invoke_provider_transports(monkeypatch, 
 
 def test_ai_contribution_reads_static_profiles_without_runtime_io() -> None:
     """AI metadata assembly cannot instantiate clients, probe binaries, or touch storage."""
+
     def poison_constructor(*args: object, **kwargs: object) -> None:
         raise AssertionError("embedding constructor or model download")
 
@@ -141,7 +141,7 @@ def test_historical_contribution_reads_static_profiles_without_runtime_io() -> N
     """Historical metadata assembly never constructs registry or data-provider objects."""
     with (
         patch.object(data_provider, "ProviderRegistry", side_effect=AssertionError("registry")),
-        patch.object(data_provider, "OpenAlgoProvider", side_effect=AssertionError("openalgo")),
+        patch.object(data_provider, "NativeBrokerProvider", side_effect=AssertionError("dhan")),
         patch.object(data_provider, "OpenChartProvider", side_effect=AssertionError("openchart")),
         patch.object(data_provider, "YFinanceProvider", side_effect=AssertionError("yfinance")),
         patch.object(httpx, "get", side_effect=AssertionError("module HTTP")),
@@ -151,7 +151,7 @@ def test_historical_contribution_reads_static_profiles_without_runtime_io() -> N
         descriptors = historical_service_descriptors()
 
     assert tuple(descriptor.provider_id for descriptor in descriptors) == (
-        "market-data:openalgo-history",
+        "market-data:native-history",
         "market-data:openchart",
         "market-data:yfinance",
     )
@@ -161,7 +161,7 @@ def test_gateway_contribution_reads_catalogue_without_broker_or_credential_io() 
     """Broker metadata projection never constructs a registry, adapter, or credential store."""
     with (
         patch.object(registry, "BrokerRegistry", side_effect=AssertionError("broker registry")),
-        patch.object(adapter, "load_broker_adapter", side_effect=AssertionError("broker adapter")),
+        patch.object(native_factory, "build_native_adapters", side_effect=AssertionError("broker adapter")),
         patch.object(credentials, "CredentialStore", side_effect=AssertionError("credential store")),
         patch.object(httpx, "get", side_effect=AssertionError("module HTTP")),
         patch.object(httpx.Client, "get", side_effect=AssertionError("client HTTP")),
@@ -170,12 +170,18 @@ def test_gateway_contribution_reads_catalogue_without_broker_or_credential_io() 
     ):
         descriptors = broker_service_descriptors()
 
-    assert len(descriptors) == 38
-    assert descriptors[-1].provider_id == "broker-bridge:openalgo"
+    assert len(descriptors) == 5
+    assert {item.provider_id for item in descriptors} == {
+        "broker:dhan",
+        "broker:upstox",
+        "broker:kotakneo",
+        "broker:indmoney",
+        "broker:groww",
+    }
 
 
 def test_gateway_static_profile_import_performs_no_filesystem_probe() -> None:
-    """A fresh metadata import must not discover an OpenAlgo checkout."""
+    """A fresh metadata import must not discover an native broker checkout."""
     script = r"""
 import sys
 from pathlib import Path

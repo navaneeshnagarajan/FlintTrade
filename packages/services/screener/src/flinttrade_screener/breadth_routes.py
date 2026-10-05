@@ -80,7 +80,7 @@ def _live_breadth_from_quotes(client: Any) -> dict[str, int] | None:
     headline; nothing is fabricated).
 
     Args:
-        client: The async OpenAlgo bridge client (``app.config["OPENALGO_CLIENT"]``).
+        client: The async broker bridge client (``app.config["BROKER_CLIENT"]``).
 
     Returns:
         ``{"advances": A, "declines": D, "unchanged": U}`` or ``None`` when no
@@ -96,7 +96,7 @@ def _live_breadth_from_quotes(client: Any) -> dict[str, int] | None:
         # Marshal onto the client's own persistent loop — driving a shared
         # httpx client via per-request asyncio.run() poisons its pooled
         # connections ("Event loop is closed" on alternating polls).
-        from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+        from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
         quotes = client_call_sync(client, client.multi_quotes(payload))
     except Exception as exc:
@@ -132,7 +132,7 @@ def _live_index_contribution(client: Any, index_name: str) -> dict[str, Any] | N
     weighting the return by the constituent's free-float weight.
 
     Args:
-        client: The async OpenAlgo bridge client.
+        client: The async broker bridge client.
         index_name: Index code (``NIFTY``, ``BANKNIFTY``).
 
     Returns:
@@ -151,7 +151,7 @@ def _live_index_contribution(client: Any, index_name: str) -> dict[str, Any] | N
     payload = [{"symbol": s, "exchange": "NSE"} for s in weights]
     try:
         # Same one-owner-loop rule as the breadth sweep above.
-        from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+        from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
         quotes = client_call_sync(client, client.multi_quotes(payload))
     except Exception as exc:
@@ -225,7 +225,7 @@ def breadth_current() -> Any:
     registry = current_app.config.get("REGISTRY")
 
     if registry and getattr(registry, "is_connected", lambda: False)():
-        raw = _live_breadth_from_quotes(current_app.config.get("OPENALGO_CLIENT"))
+        raw = _live_breadth_from_quotes(current_app.config.get("BROKER_CLIENT"))
         if raw is not None:
             # Build the live point in ISOLATION — never mutate the shared
             # sample-seeded calculator (doing so per 60s poll stacked
@@ -300,7 +300,7 @@ def index_contribution_endpoint() -> Any:
     registry = current_app.config.get("REGISTRY")
 
     if registry and getattr(registry, "is_connected", lambda: False)():
-        live = _live_index_contribution(current_app.config.get("OPENALGO_CLIENT"), index_name)
+        live = _live_index_contribution(current_app.config.get("BROKER_CLIENT"), index_name)
         if live is not None:
             # ``is_sample_data`` is nested INSIDE ``data`` so it survives the
             # frontend response-unwrap (which returns ``json.data``).

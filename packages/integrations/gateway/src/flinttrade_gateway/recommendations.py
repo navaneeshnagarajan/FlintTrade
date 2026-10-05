@@ -23,7 +23,7 @@ from .capabilities import Capabilities, native_capabilities_by_broker
 
 # Native broker capabilities keyed by ``broker_id``. Every full-parity native
 # adapter belongs here so the engine and the ``?brokers=`` route filter agree on
-# what a valid native broker is. The OpenAlgo bridge is deliberately excluded —
+# what a valid native broker is. The native broker bridge is deliberately excluded —
 # it is a meta-adapter whose real capabilities depend on the underlying broker,
 # so it cannot be ranked as a single broker here.
 NATIVE_BROKER_CAPABILITIES: dict[str, Capabilities] = native_capabilities_by_broker()

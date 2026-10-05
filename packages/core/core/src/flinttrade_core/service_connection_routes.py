@@ -76,7 +76,7 @@ def _is_loopback_peer() -> bool:
 
 
 def _selected_read_key() -> str:
-    return os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
+    return os.environ.get("FLINTTRADE_API_KEY", "")
 
 
 def _scope_for_method(method: str) -> str:
@@ -205,8 +205,7 @@ def guard_service_connection_family() -> tuple[Response, int] | None:
         return None
     if not _is_loopback_peer():
         has_carrier = any(
-            request.headers.get(name, "").strip()
-            for name in ("Authorization", "X-FlintTrade-Token", "X-API-Key")
+            request.headers.get(name, "").strip() for name in ("Authorization", "X-FlintTrade-Token", "X-API-Key")
         )
         proof = _ConnectionProof("invalid" if has_carrier else "anonymous")
         _record_attempt("rejected", proof)
@@ -251,7 +250,9 @@ def _store() -> ServiceConnectionStore:
     return store
 
 
-def _validated_json_body(*, require_empty: bool = False) -> tuple[dict[str, object] | None, tuple[Response, int] | None]:
+def _validated_json_body(
+    *, require_empty: bool = False
+) -> tuple[dict[str, object] | None, tuple[Response, int] | None]:
     length = request.content_length
     if type(length) is int and length > MAX_MUTATION_BYTES:
         return None, _response("request_too_large", 413)

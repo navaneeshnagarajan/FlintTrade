@@ -14,7 +14,7 @@ def trader(fill_price: float) -> AutonomousTrader:
         passed=True, order_response=SimpleNamespace(orderid="sandbox-1", fill_price=fill_price),
     )))
     return AutonomousTrader(
-        llm_client=Mock(), openalgo_client=broker,
+        llm_client=Mock(), broker_client=broker,
         config=AgentConfig(symbols=["RELIANCE"], max_position_size=2),
         order_executor=executor,
     )

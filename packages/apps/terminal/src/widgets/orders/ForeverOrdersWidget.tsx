@@ -405,7 +405,6 @@ export default function ForeverOrdersWidget() {
             setModifyingId(null);
             setModifyingRow(null);
           }}
-          includeOpenAlgo={false}
           nativeOnly
           supportedBrokers={SUPPORTED_GTT_BROKERS}
         />

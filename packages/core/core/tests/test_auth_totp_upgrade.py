@@ -26,9 +26,7 @@ def _create_legacy_account_db(db_path: Path) -> None:
         parallelism=4,
     ).hash(_PASSWORD)
     salt = b"legacy-salt-1234"
-    encrypted_secret = _derive_fernet_key(_PASSWORD, salt).encrypt(
-        _TOTP_SECRET.encode("utf-8")
-    )
+    encrypted_secret = _derive_fernet_key(_PASSWORD, salt).encrypt(_TOTP_SECRET.encode("utf-8"))
 
     with sqlite3.connect(db_path) as db:
         db.execute("""

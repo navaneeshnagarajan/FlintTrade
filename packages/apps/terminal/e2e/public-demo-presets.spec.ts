@@ -51,24 +51,7 @@ test("public demo saves and restores presets through the legacy manager entry", 
     // Thirty seconds allow twenty 1.5-second ping ticks, plus page mounts.
     pingCalls: { minimum: 3, maximum: 24 },
   });
-  syntheticApi.register({
-    name: "public-demo legacy Settings configuration hydration",
-    method: "GET",
-    path: "/v1/config/openalgo",
-    // The legacy route may unmount before hydration starts on either visit.
-    expectedCalls: { minimum: 0, maximum: 2 },
-    handler: (request) => {
-      expect(request.url()).toBe("http://127.0.0.1:5173/v1/config/openalgo");
-      expect(request.postData()).toBeNull();
-      expect(request.headers()["x-api-key"]).toBeUndefined();
-      return {
-        json: {
-          status: "success",
-          data: { host: "", port: 5000, ws_port: 8765, api_key: "", api_key_configured: false, api_key_last4: "" },
-        },
-      };
-    },
-  });
+
   syntheticApi.register({
     name: "public-demo shell Mode status",
     method: "GET",

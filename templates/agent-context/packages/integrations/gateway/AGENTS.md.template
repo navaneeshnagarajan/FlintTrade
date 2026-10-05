@@ -1,25 +1,17 @@
 # FlintTrade — gateway
 
-> Native broker adapters and the optional OpenAlgo bridge, gated routing, encrypted credentials and market-data streams. Read `packages/integrations/gateway/CLAUDE.md` first.
+The gateway contains five native broker adapters: Dhan, Upstox, Kotak Neo,
+INDmoney and Groww. Catalogue membership is not activation evidence. Keep
+connectability blockers, native HTTP freezes and funded Live proof gates intact.
 
-## Absorbs
-- `BROKER_CATALOG` in `adapter.py` defines the catalogue; `tests/test_adapter.py` pins its count. Catalogue membership does not imply a native adapter is activated or allowed to place Live orders.
-- OpenAlgo `broker/*` modules remain an optional compatibility path loaded through `_resolve_openalgo_root()` in `adapter.py`; native implementations live in `brokers/`.
+Resolve accounts by exact native adapter/account identity. Reads use the
+generation-fenced `BrokerReadPort`; all broker writes require a minted
+`SafetyContext` through `gate_order` or `gate_broker_write`, then `BrokerRouter`.
+Never call an adapter write directly from a route or service.
+
+Credentials belong in the encrypted workspace vault. Do not add broker
+credentials to environment variables, fixtures, logs or public configuration.
 
 ## Dependencies
 
 See `packages/integrations/gateway/pyproject.toml` for declared dependencies and optional extras.
-
-## Path resolution
-- OpenAlgo is an external test-dep, not bundled. `adapter.py:_resolve_openalgo_root()` looks for the broker tree at `.local/external/openalgo/` first (the canonical location since commit `3da42e4`, 2026-04-30), with a legacy fallback to `infra/openalgo/` for older checkouts.
-- Contributors clone the upstream via `bash scripts/setup-test-deps.sh`.
-
-## Rules
-- Read root CLAUDE.md for project-wide rules.
-- This package is the ONLY place that imports OpenAlgo's `broker.*` modules. All other FlintTrade code must talk to brokers through the gateway adapter layer.
-- Keep shared routing broker-neutral; broker selection happens through `BrokerRegistry`, while broker-specific behaviour belongs in the appropriate native or compatibility adapter.
-- Every live write must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and pass through `BrokerRouter`; never call an adapter write directly.
-- Credentials are persisted via `CredentialStore` (Fernet-encrypted SQLite). Never log a credential payload, even at DEBUG.
-- Tests are in `tests/`. Skip integration tests that require the external OpenAlgo tree when it is unavailable; native adapter tests use mocks independently of that tree. Never assume source availability authorises a real broker session or funded order.
-- Update root `changelog.md` only for shipped user-visible or API changes, including adapter-surface changes (new broker, auth-flow change, contract-normalisation change); do not add entries for tests, behaviour-preserving refactors or in-flight design.
-- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

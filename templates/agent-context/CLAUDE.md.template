@@ -28,10 +28,6 @@ are evidence from a particular run, not fixed acceptance counts.
 
 ## What This Is
 
-Open-source self-hosted trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
-FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 18 package surfaces (13 Python + 3 apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
-Repo: https://github.com/navaneeshnagarajan/FlintTrade
-
 Serves three trading-software modes from a single application:
 - **Trader** — Manual order workflows, intraday tools, options analysis, and Live-mode safeguards
 - **Automator** — Strategy development, sandbox testing, broker-gateway testing, and AI-assisted workflows
@@ -41,18 +37,8 @@ One app. One port. Route-based separation. Widget-composable workspace.
 
 ## Architecture
 
-FlintTrade runs its own backend first. OpenAlgo is optional and external.
-
-- **OpenAlgo:** Optional broker connections, REST API port 5000, WebSocket port 8765
 - **FlintTrade:** Single React app (FlexLayout workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
-- **External test-deps (not bundled, not submodules):** OpenAlgo is an optional external service FlintTrade can talk to over HTTP/WS. Contributors can run `scripts/setup-test-deps.sh` to clone a local-dev copy into `.local/external/openalgo/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/services/ditto/` and run in-process; the upstream repo is no longer tracked.
-- OpenAlgo is needed only for the optional OpenAlgo-compatible integration path. Native backend, site, terminal, docs, design-system, and most unit tests run without it.
 
-```
-                                ┌─ native gateway (BrokerAdapter) ──> Broker API
-FlintTrade (React + Python) ────┤
-                                └─ OpenAlgo bridge adapter (optional) ──> OpenAlgo (port 5000) ──> Broker API
-```
 
 ### Application Routes
 
@@ -66,7 +52,7 @@ localhost:5173/
 ├── /invest         → Investor dashboard (holdings, net worth, SIPs)
 ├── /learn          → Beginner center (courses, glossary, strategies)
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
-├── /automate       → Automation Hub (flows, cron, monitors, logs)
+├── /automate       → Automation Hub (cron, monitors, webhooks, logs)
 ├── /ai             → AI Center (chat, signals, sentiment, RAG)
 ├── /ditto          → Multi-account management (mirror, margin, risk)
 ├── /admin          → Admin panel (security, health, traffic, audit)
@@ -100,10 +86,10 @@ requirements and links to the technology-stack guide.
 ## State Architecture
 
 ```
-WebSocket (port 8765)
+Native HTTP polling
     │ ticks
     ▼
-Jotai Atoms ← WS real-time data ONLY (LTP, quote, depth per instrument)
+Jotai Atoms ← per-instrument live data ONLY (LTP, quote, depth per instrument)
     │ reads
     ▼
 Zustand Stores ← Derived/UI state ONLY (connection, layout, settings, aggregated P&L)
@@ -121,13 +107,6 @@ Rate limiting built into the query layer: Orders 10/s, Smart orders 2/s, General
 
 ## Configuration
 
-Follow the Security & Configuration section of root `AGENTS.md`, `.env.example`
-and `docs/setup/QUICKSTART.md`. Native broker credentials use the encrypted
-gateway vault; the optional OpenAlgo bridge manages broker authentication in
-OpenAlgo. Platform workspace paths, file-backed secrets and in-app preferences
-are distinct. Do not copy historical environment-variable or credential-storage
-instructions into a new installation.
-
 ## Monorepo Structure
 
 18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure. The active desktop package uses Electron with verified local-source bootstrap; its manifest records the current version. The source-built web app remains distinct from Electron-shell installers; a release is accepted only as all four canonical installers plus `SHA256SUMS.txt`, and retired Tauri and PyInstaller assets never satisfy that gate.
@@ -136,7 +115,6 @@ instructions into a new installation.
 
 | Package | Lang | Description |
 |---|---|---|
-| `core/core` | Py | Flask app, config, workspace, models, exceptions, JWT/auth; optional OpenAlgo client |
 | `core/data` | Py | Tick recorder, local audit logger, trade logger, DuckDB storage |
 | `core/historical` | Py | OHLCV downloader, free data (OpenChart/yfinance), DuckDB pipeline, expiry manager |
 | `core/indicators` | Py | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) |
@@ -159,8 +137,7 @@ instructions into a new installation.
 
 | Package | Description |
 |---|---|
-| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (catalogued in `BROKER_CATALOG`; verify counts with `test_adapter.py`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww); Dhan, Upstox, and Kotak Neo are connectable (Kotak Neo Connected (read) / API smoke only on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox); INDmoney and Groww retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
-| `integrations/webhooks` | Generic HMAC-signed custom webhooks, flow builder, alerter |
+| `integrations/webhooks` | Generic HMAC-signed custom webhooks, alerter |
 
 #### `packages/apps/` — applications
 
@@ -189,49 +166,36 @@ new agent's current-state instructions.
 ## Decisions Made — DO NOT REVISIT
 
 - Storage paths configurable via workspace.json, not hardcoded
+
 - Port: Terminal 5173 (single app, no other React ports)
-- Port: FlintTrade backend 5100 (locked — avoids OpenAlgo multi-instance range 5000-5009). Do not propose consolidating with OpenAlgo's port.
+
 - No personal hostnames, IPs, or provider names in committed code
+
 - FlintTrade (capital T) in display text, `flinttrade` lowercase in paths/packages
+
 - Tailwind CSS v4 with `@tailwindcss/vite` plugin
+
 - Terminal theme: #0a0a0f bg, #16161f cards (was #12121a), #2a2a3a borders (was #1e1e2e)
+
 - Font: Geist (headings) + Inter (body) + JetBrains Mono (numbers/data) — 3-tier system
+
 - Route tabs: Learn / Invest / Trade order in TopBar (global navigation)
+
 - Cinematic welcome at /welcome for first-time users (smart redirect)
+
 - Follow root `AGENTS.md` for isolated branches, fresh-main checks, review and explicit push/merge authorisation
+
 - FlexLayout for workspace layout; keep the adapter in `src/layout/flexLayoutAdapter.tsx` authoritative
+
 - Single React app with routes (NOT 3 separate apps)
+
 - Widget-composable workspace (NOT F1-F8 fixed modules)
+
 - shadcn/ui for all UI components (no raw HTML buttons/inputs/dialogs)
+
 - TypeScript strict mode — no `any` types
+
 - Use the root-pinned pnpm version and committed `pnpm-lock.yaml` for reproducible JavaScript installs
-
-## OpenAlgo API Reference
-
-### Orders (all POST)
-`placeorder`, `placesmartorder`, `modifyorder`, `cancelorder`, `cancelallorder`, `closeposition`, `openposition`, `orderstatus`, `optionsorder`, `optionsmultiorder`, `basketorder`, `splitorder`
-
-### GTT — Good Till Triggered (added OpenAlgo 2.0.0.9)
-`placegttorder`, `modifygttorder`, `cancelgttorder`, `gttorderbook` — live broker support: Dhan + Zerodha. MIS product rejected. Surfaced via FlintTrade safety proxy at `/api/v1/orders/gtt-{place,modify,cancel}`.
-
-### Accounts (POST unless noted)
-`funds`, `orderbook`, `tradebook`, `positionbook`, `holdings`, `margin`, `ping` (**POST**), `analyzer` (**POST**), `analyzer/toggle` (**POST**), `pnl/symbols` (**POST**)
-
-### Data (POST unless noted)
-`quotes`, `multiquotes`, `depth`, `history`, `optionchain`, `optiongreeks`, `multioptiongreeks`, `optionsymbol`, `symbol`, `search`, `expiry`, `intervals` (**GET**), `syntheticfuture`, `ticker`, `instruments` (**GET**), `gex`, `iv_smile`, `max_pain`, `oi_profile`, `chart` (**GET/POST** — chart preferences)
-
-### Utilities
-`holidays` (**POST**), `timings` (**POST**), `telegram` (POST), `whatsapp/notify` (POST — added 2.0.1.1; outbound only — pairing is admin-only on OpenAlgo's `/whatsapp` web UI)
-
-### Broker Management (added OpenAlgo 2.0.0.2)
-**NOTE:** These are session-authenticated, NOT under `/api/v1/`.
-`/api/broker/capabilities` (**GET**), `broker/credentials` (**GET/POST**), `/leverage/api/current` (**GET**)
-
-### WebSocket (port 8765)
-Modes: 1=LTP, 2=Quote, 4=Depth (50 levels in v2; was mode 3 in v1)
-Auth: `{ "action": "authenticate", "api_key": "<key>" }`
-Subscribe: `{ "action": "subscribe", "symbols": [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}], "mode": "LTP" }`
-Tick data arrives nested: `{ "type": "market_data", "data": { "ltp": ..., "symbol": ... } }`
 
 ### FlintTrade Backend Endpoints (/ft-api/v1/)
 **Analysis (GET):** `gex`, `volsurface`, `ivsmile`, `straddlepnl`, `oiprofile`, `maxpain`
@@ -239,14 +203,6 @@ Tick data arrives nested: `{ "type": "market_data", "data": { "ltp": ..., "symbo
 
 ### Rate limits
 Orders: 10/sec | Smart orders: 2/sec | General API: 50/sec
-
-### Known OpenAlgo Bugs to Work Around
-1. Sandbox sends real orders — verify isolation before testing
-2. closeposition ignores strategy — track positions per-strategy ourselves
-3. WebSocket drops without heartbeat — implement ping/pong in our client
-4. PNL calculation incorrect for some brokers — calculate ourselves
-5. MCX symbol format inconsistency — normalize in our symbol resolver
-6. SQLite concurrent access — never touch OpenAlgo's DB directly
 
 ## Available Tools and Skills
 
@@ -261,14 +217,21 @@ See `docs/REFERENCES.md` for upstream libraries and, when available locally,
 ## Code Standards
 
 - **TypeScript:** Strict mode, no `any` types, all new terminal code in `.ts`/`.tsx`. Path alias `@` → `packages/apps/terminal/src/`
+
 - **React:** Functional components, hooks, Tailwind CSS v4, shadcn/ui components, lucide-react icons
+
 - **Python:** PEP 8, ruff, type hints, Google docstrings, absolute imports
+
 - **Tests:** pytest (Python, `--import-mode=importlib` required for flat package layout) + Vitest (terminal). Every new function needs a test.
-- **Vite proxy (dev):** `/api` → OpenAlgo:5000, `/ft-api` → FlintTrade backend:5100, `/ws` → ws://127.0.0.1:8765. Port 5100 avoids conflict with OpenAlgo multi-instance (5000-5009). In dev mode `api.ts` uses relative paths (empty base); production uses full host from connectionStore. Don't bypass the proxy in dev.
+
 - **Git:** Conventional commits (`feat(pkg):`, `fix(pkg):`, `docs:`, `test:`, `chore:`)
+
 - **Branch:** Follow root `AGENTS.md`; fetch and verify live `main` before opening or merging a PR
+
 - **Widgets:** Every widget is a FlexLayout panel registered in `widgetFactory.tsx`
+
 - **Forms:** react-hook-form + zod for validation
+
 - **Data grids:** Glide Data Grid for streaming data (option chain), TanStack Table for static data (positions, orders)
 
 ## Development Workflow
@@ -282,22 +245,26 @@ See `docs/REFERENCES.md` for upstream libraries and, when available locally,
 
 ## Machine Setup
 
-Follow `docs/setup/QUICKSTART.md` and `docs/DEVELOPER_GUIDE.md`. The cross-platform
-entry point is `python scripts/ft.py setup`; the optional OpenAlgo integration
-has a separate setup path. Setup instructions do not grant push permission.
-
 ## Do NOT
 
-- Modify files inside `.local/external/openalgo/` (external test-deps; not part of FlintTrade)
 - Hardcode API keys, hostnames, IPs, provider names, or personal values
+
 - Use mock/placeholder/fake data in terminal or any UI
+
 - Commit `.env` files (only `.env.example` with blank values)
-- Duplicate functionality that OpenAlgo already provides
+
 - Bypass hooks with `--no-verify` or `dangerouslySkipPermissions`
+
 - Write new code without checking `.local/reference/REPO_FEATURE_MAP.md` first — absorb, don't reinvent
+
 - Use general-purpose agents when specialized ones exist (e.g., use engineering agent for code, testing agent for tests)
+
 - Skip spec review or code review for non-trivial changes
+
 - Use raw HTML buttons/inputs/dialogs — use shadcn/ui
+
 - Use `any` type in TypeScript
+
 - Create fixed layouts — every widget must be a FlexLayout panel
+
 - Include private data in commit messages (fund amounts, order IDs, broker names)

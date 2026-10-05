@@ -77,7 +77,7 @@ async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order(*, bac
         return True
 
     router = BrokerRouter(
-        {"openalgo": adapter},
+        {"broker": adapter},
         session_provider,
         consume_gate=consume_gate, backend_lease_proof=backend_lease_factory()
     )
@@ -86,13 +86,13 @@ async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order(*, bac
         actor_type="agent",
         actor_id="strategy:ema",
         mode="live",
-        selector="openalgo:default",
+        selector="broker:default",
     )
     dispatcher = GatedStrategyDispatcher(
         safety=_passing_safety(),
         request_context_provider=lambda: request_ctx,
         router_provider=lambda: router,
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
@@ -118,7 +118,7 @@ async def test_live_dispatch_without_selector_fails_with_typed_runtime_error() -
         safety=_passing_safety(),
         request_context_provider=lambda: request_ctx,
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
@@ -165,7 +165,7 @@ async def test_live_dispatch_checks_prospective_greeks_before_router() -> None:
         actor_type="agent",
         actor_id="strategy:greeks",
         mode="live",
-        selector="openalgo:default",
+        selector="broker:default",
     )
     recorder = _BlockingSafety()
     safety = _passing_safety()
@@ -174,7 +174,7 @@ async def test_live_dispatch_checks_prospective_greeks_before_router() -> None:
         safety=safety,
         request_context_provider=lambda: request_ctx,
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_prospective_state,
     )
@@ -199,16 +199,16 @@ async def test_scheduled_agent_dispatch_refuses_revoked_backend(backend_lease_fa
     proof = backend_lease_factory()
     adapter = _TokenCheckingAdapter()
     router = BrokerRouter(
-        {"openalgo": adapter}, lambda *_: SimpleNamespace(is_read_only=False, algo_id=""),
+        {"broker": adapter}, lambda *_: SimpleNamespace(is_read_only=False, algo_id=""),
         backend_lease_proof=proof,
     )
     request_ctx = RequestContext(
         jti="revoked-strategy", actor_type="agent", actor_id="strategy:synthetic",
-        mode="live", selector="openalgo:default",
+        mode="live", selector="broker:default",
     )
     dispatcher = GatedStrategyDispatcher(
         safety=_passing_safety(), request_context_provider=lambda: request_ctx,
-        router_provider=lambda: router, adapter_id="openalgo", account_id="default",
+        router_provider=lambda: router, adapter_id="broker", account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
     proof.revoke()
@@ -233,13 +233,13 @@ def _automate_dispatcher(safety: object) -> GatedStrategyDispatcher:
         actor_type="agent",
         actor_id="strategy:laya",
         mode="live",
-        selector="openalgo:default",
+        selector="broker:default",
     )
     return GatedStrategyDispatcher(
         safety=safety,
         request_context_provider=lambda: request_ctx,
         router_provider=lambda: MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_portfolio_state,
     )

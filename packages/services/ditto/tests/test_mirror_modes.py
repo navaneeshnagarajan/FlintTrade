@@ -4,14 +4,13 @@
 2. WebSocket-based position change detection (PositionWatcher)
 3. Broker cost metadata (BrokerCostMetadata + MirrorConfig.cheapest_account)
 
-All tests are unit-level — no live OpenAlgo or network calls.
+All tests are unit-level — no live broker or network calls.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -46,8 +45,8 @@ def _make_account(
     return BrokerAccount(
         account_id=account_id,
         name=name,
-        openalgo_host=host,
-        api_key=api_key,
+        adapter_id="dhan",
+
         allocation_weight=weight,
         enabled=enabled,
         is_master=is_master,
@@ -218,175 +217,10 @@ class TestPositionWatcher:
         watcher.on_change(cb)
         assert cb in watcher._callbacks
 
-    def test_prime_seeds_source_snapshot_without_emitting_a_change(self) -> None:
-        watcher = self._make_watcher()
-        callback = MagicMock()
-        watcher.on_change(callback)
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {
-            "status": "success",
-            "data": [
-                {
-                    "symbol": "RELIANCE",
-                    "quantity": 3,
-                    "exchange": "NSE",
-                    "product": "MIS",
-                }
-            ],
-        }
-        http = MagicMock()
-        http.__enter__ = MagicMock(return_value=http)
-        http.__exit__ = MagicMock(return_value=False)
-        http.post.return_value = response
 
-        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=http):
-            snapshot = watcher.prime()
 
-        assert snapshot[("NSE", "RELIANCE", "MIS")]["quantity"] == 3
-        assert watcher._last_snapshot == snapshot
-        callback.assert_not_called()
 
-    def test_snapshot_keeps_same_symbol_in_distinct_products(self) -> None:
-        watcher = self._make_watcher()
-        response = MagicMock(status_code=200)
-        response.json.return_value = {
-            "status": "success",
-            "data": [
-                {
-                    "symbol": "RELIANCE",
-                    "quantity": 3,
-                    "exchange": "NSE",
-                    "product": "MIS",
-                },
-                {
-                    "symbol": "RELIANCE",
-                    "quantity": 7,
-                    "exchange": "NSE",
-                    "product": "CNC",
-                },
-            ],
-        }
-        http = MagicMock()
-        http.__enter__ = MagicMock(return_value=http)
-        http.__exit__ = MagicMock(return_value=False)
-        http.post.return_value = response
 
-        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=http):
-            snapshot = watcher._fetch_snapshot()
-
-        assert snapshot == {
-            ("NSE", "RELIANCE", "MIS"): {
-                "symbol": "RELIANCE",
-                "quantity": 3,
-                "exchange": "NSE",
-                "product": "MIS",
-            },
-            ("NSE", "RELIANCE", "CNC"): {
-                "symbol": "RELIANCE",
-                "quantity": 7,
-                "exchange": "NSE",
-                "product": "CNC",
-            },
-        }
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {"status": "success"},
-            {"status": "success", "data": None},
-            {"status": "error", "data": []},
-            {"status": "success", "data": [None]},
-            {"status": "success", "data": [{"quantity": 1, "exchange": "NSE", "product": "MIS"}]},
-            {"status": "success", "data": [{"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS"}]},
-            {
-                "status": "success",
-                "data": [
-                    {
-                        "symbol": "RELIANCE",
-                        "quantity": "not-a-quantity",
-                        "exchange": "NSE",
-                        "product": "MIS",
-                    }
-                ],
-            },
-        ],
-    )
-    def test_fetch_snapshot_rejects_incomplete_or_malformed_payloads(
-        self,
-        payload: object,
-    ) -> None:
-        watcher = self._make_watcher()
-        response = MagicMock(status_code=200)
-        response.json.return_value = payload
-        http = MagicMock()
-        http.__enter__ = MagicMock(return_value=http)
-        http.__exit__ = MagicMock(return_value=False)
-        http.post.return_value = response
-
-        with (
-            patch("flinttrade_ditto.mirror.httpx.Client", return_value=http),
-            pytest.raises(RuntimeError, match="positionbook"),
-        ):
-            watcher._fetch_snapshot()
-
-    def test_authoritative_empty_snapshot_is_valid_and_closes_prior_position(self) -> None:
-        watcher = self._make_watcher()
-        watcher._last_snapshot = {
-            "RELIANCE": {
-                "symbol": "RELIANCE",
-                "quantity": 3,
-                "exchange": "NSE",
-                "product": "MIS",
-            }
-        }
-        callback = MagicMock()
-        watcher.on_change(callback)
-        response = MagicMock(status_code=200)
-        response.json.return_value = {"status": "success", "data": []}
-        http = MagicMock()
-        http.__enter__ = MagicMock(return_value=http)
-        http.__exit__ = MagicMock(return_value=False)
-        http.post.return_value = response
-
-        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=http):
-            watcher._poll_once()
-
-        callback.assert_called_once()
-        assert callback.call_args.args[1]["quantity"] == 0
-        assert watcher._last_snapshot == {}
-
-    def test_malformed_snapshot_never_becomes_a_flat_position(self) -> None:
-        watcher = self._make_watcher()
-        prior = {
-            "RELIANCE": {
-                "symbol": "RELIANCE",
-                "quantity": 3,
-                "exchange": "NSE",
-                "product": "MIS",
-            }
-        }
-        watcher._last_snapshot = prior
-        callback = MagicMock()
-        watcher.on_change(callback)
-        response = MagicMock(status_code=200)
-        response.json.return_value = {
-            "status": "success",
-            "data": [{"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS"}],
-        }
-        http = MagicMock()
-        http.__enter__ = MagicMock(return_value=http)
-        http.__exit__ = MagicMock(return_value=False)
-        http.post.return_value = response
-
-        with (
-            patch("flinttrade_ditto.mirror.httpx.Client", return_value=http),
-            pytest.raises(RuntimeError, match="positionbook"),
-        ):
-            watcher._poll_once()
-
-        callback.assert_not_called()
-        assert watcher._last_snapshot == prior
 
     def test_detect_changes_new_position(self) -> None:
         watcher = self._make_watcher()
@@ -449,58 +283,7 @@ class TestPositionWatcher:
         assert changed[mis_key]["quantity"] == 0
         assert changed[cnc_key]["quantity"] == 3
 
-    def test_callback_fires_on_position_change(self) -> None:
-        """Full integration: mock HTTP response triggers callback."""
-        fired: list[tuple[str, dict]] = []
 
-        watcher = self._make_watcher(poll_interval=0.02)
-        watcher.on_change(lambda acc_id, pos: fired.append((acc_id, pos)))
-
-        response_data = {
-            "status": "success",
-            "data": [
-                {
-                    "symbol": "NIFTY25APR20000CE",
-                    "quantity": 75,
-                    "exchange": "NFO",
-                    "product": "MIS",
-                }
-            ],
-        }
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = response_data
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post = MagicMock(return_value=mock_resp)
-
-        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=mock_client):
-            watcher.start()
-            deadline = time.time() + 1.0
-            while not fired and time.time() < deadline:
-                time.sleep(0.01)
-            watcher.stop()
-
-        assert len(fired) >= 1
-        assert fired[0][1]["symbol"] == "NIFTY25APR20000CE"
-
-    def test_http_error_does_not_crash_watcher(self) -> None:
-        """A failed HTTP poll should not stop the watcher thread."""
-        watcher = self._make_watcher(poll_interval=0.02)
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post = MagicMock(side_effect=ConnectionError("refused"))
-
-        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=mock_client):
-            watcher.start()
-            time.sleep(0.1)
-            assert watcher.is_running
-            watcher.stop()
 
     def test_poll_failure_notifies_error_callbacks_without_exception_detail(self) -> None:
         watcher = self._make_watcher(poll_interval=60.0)

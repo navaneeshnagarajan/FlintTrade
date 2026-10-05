@@ -52,13 +52,13 @@ class TestCapabilitiesRoute:
 
     def test_known_broker_returns_caps(self, client) -> None:  # type: ignore[no-untyped-def]
         """Known broker returns its capabilities record."""
-        response = client.get("/api/v1/broker/capabilities?broker=zerodha")
+        response = client.get("/api/v1/broker/capabilities?broker=kotakneo")
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "success"
-        assert data["broker"] == "zerodha"
+        assert data["broker"] == "kotakneo"
         caps = data["capabilities"]
-        assert caps["broker_name"] == "zerodha"
+        assert caps["broker_name"] == "kotakneo"
         assert isinstance(caps["supports_equity"], bool)
 
     def test_unknown_broker_returns_404(self, client) -> None:  # type: ignore[no-untyped-def]
@@ -71,7 +71,7 @@ class TestCapabilitiesRoute:
 
     def test_capabilities_fields_present(self, client) -> None:  # type: ignore[no-untyped-def]
         """All expected capability boolean fields are present in the response."""
-        response = client.get("/api/v1/broker/capabilities?broker=zerodha")
+        response = client.get("/api/v1/broker/capabilities?broker=kotakneo")
         caps = response.get_json()["capabilities"]
         required_fields = [
             "supports_market_orders",
@@ -217,20 +217,9 @@ class TestCapabilitiesRoute:
         response = client.get("/api/v1/broker/mcp")
         assert response.status_code == 200
         data = response.get_json()
-        assert data["count"] == 4
+        assert data["count"] == 3
         brokers = {b["adapter_id"]: b for b in data["brokers"]}
-        assert set(brokers) == {"openalgo", "dhan", "upstox", "groww"}
-        # OpenAlgo is the primary, community-tested path — it leads the list.
-        assert data["brokers"][0]["adapter_id"] == "openalgo"
-        assert brokers["openalgo"]["native"] is False
-        assert brokers["openalgo"]["requires_static_ip"] is False
-        assert brokers["openalgo"]["native_connect_blockers"] == []
-        assert brokers["openalgo"]["mcp"]["trading_supported"] is True
-        assert "30+" in " ".join(brokers["openalgo"]["mcp"]["use_cases"])
-        assert "safety gate" in " ".join(brokers["openalgo"]["mcp"]["cautions"])
-        openalgo_configs = {c["id"]: c for c in brokers["openalgo"]["mcp"]["client_configs"]}
-        assert openalgo_configs["stdio_local"]["command"] == "python"
-        assert "mcp.mcpserver" in openalgo_configs["stdio_local"]["args"]
+        assert set(brokers) == {"dhan", "upstox", "groww"}
         assert brokers["dhan"]["native"] is True
         assert brokers["dhan"]["connectable"] is True
         assert brokers["dhan"]["requires_static_ip"] is True
@@ -347,15 +336,15 @@ class TestCapabilitiesRoute:
         payload = response.get_json()
         assert payload["status"] == "error"
         assert "not found" in payload["message"]
-        assert set(payload["known_brokers"]) == {"openalgo", "dhan", "groww", "upstox"}
+        assert set(payload["known_brokers"]) == {"dhan", "groww", "upstox"}
 
     def test_mcp_catalogue_rejects_broker_without_catalogued_mcp(self, client) -> None:  # type: ignore[no-untyped-def]
-        response = client.get("/api/v1/broker/mcp?broker=zerodha")
+        response = client.get("/api/v1/broker/mcp?broker=kotakneo")
         assert response.status_code == 404
         payload = response.get_json()
         assert payload["status"] == "error"
         assert "no FlintTrade-catalogued MCP endpoint" in payload["message"]
-        assert set(payload["known_brokers"]) == {"openalgo", "dhan", "groww", "upstox"}
+        assert set(payload["known_brokers"]) == {"dhan", "groww", "upstox"}
 
     def test_all_brokers_have_broker_name(self, client) -> None:  # type: ignore[no-untyped-def]
         """Every broker entry in the full list contains broker_name."""

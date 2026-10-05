@@ -8,10 +8,10 @@ import DockSidebar from "@/chrome/DockSidebar";
 import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
 import { useWsBridge } from "@/hooks/useWsBridge";
+import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useDemoFeed } from "@/hooks/useDemoFeed";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
-import { useOpenAlgoConfigHydration } from "@/hooks/useOpenAlgoConfigHydration";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { useNotificationFeed } from "@/components/NotificationCentre/useNotificationFeed";
@@ -22,7 +22,6 @@ import DocsSearch, { type DocSearchResult } from "@/components/DocsSearch/DocsSe
 import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useConnectionStore } from "@/stores/connectionStore";
 import { useLayoutStore, WorkspaceStorageError } from "@/stores/layoutStore";
 import { DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
@@ -164,16 +163,15 @@ export default function AppLayout() {
     && showDeskTicker
     && (!hideTickerByDefault || tickerForcedOnNarrow);
   const authStatus = useAuthStore((s) => s.status);
-  const openAlgoApiKey = useConnectionStore((s) => s.apiKey);
   const authenticated = authStatus === "logged-in";
   const brokerConfigEnabled = authenticated && mode !== "explore";
-  const liveMarketDataEnabled = brokerConfigEnabled && openAlgoApiKey.trim().length > 0;
+  const nativeBrokerConnected = useDirectBrokerConnected();
+  const liveMarketDataEnabled = brokerConfigEnabled && nativeBrokerConnected;
 
-  useOpenAlgoConfigHydration(brokerConfigEnabled); // Public Explore never reads or retains protected broker config.
-  useWsBridge(liveMarketDataEnabled); // Explore and blank-key sessions never open the broker socket.
+  useWsBridge(liveMarketDataEnabled);
   useDemoFeed();         // Simulated-live market feed in Explore mode (no broker)
   useTickerFallback(liveMarketDataEnabled); // REST fallback belongs to the same authenticated feed.
-  usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
+  usePrevClose(liveMarketDataEnabled);        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   useTradingStoreSync(authenticated); // Mirror only the current authenticated session's account state.
   useBrokerAccounts(brokerConfigEnabled); // Never fetch account metadata while locked, logged out, or exploring.
   useNotificationFeed(); // Feed real connection/mode/order events into the Notification Centre

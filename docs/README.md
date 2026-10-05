@@ -1,14 +1,7 @@
 # FlintTrade Documentation
 
-Welcome to the FlintTrade documentation. FlintTrade is a beta-stage,
-open-source, self-hosted trading workstation with its own backend, native
-sandbox, recommended OpenAlgo-compatible bridge, and evidence-gated native
-broker contracts.
-It supports local manual trading workflows, algorithmic strategy development,
-automation, AI-assisted analysis, and sandbox practice. The repository is a
-Python, React, TypeScript, and Rust monorepo for local software development,
-integration testing, and contributor learning. FlintTrade is AGPL-3.0 licensed
-and is not production ready.
+Welcome to the FlintTrade documentation. FlintTrade is a beta-stage trading
+workspace with evidence-gated native broker contracts and a local Practice sandbox.
 
 This folder is the single source of truth for everything outside the source
 code itself. If you are reading FlintTrade for the first time, start with the
@@ -18,18 +11,8 @@ reference material you reach for when a specific question arises.
 
 ## Independence & attribution
 
-FlintTrade is native-first and **independently built**: its backend, native
-broker gateway contract, safety/gating layer, and most application code are
-original work by the FlintTrade authors. It is **not a fork** of another trading
-application. It interoperates with OpenAlgo only through an optional bridge
-adapter rather than bundling OpenAlgo's source. Reference projects were studied
-for inspiration; where a specific module was adapted from an open-source project
-it carries an in-source `Adapted from:` header and its licence and attribution
-are preserved in the repository's
-[NOTICE](https://github.com/navaneeshnagarajan/FlintTrade/blob/main/notice) file
-(see also [REFERENCES.md](REFERENCES.md)). Reducing the remaining adapted surface
-to fully-original implementations is ongoing. FlintTrade is licensed under
-[AGPL-3.0](https://github.com/navaneeshnagarajan/FlintTrade/blob/main/LICENSE).
+FlintTrade owns its backend and gateway. Attribution for adapted modules remains
+in the repository notice and source headers.
 
 ## Index
 
@@ -43,7 +26,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Contributor | Repo layout, dev environment, tests, build, how to add a widget / strategy / broker. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Contributor | Component diagrams, data flow, mode system, package dependency graph. |
 | [TECH_STACK.md](TECH_STACK.md) | Everyone / Contributor | Dependency purposes, version sources, and the in-app build information. |
-| [API.md](API.md) | Integrator | FlintTrade `/ft-api/v1/*` reference, broker/OpenAlgo-compatible bridge endpoints, WebSocket protocol, auth model. |
+| [API.md](API.md) | Integrator | FlintTrade `/ft-api/v1/*` reference, native broker contracts, auth model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Operator / Contributor | Supported brokers, exchanges, operating systems, and Python / Node versions. |
 | [ORDER_SAFETY.md](ORDER_SAFETY.md) | Operator / Contributor | Audit logging, rate limits, retention, and kill-switch design notes. |
 | [CI.md](CI.md) | Contributor | How the GitHub Actions pipeline runs, what each job covers, and how to read CI failures. |

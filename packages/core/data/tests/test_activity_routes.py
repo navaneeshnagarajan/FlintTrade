@@ -133,9 +133,7 @@ class TestGetActivity:
         assert data["data"]["entries"] == []
         assert data["data"]["count"] == 0
 
-    def test_returns_entries_with_correct_shape(
-        self, client: MagicMock, activity_log: MagicMock
-    ) -> None:
+    def test_returns_entries_with_correct_shape(self, client: MagicMock, activity_log: MagicMock) -> None:
         """Activity entries are serialised with all expected fields.
 
         Args:
@@ -154,9 +152,7 @@ class TestGetActivity:
         assert "log_id" in e
         assert "timestamp" in e
 
-    def test_passes_filters_to_query(
-        self, client: MagicMock, activity_log: MagicMock
-    ) -> None:
+    def test_passes_filters_to_query(self, client: MagicMock, activity_log: MagicMock) -> None:
         """Query parameters are forwarded to activity_log.query().
 
         Args:
@@ -164,9 +160,7 @@ class TestGetActivity:
             activity_log: Mock log fixture.
         """
         client.get("/api/v1/admin/activity?action=order.place&user=nav&limit=10")
-        activity_log.query.assert_called_once_with(
-            action="order.place", user="nav", since=None, limit=10
-        )
+        activity_log.query.assert_called_once_with(action="order.place", user="nav", since=None, limit=10)
 
     def test_invalid_limit_returns_400(self, client: MagicMock) -> None:
         """Non-integer limit query parameter returns HTTP 400.
@@ -188,9 +182,7 @@ class TestGetActivity:
         assert resp.status_code == 503
         assert resp.get_json()["status"] == "error"
 
-    def test_limit_clamped_to_500(
-        self, client: MagicMock, activity_log: MagicMock
-    ) -> None:
+    def test_limit_clamped_to_500(self, client: MagicMock, activity_log: MagicMock) -> None:
         """Limit above 500 is clamped to 500 before querying.
 
         Args:

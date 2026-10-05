@@ -127,7 +127,7 @@ def _monday_app(db_path: Path) -> Flask:
     app.config["RATE_LIMITER"] = RateLimiter(global_rate=100, per_user_rate=10)
     app.config["BROKER_ROUTER"] = _LivePathSentinel()
     app.config["CLIENT"] = _LivePathSentinel()
-    app.config["OPENALGO_CLIENT"] = _LivePathSentinel()
+    app.config["BROKER_CLIENT"] = _LivePathSentinel()
     app.config["TICK_RECORDER"] = None
     app.register_blueprint(orders_bp)
     return app
@@ -243,7 +243,7 @@ def test_live_place_stays_fail_closed_without_funded_unlock(tmp_path: Path) -> N
     assert "live mode not unlocked" in locked.get_json()["message"].lower()
     assert app.config["BROKER_ROUTER"].accesses == []
     assert app.config["CLIENT"].accesses == []
-    assert app.config["OPENALGO_CLIENT"].accesses == []
+    assert app.config["BROKER_CLIENT"].accesses == []
 
 
 @pytest.mark.unit

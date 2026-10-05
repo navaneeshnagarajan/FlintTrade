@@ -1,12 +1,12 @@
 # FlintTrade — data
 
-> Real-time tick capture, WebSocket storage, local audit trails, order flow analysis, tax reports and Practice sandbox storage.
+> Local tick storage and processing, audit trails, order flow analysis, tax reports and Practice sandbox storage. Native tick capture is unavailable pending a native stream source.
 
 ## Key Modules
 
 Modules below live in `src/flinttrade_data/`.
 
-- `tick_recorder.py` — Real-time tick capture and storage
+- `tick_recorder.py` — Local tick buffering/storage; native capture unavailable
 - `audit_logger.py` — Configurable local audit trail retention
 - `orderflow.py` / `orderflow_routes.py` — Order flow analysis and API routes
 - `tax_report.py` / `tax_routes.py` — Tax report generation and API routes
@@ -22,16 +22,7 @@ Trade logging and P&L tracking live in `packages/services/journal/src/flinttrade
 
 See `packages/core/data/pyproject.toml` for declared dependencies and optional extras.
 
-## Rules
-- Read root CLAUDE.md for project-wide rules
-- Use `flinttrade_core.openalgo_client` (`packages/core/core/src/flinttrade_core/openalgo_client.py`) for the optional OpenAlgo REST bridge. Live writes must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and flow through `BrokerRouter`; never call broker writes directly.
-- Keep shared service logic broker-neutral; broker-specific implementations and capability differences belong in gateway adapters.
-- Tests are in the `tests/` directory. Add new test files as needed.
-- Update root `changelog.md` only for shipped user-visible or API changes; do not add entries for tests, behaviour-preserving refactors or in-flight design.
-- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
-
-## Crypto data (Delta Exchange)
-- 24/7 tick data — storage grows continuously (no market close)
-- Funding rate snapshots every 8 hours
-- Liquidation events as separate data stream
-- Use CCXT for supplementary crypto data if needed
+## Tick source availability
+- Existing local tick data can be queried and processed.
+- No native streaming capture source is wired into this package.
+- Enabling a capture environment flag does not provide a stream.

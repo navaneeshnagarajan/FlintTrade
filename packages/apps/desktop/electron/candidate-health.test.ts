@@ -199,7 +199,7 @@ describe("candidate health proof", () => {
       ...(globalThis.process.platform === "win32" ? ["USERPROFILE"] : []),
     ]);
     expect(invocation.env).not.toHaveProperty("OPENAI_API_KEY");
-    expect(invocation.env).not.toHaveProperty("OPENALGO_API_KEY");
+    expect(invocation.env).not.toHaveProperty("DHAN_ACCESS_TOKEN");
   });
 
   it("binds the Windows user profile to the isolated home", () => {

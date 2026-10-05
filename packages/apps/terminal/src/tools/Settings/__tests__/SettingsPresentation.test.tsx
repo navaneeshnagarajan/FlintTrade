@@ -1,18 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { ConnectionSection } from "../ConnectionSection";
+import { BrokerSummary } from "../BrokerSummary";
 import { AboutSection } from "../AboutSection";
-vi.mock("@/components/account/OpenAlgoConnectionForm", () => ({
-  OpenAlgoConnectionForm: () => <div>Connection editor</div>,
-}));
 vi.mock("@/layout/widgetFactory", () => ({ widgetCatalog: [] }));
 describe("Settings presentation", () => {
-  it("keeps the bridge editor without a second onboarding shortcut", () => {
-    render(<ConnectionSection settings={{ host: "", port: "5000", wsPort: "8765", apiKeyConfigured: false, apiKeyLast4: "" }} onSaved={vi.fn()} />);
-    expect(screen.getByText("Connection editor")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "OpenAlgo bridge" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /setup wizard/i })).not.toBeInTheDocument();
+  it("describes the loaded broker snapshot without claiming connection enables orders", () => {
+    render(<BrokerSummary connectedAccounts={0} />);
+    expect(screen.getByText("No connected broker accounts are listed.")).toBeVisible();
+    expect(screen.getByText(/connecting an account does not enable live orders/i)).toBeVisible();
   });
   it("describes the operator workflow without internal architecture copy", () => {
     render(<AboutSection />);

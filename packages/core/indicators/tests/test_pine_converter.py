@@ -295,8 +295,7 @@ class TestGetSupportedFunctions:
     def test_contains_core_ta_functions(self):
         """Core ta functions must be present in the supported list."""
         funcs = PineConverter.get_supported_functions()
-        for name in ("ta.ema", "ta.rsi", "ta.macd", "ta.supertrend",
-                     "ta.crossover", "ta.atr", "ta.bb"):
+        for name in ("ta.ema", "ta.rsi", "ta.macd", "ta.supertrend", "ta.crossover", "ta.atr", "ta.bb"):
             assert name in funcs, f"{name!r} missing from supported list"
 
     def test_contains_input_functions(self):

@@ -13,14 +13,14 @@ pytestmark = pytest.mark.unit
 def test_entry_rationale_is_optional_and_empty_by_default():
     config = AgentConfig(symbols=["RELIANCE"])
     assert config.entry_rationale == ""
-    trader = AutonomousTrader(llm_client=None, openalgo_client=None, config=config)
+    trader = AutonomousTrader(llm_client=None, broker_client=None, config=config)
     assert trader._build_market_order("RELIANCE", "BUY", 1).admission_note == ""
 
 
 def test_typed_order_preserves_configured_operator_rationale_exactly():
     rationale = "Operator plan: test the opening-range breakout.\nUse the configured stop; ₹ risk stays bounded."
     trader = AutonomousTrader(
-        llm_client=None, openalgo_client=None,
+        llm_client=None, broker_client=None,
         config=AgentConfig(symbols=["RELIANCE"], entry_rationale=rationale),
     )
     order = trader._build_market_order("RELIANCE", "BUY", 25)
@@ -38,7 +38,7 @@ async def test_operator_rationale_does_not_override_entry_admission_refusal():
         return SimpleNamespace(passed=False, error="Laya requires a clamp")
 
     trader = AutonomousTrader(
-        llm_client=None, openalgo_client=None,
+        llm_client=None, broker_client=None,
         config=AgentConfig(symbols=["RELIANCE"], entry_rationale="Operator-authored session plan"),
         order_executor=SimpleNamespace(route_order=route_order),
     )

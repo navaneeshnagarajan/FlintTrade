@@ -89,10 +89,8 @@ describe("OrdersWidget exact mutation authority", () => {
   beforeEach(() => {
     useModeStore.setState({ mode: "live" });
     useConnectionStore.setState({
-      host: "",
       apiKey: "",
       status: "disconnected",
-      openAlgoHydrated: true,
     });
     useBrokerStore.setState({
       accounts: [ACCOUNT_A, ACCOUNT_B],

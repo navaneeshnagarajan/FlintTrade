@@ -21,7 +21,6 @@ Single-user platform deployable anywhere (NAS, cloud, personal machine). One acc
 |------|---------|--------|
 | 1. Account Security | Username, email, strong password (zxcvbn), 6-digit PIN, 2FA TOTP (QR for Authenticator apps) | NEW |
 | 2. Persona | Trader / Investor / Beginner selection | FROM /setup |
-| 3. Broker Connection | Connect OpenAlgo + individual brokers | FROM /setup |
 | 4. Trading Defaults | Exchange, product type, order type | FROM /setup |
 | 5. Risk Limits | Max daily loss, position size limits | FROM /setup |
 | 6. Mode Selection | Demo / Sandbox / Live | NEW |
@@ -40,20 +39,6 @@ Single-user platform deployable anywhere (NAS, cloud, personal machine). One acc
 ### 1.2 Daily Login Flow
 
 **Session expiry:** Every day at 08:00 IST, all sessions expire. This enforces daily re-authentication aligned with broker login expectations.
-
-**Returning user flow:**
-```
-/welcome (auto-redirect to login)
-  → Step 1: Password + TOTP code
-            OR PIN (if session was recently active, <30 min idle)
-  → Step 2: Mode selection (Demo / Sandbox / Live)
-  → Step 3: Broker Dashboard
-            - All connected brokers listed with status (red = disconnected)
-            - Click each to authenticate (TOTP/OAuth/OTP per broker)
-            - OpenAlgo users: "Managed by OpenAlgo" badge — skipped
-            - "Skip for now" — enters app with brokers disconnected
-  → Enter app at last-used route
-```
 
 ### 1.3 PIN Quick-Unlock
 
@@ -142,7 +127,7 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 |------|-----------|----------------|----------------|
 | **Demo** | Mock data engine (simulated prices) | None — read only | No |
 | **Sandbox** | Live market data from broker | Paper trades (local DuckDB) | Yes |
-| **Live** | Live market data from broker | Real orders via OpenAlgo → broker | Yes |
+| **Live** | Live market data from broker | Real orders via the native gateway → broker | Yes |
 
 ### 3.2 Mode Selection
 
@@ -172,7 +157,7 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 
 **Guided tour:**
 - Overlay-based walkthrough using SpotlightTour component (already exists)
-- Covers: /trade workspace, /invest portfolio, /learn courses, /lab backtesting, /automate flows, /ai advisor
+- Covers: /trade workspace, /invest portfolio, /learn courses, /lab backtesting, /automate schedules, /ai advisor
 - User can exit tour at any time → switches to example data
 
 **Visual indicator:**
@@ -200,10 +185,12 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 
 ### 3.5 Live Mode
 
-- Full real trading through OpenAlgo → broker → exchange
 - Requires at least one broker connected
+
 - PIN confirmation on mode entry
+
 - Green `LIVE` pill in TopBar
+
 - No banner (clean trading UI — mode is communicated via pill only)
 
 ---

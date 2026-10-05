@@ -77,36 +77,42 @@ def normalise_l2_positions(raw: Any) -> list[Any]:
 
 def normalise_l2_funds(raw: Any) -> tuple[float, float]:
     """Return ``(used_margin, total_balance)`` from broker-shaped funds."""
-    used = _to_float(_field(
-        raw,
-        "used_margin",
-        "utilized_margin",
-        "utilised_margin",
-        "usedmargin",
-        "margin_used",
-        "marginUsed",
-        "MarginUsed",
-        "used",
-    ))
-    total = _to_float(_field(
-        raw,
-        "total_balance",
-        "total",
-        "totalcollateral",
-        "totalCollateral",
-        "net",
-        "net_balance",
-        "Net",
-    ))
-    if total <= 0:
-        available = _to_float(_field(
+    used = _to_float(
+        _field(
             raw,
-            "available_balance",
-            "available_margin",
-            "available",
+            "used_margin",
+            "utilized_margin",
+            "utilised_margin",
+            "usedmargin",
+            "margin_used",
+            "marginUsed",
+            "MarginUsed",
+            "used",
+        )
+    )
+    total = _to_float(
+        _field(
+            raw,
+            "total_balance",
+            "total",
+            "totalcollateral",
+            "totalCollateral",
             "net",
+            "net_balance",
             "Net",
-        ))
+        )
+    )
+    if total <= 0:
+        available = _to_float(
+            _field(
+                raw,
+                "available_balance",
+                "available_margin",
+                "available",
+                "net",
+                "Net",
+            )
+        )
         if available or used:
             total = available + used
     return used, total
@@ -185,7 +191,6 @@ class ModifySafetyIntent:
 class _AccountSource:
     target: Any
     session: Any = None
-    openalgo: bool = False
 
 
 @dataclass(frozen=True)
@@ -249,9 +254,7 @@ def _option_risk_positions(
             return
         symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol"))
         exchange = _text(_field(row, "exchange")).upper()
-        instrument_id = _text(
-            _field(row, "instrument_id", "instrument_token", "security_id", "securityId")
-        )
+        instrument_id = _text(_field(row, "instrument_id", "instrument_token", "security_id", "securityId"))
         if not symbol or not exchange:
             raise PortfolioSafetyStateError("Incomplete option position identity")
         raw_strike = _field(row, "strike_price", "strike", "drvStrikePrice")
@@ -305,11 +308,7 @@ def _option_risk_positions(
             raise PortfolioSafetyStateError("Invalid option order quantity or action")
         merge(order, quantity if action == "BUY" else -quantity)
 
-    return [
-        aggregated[key]
-        for key in sorted(aggregated)
-        if aggregated[key]["quantity"] != 0
-    ]
+    return [aggregated[key] for key in sorted(aggregated) if aggregated[key]["quantity"] != 0]
 
 
 def _greek_identity(row: Any) -> str:
@@ -320,9 +319,7 @@ def _greek_identity(row: Any) -> str:
 
 
 def _greek_instrument_id(row: Any) -> str:
-    return _text(
-        _field(row, "instrument_id", "instrument_token", "security_id", "securityId")
-    )
+    return _text(_field(row, "instrument_id", "instrument_token", "security_id", "securityId"))
 
 
 def _greek_symbol_identity(row: Any) -> str:
@@ -347,7 +344,6 @@ async def _portfolio_greeks(
         raw_greeks = await _read(
             source,
             "portfolio_greeks",
-            "portfolio_greeks",
             option_positions,
         )
     except PortfolioSafetyStateError:
@@ -359,8 +355,7 @@ async def _portfolio_greeks(
     symbol_resolvable: set[str] = set()
     resolved_identities = resolved_identities if resolved_identities is not None else {}
     resolved_symbols = {
-        instrument_id: symbol_identity
-        for symbol_identity, instrument_id in resolved_identities.items()
+        instrument_id: symbol_identity for symbol_identity, instrument_id in resolved_identities.items()
     }
     if len(resolved_symbols) != len(resolved_identities):
         raise PortfolioSafetyStateError("Option Greeks lack a unique resolved instrument identity")
@@ -395,10 +390,8 @@ async def _portfolio_greeks(
         if returned_instrument_id and returned_instrument_id in expected:
             identity = returned_instrument_id
         elif symbol_identity in symbol_resolvable:
-            if not source.openalgo and not returned_instrument_id:
-                raise PortfolioSafetyStateError(
-                    "Native option Greeks lack an adapter-resolved instrument identity"
-                )
+            if not returned_instrument_id:
+                raise PortfolioSafetyStateError("Native option Greeks lack an adapter-resolved instrument identity")
             register_resolved_identity(symbol_identity, returned_instrument_id)
             identity = symbol_identity
         else:
@@ -613,9 +606,7 @@ def _required_margin_value(raw: Any, *, allow_zero: bool = False) -> float:
         margin = _finite_number(value, "required order margin")
         if margin < 0 or (margin == 0 and not allow_zero):
             qualifier = "non-negative" if allow_zero else "positive"
-            raise PortfolioSafetyStateError(
-                f"Authoritative required order margin is not {qualifier}"
-            )
+            raise PortfolioSafetyStateError(f"Authoritative required order margin is not {qualifier}")
         return margin
     raise PortfolioSafetyStateError("Authoritative required order margin is unavailable")
 
@@ -627,13 +618,7 @@ async def _required_order_margin(
     allow_zero: bool = False,
 ) -> float:
     try:
-        if source.openalgo:
-            reader = getattr(source.target, "margin", None)
-            if not callable(reader):
-                raise PortfolioSafetyStateError("Portfolio reader lacks margin")
-            raw = await _maybe_await(reader([_order_margin_payload(order)]))
-        else:
-            raw = await _read(source, "margin", "margin_calculator", order)
+        raw = await _read(source, "margin_calculator", order)
     except PortfolioSafetyStateError:
         raise
     except Exception as exc:
@@ -666,9 +651,7 @@ def _instrument_key(
     product = _text(_field(row, "product")).upper() or default_product
     if not symbol or not exchange or not product:
         raise PortfolioSafetyStateError(f"Incomplete {source} instrument identity")
-    instrument_id = _text(
-        _field(row, "instrument_id", "instrument_token", "security_id", "securityId")
-    )
+    instrument_id = _text(_field(row, "instrument_id", "instrument_token", "security_id", "securityId"))
     identity = instrument_id or f"symbol:{symbol}"
     return exchange, identity, product
 
@@ -799,7 +782,9 @@ def _validate_delivery_accounting(
                 if not math.isclose(instrument.position_quantity, expected_day_delta, abs_tol=1e-9):
                     raise PortfolioSafetyStateError("Delivery position does not equal today's broker quantity delta")
                 if not math.isclose(instrument.net_trade_quantity, expected_day_delta, abs_tol=1e-9):
-                    raise PortfolioSafetyStateError("Delivery trade book does not reconcile to the broker quantity delta")
+                    raise PortfolioSafetyStateError(
+                        "Delivery trade book does not reconcile to the broker quantity delta"
+                    )
             elif not math.isclose(
                 instrument.position_quantity,
                 instrument.net_trade_quantity,
@@ -841,9 +826,8 @@ def _build_local_ledger(
             _field(position, "carry_forward_sell_quantity", "carryForwardSellQty") or 0,
             "carry-forward sell quantity",
         )
-        instrument.position_accounting_complete = (
-            instrument.position_accounting_complete
-            and bool(_field(position, "accounting_complete", "_emergency_accounting_complete"))
+        instrument.position_accounting_complete = instrument.position_accounting_complete and bool(
+            _field(position, "accounting_complete", "_emergency_accounting_complete")
         )
         instrument.position_seen = True
         _merge_instrument_accounting(instrument, position)
@@ -860,9 +844,8 @@ def _build_local_ledger(
         _merge_symbol(instrument, holding)
         instrument.end_quantity += quantity
         instrument.holding_quantity += quantity
-        instrument.holding_accounting_complete = (
-            instrument.holding_accounting_complete
-            and bool(_field(holding, "accounting_complete"))
+        instrument.holding_accounting_complete = instrument.holding_accounting_complete and bool(
+            _field(holding, "accounting_complete")
         )
         instrument.holding_seen = True
         _merge_instrument_accounting(instrument, holding)
@@ -893,8 +876,7 @@ def required_quote_symbols(trades: Any, positions: Any, holdings: Any = ()) -> l
     required = {
         (exchange, instrument.symbol)
         for (exchange, _identity, _product), instrument in ledger.items()
-        if instrument.end_quantity != 0.0
-        or instrument.end_quantity - instrument.net_trade_quantity != 0.0
+        if instrument.end_quantity != 0.0 or instrument.end_quantity - instrument.net_trade_quantity != 0.0
     }
     return [f"{exchange}:{symbol}" for exchange, symbol in sorted(required)]
 
@@ -905,8 +887,7 @@ def required_previous_close_symbols(trades: Any, positions: Any, holdings: Any =
     required = {
         (exchange, instrument.symbol)
         for (exchange, _identity, _product), instrument in ledger.items()
-        if instrument.end_quantity - instrument.net_trade_quantity != 0.0
-        and instrument.previous_close is None
+        if instrument.end_quantity - instrument.net_trade_quantity != 0.0 and instrument.previous_close is None
     }
     return [f"{exchange}:{symbol}" for exchange, symbol in sorted(required)]
 
@@ -934,16 +915,12 @@ def _instrument_factor(
     multiplier = instrument.multiplier
     if multiplier is None:
         if exchange not in _CASH_EXCHANGES:
-            raise PortfolioSafetyStateError(
-                f"Missing contract multiplier for {exchange}:{symbol}"
-            )
+            raise PortfolioSafetyStateError(f"Missing contract multiplier for {exchange}:{symbol}")
         multiplier = 1.0
     if exchange in _CASH_EXCHANGES:
         fx_rate = 1.0
     elif instrument.cross_currency is None:
-        raise PortfolioSafetyStateError(
-            f"Missing settlement-currency provenance for {exchange}:{symbol}"
-        )
+        raise PortfolioSafetyStateError(f"Missing settlement-currency provenance for {exchange}:{symbol}")
     elif instrument.cross_currency:
         if instrument.fx_rate is None:
             raise PortfolioSafetyStateError(f"Missing cross-currency FX rate for {exchange}:{symbol}")
@@ -1002,19 +979,20 @@ def compute_local_daily_pnl(
                 if _optional_bool(quote, "previous_close_trusted") is True
                 else None
             )
-            previous_close = _merge_accounting_value(
-                instrument.previous_close,
-                quote_previous_close,
-                label="previous close",
-            ) or 0.0
+            previous_close = (
+                _merge_accounting_value(
+                    instrument.previous_close,
+                    quote_previous_close,
+                    label="previous close",
+                )
+                or 0.0
+            )
             if previous_close <= 0:
                 raise PortfolioSafetyStateError(f"Invalid previous close for {exchange}:{symbol}")
         factor = _instrument_factor(key, instrument)
         signed_trade_cash_flow = sum(quantity * price for quantity, price in instrument.fills)
         contribution = factor * (
-            instrument.end_quantity * ltp
-            - opening_quantity * previous_close
-            - signed_trade_cash_flow
+            instrument.end_quantity * ltp - opening_quantity * previous_close - signed_trade_cash_flow
         )
         total += contribution
     if not math.isfinite(total):
@@ -1027,15 +1005,6 @@ def _resolve_account_source(
     adapter_id: str,
     account_id: str,
 ) -> _AccountSource:
-    if adapter_id == "openalgo":
-        if account_id != "default":
-            raise PortfolioSafetyStateError(
-                "OpenAlgo exposes one configured account; non-default account selectors are unavailable"
-            )
-        client = config.get("OPENALGO_CLIENT")
-        if client is None:
-            raise PortfolioSafetyStateError("OpenAlgo portfolio reader is unavailable")
-        return _AccountSource(client, openalgo=True)
 
     adapter = (config.get("NATIVE_ADAPTERS") or {}).get(adapter_id)
     registry = config.get("REGISTRY")
@@ -1048,60 +1017,64 @@ def _resolve_account_source(
     return _AccountSource(adapter, session=session)
 
 
-async def _read(source: _AccountSource, openalgo_name: str, native_name: str, *args: Any) -> Any:
-    method_name = openalgo_name if source.openalgo else native_name
+async def _read(source: _AccountSource, native_name: str, *args: Any) -> Any:
+    method_name = native_name
     reader = getattr(source.target, method_name, None)
     if not callable(reader):
         raise PortfolioSafetyStateError(f"Portfolio reader lacks {method_name}")
-    call_args = args if source.openalgo else (source.session, *args)
+    call_args = (source.session, *args)
     return await _maybe_await(reader(*call_args))
 
 
 # Brokers whose modify contract is a full replacement and therefore needs an
 # authoritative disclosed quantity. Groww and INDmoney omit the field entirely.
-_FULL_REPLACEMENT_DISCLOSURE_ADAPTERS = frozenset({"openalgo", "dhan", "upstox", "kotakneo"})
+_FULL_REPLACEMENT_DISCLOSURE_ADAPTERS = frozenset({"dhan", "upstox", "kotakneo"})
 
 # Kotak reports an acknowledged order that is not yet open as "open pending".
 # The adapter classifies that state as active for cancellation, so the
 # authoritative cancel bind accepts the normalised "OPEN PENDING" status.
-_ACTIVE_ORDER_STATUSES = frozenset({
-    "ACTIVE",
-    "AFTER MARKET ORDER REQ RECEIVED",
-    "AMO REQ RECEIVED",
-    "CONFIRM",
-    "MODIFY PENDING",
-    "MODIFY VALIDATION PENDING",
-    "OPEN",
-    "OPEN PENDING",
-    "PARTIAL",
-    "PARTIALLY FILLED",
-    "PENDING",
-    "PUT ORDER REQ RECEIVED",
-    "SCHEDULED",
-    "TRANSIT",
-    "TRIGGER PENDING",
-    "TRIGGER_PENDING",
-    "VALIDATION PENDING",
-})
+_ACTIVE_ORDER_STATUSES = frozenset(
+    {
+        "ACTIVE",
+        "AFTER MARKET ORDER REQ RECEIVED",
+        "AMO REQ RECEIVED",
+        "CONFIRM",
+        "MODIFY PENDING",
+        "MODIFY VALIDATION PENDING",
+        "OPEN",
+        "OPEN PENDING",
+        "PARTIAL",
+        "PARTIALLY FILLED",
+        "PENDING",
+        "PUT ORDER REQ RECEIVED",
+        "SCHEDULED",
+        "TRANSIT",
+        "TRIGGER PENDING",
+        "TRIGGER_PENDING",
+        "VALIDATION PENDING",
+    }
+)
 
-_TERMINAL_ORDER_STATUSES = frozenset({
-    "CANCELED",
-    "CANCELLED",
-    "CLOSED",
-    "COMPLETE",
-    "COMPLETED",
-    "DELETED",
-    "DISABLED",
-    "EXPIRED",
-    "FILLED",
-    "REJECTED",
-    "TRADED",
-})
+_TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        "CANCELED",
+        "CANCELLED",
+        "CLOSED",
+        "COMPLETE",
+        "COMPLETED",
+        "DELETED",
+        "DISABLED",
+        "EXPIRED",
+        "FILLED",
+        "REJECTED",
+        "TRADED",
+    }
+)
 
 _ORDER_READERS = {
-    "regular": ("orderbook", "order_book"),
-    "forever": ("gtt_orderbook", "forever_orders"),
-    "super": ("", "super_orders"),
+    "regular": "order_book",
+    "forever": "forever_orders",
+    "super": "super_orders",
 }
 
 
@@ -1134,11 +1107,7 @@ def _select_super_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, Any
     if leg_name not in {"TARGET_LEG", "STOP_LOSS_LEG"}:
         raise PortfolioSafetyStateError("Super-order modify has an invalid leg name")
     legs = _rows(_field(parent, "legs", "leg_details", "legDetails"), "data", "legs")
-    matched = [
-        leg
-        for leg in legs
-        if _text(_field(leg, "leg_name", "legName")).upper() == leg_name
-    ]
+    matched = [leg for leg in legs if _text(_field(leg, "leg_name", "legName")).upper() == leg_name]
     if len(matched) != 1:
         raise PortfolioSafetyStateError("Authoritative super-order leg is unavailable")
     return matched[0], parent
@@ -1181,13 +1150,9 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
             _order_record_value(row, fallback, "symbol", "trading_symbol", "tradingsymbol", "tradingSymbol")
         ),
         "exchange": _text(_order_record_value(row, fallback, "exchange", "exchange_segment")).upper(),
-        "action": _text(
-            _order_record_value(row, fallback, "action", "transaction_type", "transactionType")
-        ).upper(),
+        "action": _text(_order_record_value(row, fallback, "action", "transaction_type", "transactionType")).upper(),
         "product": _text(_order_record_value(row, fallback, "product", "product_type", "productType")).upper(),
-        "broker_product": _text(
-            _order_record_value(row, fallback, "broker_product", "brokerProduct")
-        ).upper(),
+        "broker_product": _text(_order_record_value(row, fallback, "broker_product", "brokerProduct")).upper(),
         "quantity": _order_record_value(row, fallback, "quantity", "qty", "order_quantity"),
         "filled_quantity": _order_record_value(
             row,
@@ -1255,9 +1220,7 @@ def _active_unfilled_orders(raw_orders: Any) -> list[Any]:
             SimpleNamespace(
                 order_id=order_id,
                 symbol=current["symbol"],
-                instrument_id=_text(
-                    _field(row, "instrument_id", "instrument_token", "security_id", "securityId")
-                ),
+                instrument_id=_text(_field(row, "instrument_id", "instrument_token", "security_id", "securityId")),
                 exchange=current["exchange"],
                 action=current["action"],
                 product=current["product"],
@@ -1275,21 +1238,22 @@ def _active_unfilled_orders(raw_orders: Any) -> list[Any]:
     return pending
 
 
-_ZERO_FILL_TERMINAL_STATUSES = frozenset({
-    "CANCELED",
-    "CANCELLED",
-    "CLOSED",
-    "DELETED",
-    "DISABLED",
-    "EXPIRED",
-    "REJECTED",
-})
+_ZERO_FILL_TERMINAL_STATUSES = frozenset(
+    {
+        "CANCELED",
+        "CANCELLED",
+        "CLOSED",
+        "DELETED",
+        "DISABLED",
+        "EXPIRED",
+        "REJECTED",
+    }
+)
 
 
 def _same_order_identity(authoritative: Mapping[str, Any], order: Any) -> bool:
     return (
-        authoritative["symbol"].upper()
-        == _text(_field(order, "symbol", "trading_symbol", "tradingsymbol")).upper()
+        authoritative["symbol"].upper() == _text(_field(order, "symbol", "trading_symbol", "tradingsymbol")).upper()
         and authoritative["exchange"] == _text(_field(order, "exchange")).upper()
         and authoritative["product"] == _text(_field(order, "product")).upper()
         and authoritative["action"] == _text(_field(order, "action", "transaction_type")).upper()
@@ -1360,9 +1324,7 @@ def _project_unresolved_reservations(
                     "authoritative reserved parent filled quantity",
                 )
                 if parent_filled < 0:
-                    raise PortfolioSafetyStateError(
-                        "Authoritative reserved parent filled quantity is inconsistent"
-                    )
+                    raise PortfolioSafetyStateError("Authoritative reserved parent filled quantity is inconsistent")
                 if parent_status in _ZERO_FILL_TERMINAL_STATUSES and parent_filled == 0:
                     reconciled.append(reservation_id)
                     continue
@@ -1480,9 +1442,7 @@ def _recover_omitted_modify_fields(
         if "amo" in requested:
             requested_amo = _canonical_amo(changes.get("amo"), label="modify AMO flag")
             if requested_amo is not authoritative_amo:
-                raise PortfolioSafetyStateError(
-                    "Modify-order AMO flag does not match the authoritative open order"
-                )
+                raise PortfolioSafetyStateError("Modify-order AMO flag does not match the authoritative open order")
         if (variety == "amo") is not authoritative_amo:
             raise PortfolioSafetyStateError("Authoritative order variety contradicts its AMO flag")
 
@@ -1555,17 +1515,13 @@ def _bind_authoritative_modify_identity(
     """
     bound: MutableMapping[str, Any] = changes if isinstance(changes, MutableMapping) else dict(changes)
     explicitly_requested = (
-        set(requested_fields)
-        if requested_fields is not None
-        else set(changes).intersection(_MODIFY_IDENTITY_FIELDS)
+        set(requested_fields) if requested_fields is not None else set(changes).intersection(_MODIFY_IDENTITY_FIELDS)
     )
     for field_name in _MODIFY_IDENTITY_FIELDS:
         authoritative = _text(current[field_name]).strip()
         requested = _text(changes.get(field_name)).strip()
         if field_name in explicitly_requested and requested.upper() != authoritative.upper():
-            raise PortfolioSafetyStateError(
-                f"Modify-order {field_name} does not match the authoritative open order"
-            )
+            raise PortfolioSafetyStateError(f"Modify-order {field_name} does not match the authoritative open order")
         canonical = authoritative.upper() if field_name != "symbol" else authoritative
         bound[field_name] = canonical
     return bound
@@ -1581,7 +1537,7 @@ async def bind_authoritative_cancel_context(
 ) -> dict[str, Any]:
     """Bind Kotak cancel arguments to one authoritative active broker row."""
     source = _resolve_account_source(config, adapter_id, account_id)
-    raw_orders = await _read(source, "orderbook", "order_book")
+    raw_orders = await _read(source, "order_book")
     rows = _rows(raw_orders, "data", "orders", "orderbook", "order_book")
     matches = [row for row in rows if _order_record_id(row) == str(order_id)]
     if len(matches) != 1:
@@ -1612,15 +1568,11 @@ async def bind_authoritative_cancel_context(
         if type(requested_variety) is not str or not requested_variety.strip():
             raise PortfolioSafetyStateError("Cancel-order variety is invalid")
         if requested_variety.strip().lower() != variety:
-            raise PortfolioSafetyStateError(
-                "Cancel-order variety does not match the authoritative open order"
-            )
+            raise PortfolioSafetyStateError("Cancel-order variety does not match the authoritative open order")
     if "amo" in requested:
         requested_amo = _canonical_amo(requested["amo"], label="cancel AMO flag")
         if requested_amo is not amo:
-            raise PortfolioSafetyStateError(
-                "Cancel-order AMO flag does not match the authoritative open order"
-            )
+            raise PortfolioSafetyStateError("Cancel-order AMO flag does not match the authoritative open order")
     return {"broker_product": broker_product, "variety": variety, "amo": amo}
 
 
@@ -1641,10 +1593,7 @@ async def classify_modify_intent(
     if readers is None:
         raise PortfolioSafetyStateError("Unknown modify-order family")
     source = _resolve_account_source(config, adapter_id, account_id)
-    openalgo_reader, native_reader = readers
-    if source.openalgo and not openalgo_reader:
-        raise PortfolioSafetyStateError("Authoritative modify-order reader is unavailable")
-    raw_orders = await _read(source, openalgo_reader, native_reader)
+    raw_orders = await _read(source, readers)
     rows = _rows(raw_orders, "data", "orders", "orderbook", "order_book")
     matches = [row for row in rows if _order_record_id(row) == str(order_id)]
     if len(matches) != 1:
@@ -1708,15 +1657,10 @@ async def classify_modify_intent(
     )
     identity_fields = ("symbol", "exchange", "action", "product")
     same_exposure = all(
-        _text(_field(current_order, field)).upper()
-        == _text(_field(proposed_order, field)).upper()
+        _text(_field(current_order, field)).upper() == _text(_field(proposed_order, field)).upper()
         for field in identity_fields
     )
-    no_increase = (
-        same_exposure
-        and proposed_quantity <= current_quantity
-        and proposed_margin <= current_margin + 1e-9
-    )
+    no_increase = same_exposure and proposed_quantity <= current_quantity and proposed_margin <= current_margin + 1e-9
     return ModifySafetyIntent(
         proposed_order=proposed_order,
         # A GTT replacement can weaken or remove a protective rule without
@@ -1759,7 +1703,7 @@ async def gather_authoritative_positions(
     stable: Any = None
     try:
         for attempt in range(_SNAPSHOT_ATTEMPTS):
-            current = await _read(source, "positionbook", "positions")
+            current = await _read(source, "positions")
             if attempt and _fingerprint_rows(previous, "position") == _fingerprint_rows(current, "position"):
                 stable = current
                 break
@@ -1799,34 +1743,105 @@ async def gather_authoritative_positions(
 def _fingerprint_rows(raw: Any, kind: str) -> tuple[tuple[str, ...], ...]:
     fields_by_kind = {
         "position": (
-            "symbol", "instrument_id", "instrument_token", "security_id", "exchange", "product",
-            "quantity", "overnight_quantity",
-            "day_buy_quantity", "day_sell_quantity", "multiplier", "fx_rate",
-            "cross_currency", "previous_close_trusted",
-            "carry_forward_buy_quantity", "carry_forward_sell_quantity", "accounting_complete",
-            "option_type", "expiry", "strike_price", "underlying",
-            "previous_close", "prev_close", "close_price",
+            "symbol",
+            "instrument_id",
+            "instrument_token",
+            "security_id",
+            "exchange",
+            "product",
+            "quantity",
+            "overnight_quantity",
+            "day_buy_quantity",
+            "day_sell_quantity",
+            "multiplier",
+            "fx_rate",
+            "cross_currency",
+            "previous_close_trusted",
+            "carry_forward_buy_quantity",
+            "carry_forward_sell_quantity",
+            "accounting_complete",
+            "option_type",
+            "expiry",
+            "strike_price",
+            "underlying",
+            "previous_close",
+            "prev_close",
+            "close_price",
         ),
         "holding": (
-            "symbol", "instrument_id", "instrument_token", "security_id", "exchange", "product",
-            "quantity", "settled_quantity", "t1_quantity", "accounting_complete", "multiplier", "fx_rate",
-            "cross_currency", "previous_close_trusted",
-            "previous_close", "prev_close", "close_price",
+            "symbol",
+            "instrument_id",
+            "instrument_token",
+            "security_id",
+            "exchange",
+            "product",
+            "quantity",
+            "settled_quantity",
+            "t1_quantity",
+            "accounting_complete",
+            "multiplier",
+            "fx_rate",
+            "cross_currency",
+            "previous_close_trusted",
+            "previous_close",
+            "prev_close",
+            "close_price",
         ),
         "trade": (
-            "orderid", "symbol", "instrument_id", "instrument_token", "security_id", "exchange",
-            "product", "action", "quantity", "price",
-            "timestamp", "multiplier", "fx_rate",
+            "orderid",
+            "symbol",
+            "instrument_id",
+            "instrument_token",
+            "security_id",
+            "exchange",
+            "product",
+            "action",
+            "quantity",
+            "price",
+            "timestamp",
+            "multiplier",
+            "fx_rate",
             "cross_currency",
         ),
         "order": (
-            "orderid", "order_id", "orderId", "status", "order_status", "orderStatus",
-            "safety_order_id", "broker_order_id", "raw_broker_order_id", "order_family",
-            "symbol", "trading_symbol", "tradingsymbol", "instrument_id", "instrument_token",
-            "security_id", "exchange", "product", "action", "transaction_type", "quantity",
-            "filled_quantity", "filled_qty", "filledQty", "tradedQty", "pricetype", "price_type",
-            "order_type", "price", "trigger_price", "option_type", "expiry", "strike_price",
-            "underlying", "leg_name", "parent_order_id", "exchange_order_id", "margin_unfunded",
+            "orderid",
+            "order_id",
+            "orderId",
+            "status",
+            "order_status",
+            "orderStatus",
+            "safety_order_id",
+            "broker_order_id",
+            "raw_broker_order_id",
+            "order_family",
+            "symbol",
+            "trading_symbol",
+            "tradingsymbol",
+            "instrument_id",
+            "instrument_token",
+            "security_id",
+            "exchange",
+            "product",
+            "action",
+            "transaction_type",
+            "quantity",
+            "filled_quantity",
+            "filled_qty",
+            "filledQty",
+            "tradedQty",
+            "pricetype",
+            "price_type",
+            "order_type",
+            "price",
+            "trigger_price",
+            "option_type",
+            "expiry",
+            "strike_price",
+            "underlying",
+            "leg_name",
+            "parent_order_id",
+            "exchange_order_id",
+            "margin_unfunded",
         ),
     }
     container_keys = {
@@ -1850,24 +1865,21 @@ def _snapshot_fingerprint(snapshot: _AccountingSnapshot) -> tuple[tuple[tuple[st
 
 async def _read_accounting_snapshot(source: _AccountSource) -> _AccountingSnapshot:
     order_reader = "order_book"
-    if not source.openalgo:
-        class_reader = getattr(type(source.target), "safety_order_book", None)
-        instance_reader = vars(source.target).get("safety_order_book")
-        if callable(class_reader) or callable(instance_reader):
-            order_reader = "safety_order_book"
-    if not source.openalgo and bool(
-        getattr(source.target, "safety_snapshot_requires_serial_reads", False)
-    ):
-        positions = await _read(source, "positionbook", "positions")
-        trades = await _read(source, "tradebook", "trade_book")
-        holdings = await _read(source, "holdings", "holdings")
-        orders = await _read(source, "orderbook", order_reader)
+    class_reader = getattr(type(source.target), "safety_order_book", None)
+    instance_reader = vars(source.target).get("safety_order_book")
+    if callable(class_reader) or callable(instance_reader):
+        order_reader = "safety_order_book"
+    if bool(getattr(source.target, "safety_snapshot_requires_serial_reads", False)):
+        positions = await _read(source, "positions")
+        trades = await _read(source, "trade_book")
+        holdings = await _read(source, "holdings")
+        orders = await _read(source, order_reader)
     else:
         positions, trades, holdings, orders = await asyncio.gather(
-            _read(source, "positionbook", "positions"),
-            _read(source, "tradebook", "trade_book"),
-            _read(source, "holdings", "holdings"),
-            _read(source, "orderbook", order_reader),
+            _read(source, "positions"),
+            _read(source, "trade_book"),
+            _read(source, "holdings"),
+            _read(source, order_reader),
         )
     return _AccountingSnapshot(positions=positions, trades=trades, holdings=holdings, orders=orders)
 
@@ -1906,22 +1918,21 @@ async def _history_previous_close(
 ) -> tuple[float, str]:
     start_date = (expected_date - timedelta(days=14)).isoformat()
     end_date = (expected_date - timedelta(days=1)).isoformat()
-    if source.openalgo:
-        reader = getattr(source.target, "history", None)
-        if not callable(reader):
-            raise PortfolioSafetyStateError("OpenAlgo daily-history reader is unavailable")
-        raw = await _maybe_await(reader(symbol, exchange, "D", start_date, end_date))
-    else:
-        reader = getattr(source.target, "historical", None)
-        if not callable(reader):
-            raise PortfolioSafetyStateError("Native daily-history reader is unavailable")
-        raw = await _maybe_await(reader(source.session, {
-            "symbol": symbol,
-            "exchange": exchange,
-            "interval": "D",
-            "from_date": start_date,
-            "to_date": end_date,
-        }))
+    reader = getattr(source.target, "historical", None)
+    if not callable(reader):
+        raise PortfolioSafetyStateError("Native daily-history reader is unavailable")
+    raw = await _maybe_await(
+        reader(
+            source.session,
+            {
+                "symbol": symbol,
+                "exchange": exchange,
+                "interval": "D",
+                "from_date": start_date,
+                "to_date": end_date,
+            },
+        )
+    )
 
     candidates: dict[date, float] = {}
     for bar in _history_rows(raw):
@@ -1964,11 +1975,7 @@ def _symbols_missing_trusted_quote(quotes: Any, symbols: list[str]) -> list[str]
             and _optional_positive_number(quote, "prev_close", "previous_close") is not None
         ):
             trusted.add(_quote_key(quote))
-    return [
-        value
-        for value in symbols
-        if tuple(value.split(":", 1)) not in trusted
-    ]
+    return [value for value in symbols if tuple(value.split(":", 1)) not in trusted]
 
 
 async def _backfill_previous_closes(
@@ -2108,7 +2115,7 @@ async def gather_safety_state(
     source = _resolve_account_source(config, adapter_id, account_id)
     try:
         snapshot = await _read_stable_accounting_snapshot(source)
-        funds = await _read(source, "funds", "funds")
+        funds = await _read(source, "funds")
     except PortfolioSafetyStateError:
         raise
     except Exception as exc:
@@ -2131,27 +2138,18 @@ async def gather_safety_state(
     _validate_trade_session(
         trades,
         expected_date=expected_date,
-        allow_time_only=source.openalgo,
+        allow_time_only=False,
         observed_at=now.astimezone(_IST),
         time_scheduler=config.get("TIME_SCHEDULER"),
     )
 
     order_quote_symbols = _required_order_quote_symbols([*projected_reservations, *orders])
-    quote_symbols = sorted(
-        set(required_quote_symbols(trades, positions, holdings)) | set(order_quote_symbols)
-    )
+    quote_symbols = sorted(set(required_quote_symbols(trades, positions, holdings)) | set(order_quote_symbols))
     previous_close_symbols = required_previous_close_symbols(trades, positions, holdings)
     quotes: Any = []
     if quote_symbols:
         try:
-            if source.openalgo:
-                quote_payload = [
-                    {"exchange": value.split(":", 1)[0], "symbol": value.split(":", 1)[1]}
-                    for value in quote_symbols
-                ]
-                quotes = await _read(source, "multi_quotes", "quotes", quote_payload)
-            else:
-                quotes = await _read(source, "multi_quotes", "quotes", quote_symbols)
+            quotes = await _read(source, "quotes", quote_symbols)
         except PortfolioSafetyStateError:
             raise
         except Exception as exc:
@@ -2223,11 +2221,7 @@ async def gather_safety_state(
         required_delta, required_vega = proposed_contributions[index]
         uncertain_contributions = [
             *pending_contributions,
-            *(
-                contribution
-                for other_index, contribution in enumerate(proposed_contributions)
-                if other_index != index
-            ),
+            *(contribution for other_index, contribution in enumerate(proposed_contributions) if other_index != index),
         ]
         order_net_delta = _worst_case_component(
             base_delta + required_delta,
@@ -2245,10 +2239,7 @@ async def gather_safety_state(
                 net_vega=order_net_vega,
             )
         )
-    quotes_by_key = {
-        _quote_key(quote): quote
-        for quote in _rows(quotes, "data", "quotes")
-    }
+    quotes_by_key = {_quote_key(quote): quote for quote in _rows(quotes, "data", "quotes")}
     order_ltps: dict[tuple[str, str], float] = {}
     for value in order_quote_symbols:
         key = tuple(value.split(":", 1))
@@ -2290,11 +2281,10 @@ async def gather_l2_state(
     """THE shared best-effort ``(positions, used_margin, total_balance)`` gather.
 
     One implementation of the SafetySystem L2 input-gathering path — used by the
-    human order route AND the webhook dispatcher, so the openalgo-vs-native
+    human order route AND the webhook dispatcher, so the native
     branch, session resolution, and error classification can never drift between
     two copies. Reads the connected account's positions + funds through the
-    same broker surface the order will use: OpenAlgo for the bridge path, or the
-    active native adapter + registry session for routed native brokers.
+    active native adapter and registry session for the selected account.
     Best-effort by design: any failure (no client/session, network, auth)
     returns empty/zero state, so L2 simply enforces nothing for that order — a
     state-read hiccup must never block a live order (L1/L4/L5 still apply).
@@ -2302,21 +2292,6 @@ async def gather_l2_state(
     import logging  # noqa: PLC0415
 
     logger = logging.getLogger("flinttrade.l2_state")
-
-    if adapter_id == "openalgo":
-        client = config.get("OPENALGO_CLIENT")
-        if client is None:
-            return [], 0.0, 0.0
-        try:
-            positions = await _maybe_await(client.positionbook())
-            funds = await _maybe_await(client.funds())
-        except Exception:
-            logger.debug(
-                "L2 portfolio-state fetch failed — L2 limits not enforced this order",
-                exc_info=True,
-            )
-            return [], 0.0, 0.0
-        return normalise_l2_state(positions, funds)
 
     native_adapters = config.get("NATIVE_ADAPTERS") or {}
     registry = config.get("REGISTRY")

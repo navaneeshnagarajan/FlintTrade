@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/data/tests/test_tax_report.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import pytest

@@ -30,7 +30,7 @@ beforeAll(() => {
   global.URL.revokeObjectURL = vi.fn();
 });
 
-// HealthWidget pings OpenAlgo on mount.
+// HealthWidget pings native broker on mount.
 vi.mock("@/services/api", () => ({
   ping: vi.fn().mockResolvedValue({ status: "ok" }),
 }));

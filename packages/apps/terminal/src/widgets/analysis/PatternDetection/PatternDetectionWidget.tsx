@@ -4,7 +4,7 @@
  * Scans a symbol's recent daily bars for the six candlestick patterns
  * FlintTrade backtests (doji, hammer/shooting-star, engulfing, morning/evening
  * star, three soldiers/crows) and lists the detected patterns with their
- * bullish/bearish direction and strength. Live via the bridge history when
+ * bullish/bearish direction and strength. Live via native broker history when
  * connected; otherwise a clearly-marked sample scan.
  */
 
@@ -96,7 +96,7 @@ function PatternDetectionWidget() {
           </h3>
           <p className="text-[10px] text-text-muted">
             {scan.bar_count} daily bars · {scan.matches.length} patterns
-            
+            {response.is_sample_data !== false && <span className="ml-1 text-warning" role="status">Sample data</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">

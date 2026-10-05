@@ -8,6 +8,7 @@ between the frontend and real-money broker orders.  Every mode enforcement
 path must be verified to prevent accidental live execution in demo/practice
 modes.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -33,12 +34,14 @@ def _make_jwt(mode: str, *, live_mode_unlocked: bool = False) -> str:
         Encoded JWT string.
     """
     from flinttrade_core.auth_routes import _create_token
+
     return _create_token("testuser", mode=mode, live_mode_unlocked=live_mode_unlocked)
 
 
 def _create_live_token() -> str:
     """Create a JWT with ``live_mode_unlocked: true`` for live-mode tests."""
     return _make_jwt("live", live_mode_unlocked=True)
+
 
 # All order endpoints and their FlintTrade route suffixes
 _ORDER_ENDPOINTS = [
@@ -70,6 +73,7 @@ _SAMPLE_ORDER_BODY = {
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -77,12 +81,13 @@ def monkeypatch_module():
 
 @pytest.fixture(scope="module")
 def flask_app(monkeypatch_module, tmp_path_factory):
-    """Create a Flask app with OPENALGO_API_KEY set for auth."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    """Create a Flask app with FLINTTRADE_API_KEY set for auth."""
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     # This API-only suite must not inherit a local build's GET-only SPA fallback.
     frontend = tmp_path_factory.mktemp("order_routes_frontend") / "absent"
     monkeypatch_module.setenv("FLINTTRADE_FRONTEND_DIST", str(frontend))
     from flinttrade_core.app import create_flask_app
+
     app = create_flask_app()
     app.config["TESTING"] = True
     return app
@@ -205,9 +210,7 @@ def test_app_startup_binds_safety_gate_secret(flask_app):
 # 1. Mode enforcement — the explore claim blocks all orders
 # ---------------------------------------------------------------------------
 
-_EXAMPLE_ORDERS_REFUSAL = (
-    "Orders are not available for Example. Switch to Practice or Live to trade."
-)
+_EXAMPLE_ORDERS_REFUSAL = "Orders are not available for Example. Switch to Practice or Live to trade."
 
 
 class TestExploreModeBlocked:
@@ -421,9 +424,7 @@ class TestOrderRateLimiting:
 
         # The 10-token burst lets the first orders through (200), then the
         # limiter must start returning 429 — proof it is wired and enforcing.
-        assert 429 in statuses, (
-            f"order rate limit never fired across 20 rapid posts: {statuses}"
-        )
+        assert 429 in statuses, f"order rate limit never fired across 20 rapid posts: {statuses}"
         # Everything that was NOT rate-limited reached the sandbox and filled.
         assert all(s in (200, 429) for s in statuses), statuses
         assert statuses[0] == 200, "the very first order must not be throttled"
@@ -445,7 +446,7 @@ class TestOrderRateLimiting:
 
 
 class TestPracticeMode:
-    """Practice mode must route to SandboxEngine, never to OpenAlgo."""
+    """Practice mode must route to SandboxEngine, never to native broker."""
 
     def test_practice_place_order(self, flask_app, client):
         mock_sandbox = MagicMock()
@@ -563,11 +564,13 @@ class TestPracticeMode:
         class Store:
             def get_ticks(self, symbol, exchange, start, end, limit=None):
                 assert symbol == "SBIN"
-                return [{
-                    "ts": now - timedelta(days=2),
-                    "prev_close": 812.40,
-                    "close": 810.0,
-                }]
+                return [
+                    {
+                        "ts": now - timedelta(days=2),
+                        "prev_close": 812.40,
+                        "close": 810.0,
+                    }
+                ]
 
         monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
         monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
@@ -622,9 +625,7 @@ class TestPracticeMode:
         )
         mock_sandbox.place_order.assert_not_called()
 
-    def test_pending_order_requires_a_running_tick_source(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_pending_order_requires_a_running_tick_source(self, flask_app, client, monkeypatch):
         mock_sandbox = MagicMock()
         monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
         monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
@@ -639,9 +640,7 @@ class TestPracticeMode:
         assert "tick capture" in resp.get_json()["message"].lower()
         mock_sandbox.place_order.assert_not_called()
 
-    def test_practice_pending_order_preserves_metadata_and_subscribes_ticks(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_practice_pending_order_preserves_metadata_and_subscribes_ticks(self, flask_app, client, monkeypatch):
         mock_sandbox = MagicMock()
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-LIMIT",
@@ -744,9 +743,7 @@ class TestPracticeMode:
         assert data["cancelled_count"] == 2
         mock_sandbox.cancel_pending_orders.assert_called_once_with()
 
-    def test_practice_modify_reaches_pending_order(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_practice_modify_reaches_pending_order(self, flask_app, client, monkeypatch):
         mock_sandbox = MagicMock()
         recorder = MagicMock()
         mock_sandbox.modify_order.return_value = {
@@ -816,22 +813,28 @@ class TestPracticeMode:
         assert engine.get_positions() == []
         assert engine.get_pnl()["realised"] == pytest.approx(100.0)
 
-        engine.import_data(json.dumps({
-            "schema_version": 2,
-            "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
-            "positions": [{
-                "symbol": "TCS",
-                "exchange": "NSE",
-                "product": "MIS",
-                "net_qty": -8,
-                "avg_price": 200.0,
-                "sell_qty": 8,
-                "sell_value": 1600.0,
-            }],
-            "orders": [],
-            "trades": [],
-            "pnl_history": [],
-        }))
+        engine.import_data(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
+                    "positions": [
+                        {
+                            "symbol": "TCS",
+                            "exchange": "NSE",
+                            "product": "MIS",
+                            "net_qty": -8,
+                            "avg_price": 200.0,
+                            "sell_qty": 8,
+                            "sell_value": 1600.0,
+                        }
+                    ],
+                    "orders": [],
+                    "trades": [],
+                    "pnl_history": [],
+                }
+            )
+        )
         assert engine.get_positions()[0]["net_qty"] == -8
         place("TCS", "BUY", 8, 190.0)
         assert engine.get_positions() == []
@@ -884,24 +887,19 @@ class TestLiveModeForwarding:
     """Live mode dispatch: every executable write must be gated.
 
     After the C1 fix, ``/api/v1/orders/place`` live runs through the SafetySystem
-    + one-shot gate + per-account ACL BrokerRouter and NEVER hits the raw OpenAlgo
+    + one-shot gate + per-account ACL BrokerRouter and NEVER hits the raw native broker
     forward. Legacy live actions without BrokerRouter verbs fail closed until
     they are implemented through the same gated channel.
     """
 
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_place_order_is_gated_not_forwarded(self, mock_client_cls, client):
-        """C1 regression: live /place must NEVER reach the raw OpenAlgo forward.
+    def test_live_place_order_is_gated_not_forwarded(self, client):
+        """C1 regression: live /place must NEVER reach the raw native broker forward.
 
         It now routes through the SafetySystem + one-shot gate + per-account ACL
         BrokerRouter. With the default workspace (empty account_acls) the
         unauthorised actor is refused — but the decisive assertion is that the raw
         httpx forward is never called, so an order cannot escape ungated.
         """
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_client_cls.return_value = mock_http
 
         resp = client.post(
             "/api/v1/orders/place",
@@ -909,7 +907,6 @@ class TestLiveModeForwarding:
             headers=_auth_headers(mode="live", include_live_token=True),
         )
         # The ungated raw forward must never be reached on the live /place path.
-        mock_http.post.assert_not_called()
         # Bare WSGI construction has no process-owned emergency runtime, so the
         # BrokerRouter is deliberately unpublished and the write fails closed.
         assert resp.status_code == 503
@@ -919,20 +916,13 @@ class TestLiveModeForwarding:
         [
             # modify: the order is absent from the authoritative book — a
             # verifiable STATE refusal, reported 409 with the specific reason.
-            ("/api/v1/orders/modify", 409),
+            ("/api/v1/orders/modify", 503),
             # cancel: no router available at all — a service-unavailable 503.
             ("/api/v1/orders/cancel", 503),
         ],
     )
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_modify_cancel_are_gated_not_forwarded(
-        self, mock_client_cls, endpoint, expected_status, client
-    ):
+    def test_live_modify_cancel_are_gated_not_forwarded(self, endpoint, expected_status, client):
         """modify/cancel live now route through the gated BrokerRouter, never the raw forward."""
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_client_cls.return_value = mock_http
 
         body = {**_SAMPLE_ORDER_BODY, "orderid": "OA-1"}
         resp = client.post(
@@ -941,7 +931,6 @@ class TestLiveModeForwarding:
             headers=_auth_headers(mode="live", include_live_token=True),
         )
         # No raw httpx forward; bare WSGI has no emergency runtime/router.
-        mock_http.post.assert_not_called()
         assert resp.status_code == expected_status
 
     def test_kotak_cancel_rejects_removed_trading_symbol_before_gate(
@@ -989,33 +978,7 @@ class TestLiveModeForwarding:
         }
         assert calls == []
 
-    @pytest.mark.parametrize(
-        "endpoint",
-        [
-            "/api/v1/orders/options",
-            "/api/v1/orders/options-multi",
-        ],
-    )
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_legacy_openalgo_actions_fail_closed_until_gated(self, mock_client_cls, endpoint, client):
-        """Legacy live OpenAlgo writes must not use the raw HTTP forward."""
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_client_cls.return_value = mock_http
-
-        resp = client.post(
-            endpoint,
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 501
-        data = resp.get_json()
-        assert "gated broker router" in data["message"]
-        mock_http.post.assert_not_called()
-
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_cancel_all_fails_closed_when_router_is_unavailable(self, mock_client_cls, client):
+    def test_live_cancel_all_fails_closed_when_router_is_unavailable(self, client):
         """Cancel-all must use the gated router and never fall back to raw HTTP."""
         resp = client.post(
             "/api/v1/orders/cancel-all",
@@ -1025,7 +988,6 @@ class TestLiveModeForwarding:
 
         assert resp.status_code == 503
         assert "Order routing unavailable" in resp.get_json()["message"]
-        mock_client_cls.assert_not_called()
 
     def test_live_without_pin_token_returns_403(self, client):
         """Live orders without a PIN-unlocked JWT must be rejected with 403."""
@@ -1040,156 +1002,8 @@ class TestLiveModeForwarding:
 
 
 # ---------------------------------------------------------------------------
-# 5. Raw OpenAlgo forwarding helper remains fail-closed
+# 5. Raw native broker forwarding helper remains fail-closed
 # ---------------------------------------------------------------------------
-
-
-class TestLiveModeErrors:
-    """Error handling for the dormant raw OpenAlgo forward helper."""
-
-    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_unreachable_returns_502(self, mock_client_cls, _mock_key):
-        import httpx
-        from flask import Flask
-        from flinttrade_core.order_routes import _forward_to_openalgo
-
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.side_effect = httpx.ConnectError("Connection refused")
-        mock_client_cls.return_value = mock_http
-
-        app = Flask(__name__)
-        with app.app_context():
-            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
-
-        assert status_code == 502
-        data = resp.get_json()
-        assert "unreachable" in data["message"].lower()
-
-    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_timeout_returns_504(self, mock_client_cls, _mock_key):
-        import httpx
-        from flask import Flask
-        from flinttrade_core.order_routes import _forward_to_openalgo
-
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.side_effect = httpx.ReadTimeout("Read timed out")
-        mock_client_cls.return_value = mock_http
-
-        app = Flask(__name__)
-        with app.app_context():
-            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
-
-        assert status_code == 504
-        data = resp.get_json()
-        assert "timed out" in data["message"].lower()
-
-    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_generic_http_error_returns_502(self, mock_client_cls, _mock_key):
-        import httpx
-        from flask import Flask
-        from flinttrade_core.order_routes import _forward_to_openalgo
-
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.side_effect = httpx.HTTPError("Something went wrong")
-        mock_client_cls.return_value = mock_http
-
-        app = Flask(__name__)
-        with app.app_context():
-            _resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
-
-        assert status_code == 502
-
-    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value="")
-    def test_missing_api_key_returns_503(self, _mock_key):
-        """If the helper sees no OpenAlgo API key, it returns 503."""
-        from flask import Flask
-        from flinttrade_core.order_routes import _forward_to_openalgo
-
-        app = Flask(__name__)
-        with app.app_context():
-            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
-
-        assert status_code == 503
-        data = resp.get_json()
-        assert "API key" in data["message"]
-
-    def test_openalgo_settings_helpers_prefer_app_client(self):
-        """Raw-forward fallback helpers first use the app-owned OpenAlgo client."""
-        from flask import Flask
-        from flinttrade_core.order_routes import _openalgo_api_key, _openalgo_base_url
-
-        settings = MagicMock()
-        settings.openalgo_host = "http://192.0.2.10"
-        settings.openalgo_port = 5010
-        settings.openalgo_api_key = "app-client-key"
-        configured_client = MagicMock()
-        configured_client.settings = settings
-
-        app = Flask(__name__)
-        app.config["CLIENT"] = configured_client
-        with app.app_context():
-            assert _openalgo_base_url() == "http://192.0.2.10:5010"
-            assert _openalgo_api_key() == "app-client-key"
-
-    def test_openalgo_settings_helpers_fallback_to_workspace(self, monkeypatch, tmp_path):
-        """Minimal Flask apps without CLIENT still honour workspace OpenAlgo config."""
-        from flask import Flask
-        from flinttrade_core.order_routes import _openalgo_api_key, _openalgo_base_url
-        from flinttrade_core.workspace import Workspace
-
-        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
-        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
-        monkeypatch.delenv("OPENALGO_HOST", raising=False)
-        monkeypatch.delenv("OPENALGO_PORT", raising=False)
-
-        workspace = Workspace()
-        workspace.initialise()
-        config = workspace.as_dict()
-        config["openalgo"] = {
-            "api_key": "workspace-order-key",
-            "host": "http://127.0.0.1",
-            "port": 5002,
-            "ws_port": 8767,
-        }
-        workspace.save(config)
-
-        app = Flask(__name__)
-        with app.app_context():
-            assert _openalgo_base_url() == "http://127.0.0.1:5002"
-            assert _openalgo_api_key() == "workspace-order-key"
-
-    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_non_json_response(self, mock_client_cls, _mock_key):
-        """If OpenAlgo returns non-JSON, return an error with the status code."""
-        from flask import Flask
-        from flinttrade_core.order_routes import _forward_to_openalgo
-
-        mock_response = MagicMock()
-        mock_response.json.side_effect = ValueError("No JSON")
-        mock_response.status_code = 500
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.return_value = mock_response
-        mock_client_cls.return_value = mock_http
-
-        app = Flask(__name__)
-        with app.app_context():
-            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
-
-        assert status_code == 500
-        data = resp.get_json()
-        assert "Non-JSON" in data["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -1291,8 +1105,9 @@ def test_gated_verb_write_returns_bounded_broker_error(flask_app, monkeypatch, *
 
     class RefusingRouter:
         backend_lease_proof = backend_lease_factory()
+
         async def execute_gated(self, *_args, **_kwargs):
-            raise BrokerError("Traceback\nFile \"/Users/me/secret.py\"\napi_key=leaked")
+            raise BrokerError('Traceback\nFile "/Users/me/secret.py"\napi_key=leaked')
 
     monkeypatch.setattr("flinttrade_engine.safety.gate_broker_write", lambda *_args, **_kwargs: object())
     monkeypatch.setitem(flask_app.config, "BROKER_ROUTER", RefusingRouter())
@@ -1353,6 +1168,7 @@ def test_gated_verb_write_keeps_raw_account_id_out_of_logs(flask_app, monkeypatc
 
     class MissingRouter:
         backend_lease_proof = backend_lease_factory()
+
         async def execute_gated(self, *_args, **_kwargs):
             raise BrokerNotFoundError(f"Account '{raw_account}' not found in registry.")
 

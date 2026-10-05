@@ -41,14 +41,16 @@ def _make_bars(
         spread = close * 0.001
         high = close + abs(rng.standard_normal()) * spread
         low = close - abs(rng.standard_normal()) * spread
-        bars.append({
-            "timestamp": f"{date}T09:{15 + i:02d}:00",
-            "open": round(close, 2),
-            "high": round(high, 2),
-            "low": round(low, 2),
-            "close": round(close, 2),
-            "volume": round(base_volume + rng.uniform(-100, 100), 1),
-        })
+        bars.append(
+            {
+                "timestamp": f"{date}T09:{15 + i:02d}:00",
+                "open": round(close, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(close, 2),
+                "volume": round(base_volume + rng.uniform(-100, 100), 1),
+            }
+        )
     return bars
 
 
@@ -240,8 +242,7 @@ class TestVWAPValues:
                 session_low = min(b["low"] for b in single_day_bars[: i + 1])
                 session_high = max(b["high"] for b in single_day_bars[: i + 1])
                 assert session_low <= v <= session_high, (
-                    f"Bar {i}: VWAP {v} outside session range "
-                    f"[{session_low}, {session_high}]"
+                    f"Bar {i}: VWAP {v} outside session range [{session_low}, {session_high}]"
                 )
 
     def test_zero_volume_bar_gives_nan_vwap(self, zero_volume_bar):
@@ -379,6 +380,5 @@ class TestVWAPResultModel:
 
     def test_model_fields_are_lists(self, single_day_bars):
         result = calculate_vwap_bands(single_day_bars)
-        for field in ("timestamps", "vwap", "upper_1", "upper_2", "upper_3",
-                      "lower_1", "lower_2", "lower_3"):
+        for field in ("timestamps", "vwap", "upper_1", "upper_2", "upper_3", "lower_1", "lower_2", "lower_3"):
             assert isinstance(getattr(result, field), list)

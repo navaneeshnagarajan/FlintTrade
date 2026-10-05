@@ -180,9 +180,7 @@ class AuditExporter:
         except OSError as exc:
             raise AuditExportError(f"Cannot write CSV to {path}: {exc}") from exc
 
-        logger.info(
-            "Audit CSV exported: %d rows → %s", len(events), path
-        )
+        logger.info("Audit CSV exported: %d rows → %s", len(events), path)
         return len(events)
 
     def to_pdf(
@@ -230,8 +228,7 @@ class AuditExporter:
             )
         except ImportError as exc:
             raise AuditExportError(
-                "reportlab is required for PDF export. "
-                "Install it with: pip install 'flinttrade-data[export]'"
+                "reportlab is required for PDF export. Install it with: pip install 'flinttrade-data[export]'"
             ) from exc
 
         events = self._load_events(from_date, to_date)
@@ -248,9 +245,7 @@ class AuditExporter:
                 bottomMargin=1.5 * cm,
             )
         except Exception as exc:
-            raise AuditExportError(
-                f"Cannot create PDF at {path}: {exc}"
-            ) from exc
+            raise AuditExportError(f"Cannot create PDF at {path}: {exc}") from exc
 
         styles = getSampleStyleSheet()
         story: list[Any] = []
@@ -259,9 +254,7 @@ class AuditExporter:
         story.append(Paragraph(title, styles["Title"]))
         story.append(Spacer(1, 0.3 * cm))
 
-        date_range_text = (
-            f"Period: {from_date.isoformat()} to {to_date.isoformat()}"
-        )
+        date_range_text = f"Period: {from_date.isoformat()} to {to_date.isoformat()}"
         story.append(Paragraph(date_range_text, styles["Normal"]))
         story.append(Spacer(1, 0.5 * cm))
 

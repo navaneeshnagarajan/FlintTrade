@@ -142,7 +142,7 @@ def _live_dispatcher(*, account_id: str = "default") -> GatedStrategyDispatcher:
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=lambda: None,
         router_provider=lambda: None,
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id=account_id,
     )
 
@@ -1835,7 +1835,7 @@ def test_scheduler_rejects_live_strategy_with_raw_broker_mutation_handle() -> No
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1863,7 +1863,7 @@ def test_scheduler_rejects_live_strategy_with_arbitrarily_named_raw_broker_handl
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1891,7 +1891,7 @@ def test_scheduler_rejects_live_strategy_with_retained_bound_broker_write() -> N
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1919,7 +1919,7 @@ def test_scheduler_rejects_live_strategy_with_partial_wrapped_broker_write() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1952,7 +1952,7 @@ def test_scheduler_rejects_live_strategy_with_closure_wrapped_broker_write() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1987,7 +1987,7 @@ def test_scheduler_rejects_live_strategy_with_callable_broker_wrapper() -> None:
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2022,7 +2022,7 @@ def test_scheduler_rejects_live_strategy_with_class_held_callable_broker_wrapper
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2054,7 +2054,7 @@ def test_scheduler_rejects_live_strategy_with_nested_cyclic_broker_handle() -> N
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2086,7 +2086,7 @@ def test_scheduler_rejects_live_strategy_with_class_held_broker_handle() -> None
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2109,14 +2109,14 @@ def test_scheduler_rejects_live_strategy_with_unauthorised_dispatcher() -> None:
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     unauthorised = GatedStrategyDispatcher(
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="other",
     )
     strategy = LiveStrategy(
@@ -2144,7 +2144,7 @@ def test_scheduler_rejects_live_strategy_with_dispatch_order_lookalike() -> None
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2177,7 +2177,7 @@ def test_scheduler_rejects_live_strategy_with_module_global_broker_write(monkeyp
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2217,7 +2217,7 @@ def test_scheduler_rejects_live_strategy_with_weakref_slotted_callable() -> None
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2256,7 +2256,7 @@ def test_scheduler_rejects_live_strategy_with_shadowed_instance_dictionary() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2289,7 +2289,7 @@ def test_scheduler_rejects_live_strategy_with_dynamic_global_lookup(monkeypatch)
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2322,7 +2322,7 @@ def test_scheduler_rejects_live_strategy_with_nested_function_global_writer(monk
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2346,7 +2346,7 @@ def test_scheduler_rejects_live_strategy_when_capability_graph_exceeds_bounds() 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2373,7 +2373,7 @@ def test_scheduler_accepts_live_strategy_retaining_only_managed_dispatcher() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(

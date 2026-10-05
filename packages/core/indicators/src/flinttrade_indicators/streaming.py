@@ -289,9 +289,7 @@ class StreamingMACD:
         signal_period: int = 9,
     ) -> None:
         if fast_period >= slow_period:
-            raise ValueError(
-                f"fast_period ({fast_period}) must be less than slow_period ({slow_period})"
-            )
+            raise ValueError(f"fast_period ({fast_period}) must be less than slow_period ({slow_period})")
         if signal_period < 1:
             raise ValueError(f"signal_period must be >= 1, got {signal_period}")
         self.fast_period = fast_period
@@ -304,9 +302,7 @@ class StreamingMACD:
         self._signal: float | None = None
         self._histogram: float | None = None
 
-    def update(
-        self, price: float
-    ) -> tuple[float | None, float | None, float | None]:
+    def update(self, price: float) -> tuple[float | None, float | None, float | None]:
         """Feed one new price tick.
 
         Args:
@@ -387,14 +383,13 @@ class StreamingBollingerBands:
         self.period = period
         self.std_dev = std_dev
         from collections import deque
+
         self._buf: deque[float] = deque(maxlen=period)
         self._upper: float | None = None
         self._middle: float | None = None
         self._lower: float | None = None
 
-    def update(
-        self, price: float
-    ) -> tuple[float | None, float | None, float | None]:
+    def update(self, price: float) -> tuple[float | None, float | None, float | None]:
         """Feed one new close price.
 
         Args:
@@ -408,6 +403,7 @@ class StreamingBollingerBands:
             return None, None, None
 
         import numpy as _np
+
         arr = _np.array(self._buf, dtype=_np.float64)
         middle = float(_np.mean(arr))
         std = float(_np.std(arr, ddof=0))
@@ -480,15 +476,13 @@ class StreamingSupertrend:
         self.period = period
         self.multiplier = multiplier
         self._atr = StreamingATR(period)
-        self._direction: int | None = None       # +1 uptrend, -1 downtrend
-        self._supertrend: float | None = None    # current supertrend line
+        self._direction: int | None = None  # +1 uptrend, -1 downtrend
+        self._supertrend: float | None = None  # current supertrend line
         self._upper_band: float | None = None
         self._lower_band: float | None = None
         self._prev_close: float | None = None
 
-    def update(
-        self, high: float, low: float, close: float
-    ) -> tuple[float | None, int | None]:
+    def update(self, high: float, low: float, close: float) -> tuple[float | None, int | None]:
         """Feed one H/L/C bar.
 
         Args:
@@ -515,9 +509,7 @@ class StreamingSupertrend:
             self._upper_band = raw_upper
             self._lower_band = raw_lower
             self._direction = -1 if close >= raw_lower else 1
-            self._supertrend = (
-                self._lower_band if self._direction == -1 else self._upper_band
-            )
+            self._supertrend = self._lower_band if self._direction == -1 else self._upper_band
             self._prev_close = close
             return self._supertrend, self._direction
 
@@ -545,9 +537,7 @@ class StreamingSupertrend:
 
         self._upper_band = new_upper
         self._lower_band = new_lower
-        self._supertrend = (
-            new_lower if self._direction == -1 else new_upper
-        )
+        self._supertrend = new_lower if self._direction == -1 else new_upper
         self._prev_close = close
         return self._supertrend, self._direction
 

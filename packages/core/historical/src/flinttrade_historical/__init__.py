@@ -7,7 +7,7 @@ __version__ = APP_VERSION
 from .cache import CacheEntry, CacheResult, OHLCVCache
 from .data_provider import (
     DataProvider,
-    OpenAlgoProvider,
+    NativeBrokerProvider,
     OpenChartProvider,
     ProviderBar,
     ProviderRegistry,
@@ -46,7 +46,7 @@ __all__ = [
     "NSEDataResult",
     # Data provider abstraction (new)
     "DataProvider",
-    "OpenAlgoProvider",
+    "NativeBrokerProvider",
     "OpenChartProvider",
     "YFinanceProvider",
     "ProviderBar",

@@ -627,4 +627,3 @@ def get_strategy(name: str) -> type[_BaseBacktestStrategy]:
         raise KeyError(
             f"Strategy {name!r} not found. Available: {available}"
         ) from None
-

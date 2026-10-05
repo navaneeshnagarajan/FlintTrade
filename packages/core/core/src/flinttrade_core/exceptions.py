@@ -1,28 +1,11 @@
-"""FlintTrade exception hierarchy.
-
-Two distinct trees live here:
-
-1. **OpenAlgo HTTP-client errors** (``FlintTradeError`` → ``APIError`` →
-   ``OpenAlgoAuthError`` / ``OpenAlgoRateLimitError``). These describe failures
-   of the OpenAlgo REST client and carry HTTP status codes.
-
-2. **Broker-adapter taxonomy** (``BrokerError`` and its subtree). This is the
-   canonical taxonomy every direct broker adapter MUST map native SDK exceptions
-   to (per broker-adapter-contract §7). Raw SDK exceptions escaping an adapter
-   are a contract violation — adapters MUST wrap them, preserving ``broker_code``
-   for forensic audit, via ``raise FlintError(...) from sdk_error``.
-
-   ``SafetyBypassError`` lives in this tree (a ``BrokerError``) and is raised by
-   ``BrokerRouter`` when ``SafetyContext`` verification fails — the non-negotiable
-   invariant of broker-adapter-contract §8.
-"""
+"""FlintTrade request, configuration and native broker failure taxonomy."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
 # ===========================================================================
-# OpenAlgo HTTP-client errors (legacy tree)
+# native broker HTTP-client errors (legacy tree)
 # ===========================================================================
 
 
@@ -35,42 +18,13 @@ class ConfigError(FlintTradeError):
 
 
 class APIError(FlintTradeError):
-    """OpenAlgo API returned an error."""
+    """native broker API returned an error."""
 
     def __init__(self, status_code: int, message: str, endpoint: str) -> None:
         self.status_code = status_code
         self.message = message
         self.endpoint = endpoint
         super().__init__(f"[{status_code}] {endpoint}: {message}")
-
-
-class OpenAlgoRateLimitError(APIError):
-    """OpenAlgo client hit an HTTP 429 rate limit.
-
-    (Renamed from ``RateLimitError`` so the canonical ``RateLimitError`` name
-    belongs to the broker-adapter taxonomy below. Specific to the OpenAlgo REST
-    client.)
-    """
-
-    def __init__(self, endpoint: str, retry_after: float | None = None) -> None:
-        self.retry_after = retry_after
-        super().__init__(429, "Rate limit exceeded", endpoint)
-
-
-class OpenAlgoAuthError(APIError):
-    """OpenAlgo client authentication failed (HTTP 401/403).
-
-    (Renamed from ``AuthError`` so the canonical ``AuthError`` name belongs to
-    the broker-adapter taxonomy below.)
-    """
-
-    def __init__(
-        self,
-        endpoint: str,
-        message: str = "Authentication failed",
-        status_code: int = 401,
-    ) -> None:
-        super().__init__(status_code, message, endpoint)
 
 
 # ===========================================================================
@@ -145,10 +99,7 @@ class BrokerSessionDegraded(AuthError):
         self.read_only_until = read_only_until
         self.broker_message = broker_message
         self.broker_raw_response = broker_raw_response or {}
-        super().__init__(
-            f"BrokerSessionDegraded(reason={reason!r}, "
-            f"read_only_until={read_only_until.isoformat()})"
-        )
+        super().__init__(f"BrokerSessionDegraded(reason={reason!r}, read_only_until={read_only_until.isoformat()})")
 
 
 # ---------- order ----------

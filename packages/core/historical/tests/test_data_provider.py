@@ -1,6 +1,6 @@
 """Tests for packages/core/historical/src/data_provider.py.
 
-All external libraries (openchart, yfinance, openalgo) are mocked so these
+All external libraries (openchart, yfinance, native_broker) are mocked so these
 tests run without any network access or broker API key.
 """
 
@@ -19,6 +19,7 @@ class TestNormaliseInterval:
 
     def test_canonical_passthrough(self):
         from flinttrade_historical.data_provider import normalise_interval
+
         assert normalise_interval("1m") == "1m"
         assert normalise_interval("5m") == "5m"
         assert normalise_interval("1h") == "1h"
@@ -27,18 +28,22 @@ class TestNormaliseInterval:
 
     def test_user_friendly_to_canonical(self):
         from flinttrade_historical.data_provider import normalise_interval
+
         assert normalise_interval("1d") == "D"
 
     def test_unsupported_raises(self):
         from flinttrade_historical.data_provider import normalise_interval
         import pytest
+
         with pytest.raises(ValueError, match="Unrecognised interval"):
             normalise_interval("2d")
 
     def test_all_mapped_intervals(self):
         from flinttrade_historical.data_provider import INTERVAL_MAP
+
         # Every key should map without error
         from flinttrade_historical.data_provider import normalise_interval
+
         for k in INTERVAL_MAP:
             assert normalise_interval(k) == INTERVAL_MAP[k]
 
@@ -53,6 +58,7 @@ class TestProviderResult:
 
     def test_success_with_bars(self):
         from flinttrade_historical.data_provider import ProviderBar, ProviderResult
+
         bars = [
             ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100.5, volume=1000),
         ]
@@ -62,68 +68,78 @@ class TestProviderResult:
 
     def test_failure_with_error(self):
         from flinttrade_historical.data_provider import ProviderResult
+
         result = ProviderResult(symbol="X", exchange="NSE", interval="5m", error="API down")
         assert not result.success
         assert result.total_bars == 0
 
     def test_failure_no_bars(self):
         from flinttrade_historical.data_provider import ProviderResult
+
         result = ProviderResult(symbol="X", exchange="NSE", interval="5m")
         assert not result.success
 
 
 # ---------------------------------------------------------------------------
-# OpenAlgoProvider
+# NativeBrokerProvider
 # ---------------------------------------------------------------------------
 
 
-class TestOpenAlgoProvider:
-    """Test OpenAlgoProvider with a mocked downloader."""
+class TestNativeBrokerProvider:
+    """Test NativeBrokerProvider with a mocked downloader."""
 
     def _make_provider(self, bars=None, errors=None):
-        from flinttrade_historical.data_provider import OpenAlgoProvider
+        from flinttrade_historical.data_provider import NativeBrokerProvider
+
         mock_client = MagicMock()
-        provider = OpenAlgoProvider(mock_client)
+        provider = NativeBrokerProvider(mock_client)
         return provider, mock_client
 
-    def test_supports_all_openalgo_exchanges(self):
-        from flinttrade_historical.data_provider import OpenAlgoProvider, OPENALGO_EXCHANGES
+    def test_supports_all_native_broker_exchanges(self):
+        from flinttrade_historical.data_provider import NativeBrokerProvider, NATIVE_BROKER_EXCHANGES
+
         mock_client = MagicMock()
-        provider = OpenAlgoProvider(mock_client)
-        for exch in OPENALGO_EXCHANGES:
+        provider = NativeBrokerProvider(mock_client)
+        for exch in NATIVE_BROKER_EXCHANGES:
             assert provider.supports(exch), f"Should support {exch}"
 
     def test_name(self):
-        from flinttrade_historical.data_provider import OpenAlgoProvider
-        assert OpenAlgoProvider(MagicMock()).name == "openalgo"
+        from flinttrade_historical.data_provider import NativeBrokerProvider
+
+        assert NativeBrokerProvider(MagicMock()).name == "native"
 
     def test_does_not_support_unknown_exchange(self):
-        from flinttrade_historical.data_provider import OpenAlgoProvider
-        provider = OpenAlgoProvider(MagicMock())
+        from flinttrade_historical.data_provider import NativeBrokerProvider
+
+        provider = NativeBrokerProvider(MagicMock())
         assert not provider.supports("UNKNOWN")
 
     def test_fetch_success(self):
-        from flinttrade_historical.data_provider import OpenAlgoProvider
+        from flinttrade_historical.data_provider import NativeBrokerProvider
         from flinttrade_historical.downloader import DownloadResult
         from flinttrade_core.models import OHLCV
 
         mock_client = MagicMock()
-        provider = OpenAlgoProvider(mock_client)
+        provider = NativeBrokerProvider(mock_client)
 
         dl_result = DownloadResult(
-            symbol="RELIANCE", exchange="NSE", interval="5m",
-            start_date="2026-03-01", end_date="2026-03-15",
+            symbol="RELIANCE",
+            exchange="NSE",
+            interval="5m",
+            start_date="2026-03-01",
+            end_date="2026-03-15",
             bars=[OHLCV(timestamp="2026-03-01T09:15:00", open=100, high=101, low=99, close=100.5, volume=1000)],
             chunks_fetched=1,
         )
 
         # Patch inside the downloader module where HistoricalDownloader is defined,
-        # accessed via the lazy local import in OpenAlgoProvider.fetch()
+        # accessed via the lazy local import in NativeBrokerProvider.fetch()
         with patch("flinttrade_historical.downloader.HistoricalDownloader") as MockDL:
             MockDL.return_value.download.return_value = dl_result
             # Also patch the import inside data_provider so the local import resolves
             with patch.dict("sys.modules"):
                 import flinttrade_historical.downloader as dl_mod
+
                 original = dl_mod.HistoricalDownloader
                 dl_mod.HistoricalDownloader = MockDL
                 try:
@@ -134,20 +150,21 @@ class TestOpenAlgoProvider:
         assert result.success
         assert result.total_bars == 1
         assert result.bars[0].open == 100
-        assert result.provider == "openalgo"
+        assert result.provider == "native"
 
     def test_fetch_api_error_returns_error_result(self):
-        from flinttrade_historical.data_provider import OpenAlgoProvider
+        from flinttrade_historical.data_provider import NativeBrokerProvider
         import flinttrade_historical.downloader as dl_mod
 
         mock_client = MagicMock()
-        provider = OpenAlgoProvider(mock_client)
+        provider = NativeBrokerProvider(mock_client)
 
         original = dl_mod.HistoricalDownloader
 
         class BrokenDL:
             def __init__(self, *a, **kw):
                 pass
+
             def download(self, *a, **kw):
                 raise RuntimeError("Connection refused")
 
@@ -171,16 +188,19 @@ class TestOpenChartProvider:
 
     def test_supports_nse_nfo(self):
         from flinttrade_historical.data_provider import OpenChartProvider
+
         p = OpenChartProvider()
         assert p.supports("NSE")
         assert p.supports("NFO")
 
     def test_does_not_support_mcx(self):
         from flinttrade_historical.data_provider import OpenChartProvider
+
         assert not OpenChartProvider().supports("MCX")
 
     def test_name(self):
         from flinttrade_historical.data_provider import OpenChartProvider
+
         assert OpenChartProvider().name == "openchart"
 
     def test_fetch_success(self):
@@ -190,7 +210,9 @@ class TestOpenChartProvider:
 
         mock_result = FreeDataResult(symbol="RELIANCE", exchange="NSE", source="openchart")
         mock_result.bars = [
-            FreeBar(timestamp="2026-03-16T09:15:00", open=100, high=101, low=99, close=100.5, volume=500, source="openchart"),
+            FreeBar(
+                timestamp="2026-03-16T09:15:00", open=100, high=101, low=99, close=100.5, volume=500, source="openchart"
+            ),
         ]
 
         original = fd_mod.NSEData
@@ -240,14 +262,17 @@ class TestYFinanceProvider:
 
     def test_supports_mcx(self):
         from flinttrade_historical.data_provider import YFinanceProvider
+
         assert YFinanceProvider().supports("MCX")
 
     def test_does_not_support_nse(self):
         from flinttrade_historical.data_provider import YFinanceProvider
+
         assert not YFinanceProvider().supports("NSE")
 
     def test_name(self):
         from flinttrade_historical.data_provider import YFinanceProvider
+
         assert YFinanceProvider().name == "yfinance"
 
     def test_fetch_success(self):
@@ -257,7 +282,15 @@ class TestYFinanceProvider:
 
         mock_result = FreeDataResult(symbol="GOLD", exchange="MCX", source="yfinance")
         mock_result.bars = [
-            FreeBar(timestamp="2026-03-16 00:00:00", open=7000, high=7100, low=6950, close=7050, volume=100, source="yfinance"),
+            FreeBar(
+                timestamp="2026-03-16 00:00:00",
+                open=7000,
+                high=7100,
+                low=6950,
+                close=7050,
+                volume=100,
+                source="yfinance",
+            ),
         ]
 
         original = fd_mod.CommodityData
@@ -281,8 +314,9 @@ class TestYFinanceProvider:
         from flinttrade_historical.free_data import FreeDataResult
         import flinttrade_historical.free_data as fd_mod
 
-        mock_result = FreeDataResult(symbol="PLATINUM", exchange="MCX", source="yfinance",
-                                      error="Unknown commodity: PLATINUM")
+        mock_result = FreeDataResult(
+            symbol="PLATINUM", exchange="MCX", source="yfinance", error="Unknown commodity: PLATINUM"
+        )
 
         original = fd_mod.CommodityData
 
@@ -308,16 +342,17 @@ class TestYFinanceProvider:
 class TestProviderRegistry:
     """Test ProviderRegistry routing and fallback logic."""
 
-    def _make_registry(self, openalgo_client=None):
+    def _make_registry(self, broker_client=None):
         from flinttrade_historical.data_provider import ProviderRegistry
-        return ProviderRegistry(openalgo_client)
+
+        return ProviderRegistry(broker_client)
 
     def test_no_client_still_has_free_providers(self):
         registry = self._make_registry()
         assert len(registry.providers) >= 2
 
     def test_with_client_has_three_providers(self):
-        registry = self._make_registry(openalgo_client=MagicMock())
+        registry = self._make_registry(broker_client=MagicMock())
         assert len(registry.providers) >= 3
 
     def test_fetch_uses_first_supporting_provider(self):
@@ -328,7 +363,9 @@ class TestProviderRegistry:
         mock_provider.supports.return_value = True
         mock_provider.name = "mock"
         mock_provider.fetch.return_value = ProviderResult(
-            symbol="RELIANCE", exchange="NSE", interval="5m",
+            symbol="RELIANCE",
+            exchange="NSE",
+            interval="5m",
             provider="mock",
             bars=[ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100, volume=500)],
         )
@@ -370,14 +407,20 @@ class TestProviderRegistry:
         failing.supports.return_value = True
         failing.name = "failing"
         failing.fetch.return_value = ProviderResult(
-            symbol="X", exchange="NSE", interval="5m", error="API down",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
+            error="API down",
         )
 
         succeeding = MagicMock()
         succeeding.supports.return_value = True
         succeeding.name = "succeeding"
         succeeding.fetch.return_value = ProviderResult(
-            symbol="X", exchange="NSE", interval="5m", provider="succeeding",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
+            provider="succeeding",
             bars=[ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100, volume=500)],
         )
 
@@ -395,15 +438,22 @@ class TestProviderRegistry:
         failing.supports.return_value = True
         failing.name = "failing"
         failing.fetch.return_value = ProviderResult(
-            symbol="X", exchange="NSE", interval="5m", error="API down",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
+            error="API down",
         )
 
         succeeding = MagicMock()
         succeeding.supports.return_value = True
         succeeding.name = "succeeding"
         from flinttrade_historical.data_provider import ProviderBar
+
         succeeding.fetch.return_value = ProviderResult(
-            symbol="X", exchange="NSE", interval="5m", provider="succeeding",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
+            provider="succeeding",
             bars=[ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100, volume=500)],
         )
 
@@ -416,6 +466,7 @@ class TestProviderRegistry:
 
     def test_no_supporting_provider(self):
         from flinttrade_historical.data_provider import ProviderRegistry
+
         registry = ProviderRegistry()
         registry._providers = []
         result = registry.fetch("X", "WEIRD_EXCHANGE", "5m", "2026-03-01", "2026-03-16")
@@ -450,7 +501,10 @@ class TestProviderRegistry:
         mock_provider.supports.return_value = True
         mock_provider.name = "mock"
         mock_provider.fetch.return_value = ProviderResult(
-            symbol="X", exchange="NSE", interval="5m", provider="mock",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
+            provider="mock",
             bars=[ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100, volume=500)],
         )
 
@@ -473,10 +527,11 @@ class TestProviderRegistry:
         """Verify built-in providers implement the DataProvider protocol."""
         from flinttrade_historical.data_provider import (
             DataProvider,
-            OpenAlgoProvider,
+            NativeBrokerProvider,
             OpenChartProvider,
             YFinanceProvider,
         )
-        assert isinstance(OpenAlgoProvider(MagicMock()), DataProvider)
+
+        assert isinstance(NativeBrokerProvider(MagicMock()), DataProvider)
         assert isinstance(OpenChartProvider(), DataProvider)
         assert isinstance(YFinanceProvider(), DataProvider)

@@ -316,8 +316,8 @@ function AutomatePreview() {
       </div>
       <div className="flex items-center justify-between rounded-md bg-surface-base px-2.5 py-2.5 text-xs">
         <div>
-          <div className="text-text-primary font-medium">Webhook Flows</div>
-          <div className="text-xxs text-text-muted">54-node flow builder</div>
+          <div className="text-text-primary font-medium">Webhook Registry</div>
+          <div className="text-xxs text-text-muted">Signed custom webhook endpoints</div>
         </div>
         <Badge className="bg-neutral-bg text-neutral-text text-xxs border-0">
           Ready
@@ -413,7 +413,7 @@ const MODULES: ModuleDef[] = [
     icon: Workflow,
     iconColor: "text-rose-400",
     title: "Automate",
-    subtitle: "Flow builder, cron scheduler, Telegram kill switch",
+    subtitle: "Cron scheduler, strategy monitors, Telegram kill switch",
     route: "/automate",
     preview: <AutomatePreview />,
   },
@@ -550,7 +550,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: "[aria-label='Demo (example data) navigation']",
     title: "Navigation & Setup",
     description:
-      "Use the setup wizard to connect the recommended OpenAlgo bridge or a verified native broker. Settings keeps those connections editable later.",
+      "Use the setup wizard to connect a supported native broker. Settings keeps those connections editable later.",
     placement: "bottom",
   },
   {
@@ -571,7 +571,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: ".rounded-lg.border.border-border-default.bg-surface-card",
     title: "Ready to Go Live?",
     description:
-      "Set up the recommended OpenAlgo bridge or a verified native broker. Takes about 2 minutes.",
+      "Set up a supported native broker. Takes about 2 minutes.",
     placement: "top",
   },
 ];
@@ -618,7 +618,7 @@ export default function ExploreRoute() {
         mainLabel="Demo (example data)"
         eyebrow="Demo (example data)"
         title="Demo (example data)"
-        subtitle="Open every module with example data, then connect OpenAlgo or a verified native broker when you are ready for live data."
+        subtitle="Open every module with example data, then connect a supported native broker when you are ready for live data."
         actions={
           <nav aria-label="Demo (example data) navigation" className="flex items-center gap-2">
             <Button
@@ -739,7 +739,7 @@ export default function ExploreRoute() {
                       Ready to start?
                     </h2>
                     <p className="mt-1 text-sm text-text-muted">
-                      Set up your workspace in 2 minutes, then connect the recommended OpenAlgo bridge or a verified native broker.
+                      Set up your workspace in 2 minutes, then connect a supported native broker.
                     </p>
                   </div>
                 </div>

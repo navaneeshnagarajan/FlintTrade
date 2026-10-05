@@ -10,6 +10,7 @@ Three classes:
 - :class:`LatencyTracker` — per-broker order RTT statistics
   (p50/p95/p99).
 """
+
 from __future__ import annotations
 
 import logging
@@ -195,8 +196,7 @@ class HealthAggregator:
             "disconnected": disconnected,
             "total": len(sessions),
             "accounts": [
-                {"account_id": s.get("account_id", ""), "connected": s.get("is_connected", False)}
-                for s in sessions
+                {"account_id": s.get("account_id", ""), "connected": s.get("is_connected", False)} for s in sessions
             ],
         }
 
@@ -259,9 +259,9 @@ class HealthAggregator:
             usage = shutil.disk_usage(str(data_dir) if data_dir.exists() else str(data_dir.parent.parent))
             if usage.total <= 0:
                 return _unavailable("Host disk unavailable")
-            total_gb = usage.total / (1024 ** 3)
-            used_gb = usage.used / (1024 ** 3)
-            free_gb = usage.free / (1024 ** 3)
+            total_gb = usage.total / (1024**3)
+            used_gb = usage.used / (1024**3)
+            free_gb = usage.free / (1024**3)
             pct = (usage.used / usage.total) * 100
             rounded_pct = round(pct, 1)
 

@@ -2,7 +2,7 @@
  * AccountStatusPanel — the Account Manager's connected-brokers + daily-reauth
  * surface.
  *
- * Polls GET /ft-api/api/v1/accounts/status, which merges OpenAlgo/Ditto rows
+ * Polls GET /ft-api/api/v1/accounts/status, which merges broker/Ditto rows
  * with native FlintTrade broker rows and reports connection state + whether the
  * broker session is authenticated today / needs re-authentication. Drives the
  * operator to act on any broker that has dropped or needs a daily re-login.
@@ -15,7 +15,7 @@ import { get } from "@/services/ftApi";
 
 interface AccountStatus {
   account_id: string;
-  source?: "openalgo" | "native";
+  source?: "native";
   broker?: string;
   broker_display?: string;
   name: string;
@@ -36,7 +36,7 @@ interface StatusResponse {
 type AuthState = "reauth" | "retry" | "authed" | "unavailable" | "not_authed";
 
 function rowKey(a: AccountStatus): string {
-  return `${a.source ?? "openalgo"}:${a.broker ?? "openalgo"}:${a.account_id}`;
+  return `${a.source ?? "native"}:${a.broker ?? "unknown"}:${a.account_id}`;
 }
 
 function reauthHref(_a: AccountStatus): string {
@@ -107,8 +107,8 @@ export function AccountStatusPanel() {
                   </p>
                   {(a.broker_display || a.source) && (
                     <p className="text-xxs text-text-muted truncate">
-                      {a.broker_display ?? "OpenAlgo bridge"}
-                      {a.source ? ` · ${a.source === "native" ? "Native" : "OpenAlgo"}` : ""}
+                      {a.broker_display ?? a.broker ?? "Native broker"}
+                       · Native
                     </p>
                   )}
                   {a.error && <p className="text-xxs text-text-muted truncate">{a.error}</p>}

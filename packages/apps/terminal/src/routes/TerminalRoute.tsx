@@ -262,7 +262,7 @@ function getDefaultPresetId(level: "beginner" | "intermediate" | "advanced"): st
 }
 
 // Full-page tools available from the TOOLS dropdown on /trade.
-// backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
+// backtest-lab → /lab, strategy-builder → /lab
 // are full routes now and are no longer overlaid on the /trade canvas.
 // "settings" navigates to /settings (handled in flinttrade:open-tool event listener).
 // "market-intelligence" is unmounted (ruling D4): every tab it carried is served

@@ -52,8 +52,8 @@ class BhavcopyDayResult:
     """Outcome of one trading day's bhavcopy downloads."""
 
     trade_date: str = ""
-    saved: list[str] = field(default_factory=list)     # segment names fetched
-    skipped: list[str] = field(default_factory=list)   # already on disk
+    saved: list[str] = field(default_factory=list)  # segment names fetched
+    skipped: list[str] = field(default_factory=list)  # already on disk
     errors: dict[str, str] = field(default_factory=dict)  # segment → error
 
     def to_dict(self) -> dict[str, Any]:
@@ -146,9 +146,7 @@ class BhavcopyDownloader:
             except Exception as exc:  # per-segment capture — a holiday or a
                 # missing archive must not abort the remaining segments/days.
                 result.errors[segment] = str(exc)
-                logger.warning(
-                    "Bhavcopy %s/%s failed: %s", trade_date.isoformat(), segment, exc
-                )
+                logger.warning("Bhavcopy %s/%s failed: %s", trade_date.isoformat(), segment, exc)
         return result
 
     def download_range(
@@ -166,9 +164,7 @@ class BhavcopyDownloader:
         if end < start:
             raise ValueError("end date is before start date")
         if (end - start).days + 1 > MAX_RANGE_DAYS:
-            raise ValueError(
-                f"Range too large: {(end - start).days + 1} days (max {MAX_RANGE_DAYS} per call)"
-            )
+            raise ValueError(f"Range too large: {(end - start).days + 1} days (max {MAX_RANGE_DAYS} per call)")
 
         segs = [s for s in (segments or list(SEGMENTS)) if s in SEGMENTS]
         result = BhavcopyRangeResult(start=start.isoformat(), end=end.isoformat(), segments=segs)

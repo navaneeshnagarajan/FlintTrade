@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_pine_compile.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ _TEST_API_KEY = "test-pine-compile-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -25,8 +27,9 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def flask_app(monkeypatch_module):
     """Create a Flask app with indicators blueprint registered."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     from flinttrade_core.app import create_flask_app
+
     app = create_flask_app()
     app.config["TESTING"] = True
     return app

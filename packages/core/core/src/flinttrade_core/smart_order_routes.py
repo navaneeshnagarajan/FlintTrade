@@ -86,7 +86,7 @@ async def gather_portfolio_state(
     from .l2_state import gather_safety_state  # noqa: PLC0415
 
     config = {
-        "OPENALGO_CLIENT": client,
+        "BROKER_CLIENT": client,
         "NATIVE_ADAPTERS": native_adapters or {},
         "REGISTRY": registry,
     }
@@ -136,7 +136,7 @@ class GatedChildExecutor:
             every child. Long-lived executors use it to follow runtime router
             rebuilds; ``None`` fails closed when routing was removed.
         request_ctx: Selector-bound request context for the initiating actor.
-        adapter_id: Broker adapter id (e.g. ``"openalgo"``).
+        adapter_id: Broker adapter id (e.g. ``"dhan"``).
         account_id: Broker account id within the adapter.
         audit: Optional audit logger (``log_event``); best-effort.
         journal_write: Optional callable ``(order, orderid) -> None`` appending
@@ -369,15 +369,17 @@ def _snapshot(job: _SmartJob) -> dict[str, Any]:
     if result is not None:
         # Reading the live list mid-flight is safe: the worker only appends.
         for child in list(result.child_orders):
-            children.append({
-                "quantity": child.quantity,
-                "price_type": child.price_type,
-                "status": child.status,
-                "order_id": child.order_id,
-                "error": child.error,
-                "slippage_bps": child.slippage_bps,
-                "placed_at": child.placed_at,
-            })
+            children.append(
+                {
+                    "quantity": child.quantity,
+                    "price_type": child.price_type,
+                    "status": child.status,
+                    "order_id": child.order_id,
+                    "error": child.error,
+                    "slippage_bps": child.slippage_bps,
+                    "placed_at": child.placed_at,
+                }
+            )
         filled = result.filled_quantity
         avg_slippage = result.average_slippage_bps
         completed = result.completed
@@ -443,15 +445,15 @@ def shutdown_smart_order_jobs(*, timeout: float) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Providers — optional depth/volume from the OpenAlgo bridge client
+# Providers — optional authorised depth/volume observations
 # ---------------------------------------------------------------------------
 
 
 def _make_providers(client: Any) -> tuple[Any, Any]:
-    """Build async depth/volume providers over the optional OpenAlgo client.
+    """Build async depth/volume providers over the optional native broker client.
 
-    The smart router consumes raw OpenAlgo-shaped dicts; when the bridge
-    client exists it returns typed models, so convert at this boundary. A
+    The smart router consumes depth rows and volume observations from
+    the supplied reader. A
     missing client or depth-fetch failure returns an empty book; medium
     urgency then FAILS CLOSED (refuses, no orders placed) rather than blindly
     market-ordering, and high/low urgency do not consult depth at all.
@@ -462,7 +464,7 @@ def _make_providers(client: Any) -> tuple[Any, Any]:
     async def depth_provider(symbol: str, exchange: str) -> dict[str, Any]:
         if client is None:
             logger.warning(
-                "smart-route depth unavailable for %s/%s: OpenAlgo client is not configured",
+                "smart-route depth unavailable for %s/%s: native broker client is not configured",
                 symbol,
                 exchange,
             )
@@ -528,45 +530,55 @@ def start_smart_route() -> tuple[Any, int]:
 
     cfg = current_app.config.get("SMART_ROUTING") or {}
     if not cfg.get("enabled", False):
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Smart routing is disabled. Enable it via workspace.json "
-                "brokers.smart_routing.enabled and restart the backend."
-            ),
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Smart routing is disabled. Enable it via workspace.json "
+                    "brokers.smart_routing.enabled and restart the backend."
+                ),
+            }
+        ), 403
 
     payload = _decode_request_payload()
     if not payload:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT",
+            }
+        ), 401
 
     if payload.get("mode") != _MODE_LIVE:
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Smart routing serves live mode only — slicing against the "
-                "sandbox is not implemented. Switch to live mode first."
-            ),
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Smart routing serves live mode only — slicing against the "
+                    "sandbox is not implemented. Switch to live mode first."
+                ),
+            }
+        ), 403
 
     if not _is_live_mode_unlocked():
-        return jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Live mode not unlocked — verify PIN first",
+            }
+        ), 403
 
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Order routing unavailable — workspace.json brokers configuration is "
-                "missing or invalid. Check the startup logs, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Order routing unavailable — workspace.json brokers configuration is "
+                    "missing or invalid. Check the startup logs, then restart."
+                ),
+            }
+        ), 503
 
     try:
         safety = _require_live_safety()
@@ -631,10 +643,12 @@ def start_smart_route() -> tuple[Any, int]:
         )
     except Exception as exc:  # noqa: BLE001 - refuse without exposing broker details
         logger.error("Smart-route portfolio safety state is unavailable: %s", type(exc).__name__)
-        return jsonify({
-            "status": "error",
-            "message": "Order safety state unavailable; no order was sent.",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Order safety state unavailable; no order was sent.",
+            }
+        ), 503
     try:
         admission = portfolio_state.admission_for(0)
         parent_results = safety.check_order(
@@ -653,16 +667,19 @@ def start_smart_route() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
     blocked = next((r for r in parent_results if not r.passed), None)
     if blocked is not None:
-        return jsonify({
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+            }
+        ), 403
+
+    return jsonify(
+        {
             "status": "error",
-            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-        }), 403
-
-    return jsonify({
-        "status": "error",
-        "message": "Orders are placed through /api/v1/orders/place.",
-    }), 501
-
+            "message": "Orders are placed through /api/v1/orders/place.",
+        }
+    ), 501
 
 
 def _require_auth() -> tuple[Any, int] | None:
@@ -674,10 +691,12 @@ def _require_auth() -> tuple[Any, int] | None:
     from .order_routes import _decode_request_payload  # noqa: PLC0415
 
     if _decode_request_payload() is None:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT",
+            }
+        ), 401
     return None
 
 

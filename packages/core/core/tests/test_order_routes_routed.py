@@ -60,10 +60,34 @@ def _app(backend_lease_proof, broker_router: object | None = None, safety: objec
     app = Flask(__name__)
     if broker_router is not None:
         broker_router.backend_lease_proof = backend_lease_proof
+        if not isinstance(getattr(broker_router, "default_selector", None), str):
+            broker_router.default_selector = "dhan:default"
     app.config["BROKER_ROUTER"] = broker_router
     app.config["SAFETY"] = safety
     app.config["SAFETY_CONFIG_READY"] = safety is not None
-    app.config["OPENALGO_CLIENT"] = _fake_client([])
+    app.config["BROKER_CLIENT"] = _fake_client([])
+    session = object()
+
+    def native_session(adapter_id, account_id):
+        if (adapter_id, account_id) != ("dhan", "default"):
+            raise BrokerNotFoundError("Unbound native test account")
+        return session
+
+    def observation(method, *args):
+        return getattr(app.config["BROKER_CLIENT"], method)(*args)
+
+    app.config["REGISTRY"] = SimpleNamespace(get_session_for=native_session)
+    app.config["NATIVE_ADAPTERS"] = {
+        "dhan": SimpleNamespace(
+            positions=lambda bound: observation("positionbook"),
+            funds=lambda bound: observation("funds"),
+            trade_book=lambda bound: observation("tradebook"),
+            holdings=lambda bound: observation("holdings"),
+            order_book=lambda bound: observation("orderbook"),
+            quotes=lambda bound, instruments: observation("multi_quotes", instruments),
+            margin_calculator=lambda bound, order: observation("margin", order),
+        )
+    }
     app.register_blueprint(orders_bp)
     return app
 
@@ -120,7 +144,7 @@ def test_routed_order_route_is_registered(backend_lease_proof) -> None:
 
 def test_routed_order_no_broker_router_returns_503(backend_lease_proof) -> None:
     client = _app(backend_lease_proof, broker_router=None, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 503
     assert "routing unavailable" in resp.get_json()["message"].lower()
 
@@ -146,7 +170,7 @@ def test_routed_order_safety_bypass_returns_403(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(side_effect=SafetyBypassError("actor not authorised"))
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "refused" in resp.get_json()["message"].lower()
 
@@ -160,16 +184,16 @@ def test_routed_order_algo_tag_limit_returns_429(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(side_effect=AlgoTagLimitError("dhan/NSE algo ceiling reached"))
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 429
     assert "refused" in resp.get_json()["message"].lower()
 
 
 def test_routed_order_broker_not_found_returns_503(backend_lease_proof) -> None:
     router = MagicMock()
-    router.place_order = AsyncMock(side_effect=BrokerNotFoundError("no session for openalgo:default"))
+    router.place_order = AsyncMock(side_effect=BrokerNotFoundError("no session for dhan:default"))
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 503
     assert "not connected" in resp.get_json()["message"].lower()
 
@@ -184,13 +208,15 @@ def test_routed_order_safety_layer_block_returns_403(backend_lease_proof) -> Non
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     client = _app(backend_lease_proof, broker_router=router, safety=safety).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "L5_KILL" in resp.get_json()["message"]
     router.place_order.assert_not_called()  # blocked before any dispatch
 
 
-def test_routed_order_checks_prospective_greeks_before_router(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
+def test_routed_order_checks_prospective_greeks_before_router(
+    monkeypatch: pytest.MonkeyPatch, backend_lease_proof
+) -> None:
     from flinttrade_core import order_routes
 
     blocked = MagicMock(
@@ -220,10 +246,14 @@ def test_routed_order_checks_prospective_greeks_before_router(monkeypatch: pytes
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
 
-    response = _app(backend_lease_proof, broker_router=router, safety=safety).test_client().post(
-        "/api/v1/orders/openalgo/place",
-        json=_LIVE_BODY,
-        headers=_live_headers(),
+    response = (
+        _app(backend_lease_proof, broker_router=router, safety=safety)
+        .test_client()
+        .post(
+            "/api/v1/orders/dhan/place",
+            json=_LIVE_BODY,
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 403
@@ -237,7 +267,7 @@ def test_routed_order_invalid_body_returns_400(backend_lease_proof) -> None:
     router.place_order = AsyncMock(return_value="X")
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     bad = {**_LIVE_BODY, "action": "SIDEWAYS"}  # not BUY/SELL — enum coercion fails
-    resp = client.post("/api/v1/orders/openalgo/place", json=bad, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=bad, headers=_live_headers())
     assert resp.status_code == 400
     assert "validation failed" in resp.get_json()["message"].lower()
     router.place_order.assert_not_called()
@@ -250,7 +280,7 @@ def test_routed_order_non_integer_quantity_returns_400(backend_lease_proof) -> N
     router.place_order = AsyncMock(return_value="X")
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     bad = {**_LIVE_BODY, "quantity": "10.5"}
-    resp = client.post("/api/v1/orders/openalgo/place", json=bad, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=bad, headers=_live_headers())
     assert resp.status_code == 400
     assert "quantity" in resp.get_json()["message"].lower()
     router.place_order.assert_not_called()
@@ -258,25 +288,27 @@ def test_routed_order_non_integer_quantity_returns_400(backend_lease_proof) -> N
 
 def test_routed_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-999")
+    router.place_order = AsyncMock(return_value="NATIVE-999")
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["status"] == "success"
     # Both keys returned so the UI works regardless of which it reads.
-    assert data["orderid"] == "OA-999"
-    assert data["data"] == "OA-999"
+    assert data["orderid"] == "NATIVE-999"
+    assert data["data"] == "NATIVE-999"
     router.place_order.assert_awaited_once()
     # Regression guard (re-audit HIGH): the dispatched order MUST be the typed
-    # Order, not the raw dict — a dict AttributeErrors at the OpenAlgoClient
+    # Order, not the raw dict — a dict AttributeErrors at the BrokerClient
     # boundary (order.symbol / order.action.value / …) and 500s every live order.
     from flinttrade_core.models import Order
 
     dispatched = router.place_order.await_args.kwargs["order"]
     assert isinstance(dispatched, Order)
     assert dispatched.symbol == "RELIANCE"
-    assert router.place_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
+    assert router.place_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(
+        backend_lease_proof.incarnation
+    )
 
 
 def test_legacy_place_uses_configured_execution_default_when_target_omitted(backend_lease_proof) -> None:
@@ -339,7 +371,7 @@ def _real_safety(**cfg):
 
 def _app_with_client(backend_lease_proof, router, safety, client):
     app = _app(backend_lease_proof, broker_router=router, safety=safety)
-    app.config["OPENALGO_CLIENT"] = client
+    app.config["BROKER_CLIENT"] = client
     return app
 
 
@@ -360,7 +392,13 @@ def _app_with_native_state(
     app = _app(backend_lease_proof, broker_router=router, safety=safety)
     session = object()
     registry = MagicMock()
-    registry.get_session_for.return_value = session
+
+    def exact_session(requested_adapter, requested_account):
+        if (requested_adapter, requested_account) != (adapter_id, account_id):
+            raise BrokerNotFoundError("Unbound native test account")
+        return session
+
+    registry.get_session_for.side_effect = exact_session
     adapter = MagicMock()
     adapter.positions = AsyncMock(side_effect=positions_side_effect, return_value=positions or [])
     native_funds = {
@@ -375,7 +413,7 @@ def _app_with_native_state(
     adapter.order_book = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -436,8 +474,7 @@ def _fake_client(
     normalised_trades = [
         {
             **trade,
-            "timestamp": trade.get("timestamp")
-            or datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat(),
+            "timestamp": trade.get("timestamp") or datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat(),
         }
         if isinstance(trade, dict)
         else trade
@@ -460,7 +497,7 @@ def _fake_client(
     c.orderbook = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -512,12 +549,8 @@ def test_L4_uses_local_tradebook_mtm_and_never_activates_L5(backend_lease_proof)
     )
     app = _app_with_client(backend_lease_proof, router, safety, client)
 
-    first = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
-    second = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    first = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
+    second = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert first.status_code == 403
     assert second.status_code == 403
@@ -555,9 +588,7 @@ def test_L4_local_tradebook_hard_stop_never_dispatches_L5(backend_lease_proof) -
     )
     app = _app_with_client(backend_lease_proof, router, safety, client)
 
-    response = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    response = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert response.status_code == 403
     assert "L4_PNL" in response.get_json()["message"]
@@ -575,9 +606,7 @@ def test_L2_blocks_when_at_max_positions_from_live_state(backend_lease_proof) ->
     safety = _real_safety(max_positions=1)
     client = _fake_client([_pos("INFY", 50)])  # already 1 open position; max is 1
     app = _app_with_client(backend_lease_proof, router, safety, client)
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "L2_POSITION" in resp.get_json()["message"]
     router.place_order.assert_not_called()
@@ -590,9 +619,7 @@ def test_L2_blocks_when_margin_over_limit_from_live_funds(backend_lease_proof) -
     # 80% margin used → over the 60% cap.
     client = _fake_client([], used_margin="80000", total_balance="100000")
     app = _app_with_client(backend_lease_proof, router, safety, client)
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "Margin usage" in resp.get_json()["message"]
     router.place_order.assert_not_called()
@@ -601,26 +628,22 @@ def test_L2_blocks_when_margin_over_limit_from_live_funds(backend_lease_proof) -
 def test_L2_float_string_quantity_tolerated(backend_lease_proof) -> None:
     """A position quantity like "50.0" must not 500 the order (L2 tolerant parse)."""
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-1")
+    router.place_order = AsyncMock(return_value="NATIVE-1")
     safety = _real_safety(max_positions=10)
     client = _fake_client([_pos("INFY", "50.0")])
     app = _app_with_client(backend_lease_proof, router, safety, client)
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 200
 
 
 def test_non_finite_position_quantity_fails_closed_without_500(backend_lease_proof) -> None:
     """A non-finite quantity cannot become a zero-loss L4 snapshot."""
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-3")
+    router.place_order = AsyncMock(return_value="NATIVE-3")
     safety = _real_safety(max_positions=10)
     client = _fake_client([_pos("INFY", "Infinity")])
     app = _app_with_client(backend_lease_proof, router, safety, client)
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 503
     assert "safety state unavailable" in resp.get_json()["message"].lower()
     router.place_order.assert_not_called()
@@ -629,7 +652,7 @@ def test_non_finite_position_quantity_fails_closed_without_500(backend_lease_pro
 def test_gather_l2_state_uses_selector_matched_broker_state(backend_lease_proof) -> None:
     """_gather_l2_state must read the selector's broker account.
 
-    OpenAlgo state is valid only for ``openalgo:*``; native selectors must use
+    native broker state is valid only for ``dhan:*``; native selectors must use
     their active native adapter + registry session so L2 is enforced against the
     account that will receive the order.
     """
@@ -642,17 +665,9 @@ def test_gather_l2_state_uses_selector_matched_broker_state(backend_lease_proof)
         positions=[_pos("TCS", 25)],
         funds={"used_margin": "9", "total_balance": "10"},
     )
-    openalgo_client = _fake_client([_pos("INFY", 50)], used_margin="90", total_balance="100")
-    app.config["OPENALGO_CLIENT"] = openalgo_client
+    broker_client = _fake_client([_pos("INFY", 50)], used_margin="90", total_balance="100")
+    app.config["BROKER_CLIENT"] = broker_client
     with app.app_context():
-        openalgo_positions, openalgo_used, openalgo_total = _gather_l2_state("openalgo")
-        assert openalgo_positions[0].quantity == "50"
-        assert openalgo_used == 90.0
-        assert openalgo_total == 100.0
-
-        openalgo_client.positionbook.reset_mock()
-        openalgo_client.funds.reset_mock()
-
         native_positions, native_used, native_total = _gather_l2_state("dhan", account_id="D1")
         assert native_positions[0].quantity == "25"
         assert native_used == 9.0
@@ -660,22 +675,20 @@ def test_gather_l2_state_uses_selector_matched_broker_state(backend_lease_proof)
         registry.get_session_for.assert_called_with("dhan", "D1")
         adapter.positions.assert_awaited_once()
         adapter.funds.assert_awaited_once()
-        openalgo_client.positionbook.assert_not_awaited()
-        openalgo_client.funds.assert_not_awaited()
+        broker_client.positionbook.assert_not_awaited()
+        broker_client.funds.assert_not_awaited()
 
 
 def test_portfolio_state_fetch_failure_blocks_order(backend_lease_proof) -> None:
     """An unreadable portfolio must not be interpreted as zero daily loss."""
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-2")
+    router.place_order = AsyncMock(return_value="NATIVE-2")
     safety = _real_safety(max_positions=1)
     client = MagicMock()
     client.positionbook = AsyncMock(side_effect=RuntimeError("broker down"))
     client.funds = AsyncMock(return_value=None)
     app = _app_with_client(backend_lease_proof, router, safety, client)
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 503
     router.place_order.assert_not_called()
 
@@ -765,20 +778,21 @@ def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(mon, "get_latency_tracker", lambda: tracker)
 
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-999")
+    router.place_order = AsyncMock(return_value="NATIVE-999")
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert resp.status_code == 200
     tracker.record_order_latency.assert_called_once()
     args = tracker.record_order_latency.call_args.args
-    assert args[0] == "openalgo"  # adapter/broker id
+    assert args[0] == "dhan"  # adapter/broker id
     assert args[1] == "RELIANCE"  # symbol
     assert isinstance(args[2], float) and args[2] >= 0.0  # latency_ms
 
 
 def test_routed_happy_path_feeds_the_persistent_latency_monitor(
-    monkeypatch: pytest.MonkeyPatch, backend_lease_proof,
+    monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     """U12: the same producer feeds the DuckDB-backed admin history.
 
@@ -791,18 +805,16 @@ def test_routed_happy_path_feeds_the_persistent_latency_monitor(
     monkeypatch.setattr(mon, "get_latency_tracker", lambda: MagicMock())
 
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-999")
+    router.place_order = AsyncMock(return_value="NATIVE-999")
     app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     persistent = MagicMock()
     app.config["LATENCY_MONITOR"] = persistent
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert resp.status_code == 200
     persistent.record.assert_called_once()
     args, kwargs = persistent.record.call_args
-    assert args[0] == "openalgo"
+    assert args[0] == "dhan"
     assert args[1] == "PLACE"
     assert isinstance(args[2], float) and args[2] >= 0.0
     assert kwargs.get("symbol") == "RELIANCE"
@@ -818,12 +830,12 @@ def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.Mo
     monkeypatch.setattr(mon, "get_latency_tracker", _boom)
 
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-777")
+    router.place_order = AsyncMock(return_value="NATIVE-777")
     client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    resp = client.post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert resp.status_code == 200
-    assert resp.get_json()["orderid"] == "OA-777"
+    assert resp.get_json()["orderid"] == "NATIVE-777"
 
 
 # ---------------------------------------------------------------------------
@@ -842,14 +854,12 @@ def test_routed_happy_path_journals_the_trade(tmp_path: object, backend_lease_pr
     store.initialise()
 
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-555")
+    router.place_order = AsyncMock(return_value="NATIVE-555")
     app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["TRADE_STORAGE"] = store
     app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
 
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 200
 
     today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
@@ -858,7 +868,7 @@ def test_routed_happy_path_journals_the_trade(tmp_path: object, backend_lease_pr
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["orderid"] == "OA-555"
+    assert row["orderid"] == "NATIVE-555"
     assert row["symbol"] == "RELIANCE"
     assert row["action"] == "BUY"
     assert int(row["quantity"]) == 1
@@ -873,28 +883,26 @@ def test_journal_failure_never_breaks_the_order(backend_lease_proof) -> None:
     bad_store.insert_trade.side_effect = RuntimeError("duckdb is on fire")
 
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-444")
+    router.place_order = AsyncMock(return_value="NATIVE-444")
     app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["TRADE_STORAGE"] = bad_store
     app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
 
-    resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/orders/dhan/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 200
-    assert resp.get_json()["orderid"] == "OA-444"
+    assert resp.get_json()["orderid"] == "NATIVE-444"
     bad_store.insert_trade.assert_called_once()
 
 
 def test_routed_happy_path_does_not_duplicate_router_owned_lifecycle_recording(backend_lease_proof) -> None:
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="OA-LIFE-1")
+    router.place_order = AsyncMock(return_value="NATIVE-LIFE-1")
     provider = MagicMock()
     app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["LOCAL_STATE_PROVIDER"] = provider
 
     resp = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_LIVE_BODY,
         headers=_live_headers(),
     )
@@ -909,7 +917,7 @@ def test_routed_happy_path_does_not_duplicate_router_owned_lifecycle_recording(b
 # ---------------------------------------------------------------------------
 
 _MODIFY_BODY = {
-    "orderid": "OA-1",
+    "orderid": "NATIVE-1",
     "symbol": "RELIANCE",
     "exchange": "NSE",
     "action": "BUY",
@@ -952,7 +960,7 @@ def _real_kotak_route_stack(backend_lease_proof, *, order_row=None):
             return {"stat": "Ok", "stCode": 200, "data": [dict(order_row)]}
 
     authoritative = {
-        "orderid": "OA-1",
+        "orderid": "NATIVE-1",
         "status": "OPEN",
         "symbol": "RELIANCE",
         "exchange": "NSE",
@@ -1014,7 +1022,7 @@ def _real_kotak_route_stack(backend_lease_proof, *, order_row=None):
 
 def _official_kotak_order(
     *,
-    order_id: str = "OA-1",
+    order_id: str = "NATIVE-1",
     product: str = "CNC",
     generation: str = "AMO",
 ) -> dict[str, object]:
@@ -1104,10 +1112,10 @@ def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
     client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post("/api/v1/orders/modify", json=_MODIFY_BODY, headers=_live_headers())
     assert resp.status_code == 200
-    assert resp.get_json()["orderid"] == "OA-1"
+    assert resp.get_json()["orderid"] == "NATIVE-1"
     router.modify_order.assert_awaited_once()
     kw = router.modify_order.await_args.kwargs
-    assert kw["order_id"] == "OA-1"
+    assert kw["order_id"] == "NATIVE-1"
     assert kw["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
     assert kw["changes"]["symbol"] == "RELIANCE"
     assert kw["changes"]["validity"] == "DAY"
@@ -1129,10 +1137,14 @@ def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
 def test_modify_maps_canonical_adapter_errors_to_stable_status(backend_lease_proof, error) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(side_effect=error)
-    response = _app(backend_lease_proof, broker_router=router).test_client().post(
-        "/api/v1/orders/modify",
-        json=_MODIFY_BODY,
-        headers=_live_headers(),
+    response = (
+        _app(backend_lease_proof, broker_router=router)
+        .test_client()
+        .post(
+            "/api/v1/orders/modify",
+            json=_MODIFY_BODY,
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == (501 if isinstance(error, UnsupportedCapabilityError) else 500)
@@ -1156,10 +1168,14 @@ def test_kotak_modify_route_refuses_explicit_removed_fields_instead_of_dropping_
 ) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    response = _app(backend_lease_proof, broker_router=router).test_client().post(
-        "/api/v1/orders/kotakneo/modify",
-        json={**_MODIFY_BODY, **removed},
-        headers=_live_headers(),
+    response = (
+        _app(backend_lease_proof, broker_router=router)
+        .test_client()
+        .post(
+            "/api/v1/orders/kotakneo/modify",
+            json={**_MODIFY_BODY, **removed},
+            headers=_live_headers(),
+        )
     )
 
     assert response.status_code == 501
@@ -1249,7 +1265,7 @@ def test_kotak_modify_full_route_router_adapter_path_emits_only_v3_kwargs(backen
     adapter.order_book = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1297,7 +1313,7 @@ def test_kotak_modify_full_route_router_adapter_path_emits_only_v3_kwargs(backen
     assert response.status_code == 200
     assert client.calls == [
         {
-            "order_id": "OA-1",
+            "order_id": "NATIVE-1",
             "order_type": "L",
             "price": "100",
             "quantity": "1",
@@ -1382,7 +1398,7 @@ def test_kotak_modify_route_binds_omitted_identity_into_signed_dispatch(backend_
     adapter.order_book = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "GOLDM",
                 "exchange": "MCX",
@@ -1401,11 +1417,7 @@ def test_kotak_modify_route_binds_omitted_identity_into_signed_dispatch(backend_
             }
         ]
     )
-    body = {
-        key: value
-        for key, value in _MODIFY_BODY.items()
-        if key not in {"symbol", "exchange", "action", "product"}
-    }
+    body = {key: value for key, value in _MODIFY_BODY.items() if key not in {"symbol", "exchange", "action", "product"}}
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/modify",
@@ -1415,10 +1427,7 @@ def test_kotak_modify_route_binds_omitted_identity_into_signed_dispatch(backend_
 
     assert response.status_code == 200
     kwargs = router.modify_order.await_args.kwargs
-    assert {
-        key: kwargs["changes"][key]
-        for key in ("symbol", "exchange", "action", "product")
-    } == {
+    assert {key: kwargs["changes"][key] for key in ("symbol", "exchange", "action", "product")} == {
         "symbol": "GOLDM",
         "exchange": "MCX",
         "action": "SELL",
@@ -1426,7 +1435,7 @@ def test_kotak_modify_route_binds_omitted_identity_into_signed_dispatch(backend_
     }
     assert kwargs["order"] == {
         "_op": "modify",
-        "order_id": "OA-1",
+        "order_id": "NATIVE-1",
         "_requested_change_fields": ["price", "price_type", "quantity"],
         **kwargs["changes"],
     }
@@ -1434,7 +1443,7 @@ def test_kotak_modify_route_binds_omitted_identity_into_signed_dispatch(backend_
 
 def test_kotak_modify_route_uses_authoritative_identity_for_exact_sdk_call(backend_lease_proof) -> None:
     authoritative = {
-        "orderid": "OA-1",
+        "orderid": "NATIVE-1",
         "status": "OPEN",
         "symbol": "GOLDM",
         "exchange": "MCX",
@@ -1447,11 +1456,7 @@ def test_kotak_modify_route_uses_authoritative_identity_for_exact_sdk_call(backe
         "disclosed_quantity": "0",
     }
     app, _adapter, client = _real_kotak_route_stack(backend_lease_proof, order_row=authoritative)
-    body = {
-        key: value
-        for key, value in _MODIFY_BODY.items()
-        if key not in {"symbol", "exchange", "action", "product"}
-    }
+    body = {key: value for key, value in _MODIFY_BODY.items() if key not in {"symbol", "exchange", "action", "product"}}
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/modify",
@@ -1462,7 +1467,7 @@ def test_kotak_modify_route_uses_authoritative_identity_for_exact_sdk_call(backe
     assert response.status_code == 200
     assert client.modify_calls == [
         {
-            "order_id": "OA-1",
+            "order_id": "NATIVE-1",
             "order_type": "L",
             "price": "100",
             "quantity": "1",
@@ -1534,7 +1539,7 @@ def test_kotak_modify_route_preserves_explicit_amo_to_signed_sdk_call(backend_le
     assert response.status_code == 200
     assert client.modify_calls == [
         {
-            "order_id": "OA-1",
+            "order_id": "NATIVE-1",
             "order_type": "L",
             "price": "100",
             "quantity": "1",
@@ -1573,7 +1578,7 @@ def test_kotak_price_only_modify_recovers_every_sdk_replacement_field_from_raw_o
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/modify",
-        json={"orderid": "OA-1", "price": "101"},
+        json={"orderid": "NATIVE-1", "price": "101"},
         headers=_live_headers(),
     )
 
@@ -1581,7 +1586,7 @@ def test_kotak_price_only_modify_recovers_every_sdk_replacement_field_from_raw_o
     signed = router.modify_order.await_args.kwargs["order"]
     assert signed == {
         "_op": "modify",
-        "order_id": "OA-1",
+        "order_id": "NATIVE-1",
         "_requested_change_fields": ["price"],
         "symbol": "RELIANCE-EQ",
         "exchange": "NSE",
@@ -1600,7 +1605,7 @@ def test_kotak_price_only_modify_recovers_every_sdk_replacement_field_from_raw_o
     }
     assert client.modify_calls == [
         {
-            "order_id": "OA-1",
+            "order_id": "NATIVE-1",
             "order_type": "L",
             "price": "101",
             "quantity": "10",
@@ -1627,7 +1632,7 @@ def test_kotak_modify_refuses_explicit_amo_mismatch_before_gate_or_sdk(
     monkeypatch.setattr("flinttrade_engine.safety.gate_order", forbidden_gate)
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/modify",
-        json={"orderid": "OA-1", "price": "101", "amo": False},
+        json={"orderid": "NATIVE-1", "price": "101", "amo": False},
         headers=_live_headers(),
     )
 
@@ -1648,7 +1653,7 @@ def test_kotak_modify_refuses_explicit_empty_validity_before_read_gate_or_sdk(
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/modify",
-        json={"orderid": "OA-1", "price": "101", "validity": value},
+        json={"orderid": "NATIVE-1", "price": "101", "validity": value},
         headers=_live_headers(),
     )
 
@@ -1668,7 +1673,7 @@ def test_kotak_modify_refuses_explicit_variety_instead_of_silently_ignoring_it(
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/modify",
-        json={"orderid": "OA-1", "price": "101", "variety": "amo"},
+        json={"orderid": "NATIVE-1", "price": "101", "variety": "amo"},
         headers=_live_headers(),
     )
 
@@ -1692,7 +1697,7 @@ def test_kotak_normal_write_refuses_authoritative_legacy_variety_before_transpor
         backend_lease_proof,
         order_row=_official_kotak_order(product=product, generation="NA"),
     )
-    body = {"orderid": "OA-1"}
+    body = {"orderid": "NATIVE-1"}
     if operation == "modify":
         body["price"] = "101"
 
@@ -1715,11 +1720,11 @@ def test_modify_quantity_increase_runs_full_safety_before_router(backend_lease_p
     safety.check_order.return_value = [blocked]
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    openalgo = _fake_client([])
-    openalgo.orderbook = AsyncMock(
+    dhan = _fake_client([])
+    dhan.orderbook = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1733,17 +1738,15 @@ def test_modify_quantity_increase_runs_full_safety_before_router(backend_lease_p
             }
         ]
     )
-    openalgo.margin = AsyncMock(
+    dhan.margin = AsyncMock(
         side_effect=[
             {"data": {"required_margin": "100"}},
             {"data": {"required_margin": "250"}},
             {"data": {"required_margin": "250"}},
         ]
     )
-    openalgo.multi_quotes = AsyncMock(
-        return_value=[SimpleNamespace(symbol="RELIANCE", exchange="NSE", ltp=100)]
-    )
-    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
+    dhan.multi_quotes = AsyncMock(return_value=[SimpleNamespace(symbol="RELIANCE", exchange="NSE", ltp=100)])
+    app = _app_with_client(backend_lease_proof, router, safety, dhan)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1763,11 +1766,11 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch(backend_le
     safety.check_order.side_effect = AssertionError("no-increase modify entered L1-L4")
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    openalgo = _fake_client([])
-    openalgo.orderbook = AsyncMock(
+    dhan = _fake_client([])
+    dhan.orderbook = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1781,8 +1784,8 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch(backend_le
             }
         ]
     )
-    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
+    dhan.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(backend_lease_proof, router, safety, dhan)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1791,8 +1794,8 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch(backend_le
     )
 
     assert response.status_code == 200
-    openalgo.orderbook.assert_awaited_once()
-    assert openalgo.margin.await_count == 2
+    dhan.orderbook.assert_awaited_once()
+    assert dhan.margin.await_count == 2
     safety.check_order.assert_not_called()
     router.modify_order.assert_awaited_once()
 
@@ -1802,11 +1805,11 @@ def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook(backend_le
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
-    openalgo = _fake_client([])
-    openalgo.orderbook = AsyncMock(
+    dhan = _fake_client([])
+    dhan.orderbook = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1821,8 +1824,8 @@ def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook(backend_le
             }
         ]
     )
-    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
+    dhan.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(backend_lease_proof, router, safety, dhan)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1853,7 +1856,7 @@ def test_groww_modify_without_disclosed_quantity_still_dispatches(backend_lease_
     adapter.order_book = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1883,11 +1886,11 @@ def test_modify_without_recoverable_disclosed_quantity_fails_closed(backend_leas
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
-    openalgo = _fake_client([])
-    openalgo.orderbook = AsyncMock(
+    dhan = _fake_client([])
+    dhan.orderbook = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1900,8 +1903,8 @@ def test_modify_without_recoverable_disclosed_quantity_fails_closed(backend_leas
             }
         ]
     )
-    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
+    dhan.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(backend_lease_proof, router, safety, dhan)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1919,11 +1922,11 @@ def test_modify_stop_loss_without_recoverable_trigger_fails_closed(backend_lease
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
-    openalgo = _fake_client([])
-    openalgo.orderbook = AsyncMock(
+    dhan = _fake_client([])
+    dhan.orderbook = AsyncMock(
         return_value=[
             {
-                "orderid": "OA-1",
+                "orderid": "NATIVE-1",
                 "status": "OPEN",
                 "symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -1937,8 +1940,8 @@ def test_modify_stop_loss_without_recoverable_trigger_fails_closed(backend_lease
             }
         ]
     )
-    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
+    dhan.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(backend_lease_proof, router, safety, dhan)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1956,10 +1959,10 @@ def test_modify_unknown_current_order_fails_closed_before_router(backend_lease_p
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    openalgo = _fake_client([])
-    openalgo.orderbook = AsyncMock(return_value=[])
-    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
+    dhan = _fake_client([])
+    dhan.orderbook = AsyncMock(return_value=[])
+    dhan.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(backend_lease_proof, router, safety, dhan)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1999,12 +2002,14 @@ def test_cancel_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
     client = _app(backend_lease_proof, broker_router=router).test_client()
-    resp = client.post("/api/v1/orders/cancel", json={"orderid": "OA-7"}, headers=_live_headers())
+    resp = client.post("/api/v1/orders/cancel", json={"orderid": "NATIVE-7"}, headers=_live_headers())
     assert resp.status_code == 200
-    assert resp.get_json()["orderid"] == "OA-7"
+    assert resp.get_json()["orderid"] == "NATIVE-7"
     router.cancel_order.assert_awaited_once()
-    assert router.cancel_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
-    assert router.cancel_order.await_args.kwargs["order_id"] == "OA-7"
+    assert router.cancel_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(
+        backend_lease_proof.incarnation
+    )
+    assert router.cancel_order.await_args.kwargs["order_id"] == "NATIVE-7"
 
 
 @pytest.mark.parametrize("status", ["open pending", "OPEN PENDING"])
@@ -2027,16 +2032,16 @@ def test_kotak_cancel_open_pending_reaches_adapter(backend_lease_proof, status: 
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/cancel",
-        json={"orderid": "OA-1"},
+        json={"orderid": "NATIVE-1"},
         headers=_live_headers(),
     )
 
     assert response.status_code == 200
     assert "not active" not in response.get_json().get("message", "").lower()
     kwargs = router.cancel_order.await_args.kwargs
-    assert kwargs["order"]["order_id"] == "OA-1"
+    assert kwargs["order"]["order_id"] == "NATIVE-1"
     assert kwargs["order"]["broker_product"] == "CNC"
-    assert client.cancel_calls == [("OA-1", "YES")]
+    assert client.cancel_calls == [("NATIVE-1", "YES")]
 
 
 def test_kotak_cancel_refuses_terminal_status_before_adapter(backend_lease_proof) -> None:
@@ -2050,7 +2055,7 @@ def test_kotak_cancel_refuses_terminal_status_before_adapter(backend_lease_proof
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/cancel",
-        json={"orderid": "OA-1"},
+        json={"orderid": "NATIVE-1"},
         headers=_live_headers(),
     )
 
@@ -2072,7 +2077,7 @@ def test_kotak_cancel_binds_raw_order_book_amo_into_signed_exact_sdk_call(
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/cancel",
-        json={"orderid": "OA-1"},
+        json={"orderid": "NATIVE-1"},
         headers=_live_headers(),
     )
 
@@ -2080,13 +2085,13 @@ def test_kotak_cancel_binds_raw_order_book_amo_into_signed_exact_sdk_call(
     kwargs = router.cancel_order.await_args.kwargs
     assert kwargs["order"] == {
         "_op": "cancel",
-        "order_id": "OA-1",
+        "order_id": "NATIVE-1",
         "broker_product": "CNC",
         "variety": "amo",
         "amo": True,
     }
     assert kwargs["extras"] == {"variety": "amo", "amo": True}
-    assert client.cancel_calls == [("OA-1", "YES")]
+    assert client.cancel_calls == [("NATIVE-1", "YES")]
 
 
 def test_kotak_cancel_refuses_explicit_amo_mismatch_before_gate_or_sdk(
@@ -2104,7 +2109,7 @@ def test_kotak_cancel_refuses_explicit_amo_mismatch_before_gate_or_sdk(
     monkeypatch.setattr("flinttrade_engine.safety.gate_order", forbidden_gate)
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/cancel",
-        json={"orderid": "OA-1", "amo": False},
+        json={"orderid": "NATIVE-1", "amo": False},
         headers=_live_headers(),
     )
 
@@ -2123,7 +2128,7 @@ def test_kotak_cancel_refuses_client_variety_spoof_before_gate_or_sdk(
 
     response = app.test_client().post(
         "/api/v1/orders/kotakneo/cancel",
-        json={"orderid": "OA-1", "variety": "regular"},
+        json={"orderid": "NATIVE-1", "variety": "regular"},
         headers=_live_headers(),
     )
 
@@ -2179,9 +2184,9 @@ def test_cancel_missing_orderid_returns_400(backend_lease_proof) -> None:
 @pytest.mark.parametrize(
     "endpoint,body,method",
     [
-        ("/api/v1/orders/openalgo/place", _LIVE_BODY, "place_order"),
+        ("/api/v1/orders/dhan/place", _LIVE_BODY, "place_order"),
         ("/api/v1/orders/modify", _MODIFY_BODY, "modify_order"),
-        ("/api/v1/orders/cancel", {"orderid": "OA-7"}, "cancel_order"),
+        ("/api/v1/orders/cancel", {"orderid": "NATIVE-7"}, "cancel_order"),
     ],
 )
 def test_routed_mutations_without_backend_proof_never_dispatch(endpoint, body, method) -> None:

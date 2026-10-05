@@ -48,29 +48,9 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("gatewayApi", () => {
-  it("listBrokers sends GET and returns broker array", async () => {
-    const brokers = [
-      { id: "zerodha", name: "Zerodha", auth_type: "api_key" },
-      { id: "angel", name: "Angel One", auth_type: "api_key" },
-    ];
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ brokers }));
 
-    const result = await gatewayApi.listBrokers();
 
-    expect(fetchSpy).toHaveBeenCalledWith("/ft-api/v1/brokers", { headers: {} });
-    expect(result).toEqual(brokers);
-  });
 
-  it("removeAccount sends DELETE with URL-encoded account ID", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "deleted" }));
-
-    const actionKey = "00000000-0000-4000-8000-000000000001";
-    await gatewayApi.removeAccount("acc/special&id", actionKey);
-
-    const url = fetchSpy.mock.calls[0][0] as string;
-    expect(url).toBe("/ft-api/v1/accounts/acc%2Fspecial%26id");
-    expect(fetchSpy.mock.calls[0][1]).toEqual({ method: "DELETE", headers: { "Idempotency-Key": actionKey } });
-  });
 
   it("attaches the session JWT on writes (backend G9 write guard)", async () => {
     useAuthStore.setState({ token: "jwt-abc" });
@@ -84,11 +64,5 @@ describe("gatewayApi", () => {
     }
   });
 
-  it("throws with server error message on non-OK response", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ message: "Broker not found" }, 404),
-    );
 
-    await expect(gatewayApi.listBrokers()).rejects.toThrow("Gateway: Broker not found");
-  });
 });

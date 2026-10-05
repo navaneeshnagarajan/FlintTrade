@@ -137,7 +137,7 @@ def test_capture_historical_chain_body_exchange(client):
 
 
 def test_capture_historical_chain_reports_capture_failure(client):
-    """Upstream broker/OpenAlgo failures are surfaced to the caller."""
+    """Upstream broker/native broker failures are surfaced to the caller."""
     tracker = client.application.config["TRACKER"]
     tracker.capture_snapshot.return_value = 0
     tracker.last_capture_error = "[403] optionchain: Authentication failed"
@@ -157,7 +157,7 @@ def test_capture_historical_chain_reports_capture_failure(client):
 
 
 def test_get_tracker_wires_the_client_provider_not_an_instance(monkeypatch):
-    """The lazy tracker must receive the ``get_openalgo_client`` PROVIDER.
+    """The lazy tracker must receive the ``get_broker_client`` PROVIDER.
 
     Provider wiring keeps the tracker on the authoritative shared client even
     if startup fallback replaces it. Normal settings hot-reload reconfigures
@@ -174,4 +174,4 @@ def test_get_tracker_wires_the_client_provider_not_an_instance(monkeypatch):
 
     mod._get_tracker()
 
-    assert captured["client"] is mod.get_openalgo_client
+    assert captured["client"] is mod.get_broker_client

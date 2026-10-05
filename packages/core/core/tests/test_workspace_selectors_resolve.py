@@ -14,7 +14,7 @@ from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES
 from flinttrade_gateway.routing_config import RoutingConfig
 
 # The bare adapter_id namespace the registry is expected to know (identity X7).
-_KNOWN_ADAPTERS = {"openalgo", *NATIVE_ADAPTER_CLASSES}
+_KNOWN_ADAPTERS = set(NATIVE_ADAPTER_CLASSES)
 
 
 def _all_selectors(cfg: RoutingConfig) -> list[str]:
@@ -34,7 +34,9 @@ def _all_selectors(cfg: RoutingConfig) -> list[str]:
 
 def test_default_config_selectors_resolve_to_known_adapters() -> None:
     cfg = RoutingConfig.from_workspace(default_workspace_config()["brokers"])
-    for selector in _all_selectors(cfg):
+    assert cfg.execution.default == ""
+    assert not cfg.registered
+    for selector in filter(None, _all_selectors(cfg)):
         adapter_id, account_id = parse_selector(selector)
         assert adapter_id in _KNOWN_ADAPTERS, f"{selector!r} -> unknown adapter {adapter_id!r}"
         assert account_id, f"{selector!r} has an empty account_id"

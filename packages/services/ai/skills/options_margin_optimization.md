@@ -14,7 +14,7 @@ Key components:
 - **Exposure margin:** Additional 3–4% of notional (varies by broker)
 - **Total margin = SPAN + Exposure margin**
 
-Check real-time margin using `/api/v1/margin` before placing each order.
+Check real-time margin using the connected native adapter margin reader before placing each order.
 
 ## Naked vs Hedged Position Margin Comparison
 
@@ -76,7 +76,7 @@ MIS margin: ₹1,50,000 × 0.45 = ₹67,500
 
 - Keep total margin utilisation below 70% of available margin
 - Maintain 30% free margin as buffer for intraday margin calls (MTM losses) and new opportunities
-- When adding hedge legs to reduce margin, verify the new margin requirement via `/api/v1/margin` before assuming the savings
+- When adding hedge legs to reduce margin, verify the new margin requirement via the connected native adapter margin reader before assuming the savings
 - Monitor exposure margin separately — it is sometimes added by brokers as additional margin above SEBI minimum
 
 ## Peak Margin Rule (SEBI 2021)

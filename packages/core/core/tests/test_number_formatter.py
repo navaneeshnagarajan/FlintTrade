@@ -7,7 +7,6 @@ Covers: format_indian, format_lakhs, format_currency, format_percentage,
 from __future__ import annotations
 
 
-
 from flinttrade_core.number_formatter import (
     format_currency,
     format_indian,

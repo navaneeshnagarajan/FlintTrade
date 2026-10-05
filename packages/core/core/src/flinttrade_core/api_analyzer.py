@@ -50,14 +50,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Substring needles, not exact keys: field names like ``bot_token``,
 # ``access_token`` or ``api_secret`` must redact too. Over-redaction of a
 # benign key in a debug capture is the safe direction.
-_SENSITIVE_KEYS: frozenset[str] = frozenset(
-    {"password", "token", "api_key", "apikey", "secret", "totp", "otp", "pin"}
-)
+_SENSITIVE_KEYS: frozenset[str] = frozenset({"password", "token", "api_key", "apikey", "secret", "totp", "otp", "pin"})
 
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     return any(needle in lowered for needle in _SENSITIVE_KEYS)
+
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_calls (
@@ -104,10 +103,7 @@ def _sanitise_value(value: Any) -> Any:
     class, and non-dict JSON bodies (arrays) no longer bypass sanitising.
     """
     if isinstance(value, dict):
-        return {
-            k: "[REDACTED]" if _is_sensitive_key(k) else _sanitise_value(v)
-            for k, v in value.items()
-        }
+        return {k: "[REDACTED]" if _is_sensitive_key(k) else _sanitise_value(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_sanitise_value(item) for item in value]
     return value
@@ -222,16 +218,8 @@ class APIAnalyzer:
             response_body = None
             user_id = None
 
-        req_json = (
-            json.dumps(_sanitise(request_body), default=str)
-            if request_body is not None
-            else None
-        )
-        resp_json = (
-            json.dumps(_sanitise(response_body), default=str)
-            if response_body is not None
-            else None
-        )
+        req_json = json.dumps(_sanitise(request_body), default=str) if request_body is not None else None
+        resp_json = json.dumps(_sanitise(response_body), default=str) if response_body is not None else None
 
         if not self._enabled:
             logger.debug("APIAnalyzer disabled — call not logged: %s %s", method, route)
@@ -258,7 +246,11 @@ class APIAnalyzer:
         )
         logger.debug(
             "APIAnalyzer: %s %s %d %.1fms call_id=%s",
-            method, route, response_status, duration_ms, call_id,
+            method,
+            route,
+            response_status,
+            duration_ms,
+            call_id,
         )
         return call_id
 
@@ -363,9 +355,7 @@ class APIAnalyzer:
             params.append(since)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-        row = self._conn.execute(
-            f"SELECT COUNT(*) FROM api_calls {where}", params
-        ).fetchone()
+        row = self._conn.execute(f"SELECT COUNT(*) FROM api_calls {where}", params).fetchone()
         return int(row[0]) if row else 0
 
     # ------------------------------------------------------------------
@@ -457,9 +447,7 @@ class APIAnalyzer:
 
             cutoff = datetime.now(IST) - timedelta(days=older_than_days)
             before = self.count()
-            self._conn.execute(
-                "DELETE FROM api_calls WHERE timestamp < ?", [cutoff]
-            )
+            self._conn.execute("DELETE FROM api_calls WHERE timestamp < ?", [cutoff])
             after = self.count()
             deleted = before - after
         else:

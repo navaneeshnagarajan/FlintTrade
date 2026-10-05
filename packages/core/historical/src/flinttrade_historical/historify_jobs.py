@@ -210,11 +210,7 @@ class HistorifyJobManager:
             elif total > 0 and completed >= total:
                 job.eta_seconds = 0.0
             # Decide (under the lock) whether this tick re-checks the disk.
-            if (
-                self._recheck_every > 0
-                and completed > 0
-                and completed % self._recheck_every == 0
-            ):
+            if self._recheck_every > 0 and completed > 0 and completed % self._recheck_every == 0:
                 recheck_path = job.storage_path
 
         # The disk check (a syscall) runs OUTSIDE the lock. A long backfill that

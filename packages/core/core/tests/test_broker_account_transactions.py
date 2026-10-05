@@ -9,7 +9,11 @@ import pytest
 
 from flinttrade_core.account_lifecycle_contracts import AccountMutationKind, AccountOperationStage
 from flinttrade_core.broker_read_port import (
-    BrokerReadErrorCode, BrokerReadFailure, BrokerReadSuccess, InstrumentRef, QuoteRequest,
+    BrokerReadErrorCode,
+    BrokerReadFailure,
+    BrokerReadSuccess,
+    InstrumentRef,
+    QuoteRequest,
 )
 from flinttrade_gateway.account_transaction_store import AccountOperationConflict
 
@@ -79,6 +83,7 @@ async def test_changed_keyed_identity_and_wrong_actor_refuse_before_auth(harness
             await harness.coordinator.mutate(changed, timeout=2.0)
     with harness.app.app_context():
         from flinttrade_core.auth_routes import _create_token
+
         harness.token = _create_token("wrong-actor")
     port = harness.bind(request.selector)
     assert type(port) is BrokerReadFailure and port.code is BrokerReadErrorCode.UNAUTHORISED
@@ -123,9 +128,15 @@ async def test_account_recovery_delivers_outbox_without_repeating_authentication
     assert len(pending) == 1
     with AuditLogger(str(tmp_path / "account-audit")) as logger:
         coordinator = api.BrokerAccountTransactionCoordinator(
-            harness.store, harness.workspace, harness.lifecycle, harness.registry_owner,
-            harness.adapter, harness.runtime, lambda: None,
-            verify_current_actor=harness.verify_actor, audit_sink=build_account_audit_sink(logger),
+            harness.store,
+            harness.workspace,
+            harness.lifecycle,
+            harness.registry_owner,
+            harness.adapter,
+            harness.runtime,
+            lambda: None,
+            verify_current_actor=harness.verify_actor,
+            audit_sink=build_account_audit_sink(logger),
         )
         assert coordinator.recover() == ()
         assert harness.store.pending_audit_events(capability) == ()
@@ -134,8 +145,9 @@ async def test_account_recovery_delivers_outbox_without_repeating_authentication
         assert harness.store.pending_audit_events(capability) == ()
         assert logger.verify_chain()["ok"]
     assert harness.adapter.logins == 1
-    records = [line for path in (tmp_path / "account-audit").glob("audit_*.jsonl")
-               for line in path.read_text().splitlines()]
+    records = [
+        line for path in (tmp_path / "account-audit").glob("audit_*.jsonl") for line in path.read_text().splitlines()
+    ]
     assert len(records) == 1
 
 
@@ -153,22 +165,36 @@ async def test_account_recovery_retains_failed_audit_and_retries_the_same_event(
         raise RuntimeError("synthetic unavailable sink")
 
     failed = api.BrokerAccountTransactionCoordinator(
-        harness.store, harness.workspace, harness.lifecycle, harness.registry_owner,
-        harness.adapter, harness.runtime, lambda: None,
-        verify_current_actor=harness.verify_actor, audit_sink=unavailable,
+        harness.store,
+        harness.workspace,
+        harness.lifecycle,
+        harness.registry_owner,
+        harness.adapter,
+        harness.runtime,
+        lambda: None,
+        verify_current_actor=harness.verify_actor,
+        audit_sink=unavailable,
     )
     assert failed.recover() == ()
     assert harness.store.pending_audit_events(capability) == original
     with AuditLogger(str(tmp_path / "account-audit-retry")) as logger:
         recovered = api.BrokerAccountTransactionCoordinator(
-            harness.store, harness.workspace, harness.lifecycle, harness.registry_owner,
-            harness.adapter, harness.runtime, lambda: None,
-            verify_current_actor=harness.verify_actor, audit_sink=build_account_audit_sink(logger),
+            harness.store,
+            harness.workspace,
+            harness.lifecycle,
+            harness.registry_owner,
+            harness.adapter,
+            harness.runtime,
+            lambda: None,
+            verify_current_actor=harness.verify_actor,
+            audit_sink=build_account_audit_sink(logger),
         )
         assert recovered.recover() == ()
         assert harness.store.pending_audit_events(capability) == ()
         assert logger.verify_idempotent_event_receipt(
-            "BROKER_ACCOUNT_MUTATION_SETTLED", event_id=str(original[0].event_id), fields=original[0].fields(),
+            "BROKER_ACCOUNT_MUTATION_SETTLED",
+            event_id=str(original[0].event_id),
+            fields=original[0].fields(),
         )
     assert harness.adapter.logins == 1
 
@@ -200,6 +226,7 @@ async def test_registry_successor_during_generation_drain_is_preserved(harness, 
     from flinttrade_gateway.registry import ManagedSessionAuthority
     from flinttrade_core.workspace_migrations import broker_workspace_version
     import time
+
     successor = Session("synthetic-successor", time.time() + 3600, "Synthetic", "dhan")
     installed = []
 
@@ -207,11 +234,17 @@ async def test_registry_successor_during_generation_drain_is_preserved(harness, 
         result = original(timeout)
         if not installed:
             snapshot = harness.workspace.assert_coherent()
-            authority = ManagedSessionAuthority(reconnect.expected_credential, snapshot.version,
-                                                broker_workspace_version(snapshot))
+            authority = ManagedSessionAuthority(
+                reconnect.expected_credential, snapshot.version, broker_workspace_version(snapshot)
+            )
             prepared = harness.registry_owner.prepare_session_candidate(
-                reconnect.selector, successor, expected_registry=harness.registry.snapshot_selector(reconnect.selector),
-                authority=authority, broker="dhan", label="Successor")
+                reconnect.selector,
+                successor,
+                expected_registry=harness.registry.snapshot_selector(reconnect.selector),
+                authority=authority,
+                broker="dhan",
+                label="Successor",
+            )
             publication = harness.registry_owner.publish_prepared_candidate(prepared, current_authority=authority)
             installed.append(publication.version)
         return result
@@ -243,6 +276,7 @@ async def test_shutdown_between_runtime_lease_and_durable_admission_refuses_row(
 @pytest.mark.asyncio
 async def test_lost_workspace_replace_result_is_forward_only(harness, monkeypatch):
     from flinttrade_core import workspace_migrations
+
     request = harness.request()
     writer = workspace_migrations._atomic_write
     attempts = []
@@ -271,6 +305,7 @@ async def test_actual_jwt_revocation_while_auth_blocked_prevents_commit(harness)
     await asyncio.to_thread(harness.adapter.auth_entered.wait, 2.0)
     with harness.app.app_context():
         from flinttrade_core import auth_routes
+
         payload = auth_routes.decode_token(harness.token)
         auth_routes._revoke_jti(payload["jti"], payload["exp"])
     harness.adapter.auth_release.set()
@@ -285,7 +320,12 @@ async def test_actual_jwt_revocation_while_auth_blocked_prevents_commit(harness)
 async def test_unchecked_actor_and_default_mutation_admission_remain_denied(harness, api):
     request = harness.request()
     coordinator = api.BrokerAccountTransactionCoordinator(
-        harness.store, harness.workspace, harness.lifecycle, harness.registry_owner, harness.adapter, harness.runtime,
+        harness.store,
+        harness.workspace,
+        harness.lifecycle,
+        harness.registry_owner,
+        harness.adapter,
+        harness.runtime,
     )
     with pytest.raises(Exception, match="cutover"):
         await coordinator.mutate(request, timeout=2.0)
@@ -357,11 +397,13 @@ async def test_two_accounts_real_role_change_leaves_other_unavailable_without_re
 @pytest.mark.asyncio
 async def test_read_only_target_demotes_only_its_own_default(two_accounts):
     from flinttrade_core import workspace_migrations
+
     # The real temporary seed is adjusted through a valid owned account patch,
     # never a production configuration bypass.
     before = two_accounts.workspace.assert_coherent()
     from flinttrade_core.broker_account_workspace import BrokerAccountPatch
     from flinttrade_core.broker_identity import BrokerSelector
+
     patch = BrokerAccountPatch(AccountMutationKind.RECONNECT, BrokerSelector("dhan", "Other"), (), True)
     projected = patch.apply(before.config)
     assert projected["brokers"]["execution"]["default"] == ""
@@ -371,7 +413,8 @@ async def test_read_only_target_demotes_only_its_own_default(two_accounts):
     await two_accounts.coordinator.mutate(two_accounts.request(account="Other"), timeout=2.0)
     two_accounts.adapter.read_only = True
     result = await two_accounts.coordinator.mutate(
-        two_accounts.request(AccountMutationKind.RECONNECT, account="Other"), timeout=2.0)
+        two_accounts.request(AccountMutationKind.RECONNECT, account="Other"), timeout=2.0
+    )
     assert result.runtime_status == "ready"
     after = two_accounts.workspace.assert_coherent()
     assert after.config["brokers"]["execution"]["default"] == ""
@@ -381,6 +424,7 @@ async def test_read_only_target_demotes_only_its_own_default(two_accounts):
 @pytest.mark.asyncio
 async def test_reconnect_keeps_exhausted_shared_read_budget(harness):
     from flinttrade_gateway.rate_limiter import BrokerRateLimiter
+
     clock = [0.0]
     sleeping = asyncio.Event()
     release = asyncio.Event()
@@ -394,7 +438,10 @@ async def test_reconnect_keeps_exhausted_shared_read_budget(harness):
     harness.runtime._rate_limiter = limiter
     request = harness.request()
     await harness.coordinator.mutate(request, timeout=2.0)
-    assert type(await harness.bind(request.selector).quote(QuoteRequest(InstrumentRef("INFY", "NSE")))) is BrokerReadSuccess
+    assert (
+        type(await harness.bind(request.selector).quote(QuoteRequest(InstrumentRef("INFY", "NSE"))))
+        is BrokerReadSuccess
+    )
     await harness.coordinator.mutate(harness.request(AccountMutationKind.RECONNECT), timeout=2.0)
     read_count = harness.adapter.reads
     pending = asyncio.create_task(harness.bind(request.selector).quote(QuoteRequest(InstrumentRef("INFY", "NSE"))))
@@ -406,7 +453,9 @@ async def test_reconnect_keeps_exhausted_shared_read_budget(harness):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("phase", ["admission", "stage", "vault_apply", "registry_prepare", "registry_publish", "runtime_build"])
+@pytest.mark.parametrize(
+    "phase", ["admission", "stage", "vault_apply", "registry_prepare", "registry_publish", "runtime_build"]
+)
 async def test_phase_result_loss_never_reauthenticates_or_bumps_again(harness, monkeypatch, phase):
     request = harness.request()
     if phase == "admission":
@@ -530,7 +579,9 @@ async def test_rejected_drain_replay_retries_exact_retirement_before_releasing_c
     assert not harness.lifecycle.snapshot().active
     assert harness.store.active_operation(harness.store.owner_capability(harness.lifecycle._proof)) is None
     assert harness.adapter.logins == 1 and len(calls) > 2
-    assert (await harness.coordinator.mutate(harness.request(AccountMutationKind.RECONNECT), timeout=10.0)).runtime_status == "ready"
+    assert (
+        await harness.coordinator.mutate(harness.request(AccountMutationKind.RECONNECT), timeout=10.0)
+    ).runtime_status == "ready"
 
 
 @pytest.mark.asyncio
@@ -634,11 +685,14 @@ async def test_cancelled_committed_cleanup_records_publication_abandonment(harne
 async def test_same_process_admitted_retry_retains_original_tombstone_without_double_retirement(harness):
     await harness.coordinator.mutate(harness.request(), timeout=2.0)
     request = harness.request(AccountMutationKind.RECONNECT)
+
     # Model an interrupted borrower after definite provider-free retirement.
     def release():
         harness.store.release_claim(request.operation_id)
+
     lease = harness.lifecycle.begin(request.operation_id, request.selector, durable_claim_release=release)
     from flinttrade_core.broker_account_transactions import _Attempt
+
     attempt = _Attempt(lease, expected_registry=harness.registry.snapshot_selector(request.selector))
     harness.coordinator._attempts[request.operation_id] = attempt
     harness.store.admit(request)
@@ -654,6 +708,7 @@ async def test_same_process_admitted_retry_retains_original_tombstone_without_do
 @pytest.mark.asyncio
 async def test_unrelated_edit_between_preparation_and_publication_uses_one_current_snapshot(harness, monkeypatch):
     from flinttrade_core.workspace_migrations import update_workspace_config, read_workspace_snapshot
+
     request = harness.request()
     apply = harness.store.apply
     called = []
@@ -677,12 +732,16 @@ async def test_unrelated_edit_between_preparation_and_publication_uses_one_curre
 async def test_enrolled_session_provider_requires_explicit_coherence_verifier(harness):
     from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
     from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
     request = harness.request()
     await harness.coordinator.mutate(request, timeout=2.0)
     snapshot = harness.workspace.assert_coherent()
     provider = AuthenticatingSessionProvider(
-        harness.registry, snapshot.as_dict()["brokers"]["account_acls"], workspace_snapshot=snapshot,
-        workspace_path=harness.path, credential_version_for=lambda selector: harness.credentials.selector_state(selector).version,
+        harness.registry,
+        snapshot.as_dict()["brokers"]["account_acls"],
+        workspace_snapshot=snapshot,
+        workspace_path=harness.path,
+        credential_version_for=lambda selector: harness.credentials.selector_state(selector).version,
     )
     with pytest.raises(RegistrySessionUnavailable):
         provider(harness.verify_read(request.selector), "dhan", "Synthetic")
@@ -726,7 +785,9 @@ async def test_enrolled_read_stays_on_the_composed_verifier_when_the_document_lo
         return snapshot
 
     provider = AuthenticatingSessionProvider(
-        harness.registry, {"dhan": {"Synthetic": []}}, workspace_snapshot=snapshot,
+        harness.registry,
+        {"dhan": {"Synthetic": []}},
+        workspace_snapshot=snapshot,
         workspace_path=harness.path,
         credential_version_for=lambda selector: harness.credentials.selector_state(selector).version,
         coherence_verifier=verifier,
@@ -761,7 +822,9 @@ async def test_provider_created_after_marker_removal_still_enforces_its_composed
         harness.workspace.assert_coherent()
     snapshot = read_workspace_snapshot(harness.path)
     provider = AuthenticatingSessionProvider(
-        harness.registry, snapshot.as_dict()["brokers"]["account_acls"], workspace_snapshot=snapshot,
+        harness.registry,
+        snapshot.as_dict()["brokers"]["account_acls"],
+        workspace_snapshot=snapshot,
         workspace_path=harness.path,
         credential_version_for=lambda selector: harness.credentials.selector_state(selector).version,
         coherence_verifier=harness.workspace.assert_coherent,
@@ -784,8 +847,9 @@ async def test_read_runtime_refuses_rebuild_after_marker_removal(harness):
     stripped.pop("_broker_account_store")
     path.write_text(json.dumps(stripped), encoding="utf-8")
     with pytest.raises(BrokerAccountWorkspaceUnavailable):
-        harness.runtime.rebuild(read_workspace_snapshot(harness.path),
-                                coherence_verifier=harness.workspace.assert_coherent)
+        harness.runtime.rebuild(
+            read_workspace_snapshot(harness.path), coherence_verifier=harness.workspace.assert_coherent
+        )
     assert harness.runtime.read_owner is None
 
 
@@ -807,8 +871,12 @@ async def test_concurrent_legacy_enrolment_reads_cannot_clear_an_observed_enroll
     registry, owner = create_owned_registry(mutation_admission=lambda: None)
     authority = ManagedSessionAuthority(version, snapshot.version, broker_workspace_version(snapshot))
     prepared = owner.prepare_session_candidate(
-        selector, Session("synthetic", 4_102_444_800.0, "Synthetic", "dhan"),
-        expected_registry=registry.snapshot_selector(selector), authority=authority, broker="dhan", label="Synthetic",
+        selector,
+        Session("synthetic", 4_102_444_800.0, "Synthetic", "dhan"),
+        expected_registry=registry.snapshot_selector(selector),
+        authority=authority,
+        broker="dhan",
+        label="Synthetic",
     )
     owner.publish_prepared_candidate(prepared, current_authority=authority)
     entered, release = threading.Event(), threading.Event()
@@ -826,7 +894,10 @@ async def test_concurrent_legacy_enrolment_reads_cannot_clear_an_observed_enroll
         return call == 2
 
     provider = AuthenticatingSessionProvider(
-        registry, {"dhan": {"Synthetic": ["operator"]}}, workspace_snapshot=snapshot, workspace_path=tmp_path,
+        registry,
+        {"dhan": {"Synthetic": ["operator"]}},
+        workspace_snapshot=snapshot,
+        workspace_path=tmp_path,
         credential_version_for=lambda _selector: version,
         enrollment_required=enrollment_required,
     )
@@ -897,7 +968,9 @@ async def test_app_rebuild_refuses_enrolled_vault_when_initial_document_marker_i
 
 
 def test_legacy_app_provider_loses_lookup_authority_when_durable_enrolment_begins(
-    tmp_path, monkeypatch, backend_lease_factory,
+    tmp_path,
+    monkeypatch,
+    backend_lease_factory,
 ):
     from types import SimpleNamespace
     from flask import Flask
@@ -905,7 +978,10 @@ def test_legacy_app_provider_loses_lookup_authority_when_durable_enrolment_begin
     from flinttrade_core.broker_account_workspace import BrokerAccountWorkspace
     from flinttrade_core.broker_identity import BrokerSelector
     from flinttrade_core.workspace_migrations import (
-        broker_workspace_version, default_workspace_config, read_workspace_snapshot, write_workspace_config,
+        broker_workspace_version,
+        default_workspace_config,
+        read_workspace_snapshot,
+        write_workspace_config,
     )
     from flinttrade_engine.request_context import RequestContext
     from flinttrade_gateway.account_transaction_store import AccountTransactionStore
@@ -922,18 +998,28 @@ def test_legacy_app_provider_loses_lookup_authority_when_durable_enrolment_begin
     credentials = CredentialStore(tmp_path / "vault.db", "synthetic-password")
     registry, owner = create_owned_registry(mutation_admission=lambda: None)
     selector = BrokerSelector("dhan", "Synthetic")
-    version = credentials.put_credentials(selector, "dhan", "Synthetic", {"token": "synthetic"},
-                                          expected=credentials.selector_state(selector).version)
+    version = credentials.put_credentials(
+        selector, "dhan", "Synthetic", {"token": "synthetic"}, expected=credentials.selector_state(selector).version
+    )
     snapshot = read_workspace_snapshot(tmp_path)
     authority = ManagedSessionAuthority(version, snapshot.version, broker_workspace_version(snapshot))
     prepared = owner.prepare_session_candidate(
-        selector, Session("synthetic", 4_102_444_800.0, "Synthetic", "dhan"),
-        expected_registry=registry.snapshot_selector(selector), authority=authority, broker="dhan", label="Synthetic",
+        selector,
+        Session("synthetic", 4_102_444_800.0, "Synthetic", "dhan"),
+        expected_registry=registry.snapshot_selector(selector),
+        authority=authority,
+        broker="dhan",
+        label="Synthetic",
     )
     owner.publish_prepared_candidate(prepared, current_authority=authority)
-    composed = SimpleNamespace(app=Flask("legacy-enrolment-probe"), lifecycle=SimpleNamespace(_proof=proof),
-                               registry=registry, registry_owner=owner, credentials=credentials,
-                               adapter=SyntheticAdapter())
+    composed = SimpleNamespace(
+        app=Flask("legacy-enrolment-probe"),
+        lifecycle=SimpleNamespace(_proof=proof),
+        registry=registry,
+        registry_owner=owner,
+        credentials=credentials,
+        adapter=SyntheticAdapter(),
+    )
     dependencies = None
     try:
         assert credentials.account_protocol_enrolled() is False
@@ -956,6 +1042,7 @@ def test_legacy_app_provider_loses_lookup_authority_when_durable_enrolment_begin
 async def test_unreadable_workspace_after_attempt_preserves_uncertainty_and_one_cas(harness, monkeypatch):
     from flinttrade_core import workspace_migrations
     from flinttrade_core.broker_account_workspace import BrokerAccountWorkspaceUnavailable
+
     request = harness.request()
     original = workspace_migrations._atomic_write
     count = []
@@ -974,7 +1061,9 @@ async def test_unreadable_workspace_after_attempt_preserves_uncertainty_and_one_
     operation = harness.store.operation(request.operation_id)
     assert operation.workspace_attempted and operation.workspace_conflicted
     assert operation.state is AccountOperationStage.PLAN_READY and not operation.abandoned
-    assert harness.store.recovery_material(harness.store.owner_capability(harness.lifecycle._proof), request.operation_id).request
+    assert harness.store.recovery_material(
+        harness.store.owner_capability(harness.lifecycle._proof), request.operation_id
+    ).request
     (harness.path / "workspace.json").write_bytes((harness.path / "own-witness.json").read_bytes())
     recovered = harness.coordinator.recover()
     assert recovered[0].state is AccountOperationStage.COMMITTED
@@ -1001,17 +1090,28 @@ async def test_rebound_identity_and_stale_versions_refuse_before_auth(harness, c
     from flinttrade_core.account_lifecycle_contracts import AccountActorContext
     from flinttrade_core.broker_identity import CredentialVersion
     from flinttrade_core.workspace_migrations import WorkspaceVersion, BrokerWorkspaceVersion
+
     request = harness.request()
     await harness.coordinator.mutate(request, timeout=2.0)
     if changed == "workspace":
-        changed_request = replace(request, expected_workspace=WorkspaceVersion(
-            request.expected_workspace.instance_id, request.expected_workspace.generation + 1))
+        changed_request = replace(
+            request,
+            expected_workspace=WorkspaceVersion(
+                request.expected_workspace.instance_id, request.expected_workspace.generation + 1
+            ),
+        )
     elif changed == "broker":
-        changed_request = replace(request, expected_broker_workspace=BrokerWorkspaceVersion(
-            request.expected_broker_workspace.instance_id, request.expected_broker_workspace.generation + 1))
+        changed_request = replace(
+            request,
+            expected_broker_workspace=BrokerWorkspaceVersion(
+                request.expected_broker_workspace.instance_id, request.expected_broker_workspace.generation + 1
+            ),
+        )
     elif changed == "credential":
-        changed_request = replace(request, expected_credential=CredentialVersion(
-            request.selector, request.expected_credential.vault_incarnation, 1))
+        changed_request = replace(
+            request,
+            expected_credential=CredentialVersion(request.selector, request.expected_credential.vault_incarnation, 1),
+        )
     elif changed == "actor":
         changed_request = replace(request, actor=AccountActorContext("other", request.actor.session_binding))
     else:
@@ -1022,8 +1122,7 @@ async def test_rebound_identity_and_stale_versions_refuse_before_auth(harness, c
 
 
 @pytest.mark.parametrize("boundary", ["admission", "auth_start", "plan", "workspace", "vault", "registry"])
-def test_fresh_process_recovery_is_provider_free_at_actual_pipeline_boundaries(
-        api, tmp_path, monkeypatch, boundary):
+def test_fresh_process_recovery_is_provider_free_at_actual_pipeline_boundaries(api, tmp_path, monkeypatch, boundary):
     import json
     import os
     import subprocess
@@ -1037,6 +1136,7 @@ def test_fresh_process_recovery_is_provider_free_at_actual_pipeline_boundaries(
     from flinttrade_gateway.account_transaction_store import AccountTransactionStore
     from flinttrade_gateway.credentials import CredentialStore
     from flinttrade_gateway.registry import create_owned_registry
+
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     support_path = str(Path(__file__).parent)
     script = r"""
@@ -1071,10 +1171,10 @@ setattr(target, name, die_after)
 asyncio.run(harness.coordinator.mutate(request, timeout=5.0))
 """
     environment = dict(os.environ, SYNTHETIC_BOUNDARY=boundary)
-    environment["PYTHONPATH"] = os.pathsep.join(
-        part for part in (os.environ.get("PYTHONPATH"), support_path) if part
+    environment["PYTHONPATH"] = os.pathsep.join(part for part in (os.environ.get("PYTHONPATH"), support_path) if part)
+    process = subprocess.run(
+        [sys.executable, "-c", script], env=environment, capture_output=True, text=True, timeout=20
     )
-    process = subprocess.run([sys.executable, "-c", script], env=environment, capture_output=True, text=True, timeout=20)
     assert process.returncode == 23, process.stderr
     identity = json.loads((tmp_path / "public-identity.json").read_text())
     request = _request_from({**identity, "credentials": {"token": "synthetic-input"}})
@@ -1084,14 +1184,21 @@ asyncio.run(harness.coordinator.mutate(request, timeout=5.0))
     workspace = BrokerAccountWorkspace(tmp_path, store, lease.proof)
     registry, publication = create_owned_registry(mutation_admission=lambda: None)
     runtime = api.BrokerAccountReadRuntime(
-        registry=registry, workspace_path=tmp_path, credential_version_for=lambda selector: credentials.selector_state(selector).version,
-        adapters={}, rate_limiter=None, runtime_accepting_requests=lambda: True)
-    owner = BrokerAccountLifecycleOwner(tmp_path, lease.proof, retire_generations=runtime.retire,
-                                         rebuild_lock=threading.RLock())
+        registry=registry,
+        workspace_path=tmp_path,
+        credential_version_for=lambda selector: credentials.selector_state(selector).version,
+        adapters={},
+        rate_limiter=None,
+        runtime_accepting_requests=lambda: True,
+    )
+    owner = BrokerAccountLifecycleOwner(
+        tmp_path, lease.proof, retire_generations=runtime.retire, rebuild_lock=threading.RLock()
+    )
 
     class NeverAuthenticate:
         def authenticate(self, *args):
             pytest.fail("recovery dispatched auth")
+
         def cleanup(self, payload):
             pytest.fail("recovery invented a payload")
 
@@ -1112,8 +1219,15 @@ asyncio.run(harness.coordinator.mutate(request, timeout=5.0))
             return AccountActorContext(principal.actor_ref, principal.session_binding)
 
     coordinator = api.BrokerAccountTransactionCoordinator(
-        store, workspace, owner, publication, NeverAuthenticate(), runtime, lambda: None,
-        verify_current_actor=verify_recovered_actor)
+        store,
+        workspace,
+        owner,
+        publication,
+        NeverAuthenticate(),
+        runtime,
+        lambda: None,
+        verify_current_actor=verify_recovered_actor,
+    )
     try:
         receipts = coordinator.recover()
         operation = store.operation(request.operation_id)
@@ -1146,6 +1260,7 @@ async def test_blocked_synthetic_gated_write_drains_before_reconnect(harness):
     from flinttrade_engine.safety import gate_order, set_safety_gate_secret
     from flinttrade_gateway.brokers._base import ROUTER_TOKEN
     from flinttrade_gateway.router import BrokerRouter
+
     request = harness.request()
     await harness.coordinator.mutate(request, timeout=2.0)
     entered = asyncio.Event()
@@ -1162,13 +1277,21 @@ async def test_blocked_synthetic_gated_write_drains_before_reconnect(harness):
 
     set_safety_gate_secret(b"synthetic-gate-secret-012345678901")
     context = harness.verify_read(request.selector)
-    router = BrokerRouter({"dhan": SyntheticWrite()}, harness.runtime._provider,
-                          backend_lease_proof=harness.lifecycle._proof)
+    router = BrokerRouter(
+        {"dhan": SyntheticWrite()}, harness.runtime._provider, backend_lease_proof=harness.lifecycle._proof
+    )
     order = Order(symbol="INFY", action="BUY", exchange="NSE", quantity="1")
 
     async def gated_write():
-        return await router.place_order(context, adapter_id="dhan", account_id="Synthetic", order=order,
-            safety_ctx=gate_order(order, context, "dhan", account_id="Synthetic", backend_lease_proof=harness.lifecycle._proof))
+        return await router.place_order(
+            context,
+            adapter_id="dhan",
+            account_id="Synthetic",
+            order=order,
+            safety_ctx=gate_order(
+                order, context, "dhan", account_id="Synthetic", backend_lease_proof=harness.lifecycle._proof
+            ),
+        )
 
     write = asyncio.create_task(gated_write())
     await asyncio.wait_for(entered.wait(), 1.0)
@@ -1183,7 +1306,9 @@ async def test_blocked_synthetic_gated_write_drains_before_reconnect(harness):
         return reads and writes
 
     harness.lifecycle._retire_generations = retire_both
-    mutation = asyncio.create_task(harness.coordinator.mutate(harness.request(AccountMutationKind.RECONNECT), timeout=2.0))
+    mutation = asyncio.create_task(
+        harness.coordinator.mutate(harness.request(AccountMutationKind.RECONNECT), timeout=2.0)
+    )
     await asyncio.sleep(0.2)
     assert harness.adapter.logins == 1 and not mutation.done()
     with pytest.raises(SafetyBypassError, match="revoked"):
@@ -1197,6 +1322,7 @@ async def test_blocked_synthetic_gated_write_drains_before_reconnect(harness):
 
 def test_definite_authentication_rejection_contract_is_neutral(api):
     from flinttrade_core import account_lifecycle_contracts as contracts
+
     assert getattr(contracts, "AccountAuthenticationRejected", None) is api.AccountAuthenticationRejected
 
 
@@ -1239,6 +1365,7 @@ async def test_exact_removal_result_loss_cannot_consume_a_successor(harness, mon
     from flinttrade_gateway.brokers._base import Session
     from flinttrade_gateway.registry import ManagedSessionAuthority
     from flinttrade_core.workspace_migrations import broker_workspace_version
+
     await harness.coordinator.mutate(harness.request(), timeout=2.0)
     request = harness.request(AccountMutationKind.RECONNECT)
     actual = harness.registry_owner.remove_session_for_exact
@@ -1248,10 +1375,20 @@ async def test_exact_removal_result_loss_cannot_consume_a_successor(harness, mon
     def replace_after_remove(*args, **kwargs):
         result = actual(*args, **kwargs)
         snapshot = harness.workspace.assert_coherent()
-        authority = ManagedSessionAuthority(request.expected_credential, snapshot.version, broker_workspace_version(snapshot))
+        authority = ManagedSessionAuthority(
+            request.expected_credential, snapshot.version, broker_workspace_version(snapshot)
+        )
         prepared = harness.registry_owner.prepare_session_candidate(
-            request.selector, successor, expected_registry=result.version, authority=authority, broker="dhan", label="Successor")
-        versions.append(harness.registry_owner.publish_prepared_candidate(prepared, current_authority=authority).version)
+            request.selector,
+            successor,
+            expected_registry=result.version,
+            authority=authority,
+            broker="dhan",
+            label="Successor",
+        )
+        versions.append(
+            harness.registry_owner.publish_prepared_candidate(prepared, current_authority=authority).version
+        )
         raise OSError("synthetic lost removal result with successor")
 
     monkeypatch.setattr(harness.registry_owner, "remove_session_for_exact", replace_after_remove)
@@ -1267,28 +1404,33 @@ async def test_exact_removal_result_loss_cannot_consume_a_successor(harness, mon
 async def test_removal_decision_identity_and_consumed_custody_replay_are_exact(harness):
     from flinttrade_core.account_mutation_contracts import RegistryCapabilityError
     from flinttrade_core.broker_identity import BrokerSelector
+
     await harness.coordinator.mutate(harness.request(), timeout=2.0)
     request = harness.request(AccountMutationKind.RECONNECT)
     await harness.coordinator.mutate(request, timeout=2.0)
     attempt = harness.coordinator._attempts[request.operation_id]
     current = harness.registry.snapshot_selector(request.selector)
     result = harness.registry_owner.removal_result_for(
-        request.operation_id, request.selector, expected_registry=attempt.expected_registry)
+        request.operation_id, request.selector, expected_registry=attempt.expected_registry
+    )
     assert result.version == attempt.tombstone and result.retired is None
     replay = harness.registry_owner.remove_session_for_exact(
-        request.selector, expected_registry=attempt.expected_registry, operation_id=request.operation_id)
+        request.selector, expected_registry=attempt.expected_registry, operation_id=request.operation_id
+    )
     assert replay == result and harness.registry.snapshot_selector(request.selector) == current
     with pytest.raises(RegistryCapabilityError):
         harness.registry_owner.removal_result_for(request.operation_id, request.selector, expected_registry=current)
     with pytest.raises(RegistryCapabilityError):
-        harness.registry_owner.removal_result_for(request.operation_id, BrokerSelector("dhan", "Other"),
-                                                  expected_registry=attempt.expected_registry)
+        harness.registry_owner.removal_result_for(
+            request.operation_id, BrokerSelector("dhan", "Other"), expected_registry=attempt.expected_registry
+        )
     assert harness.adapter.logins == 2 and len(harness.adapter.cleaned) == 1
 
 
 @pytest.mark.asyncio
 async def test_target_removal_and_retirement_custody_share_short_owner_fence(harness, monkeypatch):
     import threading
+
     await harness.coordinator.mutate(harness.request(), timeout=2.0)
     request = harness.request(AccountMutationKind.RECONNECT)
     events = []
@@ -1332,6 +1474,7 @@ async def test_reconstructed_ineligible_roles_refuse_before_admission_or_auth(ha
 @pytest.mark.parametrize("deny", ["admission", "principal"])
 async def test_reconstructed_terminal_replay_requires_current_authority(harness, monkeypatch, deny):
     from flinttrade_core.broker_account_cutover import require_broker_account_mutations
+
     request = harness.request()
     committed = await harness.coordinator.mutate(request, timeout=2.0)
     calls = []
@@ -1357,6 +1500,7 @@ async def test_reconstructed_terminal_replay_requires_current_authority(harness,
 @pytest.mark.parametrize("deny", ["admission", "principal"])
 async def test_reconstructed_denied_terminal_borrower_cannot_release_cleanup_claim(harness, monkeypatch, deny):
     from flinttrade_core.broker_account_cutover import require_broker_account_mutations
+
     await harness.coordinator.mutate(harness.request(), timeout=2.0)
     request = harness.request(AccountMutationKind.REMOVE)
     harness.adapter.cleanup_release.clear()
@@ -1395,18 +1539,29 @@ async def test_reconstructed_denied_terminal_borrower_cannot_release_cleanup_cla
 @pytest.mark.asyncio
 async def test_reconstructed_removed_receipt_reports_actual_absence_in_fresh_registry(harness, api):
     from flinttrade_gateway.registry import create_owned_registry
+
     await harness.coordinator.mutate(harness.request(), timeout=2.0)
     request = harness.request(AccountMutationKind.REMOVE)
     removed = await harness.coordinator.mutate(request, timeout=2.0)
     registry, owner = create_owned_registry(mutation_admission=lambda: None)
     runtime = api.BrokerAccountReadRuntime(
-        registry=registry, workspace_path=harness.path,
+        registry=registry,
+        workspace_path=harness.path,
         credential_version_for=lambda selector: harness.credentials.selector_state(selector).version,
-        adapters={"dhan": harness.adapter}, rate_limiter=harness.limiter,
-        runtime_accepting_requests=lambda: True)
+        adapters={"dhan": harness.adapter},
+        rate_limiter=harness.limiter,
+        runtime_accepting_requests=lambda: True,
+    )
     coordinator = api.BrokerAccountTransactionCoordinator(
-        harness.store, harness.workspace, harness.lifecycle, owner, harness.adapter, runtime, lambda: None,
-        verify_current_actor=harness.verify_actor)
+        harness.store,
+        harness.workspace,
+        harness.lifecycle,
+        owner,
+        harness.adapter,
+        runtime,
+        lambda: None,
+        verify_current_actor=harness.verify_actor,
+    )
     replay = await coordinator.mutate(request, timeout=2.0)
     assert replay.receipt == removed.receipt and replay.runtime_status == "removed"
     assert registry.snapshot_exact_state(request.selector) is None and runtime.read_owner is None

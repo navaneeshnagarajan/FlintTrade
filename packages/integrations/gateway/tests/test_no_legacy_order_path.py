@@ -1,7 +1,7 @@
 """§8.1 grep guards: no parallel order path; only gate_order() mints (S7 + §8.1).
 
 These keep the safety invariant from regressing:
-  * BrokerRegistry / BrokerSession expose NO order-write methods — every write must go
+  * BrokerRegistry / Session expose NO order-write methods — every write must go
     through gate_order() -> BrokerRouter.place_order(), which verifies a one-shot
     SafetyContext (S7 / contract §12).
   * No broker adapter constructs a SafetyContext directly — only
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from flinttrade_gateway.registry import BrokerRegistry
-from flinttrade_gateway.session import BrokerSession
+from flinttrade_gateway.brokers._base import Session
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -3446,8 +3446,8 @@ _RAW_ORDER_ALLOWLIST: set[str] = set()
 #  test_bracket_order_writes_only_through_gated_router below keeps it out.)
 # (flinttrade_engine/router.py REMOVED 2026-07-09: the legacy ungated
 #  OrderRouter is deleted; the only live dispatch is gate_order → BrokerRouter.)
-# (flinttrade_automation/voice_order_bridge.py REMOVED: BUY/SELL and EXIT
-#  return before any router write. Orders go through /api/v1/orders/place.)
+# Standalone voice execution is retired. Conversational intents use the same
+# reviewed order-proposal approval flow as typed requests.
 
 # Legacy engine/AI stacks that dispatch through their own ``route_order`` API
 # instead of the canonical gate_order -> BrokerRouter surface. Keep this
@@ -3462,10 +3462,10 @@ _RAW_ROUTE_ORDER_ALLOWLIST = {
 }
 _ROUTE_ORDER_RE = re.compile(r"\.route_order\s*\(")
 
-# Raw OpenAlgoClient modify/cancel calls have no exemptions. The binding-aware
+# Raw broker client modify/cancel calls have no exemptions. The binding-aware
 # AST guard below follows receiver and bound-callable aliases rather than
 # trusting a variable merely because its spelling contains ``router``.
-_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST: set[str] = set()
+_RAW_CLIENT_MOD_CANCEL_ALLOWLIST: set[str] = set()
 
 
 def _resolves_safety_context(
@@ -3670,7 +3670,7 @@ def _binding_is_raw_broker(
     if isinstance(value, ast.Call):
         if isinstance(value.func, ast.Attribute) and value.func.attr == "get" and value.args:
             key = _constant_string(value.args[0], assignments)
-            if key in {"CLIENT", "OPENALGO_CLIENT"}:
+            if key in {"CLIENT", "BROKER_CLIENT"}:
                 return True
         return False
     return False
@@ -4169,13 +4169,13 @@ def test_registry_exposes_no_write_methods():
 
 
 def test_session_exposes_no_write_methods():
-    leaked = [m for m in _WRITE_METHODS if hasattr(BrokerSession, m)]
-    assert not leaked, f"BrokerSession must not expose write methods; found: {leaked}"
+    leaked = [m for m in _WRITE_METHODS if hasattr(Session, m)]
+    assert not leaked, f"Session must not expose write methods; found: {leaked}"
 
 
 def test_registry_and_session_source_define_no_write_methods():
     offenders: list[str] = []
-    for fname in ("registry.py", "session.py"):
+    for fname in ("registry.py",):
         text = (_GATEWAY_SRC / fname).read_text(encoding="utf-8")
         for m in _WRITE_METHODS:
             if re.search(rf"^\s*def {m}\(", text, re.MULTILINE):
@@ -4442,23 +4442,6 @@ def test_fake_broker_router_annotations_do_not_authorise_raw_writes() -> None:
         assert _raw_broker_write_offenders(ast.parse(source), "fixture.py"), source
 
 
-def test_openalgo_writes_all_require_router_token():
-    """Every executable OpenAlgo SDK mutation is dominated by the token guard."""
-    src = (_GATEWAY_SRC / "brokers" / "openalgo.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    adapter = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "OpenAlgoAdapter")
-    write_methods = ("place_order", "modify_order", "cancel_order")
-    methods = {node.name: node for node in adapter.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    missing = [method for method in write_methods if method not in methods]
-    assert not missing, f"OpenAlgoAdapter is missing write methods: {missing}"
-    ungated = [
-        f"OpenAlgoAdapter.{name}:{call.lineno}"
-        for name, method in methods.items()
-        if "_router_token"
-        in {argument.arg for argument in (*method.args.posonlyargs, *method.args.args, *method.args.kwonlyargs)}
-        for call in _router_token_dominance_offenders(method)
-    ]
-    assert not ungated, f"OpenAlgo SDK mutations must be dominated by _require_router_token (§8); unguarded: {ungated}"
 
 
 # Per-adapter expected gated write surface (the trio + every extended verb the
@@ -4512,9 +4495,8 @@ _NATIVE_ADAPTER_WRITE_METHODS: dict[str, tuple[str, tuple[str, ...]]] = {
 
 def test_native_adapter_writes_all_require_router_token():
     """Every write method of every direct broker adapter must call
-    ``_require_router_token`` in its body (§8) — the same source-level pin as
-    OpenAlgo, extended to the native SDK adapters (Dhan / Upstox / Kotak Neo /
-    IndMoney) and to EVERY extended gated verb, not just the trio.
+    ``_require_router_token`` in its body (§8), including EVERY extended gated
+    verb and every native SDK adapter.
 
     Two assertions per adapter:
       * the pinned expected write surface exists (a silently dropped gated verb
@@ -4678,7 +4660,7 @@ def test_emergency_modules_have_no_raw_client_write_escape_hatch():
 
     assert not offenders, (
         "Emergency broker mutations must use gate_broker_write -> BrokerRouter; "
-        "raw OpenAlgoClient writes are forbidden:\n" + "\n".join(offenders)
+        "raw broker client writes are forbidden:\n" + "\n".join(offenders)
     )
 
     safety_src = (_REPO_ROOT / modules[0]).read_text(encoding="utf-8")
@@ -4742,18 +4724,18 @@ def test_raw_route_order_allowlist_has_no_stale_entries():
     assert not stale, "Stale _RAW_ROUTE_ORDER_ALLOWLIST entries (the allowlist must shrink):\n" + "\n".join(stale)
 
 
-def test_no_new_raw_openalgo_modify_cancel_calls():
-    """G12 tripwire: raw OpenAlgoClient modify/cancel calls are not hidden by place-order scans."""
+def test_no_new_raw_client_modify_cancel_calls():
+    """G12 tripwire: raw broker client modify/cancel calls are not hidden by place-order scans."""
     offenders: list[str] = []
     for path in _python_sources(_ORDER_SURFACE_ROOTS):
         rel = path.relative_to(_REPO_ROOT).as_posix()
-        if rel in _RAW_OPENALGO_MOD_CANCEL_ALLOWLIST:
+        if rel in _RAW_CLIENT_MOD_CANCEL_ALLOWLIST:
             continue
         for node, method in _raw_broker_write_details(_parse_source(path), rel):
             if method in {"modify_order", "cancel_order"}:
                 offenders.append(_format_ast_offender(rel, node, detail=method))
     assert not offenders, (
-        "Raw OpenAlgoClient modify/cancel call outside the gated BrokerRouter path "
+        "Raw broker client modify/cancel call outside the gated BrokerRouter path "
         "(contract §8.1 / G12):\n" + "\n".join(offenders)
     )
 
@@ -4772,7 +4754,7 @@ def test_bracket_order_writes_only_through_gated_router():
 
     Three assertions:
       * every ``.place_order(`` / ``.cancel_order(`` / ``.modify_order(`` (and
-        the OpenAlgo spellings) attribute call sits on the canonical gated
+        the retired protocol spellings) attribute call sits on the canonical gated
         BrokerRouter receiver — a raw client write fails here;
       * the module still mints through ``gate_order`` (the sole SafetyContext
         producer), so the dispatchers cannot silently drop the gate; and
@@ -4807,7 +4789,7 @@ def test_bracket_module_is_not_on_any_raw_debt_allowlist():
     for allowlist_name, allowlist in (
         ("_RAW_ORDER_ALLOWLIST", _RAW_ORDER_ALLOWLIST),
         ("_RAW_ROUTE_ORDER_ALLOWLIST", _RAW_ROUTE_ORDER_ALLOWLIST),
-        ("_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST", _RAW_OPENALGO_MOD_CANCEL_ALLOWLIST),
+        ("_RAW_CLIENT_MOD_CANCEL_ALLOWLIST", _RAW_CLIENT_MOD_CANCEL_ALLOWLIST),
         ("_RAW_EXTENDED_VERB_ALLOWLIST", _RAW_EXTENDED_VERB_ALLOWLIST),
     ):
         assert _BRACKET_MODULE not in allowlist, (
@@ -4850,19 +4832,10 @@ def test_ditto_mirror_admits_complete_target_state_before_gate_and_router():
     owner_class = next(
         node for node in runtime_tree.body if isinstance(node, ast.ClassDef) and node.name == "DittoRouterOwner"
     )
-    admission = next(
-        node for node in owner_class.body if isinstance(node, ast.FunctionDef) and node.name == "admit_order"
-    )
-    admission_calls = {
-        node.func.id
-        if isinstance(node.func, ast.Name)
-        else node.func.attr
-        if isinstance(node.func, ast.Attribute)
-        else ""
-        for node in ast.walk(admission)
-        if isinstance(node, ast.Call)
-    }
-    assert {"gather_safety_state", "check_order"} <= admission_calls
+    assert not any(isinstance(node, ast.FunctionDef) and node.name == "admit_order" for node in owner_class.body)
+    from flinttrade_ditto.runtime import DittoCapabilityUnavailable, DittoRouterOwner
+    with pytest.raises(DittoCapabilityUnavailable, match="Native copy-trading"):
+        DittoRouterOwner()
 
     runtime_class = next(
         node for node in runtime_tree.body if isinstance(node, ast.ClassDef) and node.name == "DittoRuntime"
@@ -4883,10 +4856,10 @@ def test_ditto_mirror_admits_complete_target_state_before_gate_and_router():
     ), "DittoRuntime must inject DittoRouterOwner.admit_order into PositionMirror"
 
 
-def test_raw_openalgo_modify_cancel_allowlist_has_no_stale_entries():
-    """Every raw OpenAlgo modify/cancel debt entry must stay justified by code."""
+def test_raw_client_modify_cancel_allowlist_has_no_stale_entries():
+    """Every raw client modify/cancel debt entry must stay justified by code."""
     stale: list[str] = []
-    for rel in sorted(_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST):
+    for rel in sorted(_RAW_CLIENT_MOD_CANCEL_ALLOWLIST):
         path = _REPO_ROOT / rel
         if not path.exists():
             stale.append(f"{rel} (file gone)")
@@ -4896,8 +4869,8 @@ def test_raw_openalgo_modify_cancel_allowlist_has_no_stale_entries():
             for _node, method in _raw_broker_write_details(_parse_source(path), rel)
         )
         if not has_raw:
-            stale.append(f"{rel} (no raw OpenAlgo modify/cancel call left — remove from allowlist)")
-    assert not stale, "Stale _RAW_OPENALGO_MOD_CANCEL_ALLOWLIST entries (the allowlist must shrink):\n" + "\n".join(
+            stale.append(f"{rel} (no raw client modify/cancel call left — remove from allowlist)")
+    assert not stale, "Stale _RAW_CLIENT_MOD_CANCEL_ALLOWLIST entries (the allowlist must shrink):\n" + "\n".join(
         stale
     )
 
@@ -4927,7 +4900,7 @@ def test_only_gate_order_mints_safety_context():
     )
 
 
-# Raw OpenAlgo order-write ENDPOINT strings (URL builds POSTed via httpx/requests
+# Retired protocol order-write ENDPOINT strings (URL builds POSTed via httpx/requests
 # rather than attribute calls) — the G12 blind spot the attribute-call regex
 # above cannot see. The ditto mirror's retired ungated fallback built exactly
 # such a URL (f"{host}/api/v1/placeorder") and passed the guard for months.
@@ -4936,13 +4909,8 @@ _ORDER_WRITE_URL_RE = re.compile(
     r"|modifyorder|cancelorder|cancelallorder|closeposition)"
 )
 
-# Modules that legitimately mention order-write endpoint paths: the canonical
-# OpenAlgo client (docstrings on the single sanctioned path in). The retired
-# v1_compat route table (.local/specs/preserved/v1_compat.md) no longer needs
-# an entry.
-_ORDER_WRITE_URL_ALLOWLIST = {
-    "packages/core/core/src/flinttrade_core/openalgo_client.py",
-}
+# No production module may contain a retired wire order-write endpoint.
+_ORDER_WRITE_URL_ALLOWLIST: set[str] = set()
 
 
 def _forward_to_openalgo_references(tree: ast.Module) -> list[ast.AST]:
@@ -5117,7 +5085,6 @@ def test_static_get_and_join_indirection_cannot_reactivate_retired_writes() -> N
 
 
 def test_forward_to_openalgo_has_zero_non_test_callable_references() -> None:
-    canonical_path = "packages/core/core/src/flinttrade_core/order_routes.py"
     definitions: list[str] = []
     offenders: list[str] = []
     for path in _python_sources(_PRODUCTION_PYTHON_ROOTS):
@@ -5129,9 +5096,7 @@ def test_forward_to_openalgo_has_zero_non_test_callable_references() -> None:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_forward_to_openalgo"
         )
         offenders.extend(_format_ast_offender(relative, node) for node in _forward_to_openalgo_references(tree))
-    assert len(definitions) == 1 and definitions[0].startswith(f"{canonical_path}:"), (
-        f"The retired forwarding helper must remain one identifiable definition; found {definitions}"
-    )
+    assert not definitions, f"Retired forwarding helper must be absent; found {definitions}"
     assert not offenders, (
         "_forward_to_openalgo must have zero non-test callable references; any "
         "direct, aliased or reflective recovery can reactivate an ungated write:\n" + "\n".join(offenders)
@@ -5156,7 +5121,7 @@ def test_no_raw_order_write_urls_in_services_and_webhooks():
             _format_ast_offender(relative, node) for node in _raw_order_write_url_references(_parse_source(path))
         )
     assert not offenders, (
-        "Raw OpenAlgo order-write endpoint URL outside the canonical client "
+        "Retired protocol order-write endpoint URL outside the canonical client "
         "(contract §8.1 / G12). Order writes must traverse gate_order -> "
         "BrokerRouter — never a hand-built endpoint POST:\n" + "\n".join(offenders)
     )
@@ -5182,3 +5147,8 @@ def test_broker_mcp_surface_is_metadata_only():
         if "mcp" in rule.rule
     )
     assert mcp_rules == [("/api/v1/broker/mcp", ["GET"])]
+
+
+def test_retired_broker_adapter_and_session_wrapper_are_absent():
+    assert not (_GATEWAY_SRC / "brokers" / "openalgo.py").exists()
+    assert not (_GATEWAY_SRC / "session.py").exists()

@@ -57,7 +57,7 @@ describe("brokerAccountsApi", () => {
     mocks.listNative.mockResolvedValue([]);
   });
 
-  it("lists gateway and native accounts through one merged contract", async () => {
+  it("lists only native accounts and discards retired gateway rows", async () => {
     mocks.listGateway.mockResolvedValue([gatewayAccount]);
     mocks.listNative.mockResolvedValue([
       {
@@ -77,7 +77,6 @@ describe("brokerAccountsApi", () => {
     ]);
 
     await expect(listBrokerAccounts()).resolves.toEqual([
-      gatewayAccount,
       {
         account_id: "UPX1",
         broker: "upstox",
@@ -111,11 +110,11 @@ describe("brokerAccountsApi", () => {
     ]);
   });
 
-  it("forwards one AbortSignal through both account sources and native discovery", async () => {
+  it("forwards the AbortSignal through native account discovery", async () => {
     const controller = new AbortController();
 
     await listBrokerAccounts([], controller.signal);
-    expect(mocks.listGateway).toHaveBeenCalledWith(controller.signal);
+    expect(mocks.listGateway).not.toHaveBeenCalled();
     expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
 
     mocks.listNative.mockClear();
@@ -127,10 +126,9 @@ describe("brokerAccountsApi", () => {
     expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
   });
 
-  it("keeps a failed source's previous rows until that source recovers", async () => {
-    mocks.listGateway.mockRejectedValue(new Error("Gateway unavailable"));
-
-    await expect(listBrokerAccounts([gatewayAccount])).resolves.toEqual([gatewayAccount]);
+  it("does not resurrect retired rows after native discovery fails", async () => {
+    mocks.listNative.mockRejectedValue(new Error("Native discovery unavailable"));
+    await expect(listBrokerAccounts([gatewayAccount])).rejects.toThrow("Native discovery unavailable");
   });
 
   it("dispatches account actions by account source", async () => {
@@ -145,12 +143,12 @@ describe("brokerAccountsApi", () => {
     expect(mocks.reloginNative).toHaveBeenCalledWith("upstox", "UPX1", undefined, actionKey);
     expect(mocks.setNativePrimary).toHaveBeenCalledWith("upstox", "UPX1", actionKey);
 
-    await removeBrokerAccount(gatewayRef, actionKey);
-    await reconnectBrokerAccount(gatewayRef, actionKey);
-    await setPrimaryBrokerAccount(gatewayRef, actionKey);
-    expect(mocks.removeGateway).toHaveBeenCalledWith("GW1", actionKey);
-    expect(mocks.reconnectGateway).toHaveBeenCalledWith("GW1", actionKey);
-    expect(mocks.setGatewayPrimary).toHaveBeenCalledWith("GW1", actionKey);
+    await expect(removeBrokerAccount(gatewayRef, actionKey)).rejects.toThrow("Only native broker accounts");
+    await expect(reconnectBrokerAccount(gatewayRef, actionKey)).rejects.toThrow("Only native broker accounts");
+    await expect(setPrimaryBrokerAccount(gatewayRef, actionKey)).rejects.toThrow("Only native broker accounts");
+    expect(mocks.removeGateway).not.toHaveBeenCalled();
+    expect(mocks.reconnectGateway).not.toHaveBeenCalled();
+    expect(mocks.setGatewayPrimary).not.toHaveBeenCalled();
   });
 
   it("lists only live native read accounts in the shared account client", async () => {

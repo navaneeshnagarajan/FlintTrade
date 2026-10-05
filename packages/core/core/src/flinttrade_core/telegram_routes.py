@@ -5,7 +5,7 @@ Endpoint
 POST /api/v1/telegram
 
 This keeps the terminal's Telegram test-send on FlintTrade's local backend
-instead of requiring an OpenAlgo API key. Explicit bot credentials are accepted
+using explicit Telegram bot credentials. Explicit bot credentials are accepted
 for one test send only and are never persisted or echoed back.
 """
 
@@ -24,8 +24,7 @@ logger = logging.getLogger("flinttrade.core.telegram_routes")
 telegram_bp = Blueprint("telegram", __name__, url_prefix="/api/v1")
 
 _EXPLORE_TELEGRAM_BLOCKED = (
-    "Telegram tests are blocked for Example. "
-    "Switch to Practice or Live with Telegram configured to send a real test."
+    "Telegram tests are blocked for Example. Switch to Practice or Live with Telegram configured to send a real test."
 )
 
 
@@ -44,11 +43,13 @@ def _explore_telegram_blocked() -> tuple[Any, int] | None:
         jwt_mode or "unknown",
         header_mode or "-",
     )
-    return jsonify({
-        "status": "error",
-        "message": _EXPLORE_TELEGRAM_BLOCKED,
-        "code": "mode_blocked",
-    }), 403
+    return jsonify(
+        {
+            "status": "error",
+            "message": _EXPLORE_TELEGRAM_BLOCKED,
+            "code": "mode_blocked",
+        }
+    ), 403
 
 
 @telegram_bp.route("/telegram", methods=["POST"])

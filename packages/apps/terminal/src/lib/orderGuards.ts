@@ -220,7 +220,7 @@ export function parsePriceValue(raw: string): number | null {
 /**
  * Extract a real broker order id from a place-order result.
  *
- * A cancel/modify must never be attempted against a fabricated id. OpenAlgo
+ * A cancel/modify must never be attempted against a fabricated id. broker
  * returns the id under `orderId`/`orderid`/`order_id` (or as a bare string for
  * lenient bridges); anything else yields null so the caller fails closed.
  */

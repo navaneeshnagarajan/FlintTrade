@@ -26,9 +26,7 @@ from .source_root import discover_source_root
 
 logger = logging.getLogger("flinttrade.core.frontend_error_routes")
 
-frontend_errors_bp = Blueprint(
-    "frontend_errors", __name__, url_prefix="/v1"
-)
+frontend_errors_bp = Blueprint("frontend_errors", __name__, url_prefix="/v1")
 
 _REPO_ROOT = discover_source_root()
 _CHANGELOG_PATH = _REPO_ROOT / "changelog.md"
@@ -100,9 +98,7 @@ def get_changelog() -> tuple[Response, int]:
             return jsonify({"status": "error", "message": "changelog.md not found"}), 404
         text = _CHANGELOG_PATH.read_text(encoding="utf-8")
         # Content-Type is markdown; the viewer renders it client-side.
-        resp = current_app.response_class(
-            text, status=200, mimetype="text/markdown; charset=utf-8"
-        )
+        resp = current_app.response_class(text, status=200, mimetype="text/markdown; charset=utf-8")
         resp.headers["Cache-Control"] = "no-cache"
         return resp, 200
     except Exception as exc:

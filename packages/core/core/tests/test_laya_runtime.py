@@ -789,9 +789,7 @@ def test_unpatched_health_is_ready_after_the_weight_file_is_verified(
 
 
 @pytest.mark.unit
-def test_leftover_verification_from_an_earlier_run_is_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_leftover_verification_from_an_earlier_run_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     live = 424242
     _accept_only(monkeypatch, live)
     policy = load_policy()
@@ -830,9 +828,7 @@ def test_leftover_verification_from_an_earlier_run_is_rejected(
 
 
 @pytest.mark.unit
-def test_start_recomputes_the_weight_file_and_drops_it_on_stop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_start_recomputes_the_weight_file_and_drops_it_on_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     live = 424242
     _accept_only(monkeypatch, live)
     policy = load_policy()
@@ -908,16 +904,12 @@ def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path, monkeypatch: p
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "wrong_revision"
     assert laya_reason_detail("wrong_revision", 8000) == "Wrong model version"
-    assert laya_reason_tooltip("wrong_revision", 8000) == (
-        "Laya is running a different model than FlintTrade expects."
-    )
+    assert laya_reason_tooltip("wrong_revision", 8000) == ("Laya is running a different model than FlintTrade expects.")
     reset_process_laya_for_tests()
 
 
 @pytest.mark.unit
-def test_stale_api_key_is_reread_and_a_rejected_key_stays_down(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_stale_api_key_is_reread_and_a_rejected_key_stays_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     policy = load_policy()
     runtime = _attached(
         tmp_path,
@@ -993,7 +985,15 @@ def _accept_pinned_digests(monkeypatch: pytest.MonkeyPatch, policy: Any, *, wron
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "extra",
-    ["model.safetensors.index.json", "pytorch_model.bin.index.json", "other.safetensors", "weights.bin", "model.pt", "model.pth", "model.gguf"],
+    [
+        "model.safetensors.index.json",
+        "pytorch_model.bin.index.json",
+        "other.safetensors",
+        "weights.bin",
+        "model.pt",
+        "model.pth",
+        "model.gguf",
+    ],
 )
 def test_extra_snapshot_weights_are_unverified_and_do_not_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: str
@@ -1036,9 +1036,7 @@ def test_extra_snapshot_weights_are_unverified_and_do_not_launch(
 
 
 @pytest.mark.unit
-def test_tampered_weight_is_wrong_revision_and_does_not_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_tampered_weight_is_wrong_revision_and_does_not_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _plant_snapshot(tmp_path, monkeypatch, extra=None)
     launched: list[object] = []
     runtime = LayaRuntime(
@@ -1135,9 +1133,7 @@ def test_pid_and_key_changes_flip_status_within_the_watch_interval(
         tmp_path,
         watch=True,
         watch_interval=0.05,
-        artifact_checker=lambda: ArtifactCheck(
-            ok=True, reason=None, revision=policy.revision, sha256=policy.sha256
-        ),
+        artifact_checker=lambda: ArtifactCheck(ok=True, reason=None, revision=policy.revision, sha256=policy.sha256),
         health_reader=lambda _url: _healthy(),
     )
     runtime.attach(key_path)
@@ -1206,9 +1202,7 @@ def test_a_cli_restart_is_verified_once_the_first_process_has_exited(
 
 
 @pytest.mark.unit
-def test_a_record_from_an_exited_process_is_not_trusted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_record_from_an_exited_process_is_not_trusted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     first = 424242
     monkeypatch.setattr("flinttrade_core.laya_runtime._pid_alive", lambda candidate: candidate == first)
     policy = load_policy()
@@ -1582,9 +1576,7 @@ def test_start_without_a_pinned_commit_says_cant_verify_and_attempts_no_download
 
 
 @pytest.mark.unit
-def test_tampered_download_is_removed_and_does_not_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_tampered_download_is_removed_and_does_not_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     policy = load_policy()
     cache = tmp_path / "hub"
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(cache))
@@ -1772,11 +1764,7 @@ def _accept_pinned_digests_except_old(monkeypatch: pytest.MonkeyPatch, policy: A
 
 
 def _old_checkpoint_names(runtime: LayaRuntime) -> list[str]:
-    return sorted(
-        child.name
-        for child in runtime.runtime_root.iterdir()
-        if child.name.startswith("checkpoint.old-")
-    )
+    return sorted(child.name for child in runtime.runtime_root.iterdir() if child.name.startswith("checkpoint.old-"))
 
 
 @pytest.mark.unit
@@ -1814,9 +1802,7 @@ def test_pin_upgrade_replaces_the_checkpoint_and_removes_the_old_one(
 
 
 @pytest.mark.unit
-def test_failed_upgrade_rename_restores_the_old_checkpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_failed_upgrade_rename_restores_the_old_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     policy = load_policy()
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
     _accept_pinned_digests_except_old(monkeypatch, policy)
@@ -2036,9 +2022,7 @@ def test_stale_staging_and_old_checkpoint_are_removed_silently(
 
 
 @pytest.mark.unit
-def test_crash_between_renames_restores_the_old_checkpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_crash_between_renames_restores_the_old_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     policy = load_policy()
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
     _accept_pinned_digests(monkeypatch, policy)
@@ -2172,9 +2156,7 @@ def _default_huggingface_home() -> Path:
 
 
 @pytest.mark.unit
-def test_download_env_keeps_huggingface_home_inside_flinttrade(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_download_env_keeps_huggingface_home_inside_flinttrade(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Transfer logs use the runtime folder, not the shared user cache."""
     policy = load_policy()
     shared = _default_huggingface_home()
@@ -2294,9 +2276,7 @@ def _bootstrap_accepts_weights(path: str) -> bool:
 
 
 @pytest.mark.unit
-def test_start_rewrites_the_runtime_key_the_environment_names(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_start_rewrites_the_runtime_key_the_environment_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``LAYA_API_KEY_FILE`` at ``runtime/laya/api.key`` is the file start writes."""
     runtime = LayaRuntime(
         tmp_path,
@@ -2319,9 +2299,7 @@ def test_start_rewrites_the_runtime_key_the_environment_names(
 
 
 @pytest.mark.unit
-def test_standard_cache_symlink_is_the_snapshot_checkpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_standard_cache_symlink_is_the_snapshot_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A blobs symlink still launches as ``snapshots/<rev>/model.safetensors``."""
     policy = load_policy()
     root = tmp_path / "hub"

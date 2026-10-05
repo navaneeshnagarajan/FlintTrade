@@ -48,7 +48,9 @@ def _passing_safety() -> SafetySystem:
     return safety
 
 
-def _live_app(backend_lease_proof: object, *, safety: SafetySystem | None = None) -> tuple[Flask, MagicMock, SafetySystem]:
+def _live_app(
+    backend_lease_proof: object, *, safety: SafetySystem | None = None
+) -> tuple[Flask, MagicMock, SafetySystem]:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     router.backend_lease_proof = backend_lease_proof
@@ -76,7 +78,7 @@ def _practice_app() -> tuple[Flask, MagicMock]:
 def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> None:
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -98,7 +100,7 @@ def test_live_clamp_stops_before_safety_and_names_the_reduced_quantity(backend_l
     process_laya().set_status(DecisionStatus.READY)
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "quantity": 101},
         headers=_headers("live", unlocked=True),
     )
@@ -116,7 +118,7 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     process_laya().set_status(DecisionStatus.DEGRADED)
     app, router, safety = _live_app(backend_lease_proof)
     inside = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -130,7 +132,7 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     safety.check_order.reset_mock()
     router.place_order.reset_mock()
     over = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "quantity": 2},
         headers=_headers("live", unlocked=True),
     )
@@ -148,7 +150,7 @@ def test_client_cannot_mark_an_operator_place_as_chat(backend_lease_proof) -> No
     process_laya().set_status(DecisionStatus.READY)
     app, router, _safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "source": "chat"},
         headers=_headers("live", unlocked=True),
     )
@@ -183,7 +185,7 @@ def test_unqualified_ready_live_names_the_qualification_requirement(backend_leas
     process_laya().apply_runtime_status(DecisionStatus.READY, live_qualified=False)
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -201,7 +203,7 @@ def test_unqualified_degraded_live_uses_the_same_sentence(backend_lease_proof) -
     process_laya().apply_runtime_status(DecisionStatus.DEGRADED, live_qualified=False)
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -251,9 +253,7 @@ def test_explore_stays_on_the_mode_refusal() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body.get("code") == "mode_blocked"
-    assert body["message"] == (
-        "Orders are not available for Example. Switch to Practice or Live to trade."
-    )
+    assert body["message"] == ("Orders are not available for Example. Switch to Practice or Live to trade.")
     safety.check_order.assert_not_called()
 
 
@@ -383,7 +383,7 @@ def test_place_100_after_a_150_cap_passes_admission(backend_lease_proof) -> None
     process_laya().set_status(DecisionStatus.READY)
     app, router, safety = _live_app(backend_lease_proof)
     first = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "quantity": 150},
         headers=_headers("live", unlocked=True),
     )
@@ -393,7 +393,7 @@ def test_place_100_after_a_150_cap_passes_admission(backend_lease_proof) -> None
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
     second = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "quantity": 100},
         headers=_headers("live", unlocked=True),
     )
@@ -409,7 +409,7 @@ def test_live_place_without_a_note_denies_as_uncertain(backend_lease_proof) -> N
     process_laya().set_decision_client(host)
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -462,7 +462,7 @@ def test_live_model_deny_stops_before_safety_and_the_router(backend_lease_proof)
     process_laya().set_decision_client(host)
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "rationale": "I need to win it back."},
         headers=_headers("live", unlocked=True),
     )
@@ -477,7 +477,12 @@ def test_action_center_model_deny_stops_before_safety(backend_lease_proof, monke
     import threading
     import time
 
-    from flinttrade_core.agent_routes import _RUNNER, _RUNNER_LOCK, _reset_runner_for_tests, dispatch_action_center_approval
+    from flinttrade_core.agent_routes import (
+        _RUNNER,
+        _RUNNER_LOCK,
+        _reset_runner_for_tests,
+        dispatch_action_center_approval,
+    )
     from flinttrade_engine.action_center import ApprovalRequest
 
     host = _ScriptedHost(_deny_answers())
@@ -506,7 +511,7 @@ def test_action_center_model_deny_stops_before_safety(backend_lease_proof, monke
         reason="I need to win the last loss back.",
         created_at="t",
         expires_at="t",
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         source="autonomous-agent",
         intent_type="entry",
@@ -522,7 +527,7 @@ def test_action_center_model_deny_stops_before_safety(backend_lease_proof, monke
                     "trader": trader,
                     "thread": thread,
                     "loop": None,
-                    "params": {"broker": "openalgo", "account_id": "default"},
+                    "params": {"broker": "dhan", "account_id": "default"},
                 }
             )
         with app.app_context():

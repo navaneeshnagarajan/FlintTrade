@@ -17,7 +17,7 @@ from flask import Flask
 def _create_frontend_app(dist: Path, monkeypatch: pytest.MonkeyPatch) -> Flask:
     """Create a rate-limited test app around the supplied frontend tree."""
     monkeypatch.setenv("FLINTTRADE_FRONTEND_DIST", str(dist))
-    monkeypatch.setenv("OPENALGO_API_KEY", "spa-static-serving-test-key")
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "spa-static-serving-test-key")
 
     from flinttrade_core import app as app_module
 
@@ -95,10 +95,7 @@ def test_frontend_asset_burst_is_not_rate_limited(built_frontend_app: Flask) -> 
     """One page load may fetch more than the API's 50-request default limit."""
     client = built_frontend_app.test_client()
 
-    statuses = [
-        [client.get(path).status_code for _ in range(2)]
-        for path in ("/assets/app.js", "/fonts/app.woff2")
-    ]
+    statuses = [[client.get(path).status_code for _ in range(2)] for path in ("/assets/app.js", "/fonts/app.woff2")]
 
     assert statuses == [[200, 200], [200, 200]]
 
@@ -323,6 +320,7 @@ def test_request_teardown_clears_structured_log_context(
     assert response.status_code == 200
     assert structlog.contextvars.get_contextvars() == {}
 
+
 @pytest.mark.unit
 def test_nested_docs_index_html_exact_sentinel_stays_nested(
     built_frontend_app: Flask,
@@ -332,9 +330,7 @@ def test_nested_docs_index_html_exact_sentinel_stays_nested(
     docs = dist / "docs"
     docs.mkdir()
     sentinel = "NESTED_DOCS_INDEX_SENTINEL_EXACT"
-    (docs / "index.html").write_text(
-        f"<!doctype html><p>{sentinel}</p>", encoding="utf-8"
-    )
+    (docs / "index.html").write_text(f"<!doctype html><p>{sentinel}</p>", encoding="utf-8")
 
     response = built_frontend_app.test_client().get("/docs/index.html")
     body = response.get_data(as_text=True)

@@ -24,10 +24,14 @@ import pytest
 def monkeypatch_module():
     """Module-scoped monkeypatch for environment variables."""
     original_env = dict(os.environ)
-    yield type("MonkeyPatch", (), {
-        "setenv": lambda self, k, v: os.environ.update({k: v}),
-        "delenv": lambda self, k, **kw: os.environ.pop(k, None),
-    })()
+    yield type(
+        "MonkeyPatch",
+        (),
+        {
+            "setenv": lambda self, k, v: os.environ.update({k: v}),
+            "delenv": lambda self, k, **kw: os.environ.pop(k, None),
+        },
+    )()
     os.environ.clear()
     os.environ.update(original_env)
 
@@ -56,6 +60,7 @@ def _reset_log_buffer():
 def log_buffer():
     """Return the LogBuffer singleton."""
     from flinttrade_core.log_stream import LogBuffer
+
     return LogBuffer()
 
 
@@ -83,7 +88,7 @@ def client(monkeypatch_module):
     """Return a Flask test client with the log_stream blueprint registered."""
     from flinttrade_core.app import create_flask_app
 
-    monkeypatch_module.setenv("OPENALGO_API_KEY", "test-key")
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", "test-key")
     app = create_flask_app()
     app.config["TESTING"] = True
     with app.test_client() as c:
@@ -225,12 +230,14 @@ class TestRecentEndpoint:
 
     def test_returns_entries(self, client, log_buffer):
         """The recent endpoint returns buffered entries."""
-        log_buffer.push({
-            "timestamp": "2026-04-08T10:00:00+05:30",
-            "level": "INFO",
-            "message": "test entry",
-            "request_id": "abc123",
-        })
+        log_buffer.push(
+            {
+                "timestamp": "2026-04-08T10:00:00+05:30",
+                "level": "INFO",
+                "message": "test entry",
+                "request_id": "abc123",
+            }
+        )
 
         resp = client.get("/v1/logs/recent")
         assert resp.status_code == 200

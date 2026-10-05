@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
+import pytest
+
 
 
 # ---------------------------------------------------------------------------
@@ -244,3 +246,91 @@ class TestBackgroundReconciler:
         assert "TCS" in symbols
         assert "INFY" in symbols
         assert "WIPRO" not in symbols
+
+
+def test_duplicate_snapshot_is_refused():
+    import pytest
+    from flinttrade_engine.reconciliation import ReconciliationEngine
+
+    with pytest.raises(ValueError, match="duplicate"):
+        ReconciliationEngine().reconcile_positions([_pos("TEST", 1), _pos("TEST", 2)], [])
+
+
+def test_nonfinite_snapshot_is_refused():
+    import pytest
+    from flinttrade_engine.reconciliation import ReconciliationEngine
+
+    with pytest.raises(ValueError, match="non-finite"):
+        ReconciliationEngine().reconcile_positions([_pos("TEST", 1, float("nan"))], [])
+
+
+def test_read_failure_never_reports_clean_or_external_close():
+    from flinttrade_engine.reconciliation import BackgroundReconciler
+
+    async def unavailable():
+        raise ConnectionError("unavailable")
+
+    callback = AsyncMock()
+    result = asyncio.run(BackgroundReconciler(unavailable, lambda: [_pos("TEST", 1)], callback)._run_once())
+    assert not result.clean
+    assert result.error
+    assert result.checked_count == 0
+    callback.assert_not_called()
+
+
+@pytest.mark.parametrize("quantity", [2.5, "2.5", True, False, "nan", "inf"])
+@pytest.mark.parametrize("positions", [True, False])
+def test_nonintegral_or_boolean_quantity_cannot_compare_clean(quantity, positions):
+    from flinttrade_engine.reconciliation import ReconciliationEngine
+
+    broker = {"symbol": "TEST", "order_id": "synthetic", "quantity": quantity}
+    local = broker | {"quantity": 2}
+    method = ReconciliationEngine().reconcile_positions if positions else ReconciliationEngine().reconcile_orders
+    with pytest.raises(ValueError, match="quantity"):
+        method([broker], [local])
+
+
+@pytest.mark.parametrize("positions,row", [
+    (True, {"symbol": " ", "quantity": 1}),
+    (False, {"symbol": "TEST", "quantity": 1}),
+    (False, {"symbol": "TEST", "order_id": " ", "quantity": 1}),
+])
+def test_missing_snapshot_identity_is_refused(positions, row):
+    from flinttrade_engine.reconciliation import ReconciliationEngine
+
+    method = ReconciliationEngine().reconcile_positions if positions else ReconciliationEngine().reconcile_orders
+    with pytest.raises(ValueError, match="symbol|identity"):
+        method([row], [])
+
+
+@pytest.mark.parametrize("invalid", [
+    {"symbol": "TEST", "quantity": 1.9},
+    {"symbol": "TEST", "quantity": True},
+    {"quantity": 1},
+])
+@pytest.mark.parametrize("invalid_side", ["broker", "local"])
+def test_snapshot_validation_failure_never_emits_external_close(invalid, invalid_side):
+    from flinttrade_engine.reconciliation import BackgroundReconciler
+
+    async def broker():
+        return [invalid] if invalid_side == "broker" else []
+
+    local = [invalid] if invalid_side == "local" else [_pos("TEST", 1)]
+    callback = AsyncMock()
+    result = asyncio.run(BackgroundReconciler(broker, lambda: local, callback)._run_once())
+    assert not result.clean
+    assert result.error
+    assert result.checked_count == 0
+    callback.assert_not_called()
+
+
+def test_integral_quantity_projection_keeps_exact_units_and_sparse_positions():
+    from flinttrade_engine.reconciliation import ReconciliationEngine
+
+    value = 9_007_199_254_740_993
+    broker = {"symbol": "TEST", "quantity": str(value)}
+    local = {"symbol": "TEST", "quantity": str(value + 1)}
+    result = ReconciliationEngine().reconcile_positions([broker], [local])
+    assert result.mismatch_count == 1
+    assert result.mismatches[0].broker_value == value
+    assert result.mismatches[0].local_value == value + 1

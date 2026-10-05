@@ -210,8 +210,7 @@ class WebhookOrderDispatcher:
                     # reservation and surface a placed-with-warning result.
                     acknowledgement_failed = True
                     logger.critical(
-                        "Webhook order placed but reservation acknowledgement failed | "
-                        "source=%s adapter=%s account=%s",
+                        "Webhook order placed but reservation acknowledgement failed | source=%s adapter=%s account=%s",
                         payload.source,
                         adapter_id,
                         safe_account,
@@ -274,9 +273,7 @@ class WebhookOrderDispatcher:
             return _error("place_order", payload, "Webhook order dispatch failed.")
 
         audit_event = (
-            "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED"
-            if acknowledgement_failed
-            else "WEBHOOK_ORDER_PLACED"
+            "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED" if acknowledgement_failed else "WEBHOOK_ORDER_PLACED"
         )
         self._audit(audit_event, adapter_id, account_id, authority.actor_id, payload, result)
         self._journal(
@@ -550,11 +547,13 @@ def _payload_to_order_body(payload: WebhookPayload) -> tuple[dict[str, Any], str
     for key in ("rationale", "note"):
         if key in payload.data:
             body[key] = payload.data[key]
-    body.update({
-        "symbol": payload.symbol,
-        "exchange": payload.exchange or payload.data.get("exchange") or "NSE",
-        "action": side,
-    })
+    body.update(
+        {
+            "symbol": payload.symbol,
+            "exchange": payload.exchange or payload.data.get("exchange") or "NSE",
+            "action": side,
+        }
+    )
     price_error = _validate_order_prices(body)
     if price_error:
         return {}, price_error

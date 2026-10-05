@@ -2,7 +2,7 @@
 
 Provides four broker-agnostic classes for options short-straddle trading.
 All broker I/O is injected via callable dependencies so the strategies work
-with any OpenAlgo-compatible API without referencing broker libraries.
+with any broker-compatible API without referencing broker libraries.
 
 Classes:
     StraddleConfig       — shared Pydantic config model.
@@ -13,7 +13,7 @@ Classes:
 
 All times are assumed to be in IST (Asia/Kolkata). No broker library is
 imported; order placement is done through injected callables that mirror the
-OpenAlgo REST API surface.
+broker REST API surface.
 
 Supported indices: NIFTY, BANKNIFTY, FINNIFTY, SENSEX.
 """

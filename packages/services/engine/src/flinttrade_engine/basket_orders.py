@@ -6,7 +6,7 @@ cancel or close all previously placed legs so the overall position remains
 flat.  A full :class:`BasketResult` with per-leg status is always returned,
 whether execution succeeded or was rolled back.
 
-BUY legs are placed before SELL legs (mirrors OpenAlgo basket service
+BUY legs are placed before SELL legs (mirrors broker basket service
 behaviour) to avoid margin shortfall on entry.
 
 Usage::

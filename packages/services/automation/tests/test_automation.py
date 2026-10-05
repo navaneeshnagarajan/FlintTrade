@@ -22,7 +22,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class TestTOTPLogin:
-    """Test TOTP module — now a stub (broker auth handled by OpenAlgo)."""
+    """Test TOTP module — now a stub (broker auth handled by broker)."""
 
     def test_is_trading_day_weekday(self):
         from flinttrade_automation.totp_login import is_trading_day
@@ -172,19 +172,19 @@ class TestCronManager:
         assert "health_check" in DEFAULT_JOBS
         assert DEFAULT_JOBS["health_check"]["trigger_args"]["minutes"] == 5
         assert "backup" in DEFAULT_JOBS
-        assert "totp_login" not in DEFAULT_JOBS  # removed — OpenAlgo handles auth
+        assert "totp_login" not in DEFAULT_JOBS  # removed — broker handles auth
         assert "ddns_update" not in DEFAULT_JOBS  # removed — infrastructure-specific
 
     def test_cron_accepts_wired_dependencies(self):
         from flinttrade_automation.cron_manager import CronManager
 
         cron = CronManager(
-            openalgo_client=MagicMock(),
+            broker_client=MagicMock(),
             audit_logger=MagicMock(),
             telegram_bot=MagicMock(),
             totp_login=MagicMock(),
         )
-        assert cron.openalgo_client is not None
+        assert cron.broker_client is not None
         assert cron.audit_logger is not None
 
 
@@ -242,7 +242,7 @@ class TestCronBuiltinJobs:
         from flinttrade_automation.cron_manager import CronManager
 
         cron = CronManager(
-            openalgo_client=MagicMock(),
+            broker_client=MagicMock(),
             audit_logger=MagicMock(),
             telegram_bot=MagicMock(),
         )
@@ -409,12 +409,12 @@ class TestTelegramBot:
 
         msg = format_health(
             {
-                "openalgo_connected": True,
+                "broker_connected": True,
                 "websocket_connected": False,
                 "disk_free_gb": 50.5,
             }
         )
-        assert "OpenAlgo" in msg
+        assert "broker" in msg
 
 
 # ======================================================================
@@ -648,7 +648,7 @@ class TestTelegramKillSwitch:
         assert "NSE" in result.response
         assert "ACTIVE" in result.response
 
-    def test_status_never_reports_flat_when_openalgo_position_read_fails(self):
+    def test_status_never_reports_flat_when_broker_position_read_fails(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
         mock_client = MagicMock()
@@ -699,7 +699,7 @@ class TestTelegramKillSwitch:
 
         result = bot.handle_command("/status", chat_id="12345")
 
-        assert "OpenAlgo bridge" in result.response
+        assert "broker bridge" in result.response
         assert "1/1 targets complete" in result.response
         assert "dhan:primary" in result.response
 

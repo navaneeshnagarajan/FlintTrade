@@ -1,5 +1,5 @@
 /**
- * IndexStripWidget — compact horizontal strip of live index cards.
+ * IndexStripWidget — compact horizontal strip of index observations.
  *
  * Extracted from the retired Dashboard widget (dedup ruling D5), whose
  * five-index card row was the only part of it no other widget carried. The
@@ -7,14 +7,11 @@
  * FIN NIFTY and India VIX, each with LTP, change, change% and a synthetic
  * OHLC sparkline, plus the VIX>20 warning border.
  *
- * DATA HONESTY (the MarketSummary pattern). Every number on this strip comes
- * from the live WebSocket tick atoms (Jotai `tickAtomFamily`, populated by
- * useWsBridge; `prevClose` is merged in by usePrevClose) — the same single
- * entry path Dashboard, MarketSummary and the Ticker read. There is no sample
- * fallback: a card with no tick renders an explicit "Awaiting tick" state
- * rather than a fabricated level, and the header chip claims "Live" only once
- * the lead index has actually ticked. Explore mode therefore shows the honest
- * awaiting state, never demo prices.
+ * Native REST polling and the explicitly selected Example feed publish into
+ * Jotai `tickAtomFamily`; usePrevClose supplies native reference closes.
+ * Example mode always badges its simulated observations. Other modes show
+ * "Native quotes" only with a finite lead price and reference close. Missing
+ * observations render an awaiting state rather than a fabricated level.
  *
  * The Dashboard's position-status tracker did NOT move here: it reads the
  * position book (TanStack Query), not the tick stream, so it lives with the
@@ -28,6 +25,7 @@ import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { tickKeyFor } from "@/lib/market";
 import { cn } from "@/lib/utils";
+import { useModeStore } from "@/stores/modeStore";
 import type { WsTick } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 
@@ -59,33 +57,38 @@ const VIX_WARNING_LEVEL = 20;
 // Index card
 // ---------------------------------------------------------------------------
 
-function IndexCard({ symbol, exchange, name }: IndexDef) {
+function hasUsablePrice(tick: WsTick | null): boolean {
+  const previous = tick?.prevClose ?? tick?.close;
+  return tick !== null && Number.isFinite(tick.ltp) && tick.ltp > 0
+    && previous !== undefined && Number.isFinite(previous) && previous > 0;
+}
+
+function IndexCard({ symbol, exchange, name, example }: IndexDef & { example: boolean }) {
   const tick: WsTick | null = useAtomValue(tickAtomFamily(tickKeyFor(symbol, exchange)));
 
   const ltp = tick?.ltp ?? 0;
-  // Prefer prevClose (REST-fetched by usePrevClose) — tick.close is undefined
-  // in LTP WebSocket mode. Fall back to tick.close for quote/fallback modes.
+  // Prefer the explicit session reference; partial native quotes may omit close.
   const prevClose = tick?.prevClose ?? tick?.close ?? 0;
 
-  if (!tick || ltp <= 0 || prevClose <= 0) {
+  if (!hasUsablePrice(tick)) {
     // Honest empty state: no tick means no number — never a fabricated level.
     return (
       <div
         className="bg-surface-card border border-border-default rounded-lg p-3 shadow-sm min-w-36 shrink-0"
-        aria-label={`${name} awaiting live price`}
+        aria-label={`${name} awaiting ${example ? "example" : "native"} price`}
       >
         <div className="text-xxs uppercase tracking-wider text-text-muted font-sans mb-1">
           {name}
         </div>
         <div className="text-base font-mono font-bold text-text-muted">—</div>
-        <div className="text-xxs text-text-muted mt-1">Awaiting tick</div>
+        <div className="text-xxs text-text-muted mt-1">Awaiting price</div>
       </div>
     );
   }
 
-  const open = tick.open ?? prevClose;
-  const high = tick.high ?? ltp;
-  const low = tick.low ?? ltp;
+  const open = tick?.open ?? prevClose;
+  const high = tick?.high ?? ltp;
+  const low = tick?.low ?? ltp;
   const change = ltp - prevClose;
   const changePct = (change / prevClose) * 100;
   const up = change >= 0;
@@ -143,13 +146,13 @@ function IndexCard({ symbol, exchange, name }: IndexDef) {
 // ---------------------------------------------------------------------------
 
 function IndexStripWidget(_props: WidgetProps) {
-  // A tick for the lead index is the evidence that the strip is live; each
-  // card still renders its own awaiting state, so a partially-populated strip
-  // never claims data it does not have (the MarketSummary pattern).
+  const example = useModeStore((state) => state.mode === "explore");
+  // Every card independently checks its price and reference close; the badge
+  // describes provenance rather than promising a streaming transport.
   const leadTick = useAtomValue(
     tickAtomFamily(tickKeyFor(INDEX_STRIP_INDICES[0].symbol, INDEX_STRIP_INDICES[0].exchange)),
   );
-  const isLive = (leadTick?.ltp ?? 0) > 0;
+  const hasLeadPrice = hasUsablePrice(leadTick);
 
   return (
     <div
@@ -164,25 +167,29 @@ function IndexStripWidget(_props: WidgetProps) {
         <span
           role="status"
           aria-label={
-            isLive
-              ? "Index cards show live WebSocket prices"
-              : "No live ticks yet — index cards show no prices"
+            example
+              ? "Index cards show simulated Example prices"
+              : hasLeadPrice
+                ? "Index cards show native broker quotes from REST polling"
+                : "Awaiting a native quote and session reference for the lead index"
           }
           className={cn(
             "px-1.5 py-0.5 text-xxs rounded border",
-            isLive
+            example
+              ? "text-accent bg-accent/10 border-accent/30"
+              : hasLeadPrice
               ? "text-profit bg-profit/10 border-profit/30"
               : "text-warning bg-warning/10 border-warning/30",
           )}
         >
-          {isLive ? "Live" : "Awaiting ticks"}
+          {example ? "Example" : hasLeadPrice ? "Native quotes" : "Awaiting quotes"}
         </span>
       </div>
 
       {/* Card strip — horizontal scroll on narrow panels */}
       <div className="flex-1 min-h-0 flex items-start gap-2 p-2 overflow-x-auto overflow-y-auto">
         {INDEX_STRIP_INDICES.map((idx) => (
-          <IndexCard key={idx.symbol} {...idx} />
+          <IndexCard key={idx.symbol} {...idx} example={example} />
         ))}
       </div>
     </div>

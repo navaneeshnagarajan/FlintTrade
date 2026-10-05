@@ -1052,7 +1052,7 @@ def _release_gateway_project(
         cwd=repo,
         env=env,
     ).stdout
-    files = [Path(path) for path in listed.split("\0") if path]
+    files = [Path(path) for path in listed.split("\0") if path and (repo / path).is_file()]
     manifest = Path("packages/integrations/gateway/pyproject.toml")
     if manifest not in files or not any(path.is_relative_to("packages/integrations/gateway/src") for path in files):
         raise ContractError("tracked gateway source and manifest are required for release compatibility")

@@ -46,8 +46,9 @@ from .workspace_migrations import WorkspaceSnapshot, broker_workspace_version
 
 
 class _CandidateDriver(Protocol):
-    def authenticate(self, request: AccountMutationRequest, credentials: Mapping[str, object],
-                     prior_retirement: object | None) -> NativeSessionCandidate: ...
+    def authenticate(
+        self, request: AccountMutationRequest, credentials: Mapping[str, object], prior_retirement: object | None
+    ) -> NativeSessionCandidate: ...
 
     def cleanup(self, payload: object) -> None: ...
 
@@ -68,10 +69,16 @@ class _Attempt:
 class BrokerAccountReadRuntime:
     """Read-only composition with a caller-owned shared limiter across rebuilds."""
 
-    def __init__(self, *, registry: BrokerRegistry, workspace_path: Path,
-                 credential_version_for: Callable[[BrokerSelector], CredentialVersion],
-                 adapters: dict[str, object], rate_limiter: object,
-                 runtime_accepting_requests: Callable[[], bool]) -> None:
+    def __init__(
+        self,
+        *,
+        registry: BrokerRegistry,
+        workspace_path: Path,
+        credential_version_for: Callable[[BrokerSelector], CredentialVersion],
+        adapters: dict[str, object],
+        rate_limiter: object,
+        runtime_accepting_requests: Callable[[], bool],
+    ) -> None:
         self.registry = registry
         self.workspace_path = Path(workspace_path)
         self._credential_version_for = credential_version_for
@@ -106,13 +113,19 @@ class BrokerAccountReadRuntime:
         if self.read_owner is not None or self._retiring:
             raise BrokerAccountWorkspaceUnavailable
         verified = coherence_verifier()
-        if (type(verified) is not WorkspaceSnapshot or verified.version is None
-                or broker_workspace_version(verified) != broker_workspace_version(snapshot)):
+        if (
+            type(verified) is not WorkspaceSnapshot
+            or verified.version is None
+            or broker_workspace_version(verified) != broker_workspace_version(snapshot)
+        ):
             raise BrokerAccountWorkspaceUnavailable
         snapshot = verified
         provider = AuthenticatingSessionProvider(
-            self.registry, snapshot.as_dict()["brokers"]["account_acls"], workspace_snapshot=snapshot,
-            workspace_path=self.workspace_path, credential_version_for=self._credential_version_for,
+            self.registry,
+            snapshot.as_dict()["brokers"]["account_acls"],
+            workspace_snapshot=snapshot,
+            workspace_path=self.workspace_path,
+            credential_version_for=self._credential_version_for,
             coherence_verifier=coherence_verifier,
         )
         current = broker_workspace_version(snapshot)
@@ -128,8 +141,11 @@ class BrokerAccountReadRuntime:
             return
         self._provider = provider
         self.read_owner = BrokerReadOwner(
-            registry=self.registry, session_provider=provider, adapters=self._adapters,
-            workspace_path=self.workspace_path, rate_limiter=self._rate_limiter,
+            registry=self.registry,
+            session_provider=provider,
+            adapters=self._adapters,
+            workspace_path=self.workspace_path,
+            rate_limiter=self._rate_limiter,
             runtime_accepting_requests=self._accepting,
         )
 
@@ -149,18 +165,29 @@ class BrokerAccountReadRuntime:
 class BrokerAccountTransactionCoordinator:
     """One app owner, exact durable participant and retained synthetic worker."""
 
-    def __init__(self, store: AccountTransactionStore, workspace: BrokerAccountWorkspace,
-                 lifecycle: BrokerAccountLifecycleOwner, registry_owner: RegistryPublicationOwner,
-                 candidate_driver: _CandidateDriver, runtime_builder: BrokerAccountReadRuntime,
-                 mutation_admission: Callable[[], None] = require_broker_account_mutations, *,
-                 audit_sink: Callable[[AccountMutationAudit], UUID] | None = None,
-                 verify_current_actor: Callable[[], AccountActorContext] | None = None) -> None:
-        if (type(store) is not AccountTransactionStore or type(workspace) is not BrokerAccountWorkspace
-                or type(lifecycle) is not BrokerAccountLifecycleOwner
-                or type(registry_owner) is not RegistryPublicationOwner
-                or workspace._store is not store
-                or runtime_builder.registry is not registry_owner.registry
-                or audit_sink is not None and not callable(audit_sink)):
+    def __init__(
+        self,
+        store: AccountTransactionStore,
+        workspace: BrokerAccountWorkspace,
+        lifecycle: BrokerAccountLifecycleOwner,
+        registry_owner: RegistryPublicationOwner,
+        candidate_driver: _CandidateDriver,
+        runtime_builder: BrokerAccountReadRuntime,
+        mutation_admission: Callable[[], None] = require_broker_account_mutations,
+        *,
+        audit_sink: Callable[[AccountMutationAudit], UUID] | None = None,
+        verify_current_actor: Callable[[], AccountActorContext] | None = None,
+    ) -> None:
+        if (
+            type(store) is not AccountTransactionStore
+            or type(workspace) is not BrokerAccountWorkspace
+            or type(lifecycle) is not BrokerAccountLifecycleOwner
+            or type(registry_owner) is not RegistryPublicationOwner
+            or workspace._store is not store
+            or runtime_builder.registry is not registry_owner.registry
+            or audit_sink is not None
+            and not callable(audit_sink)
+        ):
             raise BrokerAccountWorkspaceUnavailable
         lifecycle.assert_bound(store._workspace_path, store._proof)
         self.store = store
@@ -197,13 +224,17 @@ class BrokerAccountTransactionCoordinator:
 
     def _validate_new(self, request: AccountMutationRequest) -> WorkspaceSnapshot:
         snapshot = self.workspace.assert_coherent()
-        if (snapshot.version != request.expected_workspace
-                or broker_workspace_version(snapshot) != request.expected_broker_workspace):
+        if (
+            snapshot.version != request.expected_workspace
+            or broker_workspace_version(snapshot) != request.expected_broker_workspace
+        ):
             raise BrokerAccountWorkspaceUnavailable
         self._provenance(request)
         return snapshot
 
-    def _outcome(self, receipt: AccountMutationReceipt, request: AccountMutationRequest | None = None) -> AccountMutationOutcome:
+    def _outcome(
+        self, receipt: AccountMutationReceipt, request: AccountMutationRequest | None = None
+    ) -> AccountMutationOutcome:
         attempt = self._attempts.get(receipt.operation_id)
         if receipt.state in (AccountOperationStage.BLOCKED, AccountOperationStage.AUTHENTICATION_UNKNOWN):
             status = "blocked"
@@ -217,15 +248,27 @@ class BrokerAccountTransactionCoordinator:
                 snapshot = self.workspace.assert_coherent()
                 if request is not None:
                     self._principal(request)
-                if (operation.abandoned or operation.workspace_conflicted
-                        or self.store.native_state(receipt.selector).version != receipt.credential_version
-                        or broker_workspace_version(snapshot) != receipt.commit_broker_workspace):
+                if (
+                    operation.abandoned
+                    or operation.workspace_conflicted
+                    or self.store.native_state(receipt.selector).version != receipt.credential_version
+                    or broker_workspace_version(snapshot) != receipt.commit_broker_workspace
+                ):
                     raise BrokerAccountWorkspaceUnavailable
                 state = self.registry.snapshot_exact_state(receipt.selector)
                 if receipt.kind is AccountMutationKind.REMOVE:
-                    status = "removed" if (state is None or state.binding is None) and not self.store.native_state(receipt.selector).present else "session_unavailable"
+                    status = (
+                        "removed"
+                        if (state is None or state.binding is None)
+                        and not self.store.native_state(receipt.selector).present
+                        else "session_unavailable"
+                    )
                 else:
-                    status = "ready" if self.runtime.ready(receipt.selector, receipt.credential_version) else "session_unavailable"
+                    status = (
+                        "ready"
+                        if self.runtime.ready(receipt.selector, receipt.credential_version)
+                        else "session_unavailable"
+                    )
             except Exception:
                 status = "session_unavailable"
         return AccountMutationOutcome(receipt, status)
@@ -235,7 +278,8 @@ class BrokerAccountTransactionCoordinator:
             return
         if attempt.retirement is not None and attempt.retirement_ticket is None:
             attempt.retirement_ticket = self.lifecycle.retain_retirement(
-                attempt.lease, self.registry_owner, attempt.retirement)
+                attempt.lease, self.registry_owner, attempt.retirement
+            )
         while not attempt.settled:
             if self.lifecycle.settle(attempt.lease, durable_disposition=True):
                 attempt.settled = True
@@ -279,25 +323,31 @@ class BrokerAccountTransactionCoordinator:
             raise BrokerAccountWorkspaceUnavailable
         state = self.registry.snapshot_exact_state(request.selector)
         if state is not None and state.binding is not None:
-            if (type(state.binding) is not SessionVersion
-                    or state.binding.credential_version != request.expected_credential
-                    or state.binding.broker_workspace_version != request.expected_broker_workspace):
+            if (
+                type(state.binding) is not SessionVersion
+                or state.binding.credential_version != request.expected_credential
+                or state.binding.broker_workspace_version != request.expected_broker_workspace
+            ):
                 raise BrokerAccountWorkspaceUnavailable
         try:
             removed = self.registry_owner.remove_session_for_exact(
-                request.selector, expected_registry=expected, operation_id=request.operation_id)
+                request.selector, expected_registry=expected, operation_id=request.operation_id
+            )
         except Exception:
             removed = self.registry_owner.removal_result_for(
-                request.operation_id, request.selector, expected_registry=expected)
+                request.operation_id, request.selector, expected_registry=expected
+            )
             if removed is None:
-                self.store.settle(request.operation_id, state=AccountOperationStage.BLOCKED,
-                                  reason="registry_removal_outcome_unknown")
+                self.store.settle(
+                    request.operation_id, state=AccountOperationStage.BLOCKED, reason="registry_removal_outcome_unknown"
+                )
                 raise
         attempt.tombstone = removed.version
         attempt.retirement = removed.retired
         if removed.retired is not None:
             attempt.retirement_ticket = self.lifecycle.retain_retirement(
-                attempt.lease, self.registry_owner, removed.retired)
+                attempt.lease, self.registry_owner, removed.retired
+            )
         if self.registry.snapshot_selector(request.selector) != attempt.tombstone:
             raise BrokerAccountWorkspaceUnavailable
 
@@ -308,8 +358,12 @@ class BrokerAccountTransactionCoordinator:
             prepared = None
             try:
                 prepared = self.registry_owner.prepare_session_candidate(
-                    request.selector, attempt.candidate.session, expected_registry=attempt.tombstone,
-                    authority=authority, broker=request.broker, label=request.label,
+                    request.selector,
+                    attempt.candidate.session,
+                    expected_registry=attempt.tombstone,
+                    authority=authority,
+                    broker=request.broker,
+                    label=request.label,
                 )
                 self.registry_owner.publish_prepared_candidate(prepared, current_authority=authority)
             except BaseException as error:
@@ -323,7 +377,8 @@ class BrokerAccountTransactionCoordinator:
                         retired = self.registry_owner.retirement_for_candidate(attempt.candidate.session)
                     if retired is None:
                         prepared = self.registry_owner.prepared_candidate_for(
-                            attempt.candidate.session, expected_registry=attempt.tombstone)
+                            attempt.candidate.session, expected_registry=attempt.tombstone
+                        )
                         if prepared is not None:
                             retired = self.registry_owner.abandon_prepared_candidate(prepared)
                     if retired is not None:
@@ -335,7 +390,9 @@ class BrokerAccountTransactionCoordinator:
         snapshot = self.workspace.with_current_authority(request.operation_id, publish)
         self.runtime.rebuild(snapshot, coherence_verifier=self.workspace.assert_coherent)
 
-    def _commit_and_publish(self, request: AccountMutationRequest, attempt: _Attempt, patch: BrokerAccountPatch) -> AccountMutationReceipt:
+    def _commit_and_publish(
+        self, request: AccountMutationRequest, attempt: _Attempt, patch: BrokerAccountPatch
+    ) -> AccountMutationReceipt:
         self._principal(request)
         witness = self.workspace.commit(request.operation_id, patch)
         try:
@@ -355,8 +412,13 @@ class BrokerAccountTransactionCoordinator:
 
     async def mutate(self, request: AccountMutationRequest, *, timeout: float) -> AccountMutationOutcome:
         """Perform one bounded borrower operation without cancelling real workers."""
-        if (type(request) is not AccountMutationRequest or type(timeout) not in (int, float)
-                or isinstance(timeout, bool) or not math.isfinite(timeout) or timeout < 0):
+        if (
+            type(request) is not AccountMutationRequest
+            or type(timeout) not in (int, float)
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout < 0
+        ):
             raise ValueError("account_mutation_invalid")
         request.__post_init__()
         deadline = time.monotonic() + timeout
@@ -374,12 +436,17 @@ class BrokerAccountTransactionCoordinator:
                 await self._settle(existing.receipt, attempt, deadline)
             return self._outcome(existing.receipt, request)
         # Operation-kind eligibility is known without authenticating a candidate.
-        BrokerAccountPatch(request.kind, request.selector, request.data_roles,
-                           None if request.kind is AccountMutationKind.REMOVE else False)
+        BrokerAccountPatch(
+            request.kind,
+            request.selector,
+            request.data_roles,
+            None if request.kind is AccountMutationKind.REMOVE else False,
+        )
         if attempt is not None and attempt.borrowing:
             raise RuntimeError("account_mutation_busy")
         # Runtime admission precedes the durable row: shutdown cannot strand it.
         if attempt is None:
+
             def release_claim():
                 if self.store.existing_request(request) is not None:
                     self.store.release_claim(request.operation_id)
@@ -412,6 +479,7 @@ class BrokerAccountTransactionCoordinator:
                 credentials = request.credentials
                 if credentials is None:
                     credentials = self.store.native_credentials(request.selector, request.expected_credential)
+
                 def authenticate():
                     self._principal(request)
                     self._admission()
@@ -421,17 +489,27 @@ class BrokerAccountTransactionCoordinator:
                     if type(candidate) is not NativeSessionCandidate:
                         raise ValueError("account_candidate_invalid")
                     attempt.candidate = candidate
-                    attempt.ticket = self.lifecycle.retain_candidate(attempt.lease, candidate.session, self.driver.cleanup)
+                    attempt.ticket = self.lifecycle.retain_candidate(
+                        attempt.lease, candidate.session, self.driver.cleanup
+                    )
 
                 worker = self.lifecycle.run_worker(
-                    attempt.lease, authenticate, accept_result=accept,
-                    before_dispatch=lambda: self.store.mark_authentication_started(request.operation_id))
+                    attempt.lease,
+                    authenticate,
+                    accept_result=accept,
+                    before_dispatch=lambda: self.store.mark_authentication_started(request.operation_id),
+                )
                 try:
-                    await self.lifecycle.wait_worker(attempt.lease, worker, timeout=max(0.0, deadline - time.monotonic()))
+                    await self.lifecycle.wait_worker(
+                        attempt.lease, worker, timeout=max(0.0, deadline - time.monotonic())
+                    )
                 except AccountAuthenticationRejected:
                     receipt = self.lifecycle.with_disposition_fence(
-                        attempt.lease, lambda: self.store.settle(request.operation_id,
-                            state=AccountOperationStage.REJECTED, reason="authentication_rejected"))
+                        attempt.lease,
+                        lambda: self.store.settle(
+                            request.operation_id, state=AccountOperationStage.REJECTED, reason="authentication_rejected"
+                        ),
+                    )
                     await self._settle(receipt, attempt, deadline)
                     return self._outcome(receipt, request)
                 if attempt.candidate.probe_error is not None:
@@ -439,9 +517,13 @@ class BrokerAccountTransactionCoordinator:
             read_only = None if request.kind is AccountMutationKind.REMOVE else attempt.candidate.is_read_only
             patch = BrokerAccountPatch(request.kind, request.selector, request.data_roles, read_only)
             self.store.stage_plan(
-                request.operation_id, replay_credentials=None if request.kind is AccountMutationKind.REMOVE
-                else attempt.candidate.replay_credentials, read_only=read_only,
-                before_digest=broker_account_digest(snapshot), after_digest=broker_account_digest(patch.apply(snapshot.config)),
+                request.operation_id,
+                replay_credentials=None
+                if request.kind is AccountMutationKind.REMOVE
+                else attempt.candidate.replay_credentials,
+                read_only=read_only,
+                before_digest=broker_account_digest(snapshot),
+                after_digest=broker_account_digest(patch.apply(snapshot.config)),
             )
             receipt = self.lifecycle.publish_if_current(
                 attempt.lease, lambda: self._commit_and_publish(request, attempt, patch)
@@ -477,10 +559,14 @@ class BrokerAccountTransactionCoordinator:
             return receipts
         attempt = self._attempts.get(active.operation_id)
         if attempt is None:
-            attempt = _Attempt(self.lifecycle.begin(
-                active.operation_id, active.selector,
-                durable_claim_release=lambda: self.store.release_claim(active.operation_id)),
-                expected_registry=self.registry.snapshot_selector(active.selector))
+            attempt = _Attempt(
+                self.lifecycle.begin(
+                    active.operation_id,
+                    active.selector,
+                    durable_claim_release=lambda: self.store.release_claim(active.operation_id),
+                ),
+                expected_registry=self.registry.snapshot_selector(active.selector),
+            )
             self._attempts[active.operation_id] = attempt
         receipts = self.lifecycle.with_disposition_fence(attempt.lease, self.workspace.recover)
         if receipts and receipts[0].state in (AccountOperationStage.COMMITTED, AccountOperationStage.REJECTED):

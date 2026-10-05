@@ -28,10 +28,10 @@ If any metric fails, return to backtesting. Do not rationalise.
 **Code and configuration:**
 - [ ] All hardcoded values replaced with config parameters
 - [ ] API key stored through FlintTrade Setup/Settings or the encrypted vault, never in code
-- [ ] OpenAlgo host set to the intended target through Setup/Settings
+- [ ] broker host set to the intended target through Setup/Settings
 - [ ] Product type correct: `MIS` for intraday, `NRML` for overnight/options sell
 - [ ] Lot size resolved from current instrument metadata; no hardcoded lot assumptions
-- [ ] Symbol format validated against OpenAlgo `/api/v1/symbol` endpoint
+- [ ] Symbol format validated against the native instrument resolver
 
 **Safety systems:**
 - [ ] Layer 4 daily-loss pause and hard-stop thresholds configured and verified to block only new orders
@@ -41,15 +41,15 @@ If any metric fails, return to backtesting. Do not rationalise.
 - [ ] WebSocket reconnect with position re-sync on disconnect
 
 **Connectivity:**
-- [ ] OpenAlgo `/api/v1/ping` returns success
-- [ ] Broker authenticated (verify `/api/v1/funds` succeeds; a zero balance is not an authentication failure)
+- [ ] The native account session is current and read smoke checks pass
+- [ ] Broker authenticated (verify the connected native account funds reader succeeds; a zero balance is not an authentication failure)
 - [ ] WebSocket connection stable for 30 minutes under load test
 
 ## Phase 3 — Go-Live Checklist (Day 1)
 
 Run these checks at 09:00 IST, 15 minutes before market open:
 
-1. OpenAlgo health check: `make health`
+1. broker health check: `make health`
 2. Funds available: minimum 2× required margin per instrument
 3. No open positions from yesterday (flat start)
 4. Explicit Layer 5 control reachable; account-MTM breaker monitoring checked separately
@@ -87,7 +87,7 @@ Never skip a scale step because early results look good. Slippage and market imp
 
 **Level 3 — Layer 4 daily-loss threshold or explicit Layer 5 activation:** Layer 4 blocks new orders only. Explicit Layer 5 or the separate account-MTM breaker may cancel or flatten; confirm broker exposure before declaring positions closed. Complete a post-mortem before the next session and file it in `~/.flinttrade/incidents/YYYYMMDD.md`.
 
-**Level 4 — Broker/API unresponsive:** Close positions manually via broker's own app. Notify broker support. Keep a phone or mobile app login for this scenario — do not rely solely on OpenAlgo when a broker is having issues.
+**Level 4 — Broker/API unresponsive:** Close positions manually via broker's own app. Notify broker support. Keep a phone or mobile app login for this scenario — do not rely solely on broker when a broker is having issues.
 
 ## Post-Session Review (Every Day)
 

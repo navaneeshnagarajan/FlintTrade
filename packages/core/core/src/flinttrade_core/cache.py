@@ -151,7 +151,9 @@ class Cache:
             # Evict LRU if at capacity
             while len(self._store) >= self._max_size:
                 evicted_key, _ = self._store.popitem(last=False)
-                self._deregister_tags(evicted_key, self._store.get(evicted_key, CacheEntry(evicted_key, None, 0, None)).tags)
+                self._deregister_tags(
+                    evicted_key, self._store.get(evicted_key, CacheEntry(evicted_key, None, 0, None)).tags
+                )
                 logger.debug("Cache: LRU eviction of key '%s'", evicted_key)
 
             self._store[key] = entry

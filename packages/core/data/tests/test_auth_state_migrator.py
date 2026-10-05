@@ -15,9 +15,7 @@ from pathlib import Path
 
 import pytest
 
-_MIG_PATH = (
-    Path(__file__).resolve().parents[4] / "scripts" / "migrate-auth-state-duckdb-to-sqlite.py"
-)
+_MIG_PATH = Path(__file__).resolve().parents[4] / "scripts" / "migrate-auth-state-duckdb-to-sqlite.py"
 
 
 def _load():
@@ -52,9 +50,16 @@ def test_create_schema_makes_all_canonical_tables(mig, tmp_path: Path) -> None:
     db = tmp_path / "auth_state.sqlite"
     mig.create_schema(db)
     assert _tables(db) >= {
-        "revoked_jtis", "rate_limit_events", "otp_requests", "consent_ledger",
-        "agent_runs", "webhooks", "webhook_nonces", "login_sessions",
-        "audit_chain_head", "auth_sessions",
+        "revoked_jtis",
+        "rate_limit_events",
+        "otp_requests",
+        "consent_ledger",
+        "agent_runs",
+        "webhooks",
+        "webhook_nonces",
+        "login_sessions",
+        "audit_chain_head",
+        "auth_sessions",
     }
 
 
@@ -118,9 +123,7 @@ def test_webhook_id_immutability_check(mig, tmp_path: Path) -> None:
 
 def test_migrate_fresh_install_creates_schema(mig, tmp_path: Path) -> None:
     """No legacy DuckDB → migrate() creates the canonical schema and returns 0."""
-    args = argparse.Namespace(
-        master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None
-    )
+    args = argparse.Namespace(master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None)
     rc = mig.migrate(tmp_path, args)
     assert rc == 0
     assert (tmp_path / "auth_state.sqlite").exists()
@@ -128,8 +131,6 @@ def test_migrate_fresh_install_creates_schema(mig, tmp_path: Path) -> None:
 
 
 def test_migrate_idempotent_when_sqlite_exists(mig, tmp_path: Path) -> None:
-    args = argparse.Namespace(
-        master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None
-    )
+    args = argparse.Namespace(master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None)
     assert mig.migrate(tmp_path, args) == 0
     assert mig.migrate(tmp_path, args) == 0  # second run is a no-op

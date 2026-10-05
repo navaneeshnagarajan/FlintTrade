@@ -114,9 +114,7 @@ class QuestDBBridgeError(Exception):
 
 _SYMBOL_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,32}$")
 _INTERVAL_RE = re.compile(r"^[0-9]{1,3}[smhdMy]$")
-_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?Z?)?$"
-)
+_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?Z?)?$")
 _TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
 
@@ -124,9 +122,7 @@ def _validate_symbol(symbol: str) -> str:
     """Strict allowlist for trading symbols. Returns the symbol unchanged
     when valid; raises ``QuestDBBridgeError`` otherwise."""
     if not isinstance(symbol, str) or not _SYMBOL_RE.match(symbol):
-        raise QuestDBBridgeError(
-            f"Invalid symbol {symbol!r}: must match {_SYMBOL_RE.pattern}"
-        )
+        raise QuestDBBridgeError(f"Invalid symbol {symbol!r}: must match {_SYMBOL_RE.pattern}")
     return symbol
 
 
@@ -135,9 +131,7 @@ def _validate_interval(interval: str) -> str:
     ``1d``, ``1M``, ``1y`` — i.e. ``<int><unit>`` where unit is one of
     s/m/h/d/M/y. Raises on anything else."""
     if not isinstance(interval, str) or not _INTERVAL_RE.match(interval):
-        raise QuestDBBridgeError(
-            f"Invalid interval {interval!r}: must match {_INTERVAL_RE.pattern}"
-        )
+        raise QuestDBBridgeError(f"Invalid interval {interval!r}: must match {_INTERVAL_RE.pattern}")
     return interval
 
 
@@ -148,8 +142,7 @@ def _validate_timestamp(ts: str, *, label: str) -> str:
     but rejects anything containing quote or semicolon characters."""
     if not isinstance(ts, str) or not _TIMESTAMP_RE.match(ts):
         raise QuestDBBridgeError(
-            f"Invalid {label} timestamp {ts!r}: must be ISO-8601 "
-            "(e.g. '2026-04-08' or '2026-04-08T09:15:00')"
+            f"Invalid {label} timestamp {ts!r}: must be ISO-8601 (e.g. '2026-04-08' or '2026-04-08T09:15:00')"
         )
     return ts
 
@@ -158,9 +151,7 @@ def _validate_table_name(name: str) -> str:
     """Allow only standard SQL identifier characters for table names. Used
     to protect the literal interpolation of ``self.table`` in queries."""
     if not isinstance(name, str) or not _TABLE_RE.match(name):
-        raise QuestDBBridgeError(
-            f"Invalid table name {name!r}: must match {_TABLE_RE.pattern}"
-        )
+        raise QuestDBBridgeError(f"Invalid table name {name!r}: must match {_TABLE_RE.pattern}")
     return name
 
 
@@ -301,9 +292,7 @@ class QuestDBBridge:
             raise QuestDBBridgeError(f"QuestDB query request failed: {exc}") from exc
 
         if resp.status_code != 200:
-            raise QuestDBBridgeError(
-                f"QuestDB query returned HTTP {resp.status_code}: {resp.text[:200]}"
-            )
+            raise QuestDBBridgeError(f"QuestDB query returned HTTP {resp.status_code}: {resp.text[:200]}")
 
         body: dict[str, Any] = resp.json()
 
@@ -381,10 +370,6 @@ class QuestDBBridge:
         symbol_v = _validate_symbol(symbol)
         table_v = _validate_table_name(self.table)
 
-        sql = (
-            f"SELECT * FROM '{table_v}' "
-            f"WHERE symbol = '{symbol_v}' "
-            f"ORDER BY timestamp DESC LIMIT 1"
-        )
+        sql = f"SELECT * FROM '{table_v}' WHERE symbol = '{symbol_v}' ORDER BY timestamp DESC LIMIT 1"
         rows = self.query(sql)
         return rows[0] if rows else None

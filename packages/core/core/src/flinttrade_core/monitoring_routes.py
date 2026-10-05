@@ -13,6 +13,7 @@ GET /api/v1/traffic/recent     — recent requests
 GET /api/v1/latency/stats      — order latency stats
 GET /api/v1/latency/recent     — recent latency records
 """
+
 from __future__ import annotations
 
 import logging
@@ -105,18 +106,20 @@ def traffic_stats() -> tuple[Any, int]:
     since = datetime.now(_IST) - timedelta(minutes=minutes)
     stats = traffic_logger.stats(since=since)
     total = int(stats.get("total_requests", 0) or 0)
-    return jsonify({
-        "status": "success",
-        "data": {
-            "window_minutes": minutes,
-            "total_requests": total,
-            "requests_per_sec": round(total / (minutes * 60), 4),
-            "error_rate": stats.get("error_rate", 0.0),
-            "avg_latency_ms": stats.get("avg_duration_ms", 0.0),
-            "p95_latency_ms": stats.get("p95_duration_ms", 0.0),
-            "top_paths": stats.get("top_paths", []),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "window_minutes": minutes,
+                "total_requests": total,
+                "requests_per_sec": round(total / (minutes * 60), 4),
+                "error_rate": stats.get("error_rate", 0.0),
+                "avg_latency_ms": stats.get("avg_duration_ms", 0.0),
+                "p95_latency_ms": stats.get("p95_duration_ms", 0.0),
+                "top_paths": stats.get("top_paths", []),
+            },
+        }
+    ), 200
 
 
 @monitoring_bp.route("/traffic/recent", methods=["GET"])

@@ -20,9 +20,9 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 
 vi.mock("@/stores/connectionStore", () => ({
-  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  //  models a normally-loaded app; the hydration
   // fail-closed window is covered by brokerTargets/api tests.
-  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey, openAlgoHydrated: true }) },
+  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey }) },
 }));
 
 vi.mock("@/stores/authStore", () => ({
@@ -30,6 +30,8 @@ vi.mock("@/stores/authStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native" }>,
     selector: string | null,
@@ -691,8 +693,8 @@ describe("startAgent", () => {
     expect(requestBody(fetchMock)).toMatchObject({ broker: "dhan", account_id: "D1" });
   });
 
-  it("keeps OpenAlgo primary when a bridge API key is configured", async () => {
-    storeState.apiKey = "openalgo-key";
+  it("keeps the exact native target despite stale transport credentials", async () => {
+    storeState.apiKey = "stale-backend-key";
     storeState.brokerState = {
       accounts: [
         { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -702,8 +704,7 @@ describe("startAgent", () => {
 
     await startAgent(BASE_PARAMS);
 
-    expect(requestBody(fetchMock)).not.toHaveProperty("broker");
-    expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
+    expect(requestBody(fetchMock)).toMatchObject({ broker: "upstox", account_id: "U1" });
   });
 
   it("does not add a native target outside live mode", async () => {
@@ -743,7 +744,7 @@ describe("runTeamAnalysisStream", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    storeState.apiKey = "openalgo-key";
+    storeState.apiKey = "stale-backend-key";
     storeState.token = "jwt-token";
   });
 

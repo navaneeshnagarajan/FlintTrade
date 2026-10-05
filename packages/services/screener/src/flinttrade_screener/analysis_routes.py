@@ -557,7 +557,7 @@ def _live_option_chain(
 ) -> dict[str, Any] | None:
     """Fetch a REAL option chain via an existing configured broker read path.
 
-    The OpenAlgo client's ``OptionChainStrike`` fields (strike_price, ce/pe ltp,
+    The broker client's ``OptionChainStrike`` fields (strike_price, ce/pe ltp,
     oi, iv, greeks) match the keys the snapshot builder reads, so a ``model_dump``
     per strike is a direct fit. The legacy registry may also expose a compatible
     ``get_option_chain(account_id, params)`` method; use it only when present.
@@ -623,13 +623,13 @@ def _live_option_chain(
                 exc,
             )
 
-    client = current_app.config.get("OPENALGO_CLIENT")
+    client = current_app.config.get("BROKER_CLIENT")
     if client is not None:
         try:
 
             # One-owner-loop rule: the shared client's pooled connections are
             # loop-affine; run on its owner loop, never a fresh asyncio.run().
-            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+            from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
             chain = client_call_sync(
                 client,
@@ -642,7 +642,7 @@ def _live_option_chain(
                 candidates.append(normalised)
         except Exception as exc:  # noqa: BLE001 - any failure degrades to the registry/sample path
             logger.warning(
-                "Live option chain via OpenAlgo failed for %s %s: %s",
+                "Live option chain via broker failed for %s %s: %s",
                 symbol,
                 underlying_exchange,
                 exc,
@@ -868,7 +868,7 @@ def _resolve_gex_lot_size(
         return _chain_lot_size(chain_data)
 
     normalised_symbol = symbol.strip().upper()
-    client = current_app.config.get("OPENALGO_CLIENT")
+    client = current_app.config.get("BROKER_CLIENT")
     if client is None:
         return None
     resolution = LotSizeResolver(client).resolve(normalised_symbol, exchange)
@@ -899,7 +899,7 @@ def gex_endpoint() -> Any:
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    # Live data via the OpenAlgo bridge (the functional adapter).
+    # Live data via the broker bridge (the functional adapter).
     chain_data = None
     authoritative_dte = _live_option_days_to_expiry(expiry)
     if authoritative_dte is not None:
@@ -1893,7 +1893,7 @@ def rrg_sectors_endpoint() -> Any:
         }
 
     Notes:
-        - Uses OpenAlgo /history endpoint (weekly) when broker is connected.
+        - Uses broker /history endpoint (weekly) when broker is connected.
         - Falls back to deterministic synthetic data in dev/disconnected mode.
         - Benchmark is always NIFTY 50 (NSE_INDEX).
     """
@@ -2101,7 +2101,7 @@ def rrg_portfolio_endpoint() -> Any:
 
 
 def _candles_to_series(candles: list[dict[str, Any]]) -> _Series:
-    """Convert OpenAlgo OHLCV candle list to a dated close-price _Series.
+    """Convert broker OHLCV candle list to a dated close-price _Series.
 
     Candle format: {"time": unix_ts, "open": f, "high": f, "low": f, "close": f, "volume": i}
     or {"timestamp": unix_ts, ...} — handles both field names.

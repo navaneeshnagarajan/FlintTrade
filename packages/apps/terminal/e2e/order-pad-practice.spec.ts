@@ -122,19 +122,8 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await page.clock.install({ time: controlledTime });
   await page.clock.pauseAt(controlledTime);
   await seedOrderPadWorkspace(page);
-  syntheticApi.register({
-    name: "list gateway accounts for the Practice workspace",
-    method: "GET",
-    path: "/ft-api/v1/accounts",
-    // TanStack now propagates its AbortSignal through account discovery. In
-    // React StrictMode the development-only first mount may therefore abort
-    // and remount instead of sharing the original in-flight request.
-    expectedCalls: { minimum: 1, maximum: 2 },
-    handler: (request) => {
-      expectAuthenticatedGet(request);
-      return { json: { accounts: [] } };
-    },
-  });
+  // This desk discovers native accounts through the endpoint below. Leave
+  // unused gateway-account routes unregistered so any new request fails closed.
   syntheticApi.register({
     name: "list native accounts for Practice market-data resolution",
     method: "GET",
@@ -151,26 +140,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { accounts: [] } };
     },
   });
-  syntheticApi.register({
-    name: "hydrate blank OpenAlgo configuration",
-    method: "GET",
-    path: "/ft-api/v1/config/openalgo",
-    expectedCalls: 2,
-    handler: (request) => {
-      expectAuthenticatedGet(request);
-      return {
-        json: {
-          status: "success",
-          data: {
-            api_key_configured: false,
-            host: "",
-            port: "",
-            ws_port: "",
-          },
-        },
-      };
-    },
-  });
+
   syntheticApi.register({
     name: "read Practice sandbox funds",
     method: "GET",

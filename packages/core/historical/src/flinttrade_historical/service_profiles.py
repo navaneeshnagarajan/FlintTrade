@@ -21,15 +21,15 @@ class HistoricalProviderProfile:
     activation_blockers: tuple[str, ...]
 
 
-OPENALGO_PROFILE = HistoricalProviderProfile(
-    runtime_name="openalgo",
-    provider_id="market-data:openalgo-history",
-    display_name="OpenAlgo historical data",
+NATIVE_BROKER_PROFILE = HistoricalProviderProfile(
+    runtime_name="native",
+    provider_id="market-data:native-history",
+    display_name="native broker historical data",
     exchanges=("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"),
     pricing_class="unknown",
     requires_configured_client=True,
-    provenance=("Configured OpenAlgo client history endpoint.",),
-    activation_blockers=("A configured OpenAlgo client is required.",),
+    provenance=("Configured native broker client history endpoint.",),
+    activation_blockers=("A configured native broker client is required.",),
 )
 
 OPENCHART_PROFILE = HistoricalProviderProfile(
@@ -57,7 +57,7 @@ YFINANCE_PROFILE = HistoricalProviderProfile(
 )
 
 HISTORICAL_PROVIDER_PROFILES: tuple[HistoricalProviderProfile, ...] = (
-    OPENALGO_PROFILE,
+    NATIVE_BROKER_PROFILE,
     OPENCHART_PROFILE,
     YFINANCE_PROFILE,
 )

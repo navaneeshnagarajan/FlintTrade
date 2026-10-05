@@ -18,22 +18,21 @@ State machine (WheelPhase):
                                WAITING_CSP
 
 Live execution details:
-- Nearest expiry resolved via OpenAlgo ``expiry`` endpoint.
+- Expiry reads require a supported native market-data capability.
 - Premium validity: skip the option if LTP < ₹10.
 - SL placed at 30% above entry premium (e.g. sold @ ₹50 → SL BUY @ ₹65).
 - Quote and expiry reads may use
-  :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`; generated orders are
+  :class:`~flinttrade_core.broker_client.BrokerClient`; generated orders are
   queued for FlintTrade's canonical gated strategy runtime and never written
   through that raw client.
-- Telegram alerts sent on every state transition via the client's
-  ``telegram()`` method.
+- Alerts require a configured platform notification provider.
 
 Usage::
 
-    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.broker_client import BrokerClient
     from flinttrade_engine.strategies.wheel_live import WheelStrategy
 
-    client = OpenAlgoClient(host="http://localhost:5000", api_key="...")
+    client = BrokerClient()
     strategy = WheelStrategy(
         symbol="NIFTY",
         exchange="NFO",
@@ -48,10 +47,10 @@ from __future__ import annotations
 
 import logging
 from enum import StrEnum
-from typing import Any
+from typing import Any, Awaitable, Callable
 
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import OHLCV, Order, Quote
-from flinttrade_core.openalgo_client import OpenAlgoClient
 from flinttrade_engine.strategy import BaseStrategy
 
 logger = logging.getLogger("flinttrade.engine.strategies.wheel_live")
@@ -93,10 +92,10 @@ class WheelPhase(StrEnum):
 
 
 class WheelStrategy(BaseStrategy):
-    """Live Wheel options strategy executed via OpenAlgo.
+    """Live Wheel options strategy executed via broker.
 
     Manages the full CSP → assignment → CC cycle for a single underlying
-    instrument.  All OpenAlgo API calls are async.
+    instrument.  All broker API calls are async.
 
     Args:
         symbol:           Underlying symbol (e.g. ``"NIFTY"``).
@@ -104,14 +103,14 @@ class WheelStrategy(BaseStrategy):
         product:          Order product type (default ``"MIS"``).
         quantity:         Lot size / quantity per leg.
         client:           Read-capable
-                          :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`
+                          :class:`~flinttrade_core.broker_client.BrokerClient`
                           instance for quotes, expiries, and notifications. It
                           is never used for broker mutation.
         put_strike_offset: Distance from ATM to put strike (in points).
                            ``0`` means ATM.  Default ``0``.
         call_strike_offset: Distance above cost-basis to call strike (in points).
                             ``0`` means ATM.  Default ``0``.
-        strategy_tag:     OpenAlgo strategy name tag for order tracking.
+        strategy_tag:     broker strategy name tag for order tracking.
 
     State transitions::
 
@@ -136,7 +135,8 @@ class WheelStrategy(BaseStrategy):
         exchange: str = "NFO",
         product: str = "MIS",
         quantity: int = 50,
-        client: OpenAlgoClient | None = None,
+        client: BrokerClient | None = None,
+        alert_sender: Callable[[str], Awaitable[Any]] | None = None,
         put_strike_offset: float = 0.0,
         call_strike_offset: float = 0.0,
         strategy_tag: str = "wheel",
@@ -148,6 +148,7 @@ class WheelStrategy(BaseStrategy):
         self.symbol = symbol
         self.quantity = quantity
         self._client = client
+        self._alert_sender = alert_sender
         self.put_strike_offset = put_strike_offset
         self.call_strike_offset = call_strike_offset
         self.strategy_tag = strategy_tag
@@ -423,11 +424,11 @@ class WheelStrategy(BaseStrategy):
             )
 
     # ------------------------------------------------------------------
-    # OpenAlgo API helpers
+    # broker API helpers
     # ------------------------------------------------------------------
 
     async def _get_nearest_expiry(self) -> str:
-        """Fetch nearest expiry for the underlying via OpenAlgo.
+        """Fetch nearest expiry for the underlying via broker.
 
         Returns:
             Nearest expiry date string (e.g. ``"27-Apr-2025"``),
@@ -470,7 +471,7 @@ class WheelStrategy(BaseStrategy):
         """Fetch LTP for a specific option symbol.
 
         Args:
-            option_symbol: Full OpenAlgo option symbol string.
+            option_symbol: Full broker option symbol string.
 
         Returns:
             LTP as float, or ``0.0`` on failure.
@@ -540,18 +541,14 @@ class WheelStrategy(BaseStrategy):
         )
 
     async def _send_telegram(self, message: str) -> None:
-        """Send a Telegram alert via the OpenAlgo client.
-
-        Args:
-            message: Alert text.
-        """
-        if self._client is None:
-            logger.info("WheelStrategy (no client): Telegram: %s", message)
+        """Deliver an observation through an explicitly injected alert sender."""
+        if self._alert_sender is None:
+            logger.info("WheelStrategy: %s", message)
             return
         try:
-            await self._client.telegram(message)
-        except Exception as exc:
-            logger.warning("WheelStrategy: Telegram alert failed: %s", exc)
+            await self._alert_sender(message)
+        except Exception:
+            logger.warning("WheelStrategy: native alert delivery failed")
 
     # ------------------------------------------------------------------
     # State transition helper
@@ -602,13 +599,13 @@ class WheelStrategy(BaseStrategy):
     ) -> str:
         """Build a generic option symbol string.
 
-        This builds a symbol in the format expected by most OpenAlgo broker
+        This builds a symbol in the format expected by most broker broker
         integrations.  Actual symbol formats vary by broker; adjust this
         method if the broker-specific ``optionsymbol`` endpoint is preferred.
 
         Args:
             underlying: Underlying symbol (e.g. ``"NIFTY"``).
-            expiry:     Expiry string from OpenAlgo (e.g. ``"27-Apr-2025"``).
+            expiry:     Expiry string from broker (e.g. ``"27-Apr-2025"``).
             strike:     Strike price (e.g. ``22000.0``).
             opt_type:   ``"PE"`` or ``"CE"``.
 

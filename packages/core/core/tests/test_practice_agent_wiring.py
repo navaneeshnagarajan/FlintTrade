@@ -17,12 +17,22 @@ def controls(monkeypatch):
         def respond(*args):
             called.append((name, args))
             return jsonify({"status": "success", "data": {"mode": "practice", "operation": name}}), 200
+
         return respond
 
-    runtime = SimpleNamespace(**{name: handler(name) for name in (
-        "start_practice_agent", "stop_practice_agent", "practice_agent_status",
-        "list_practice_runs", "practice_run_events", "resolve_practice_run",
-    )})
+    runtime = SimpleNamespace(
+        **{
+            name: handler(name)
+            for name in (
+                "start_practice_agent",
+                "stop_practice_agent",
+                "practice_agent_status",
+                "list_practice_runs",
+                "practice_run_events",
+                "resolve_practice_run",
+            )
+        }
+    )
     runtime.shutdown_practice_agent = lambda app, timeout: called.append(("shutdown", ())) or True
     monkeypatch.setitem(sys.modules, "flinttrade_core.practice_agent_runtime", runtime)
     monkeypatch.setattr(order_routes, "_decode_request_payload", lambda: {"mode": "practice"})
@@ -32,14 +42,17 @@ def controls(monkeypatch):
     return app, called
 
 
-@pytest.mark.parametrize(("method", "path", "operation"), [
-    ("post", "/start", "start_practice_agent"),
-    ("post", "/stop", "stop_practice_agent"),
-    ("get", "/status", "practice_agent_status"),
-    ("get", "/practice/runs", "list_practice_runs"),
-    ("get", "/practice/runs/run-1/events", "practice_run_events"),
-    ("post", "/practice/runs/run-1/resolve", "resolve_practice_run"),
-])
+@pytest.mark.parametrize(
+    ("method", "path", "operation"),
+    [
+        ("post", "/start", "start_practice_agent"),
+        ("post", "/stop", "stop_practice_agent"),
+        ("get", "/status", "practice_agent_status"),
+        ("get", "/practice/runs", "list_practice_runs"),
+        ("get", "/practice/runs/run-1/events", "practice_run_events"),
+        ("post", "/practice/runs/run-1/resolve", "resolve_practice_run"),
+    ],
+)
 def test_public_practice_control_is_routed(controls, method, path, operation):
     app, called = controls
     response = getattr(app.test_client(), method)("/api/v1/ai/agent" + path, json={})

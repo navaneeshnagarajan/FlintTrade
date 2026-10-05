@@ -82,7 +82,7 @@ export function symbolOf(pos: Position): string {
   return String(wire.symbol ?? wire.tradingsymbol ?? "");
 }
 
-/** Extract strategy tag from an OpenAlgo position — falls back to "default". */
+/** Extract strategy tag from an broker position — falls back to "default". */
 export function strategyOf(pos: Position): string {
   return (pos as WirePosition).strategy ?? "default";
 }

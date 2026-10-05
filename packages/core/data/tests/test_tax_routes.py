@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/data/tests/test_tax_routes.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import datetime
@@ -34,6 +35,7 @@ _TEST_API_KEY = "test-tax-routes-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -44,7 +46,7 @@ def app_client(monkeypatch_module):
     """Return a Flask test client with the tax blueprint registered."""
     from flinttrade_core.app import create_flask_app
 
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
 
     flask_app = create_flask_app()
     flask_app.config["TESTING"] = True
@@ -69,12 +71,26 @@ class TestTaxSummaryEndpoint:
         resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
         data = json.loads(resp.data)["data"]
         required_fields = [
-            "fy", "equity_ltcg", "equity_stcg", "intraday_pnl",
-            "fno_pnl", "commodity_pnl", "stt_paid", "turnover",
-            "tax_liability_estimated", "ltcg_exemption_used",
-            "needs_audit", "audit_assessment", "audit_assessment_reason",
-            "tax_estimate_methodology", "stt_methodology", "stt_rate_provenance",
-            "stt_rate_schedule", "trade_count", "is_sample_data", "data_source",
+            "fy",
+            "equity_ltcg",
+            "equity_stcg",
+            "intraday_pnl",
+            "fno_pnl",
+            "commodity_pnl",
+            "stt_paid",
+            "turnover",
+            "tax_liability_estimated",
+            "ltcg_exemption_used",
+            "needs_audit",
+            "audit_assessment",
+            "audit_assessment_reason",
+            "tax_estimate_methodology",
+            "stt_methodology",
+            "stt_rate_provenance",
+            "stt_rate_schedule",
+            "trade_count",
+            "is_sample_data",
+            "data_source",
         ]
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
@@ -123,9 +139,15 @@ class TestTaxSummaryEndpoint:
         resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
         data = json.loads(resp.data)["data"]
         numeric_fields = [
-            "equity_ltcg", "equity_stcg", "intraday_pnl",
-            "fno_pnl", "commodity_pnl", "stt_paid", "turnover",
-            "tax_liability_estimated", "ltcg_exemption_used",
+            "equity_ltcg",
+            "equity_stcg",
+            "intraday_pnl",
+            "fno_pnl",
+            "commodity_pnl",
+            "stt_paid",
+            "turnover",
+            "tax_liability_estimated",
+            "ltcg_exemption_used",
         ]
         for field in numeric_fields:
             assert isinstance(data[field], (int, float)), f"{field} is not numeric"

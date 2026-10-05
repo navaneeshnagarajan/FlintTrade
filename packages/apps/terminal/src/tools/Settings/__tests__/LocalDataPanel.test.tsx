@@ -196,7 +196,7 @@ describe("LocalDataPanel", () => {
     expect(screen.queryByText(/Nothing downloaded yet/)).not.toBeInTheDocument();
   });
 
-  it("shows the off hint when capture is disabled", async () => {
+  it("shows the backend's native capture unavailability hint when disabled", async () => {
     vi.stubGlobal("fetch", mockFetch({
       "/api/v1/data/ticks/status": {
         status: "success",
@@ -206,7 +206,7 @@ describe("LocalDataPanel", () => {
           connected: false,
           tick_count: 0,
           watchlist: {},
-          hint: "Set FLINTTRADE_TICK_CAPTURE=1",
+          hint: "Native tick capture is unavailable until a native source is supported.",
         },
       },
       "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
@@ -215,9 +215,64 @@ describe("LocalDataPanel", () => {
     render(<LocalDataPanel />, { wrapper });
 
     await waitFor(() => {
-      expect(screen.getByText("off")).toBeInTheDocument();
+      expect(screen.getByText("unavailable")).toBeInTheDocument();
     });
-    expect(screen.getByText(/FLINTTRADE_TICK_CAPTURE=1/)).toBeInTheDocument();
+    expect(screen.getByText(/Native tick capture is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1/)).not.toBeInTheDocument();
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+  });
+
+  it("discloses capture unavailability without an enable hint while retaining stored OHLCV and downloads", async () => {
+    const fetch = mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: { enabled: false, running: false, connected: false, tick_count: 0, watchlist: {} },
+      },
+      "/v1/historify/bars/summary": {
+        status: "success",
+        data: { tables: {
+          ohlcv_1d: { rows: 5000, symbols: 12, first: "2025-01-01 00:00:00", last: "2026-07-04 00:00:00" },
+        } },
+      },
+      "/v1/historify/bhavcopy/download": {
+        status: "success", data: { saved_count: 1, error_count: 0, dest_dir: "/tmp/bhavcopy" },
+      },
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<LocalDataPanel />, { wrapper });
+    expect(await screen.findByText(/Native tick capture is unavailable/)).toHaveTextContent(
+      "Existing local data and downloads remain available.",
+    );
+    expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1|restart.*record.*ticks/i)).not.toBeInTheDocument();
+    expect(screen.getByText("ohlcv_1d")).toBeInTheDocument();
+    expect(screen.getByText("5,000")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Fetch bhavcopies/i }));
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).includes("/v1/historify/bhavcopy/download"))).toBe(true));
+    expect(await screen.findByText(/Saved 1/)).toBeInTheDocument();
+  });
+
+  it("retains local tick counters and watchlist while native capture remains unavailable", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: false, running: false, connected: false, tick_count: 44, persisted_tick_count: 42,
+          pending_tick_count: 2, dropped_tick_count: 3,
+          watchlist: { quote: [{ symbol: "INFY", exchange: "NSE" }] },
+          hint: "Native tick capture is unavailable until a native source is supported.",
+          last_error: "Native broker tick capture is not available",
+        },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+    render(<LocalDataPanel />, { wrapper });
+    expect(await screen.findByText("Native broker tick capture is not available")).toBeInTheDocument();
+    expect(screen.getByText("unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/Native tick capture is unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/42 persisted/)).toBeInTheDocument();
+    expect(screen.getByText(/42 persisted/)).toHaveTextContent("44 received · 2 pending · 3 dropped · INFY");
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+    expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1/)).not.toBeInTheDocument();
   });
 
   it("shows reconnecting rather than recording when the enabled recorder is disconnected", async () => {
@@ -228,7 +283,7 @@ describe("LocalDataPanel", () => {
           enabled: true,
           running: true,
           connected: false,
-          last_error: "OpenAlgo connection refused",
+          last_error: "native broker connection refused",
           tick_count: 0,
           watchlist: {},
         },
@@ -242,7 +297,7 @@ describe("LocalDataPanel", () => {
       expect(screen.getByText("reconnecting")).toBeInTheDocument();
     });
     expect(screen.queryByText("recording")).not.toBeInTheDocument();
-    expect(screen.getByText("OpenAlgo connection refused")).toBeInTheDocument();
+    expect(screen.getByText("native broker connection refused")).toBeInTheDocument();
   });
 
   it("shows degraded rather than recording for a connected control error", async () => {

@@ -1,6 +1,6 @@
 """Dynamic lot size resolver for F&O instruments.
 
-Fetches authoritative lot sizes from the OpenAlgo ``instruments`` endpoint
+Fetches authoritative lot sizes from the broker ``instruments`` endpoint
 and caches them for 24 hours.  Falls back to a built-in table of common lot
 sizes when the live fetch is unavailable.
 
@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from flinttrade_core.instrument_lots import lot_size_from_master
 
 if TYPE_CHECKING:
-    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.broker_client import BrokerClient
 
 logger = logging.getLogger("flinttrade.screener.lot_sizes")
 
@@ -117,7 +117,7 @@ class LotResolution(NamedTuple):
     Attributes:
         lot_size: Resolved lot size (always >= 1).
         source: Where the value came from — ``"live"`` (broker symbol master
-            via the OpenAlgo ``instruments`` endpoint, possibly cache-served
+            via the broker ``instruments`` endpoint, possibly cache-served
             within TTL), ``"fallback"`` (the built-in table), or
             ``"default"`` (unknown symbol; the safe placeholder ``1``).
             Consumers that size real orders must treat anything other than
@@ -151,14 +151,14 @@ def get_lot_size_sync(symbol: str, exchange: str = "") -> int:  # noqa: ARG001
 
 
 class LotSizeResolver:
-    """Fetch and cache lot sizes from the OpenAlgo ``instruments`` endpoint.
+    """Fetch and cache lot sizes from the broker ``instruments`` endpoint.
 
     The resolver keeps an in-process cache keyed by ``(symbol, exchange)``
     with a configurable TTL (default 24 hours).  On cache miss it queries
-    OpenAlgo; on network failure it falls back to the built-in table.
+    broker; on network failure it falls back to the built-in table.
 
     Args:
-        client: An ``OpenAlgoClient`` instance used for API calls.
+        client: An ``BrokerClient`` instance used for API calls.
         cache_ttl: Cache lifetime in seconds (default 86400 = 24 hours).
 
     Usage::
@@ -169,7 +169,7 @@ class LotSizeResolver:
 
     def __init__(
         self,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         cache_ttl: int = _CACHE_TTL_SECONDS,
     ) -> None:
         self._client = client
@@ -185,8 +185,8 @@ class LotSizeResolver:
         fetched_at = entry[1]
         return (time.monotonic() - fetched_at) < self._cache_ttl
 
-    def _fetch_from_openalgo(self, exchange: str) -> dict[str, int]:
-        """Fetch all lot sizes for an exchange from OpenAlgo instruments endpoint.
+    def _fetch_from_broker(self, exchange: str) -> dict[str, int]:
+        """Fetch all lot sizes for an exchange from broker instruments endpoint.
 
         Returns a mapping of ``{symbol_upper: lot_size}`` or an empty dict on
         failure.
@@ -198,13 +198,13 @@ class LotSizeResolver:
             Dict of symbol → lot size.  Empty on any error.
         """
         try:
-            # OpenAlgo /api/v1/instruments returns a successful response
+            # broker /api/v1/instruments returns a successful response
             # envelope whose data rows identify their exchange explicitly.
             raw: Any = self._client.instruments(exchange=exchange)
             if inspect.iscoroutine(raw):
                 # Drive the coroutine on the client's OWNER loop — ad-hoc
                 # asyncio.run() poisons the pooled httpx connections.
-                from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+                from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
                 raw = client_call_sync(self._client, raw)
             if (
@@ -237,14 +237,14 @@ class LotSizeResolver:
                     return {}
                 result[sym] = lot
             logger.debug(
-                "Fetched %d lot sizes for exchange %s from OpenAlgo",
+                "Fetched %d lot sizes for exchange %s from broker",
                 len(result),
                 exchange,
             )
             return result
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Failed to fetch instruments from OpenAlgo for exchange %s: %s",
+                "Failed to fetch instruments from broker for exchange %s: %s",
                 exchange,
                 exc,
             )
@@ -256,7 +256,7 @@ class LotSizeResolver:
         Lookup order:
         1. In-process cache (if within TTL) — keeps the source it was
            cached with.
-        2. Live fetch from OpenAlgo ``/api/v1/instruments`` for the exchange
+        2. Live fetch from broker ``/api/v1/instruments`` for the exchange
            (``source="live"``).
         3. Built-in fallback table (``source="fallback"``).
         4. Default of ``1`` for unknown symbols (``source="default"``).
@@ -277,7 +277,7 @@ class LotSizeResolver:
             return LotResolution(lot, source)
 
         # Fetch the full instrument list for this exchange and populate cache
-        live_data = self._fetch_from_openalgo(exc_key)
+        live_data = self._fetch_from_broker(exc_key)
         now = time.monotonic()
         for fetched_sym, lot in live_data.items():
             self._cache[(fetched_sym, exc_key)] = (lot, now, "live")

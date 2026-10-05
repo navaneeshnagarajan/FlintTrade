@@ -99,6 +99,7 @@ def _workspace_retention_overrides() -> dict[str, int]:
         logger.debug("Traffic-log retention overrides unavailable: %s", exc)
         return {}
 
+
 # Paths that should never be logged (avoids feedback loops and noise).
 _SKIP_PREFIXES: tuple[str, ...] = (
     "/static/",
@@ -191,8 +192,8 @@ class TrafficLogger:
             self._db_path = str(db_path)
 
         overrides = _workspace_retention_overrides() if self._db_path != ":memory:" else {}
-        self._retention_days = retention_days if retention_days is not None else overrides.get(
-            "retention_days", DEFAULT_RETENTION_DAYS
+        self._retention_days = (
+            retention_days if retention_days is not None else overrides.get("retention_days", DEFAULT_RETENTION_DAYS)
         )
         self._max_rows = max_rows if max_rows is not None else overrides.get("max_rows", DEFAULT_MAX_ROWS)
 
@@ -237,9 +238,7 @@ class TrafficLogger:
         try:
             if self._retention_days > 0:
                 cutoff = datetime.now(IST) - timedelta(days=self._retention_days)
-                row = self._conn.execute(
-                    "DELETE FROM traffic_log WHERE timestamp < ?", [cutoff]
-                ).fetchone()
+                row = self._conn.execute("DELETE FROM traffic_log WHERE timestamp < ?", [cutoff]).fetchone()
                 deleted += int(row[0]) if row else 0
             if self._max_rows > 0:
                 count_row = self._conn.execute("SELECT COUNT(*) FROM traffic_log").fetchone()
@@ -323,7 +322,11 @@ class TrafficLogger:
                 self._prune_locked()
         logger.debug(
             "Traffic: %s %s %d %.1fms entry_id=%s",
-            method, path, status_code, duration_ms, entry_id,
+            method,
+            path,
+            status_code,
+            duration_ms,
+            entry_id,
         )
         return entry_id
 
@@ -464,13 +467,9 @@ class TrafficLogger:
         """
         with self._lock:
             if since is not None:
-                row = self._conn.execute(
-                    "SELECT COUNT(*) FROM traffic_log WHERE timestamp >= ?", [since]
-                ).fetchone()
+                row = self._conn.execute("SELECT COUNT(*) FROM traffic_log WHERE timestamp >= ?", [since]).fetchone()
             else:
-                row = self._conn.execute(
-                    "SELECT COUNT(*) FROM traffic_log"
-                ).fetchone()
+                row = self._conn.execute("SELECT COUNT(*) FROM traffic_log").fetchone()
         return int(row[0]) if row else 0
 
     def export_csv(self, since: datetime | None = None) -> str:
@@ -501,9 +500,17 @@ class TrafficLogger:
         writer = csv.writer(output)
         writer.writerow(
             [
-                "entry_id", "timestamp", "ip", "method", "path",
-                "status_code", "duration_ms", "user_agent",
-                "request_size", "response_size", "user_id",
+                "entry_id",
+                "timestamp",
+                "ip",
+                "method",
+                "path",
+                "status_code",
+                "duration_ms",
+                "user_agent",
+                "request_size",
+                "response_size",
+                "user_id",
             ]
         )
         for row in rows:
@@ -511,9 +518,17 @@ class TrafficLogger:
             ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
             writer.writerow(
                 [
-                    row[0], ts_str, row[2], row[3], row[4],
-                    row[5], row[6], row[7],
-                    row[8], row[9], row[10],
+                    row[0],
+                    ts_str,
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    row[7],
+                    row[8],
+                    row[9],
+                    row[10],
                 ]
             )
         return output.getvalue()

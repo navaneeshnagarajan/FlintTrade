@@ -163,12 +163,11 @@ def _uuid_from(value: object) -> UUID:
 def broker_account_digest(workspace: WorkspaceSnapshot | Mapping[str, object]) -> str:
     """Hash exactly broker liveness fields, excluding the transaction marker."""
     # Local import lets the workspace participant consume these neutral codecs.
-    from .workspace_migrations import legacy_openalgo_broker_projection
 
     config = workspace.as_dict() if type(workspace) is WorkspaceSnapshot else _thaw(_freeze(workspace))
     if type(config) is not dict:
         raise AccountContractError
-    payload = [config.get("brokers"), legacy_openalgo_broker_projection(config)]
+    payload = [config.get("brokers")]
     return hashlib.sha256(("broker-account-domain/v1\0" + canonical_account_json(payload)).encode()).hexdigest()
 
 
@@ -224,7 +223,6 @@ class AccountMutationRequest(_PrivateValue):
             self.expected_credential.__post_init__()
             if (
                 self.expected_credential.selector != self.selector
-                or self.selector.adapter_id == "openalgo"
                 or type(self.broker) is not str
                 or self.broker != self.selector.adapter_id
                 or type(self.label) is not str
@@ -478,13 +476,18 @@ class AccountOperationSnapshot:
             or (self.abandonment_committed and not self.abandoned)
             or type(self.workspace_attempted) is not bool
             or type(self.workspace_conflicted) is not bool
-            or self.workspace_conflicted and not self.workspace_attempted
-            or self.workspace_attempted and (
+            or self.workspace_conflicted
+            and not self.workspace_attempted
+            or self.workspace_attempted
+            and (
                 self.state not in (AccountOperationStage.PLAN_READY, AccountOperationStage.COMMITTED)
-                or self.before_digest is None or self.after_digest is None
+                or self.before_digest is None
+                or self.after_digest is None
             )
-            or self.state is AccountOperationStage.COMMITTED and not self.workspace_attempted
-            or self.abandonment_committed and not self.workspace_attempted
+            or self.state is AccountOperationStage.COMMITTED
+            and not self.workspace_attempted
+            or self.abandonment_committed
+            and not self.workspace_attempted
         ):
             raise AccountContractError
         self.actor.__post_init__()

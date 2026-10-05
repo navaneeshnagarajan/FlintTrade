@@ -189,9 +189,7 @@ def _store_orderflow_checkpoint_locked(
         except OrderFlowCheckpointCorruptError:
             raise
         except (OSError, OrderFlowCheckpointError) as exc:
-            raise OrderFlowCheckpointWriteError(
-                "order-flow checkpoint lineage evidence could not be verified"
-            ) from exc
+            raise OrderFlowCheckpointWriteError("order-flow checkpoint lineage evidence could not be verified") from exc
     current_generation = 0 if current is None else current.publication_generation
     resolved_owner_epoch = owner_epoch or _PROCESS_PUBLICATION_OWNER_EPOCH
     resolved_expected_generation = current_generation if expected_generation is None else expected_generation
@@ -496,15 +494,15 @@ def ensure_orderflow_checkpoint_lineage_evidence(
             or current.publication_generation != checkpoint.publication_generation
             or not hmac.compare_digest(current.payload_checksum, checkpoint.payload_checksum)
         ):
-            raise OrderFlowCheckpointWriteError("order-flow checkpoint lineage evidence obligation is no longer canonical")
+            raise OrderFlowCheckpointWriteError(
+                "order-flow checkpoint lineage evidence obligation is no longer canonical"
+            )
         try:
             evidence_path = _ensure_lineage_handoff_evidence(path.parent, current, reject_expired=True)
         except OrderFlowCheckpointCorruptError:
             raise
         except (OSError, OrderFlowCheckpointError) as exc:
-            raise OrderFlowCheckpointWriteError(
-                "order-flow checkpoint lineage evidence could not be verified"
-            ) from exc
+            raise OrderFlowCheckpointWriteError("order-flow checkpoint lineage evidence could not be verified") from exc
     if evidence_path is None:  # pragma: no cover - guarded by validation above
         raise OrderFlowCheckpointValidationError("order-flow checkpoint lineage evidence obligation is invalid")
     return evidence_path
@@ -752,12 +750,10 @@ def _ensure_lineage_handoff_evidence(
                 raise OrderFlowCheckpointCorruptError(
                     "order-flow lineage evidence does not match the canonical checkpoint"
                 )
-            if (
-                reject_expired
-                and existing_identity == record_identity
-                and not cutoff <= existing["recorded_at"] <= now
-            ):
-                raise OrderFlowCheckpointCorruptError("order-flow lineage evidence for the canonical checkpoint expired")
+            if reject_expired and existing_identity == record_identity and not cutoff <= existing["recorded_at"] <= now:
+                raise OrderFlowCheckpointCorruptError(
+                    "order-flow lineage evidence for the canonical checkpoint expired"
+                )
         records = [record for record in records if cutoff <= record["recorded_at"] <= now]
         if not any(
             {key: value for key, value in existing.items() if key != "recorded_at"} == record_identity

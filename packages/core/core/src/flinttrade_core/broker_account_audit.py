@@ -19,10 +19,14 @@ from .account_lifecycle_contracts import (
 from .broker_identity import INT64_MAX
 
 ACCOUNT_AUDIT_EVENT_TYPE = "BROKER_ACCOUNT_MUTATION_SETTLED"
-_TERMINAL = frozenset((
-    AccountOperationStage.COMMITTED, AccountOperationStage.REJECTED,
-    AccountOperationStage.AUTHENTICATION_UNKNOWN, AccountOperationStage.BLOCKED,
-))
+_TERMINAL = frozenset(
+    (
+        AccountOperationStage.COMMITTED,
+        AccountOperationStage.REJECTED,
+        AccountOperationStage.AUTHENTICATION_UNKNOWN,
+        AccountOperationStage.BLOCKED,
+    )
+)
 
 
 class AccountAuditUnavailable(ValueError):
@@ -58,8 +62,11 @@ class AccountMutationAudit:
             raise AccountContractError
         if self.state not in _TERMINAL:
             raise AccountContractError
-        expected = (self.expected_credential_generation, self.expected_workspace_generation,
-                    self.expected_broker_generation)
+        expected = (
+            self.expected_credential_generation,
+            self.expected_workspace_generation,
+            self.expected_broker_generation,
+        )
         committed = (self.credential_generation, self.workspace_generation, self.broker_generation)
         for value in expected:
             if type(value) is not int or not 0 <= value <= INT64_MAX:
@@ -70,9 +77,11 @@ class AccountMutationAudit:
         if self.state is AccountOperationStage.COMMITTED:
             if any(value is None for value in committed):
                 raise AccountContractError
-            if (self.credential_generation != self.expected_credential_generation + 1
-                    or self.workspace_generation <= self.expected_workspace_generation
-                    or self.broker_generation < self.expected_broker_generation):
+            if (
+                self.credential_generation != self.expected_credential_generation + 1
+                or self.workspace_generation <= self.expected_workspace_generation
+                or self.broker_generation < self.expected_broker_generation
+            ):
                 raise AccountContractError
         elif any(value is not None for value in committed):
             raise AccountContractError
@@ -139,13 +148,20 @@ def build_account_audit_sink(audit_logger: Any) -> Callable[[AccountMutationAudi
             fields = event.fields()
             identifier = str(event.event_id)
             acknowledgement = audit_logger.log_idempotent_event(
-                ACCOUNT_AUDIT_EVENT_TYPE, event_id=identifier, fields=fields,
+                ACCOUNT_AUDIT_EVENT_TYPE,
+                event_id=identifier,
+                fields=fields,
             )
             if type(acknowledgement) is not str or acknowledgement != identifier:
                 raise AccountAuditUnavailable
-            if audit_logger.verify_idempotent_event_receipt(
-                ACCOUNT_AUDIT_EVENT_TYPE, event_id=identifier, fields=fields,
-            ) is not True:
+            if (
+                audit_logger.verify_idempotent_event_receipt(
+                    ACCOUNT_AUDIT_EVENT_TYPE,
+                    event_id=identifier,
+                    fields=fields,
+                )
+                is not True
+            ):
                 raise AccountAuditUnavailable
             return event.event_id
         except Exception:

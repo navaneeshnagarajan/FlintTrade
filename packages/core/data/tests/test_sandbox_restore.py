@@ -16,7 +16,7 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture()
 def restore_app(tmp_path, monkeypatch):
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     with patch("flinttrade_core.auth_routes._get_auth_service") as mock:
         from flinttrade_core.app import create_flask_app
@@ -38,12 +38,16 @@ def restore_app(tmp_path, monkeypatch):
 
 
 def _setup(client) -> None:
-    created = client.post("/v1/auth/setup", json={
-        "username": "nav",
-        "email": "nav@example.com",
-        "password": "StrongP@ss123!",
-        "pin": "123456",
-    }, headers={"Content-Type": "application/json"})
+    created = client.post(
+        "/v1/auth/setup",
+        json={
+            "username": "nav",
+            "email": "nav@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "123456",
+        },
+        headers={"Content-Type": "application/json"},
+    )
     assert created.status_code == 201
 
 
@@ -57,41 +61,49 @@ def _practice_headers() -> dict[str, str]:
 
 
 def _backup() -> str:
-    return json.dumps({
-        "schema_version": 2,
-        "capital": {"initial": 100_000.0, "current": 100_000.0},
-        "positions": [{
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "product": "MIS",
-            "net_qty": 1,
-            "avg_price": 1500.0,
-        }],
-        "orders": [{
-            "order_id": "o1",
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "action": "BUY",
-            "quantity": 1,
-            "price": 1500.0,
-            "product": "MIS",
-            "status": "COMPLETE",
-            "strategy": "original",
-        }],
-        "trades": [{
-            "trade_id": "t1",
-            "order_id": "o1",
-            "symbol": "INFY",
-            "exchange": "NSE",
-            "action": "BUY",
-            "quantity": 1,
-            "price": 1500.0,
-            "product": "MIS",
-            "strategy": "original",
-            "traded_at": 1_700_000_000,
-        }],
-        "pnl_history": [],
-    })
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "capital": {"initial": 100_000.0, "current": 100_000.0},
+            "positions": [
+                {
+                    "symbol": "INFY",
+                    "exchange": "NSE",
+                    "product": "MIS",
+                    "net_qty": 1,
+                    "avg_price": 1500.0,
+                }
+            ],
+            "orders": [
+                {
+                    "order_id": "o1",
+                    "symbol": "INFY",
+                    "exchange": "NSE",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "price": 1500.0,
+                    "product": "MIS",
+                    "status": "COMPLETE",
+                    "strategy": "original",
+                }
+            ],
+            "trades": [
+                {
+                    "trade_id": "t1",
+                    "order_id": "o1",
+                    "symbol": "INFY",
+                    "exchange": "NSE",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "price": 1500.0,
+                    "product": "MIS",
+                    "strategy": "original",
+                    "traded_at": 1_700_000_000,
+                }
+            ],
+            "pnl_history": [],
+        }
+    )
 
 
 def test_practice_restore_marks_fills_and_does_not_admit(restore_app) -> None:
@@ -163,13 +175,33 @@ def test_reset_backup_imports_and_pending_orders_do_not_fill(restore_app) -> Non
     client, _svc, engine = restore_app
     _setup(client)
     limit_order = engine.place_order(
-        "INFY", "NSE", "BUY", 1, 100.0, order_type="LIMIT", strategy="limit-desk",
+        "INFY",
+        "NSE",
+        "BUY",
+        1,
+        100.0,
+        order_type="LIMIT",
+        strategy="limit-desk",
     )
     stop_order = engine.place_order(
-        "INFY", "NSE", "BUY", 1, 100.0, order_type="SL", trigger_price=90.0, strategy="stop-desk",
+        "INFY",
+        "NSE",
+        "BUY",
+        1,
+        100.0,
+        order_type="SL",
+        trigger_price=90.0,
+        strategy="stop-desk",
     )
     stop_market = engine.place_order(
-        "INFY", "NSE", "BUY", 1, 100.0, order_type="SL-M", trigger_price=90.0, strategy="stop-market-desk",
+        "INFY",
+        "NSE",
+        "BUY",
+        1,
+        100.0,
+        order_type="SL-M",
+        trigger_price=90.0,
+        strategy="stop-market-desk",
     )
     assert limit_order["status"] == "PENDING"
     assert stop_order["status"] == "PENDING"

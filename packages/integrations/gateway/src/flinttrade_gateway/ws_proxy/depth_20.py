@@ -1,18 +1,18 @@
 """20-Level Market Depth — parsing and aggregation utilities.
 
-OpenAlgo v2 introduced WebSocket mode 4 which delivers up to 20 bid/ask
+native broker v2 introduced WebSocket mode 4 which delivers up to 20 bid/ask
 price levels per tick (mode 3 in v1 only delivered 5 levels).
 
 This module provides:
 
 - :class:`DepthLevel` — one price/quantity/orders level.
 - :class:`Depth20Tick` — full 20-level depth snapshot.
-- :func:`parse_depth_20_payload` — parse a raw OpenAlgo v2 depth dict into a
+- :func:`parse_depth_20_payload` — parse a raw native broker v2 depth dict into a
   :class:`Depth20Tick`.
 - :class:`Depth20Aggregator` — collapse 20 levels to 5 and compute
   order-book imbalance.
 
-OpenAlgo v2 depth payload format
+native broker v2 depth payload format
 ---------------------------------
 The raw ``data`` dict inside a ``market_data`` WebSocket message looks like::
 
@@ -133,7 +133,7 @@ class Depth20Tick:
 
 
 def parse_depth_20_payload(raw: dict) -> Depth20Tick:
-    """Parse an OpenAlgo v2 depth payload into a :class:`Depth20Tick`.
+    """Parse an native broker v2 depth payload into a :class:`Depth20Tick`.
 
     Accepts two bid/ask formats:
     - **List-of-lists** (primary): ``[[price, qty, orders], ...]``
@@ -142,7 +142,7 @@ def parse_depth_20_payload(raw: dict) -> Depth20Tick:
     Both are capped at :data:`_MAX_DEPTH_LEVELS` (20) entries.
 
     Args:
-        raw: Raw dict from the OpenAlgo WebSocket ``data`` field.
+        raw: Raw dict from the native broker WebSocket ``data`` field.
 
     Returns:
         A populated :class:`Depth20Tick`.

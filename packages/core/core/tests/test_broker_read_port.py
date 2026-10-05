@@ -53,7 +53,9 @@ def test_closed_domain_public_fields_publish_exact_literal_annotations() -> None
 def test_protocol_exposes_exactly_thirteen_async_fixed_reads() -> None:
     BrokerReadPort = _contract().BrokerReadPort
     methods = tuple(
-        name for name, value in BrokerReadPort.__dict__.items() if not name.startswith("_") and inspect.isfunction(value)
+        name
+        for name, value in BrokerReadPort.__dict__.items()
+        if not name.startswith("_") and inspect.isfunction(value)
     )
 
     assert methods == EXPECTED_METHODS
@@ -75,15 +77,8 @@ def test_contract_values_are_frozen_slotted_and_dependency_neutral() -> None:
 
     source = Path(inspect.getfile(BrokerReadPort)).read_text(encoding="utf-8")
     imports = {
-        alias.name
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    } | {
-        node.module or ""
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.ImportFrom)
-    }
+        alias.name for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Import) for alias in node.names
+    } | {node.module or "" for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ImportFrom)}
     assert not any(
         name.startswith(("flinttrade_gateway", "flinttrade_engine", "flask")) or "sdk" in name.lower()
         for name in imports

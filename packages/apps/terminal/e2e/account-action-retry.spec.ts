@@ -11,7 +11,6 @@ test("broker connection retry retains its action identity after an ambiguous res
   page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
   await seedExploreDemoSession(page);
   for (const [name, data] of Object.entries({
-    openalgo: { host: "", ws_port: 8765, api_key_configured: false },
     llm: { provider: "", host: "", model: "", api_key_configured: false },
   })) {
     syntheticApi.register({

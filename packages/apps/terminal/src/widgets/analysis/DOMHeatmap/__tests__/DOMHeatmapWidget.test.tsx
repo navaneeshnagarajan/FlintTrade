@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -39,6 +39,9 @@ vi.mock("@/services/api", () => ({
 // Operating mode drives the data source: explore → deterministic demo book,
 // anything else → the live REST poll.
 let mockMode = "live";
+let mockScope = "live:native:dhan:A1";
+vi.mock("@/hooks/useDataScope", () => ({ useMarketDataScope: () => mockScope }));
+beforeEach(() => { mockScope = "live:native:dhan:A1"; });
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) =>
     selector({ mode: mockMode }),
@@ -313,7 +316,7 @@ describe("DOMHeatmapWidget — live view", () => {
 
   it("calls getDepth on mount", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
-    expect(mockGetDepth).toHaveBeenCalledWith("NIFTY", "NSE_INDEX");
+    expect(mockGetDepth).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", expect.any(AbortSignal), "live:native:dhan:A1");
   });
 
   it("shows error badge when getDepth rejects", async () => {
@@ -412,7 +415,7 @@ describe("DOMHeatmapWidget — Explore demo data", () => {
 
   it("labels generated data with a permanent 'Sample data' badge", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
-    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Example")).toBeInTheDocument();
   });
 
   it("says 'sample data' in the chart's accessible description", () => {
@@ -583,7 +586,7 @@ describe("DOMHeatmapWidget — replay transport", () => {
   it("switching back to live retires the transport", () => {
     render(<DOMHeatmapWidget {...replayProps()} />);
     expect(screen.getByRole("toolbar", { name: "Replay controls" })).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Live accumulating view"));
+    fireEvent.click(screen.getByLabelText("Accumulating depth view"));
     expect(screen.queryByRole("toolbar", { name: "Replay controls" })).toBeNull();
   });
 
@@ -598,5 +601,48 @@ describe("DOMHeatmapWidget — replay transport", () => {
     expect(updateParameters).toHaveBeenCalledWith(
       expect.objectContaining({ view: "replay" }),
     );
+  });
+});
+
+
+describe("DOMHeatmap market authority retirement", () => {
+  const depth = { buy: [{ price: 22000, quantity: 20, orders: 1 }], sell: [{ price: 22010, quantity: 10, orders: 1 }] };
+  beforeEach(() => { mockMode = "live"; mockGetDepth.mockReset(); });
+  it("clears captured A snapshots before showing account B", async () => {
+    mockGetDepth.mockResolvedValueOnce(depth).mockReturnValue(new Promise(() => {}));
+    const { rerender } = render(<DOMHeatmapWidget {...liveProps} />);
+    await waitFor(() => expect(screen.getByText(/1\/60 snaps/)).toBeInTheDocument());
+    expect(screen.getByText("22,005.00")).toBeInTheDocument();
+    mockScope = "practice:native:upstox:B1";
+    rerender(<DOMHeatmapWidget {...liveProps} params={{ ...liveProps.params }} />);
+    expect(screen.getByText(/0\/60 snaps/)).toBeInTheDocument();
+    expect(screen.queryByText("22,005.00")).not.toBeInTheDocument();
+    expect(mockGetDepth).toHaveBeenLastCalledWith("NIFTY", "NSE_INDEX", expect.any(AbortSignal), mockScope);
+  });
+  it("aborts old depth on Explore and refuses late publication into the Example ring", async () => {
+    let finish!: (value: unknown) => void;
+    mockGetDepth.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { rerender } = render(<DOMHeatmapWidget {...liveProps} />);
+    const signal = mockGetDepth.mock.calls[0][2] as AbortSignal;
+    mockMode = "explore"; mockScope = "explore:mock";
+    rerender(<DOMHeatmapWidget {...liveProps} params={{ ...liveProps.params }} />);
+    expect(signal.aborted).toBe(true);
+    expect(screen.getByText(/60\/60 snaps/)).toBeInTheDocument();
+    await act(async () => { finish(depth); });
+    expect(screen.queryByText("22,005.00")).not.toBeInTheDocument();
+    expect(screen.getByText(/60\/60 snaps/)).toBeInTheDocument();
+    expect(mockGetDepth).toHaveBeenCalledOnce();
+  });
+  it("restores polling after StrictMode replay and aborts on final unmount", async () => {
+    const requests: Array<{ signal: AbortSignal; finish: (value: unknown) => void }> = [];
+    mockGetDepth.mockImplementation((_symbol, _exchange, signal: AbortSignal) => new Promise((finish) => { requests.push({ signal, finish }); }));
+    const { unmount } = render(<DOMHeatmapWidget {...liveProps} />, { reactStrictMode: true });
+    expect(requests).toHaveLength(2);
+    expect(requests[0].signal.aborted).toBe(true);
+    expect(requests[1].signal.aborted).toBe(false);
+    unmount();
+    expect(requests[1].signal.aborted).toBe(true);
+    await act(async () => { requests.forEach((request) => request.finish(depth)); });
+    expect(screen.queryByTestId("domheatmap-canvas")).not.toBeInTheDocument();
   });
 });

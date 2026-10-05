@@ -1,7 +1,7 @@
 """Order proxy blueprint — mode-enforcing gateway for all order operations.
 
 This module is a CRITICAL SAFETY LAYER.  Every order request from the
-frontend MUST pass through here before reaching OpenAlgo.  The blueprint
+frontend MUST pass through here before reaching native broker.  The blueprint
 reads the ``mode`` claim from the *server-issued JWT* (not from any
 client-controlled header) and routes accordingly:
 
@@ -38,7 +38,6 @@ from contextlib import AbstractContextManager, nullcontext
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 import jwt
 from flask import Blueprint, current_app, jsonify, request
 
@@ -49,21 +48,20 @@ from .rate_limiter import rate_limit
 logger = logging.getLogger("flinttrade.order_routes")
 
 
-
 def _run_on_client_loop(coro: Any) -> Any:
     """Run a broker-bound coroutine on the shared client's owner event loop.
 
-    Order dispatch and gated reads ultimately await the app-owned OpenAlgo
+    Order dispatch and gated reads ultimately await the app-owned native broker
     client (and native adapters' pooled HTTP clients). Driving them on a fresh
     ``asyncio.run()`` loop per request poisons those loop-affine connection
     pools ("Event loop is closed" on alternating requests), so every sync
     entry point marshals onto ONE persistent loop via the client's run_sync.
     Falls back to ``asyncio.run`` when no shared client is configured (tests).
     """
-    from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
+    from .broker_client import BrokerClient  # noqa: PLC0415
 
-    client = current_app.config.get("CLIENT") or current_app.config.get("OPENALGO_CLIENT")
-    if isinstance(client, OpenAlgoClient):
+    client = current_app.config.get("CLIENT") or current_app.config.get("BROKER_CLIENT")
+    if isinstance(client, BrokerClient):
         return client.run_sync(coro)
     # Test fakes / unconfigured apps: one fresh loop per call is correct.
     return asyncio.run(coro)
@@ -83,6 +81,7 @@ def _redact_exc(exc: object, account_id: object) -> str:
     if raw and raw in text:
         text = text.replace(raw, account_ref(account_id))
     return text
+
 
 # Frontend `api.ts` posts to `/ft-api/api/v1/orders/<X>` (→ `/api/v1/orders/<X>`
 # after the WSGI prefix strip). The blueprint must therefore live under
@@ -108,29 +107,15 @@ _VALID_MODES = frozenset({_MODE_EXPLORE, _MODE_PRACTICE, _MODE_LIVE})
 _PLACE_ROUTE_REQUIRED = "Orders are placed through /api/v1/orders/place."
 
 # Example (the explore claim) never places. Both order dispatchers share this refusal.
-_EXAMPLE_ORDERS_REFUSAL = (
-    "Orders are not available for Example. Switch to Practice or Live to trade."
+_EXAMPLE_ORDERS_REFUSAL = "Orders are not available for Example. Switch to Practice or Live to trade."
+
+# ---------------------------------------------------------------------------
+# Recognised local action names. Unsupported Live actions are refused below.
+# ---------------------------------------------------------------------------
+
+_ORDER_ACTIONS = frozenset(
+    {"place", "modify", "cancel", "cancel-all", "options", "options-multi", "gtt-place", "gtt-modify", "gtt-cancel"}
 )
-
-# ---------------------------------------------------------------------------
-# OpenAlgo endpoint map — FlintTrade route suffix → OpenAlgo endpoint name
-# ---------------------------------------------------------------------------
-
-_ENDPOINT_MAP: dict[str, str] = {
-    "place":          "placeorder",
-    "modify":         "modifyorder",
-    "cancel":         "cancelorder",
-    "cancel-all":     "cancelallorder",
-    "options":        "optionsorder",
-    "options-multi":  "optionsmultiorder",
-    # GTT — Good Till Triggered orders (added in OpenAlgo v2.0.0.9).
-    # Live broker support upstream: Dhan + Zerodha. Other brokers respond
-    # with a 501 that this dispatcher propagates unchanged so the UI can
-    # surface the actual error message.
-    "gtt-place":      "placegttorder",
-    "gtt-modify":     "modifygttorder",
-    "gtt-cancel":     "cancelgttorder",
-}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -208,120 +193,12 @@ def _mode_header_mismatch_response(
         header_mode,
         signed_mode,
     )
-    return jsonify({
-        "status": "error",
-        "message": "X-FlintTrade-Mode does not match the authenticated mode",
-    }), 403
-
-
-def _openalgo_base_url() -> str:
-    """Resolve the OpenAlgo base URL from app config or workspace/env fallback.
-
-    Checks ``app.config["CLIENT"]`` first (has ``settings.openalgo_host``),
-    then falls back to Settings.from_env() so UI-owned ``workspace.json`` config
-    is honoured even in minimal Flask apps.
-
-    Returns:
-        Base URL string, e.g. ``"http://127.0.0.1:5000"``, trailing slash stripped.
-    """
-    client = current_app.config.get("CLIENT")
-    if client is not None:
-        try:
-            from .config import openalgo_rest_base_url  # noqa: PLC0415
-
-            return openalgo_rest_base_url(client.settings)
-        except AttributeError:
-            pass
-
-    from .config import Settings, openalgo_rest_base_url  # noqa: PLC0415
-
-    settings = Settings.from_env()
-    return openalgo_rest_base_url(settings)
-
-
-def _openalgo_api_key() -> str:
-    """Return the OpenAlgo API key from app config or environment.
-
-    Returns:
-        API key string (may be empty — callers should handle that case).
-    """
-    client = current_app.config.get("CLIENT")
-    if client is not None:
-        try:
-            return str(client.settings.openalgo_api_key)
-        except AttributeError:
-            pass
-    from .config import Settings  # noqa: PLC0415
-
-    return Settings.from_env().openalgo_api_key
-
-
-def _forward_to_openalgo(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]:
-    """Forward a validated order request to OpenAlgo synchronously via httpx.
-
-    Injects the OpenAlgo API key into the request body (OpenAlgo's REST API
-    requires ``apikey`` in the JSON payload, not in a header).
-
-    Args:
-        endpoint: OpenAlgo endpoint name, e.g. ``"placeorder"``.
-        body: JSON-decoded request body from the frontend.
-
-    Returns:
-        A ``(flask.Response, http_status_code)`` tuple ready to be returned
-        from a Flask route handler.
-    """
-    api_key = _openalgo_api_key()
-    if not api_key:
-        logger.error(
-            "OPENALGO_API_KEY not configured — cannot forward live order to %s", endpoint
-        )
-        return jsonify({
+    return jsonify(
+        {
             "status": "error",
-            "message": "Server not configured — OpenAlgo API key missing",
-        }), 503
-
-    url = f"{_openalgo_base_url()}/api/v1/{endpoint}"
-    payload = dict(body)
-    payload["apikey"] = api_key  # OpenAlgo requires key in body
-    # Upstream marks ``strategy`` as required on every order endpoint
-    # (Place/Modify/Cancel for regular orders AND GTT). Frontends omit
-    # it for ergonomic reasons — inject a stable default so a missing
-    # field never triggers a 400 from upstream. Callers that supply
-    # their own ``strategy`` (BacktestLab, AI agent, etc.) win.
-    if not payload.get("strategy"):
-        payload["strategy"] = "Flint"
-
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(url, json=payload)
-    except httpx.ConnectError as exc:
-        logger.error(
-            "OpenAlgo unreachable at %s whilst forwarding %s: %s", url, endpoint, exc
-        )
-        return jsonify({
-            "status": "error",
-            "message": "OpenAlgo unreachable — check that the broker gateway is running",
-        }), 502
-    except httpx.TimeoutException as exc:
-        logger.error("OpenAlgo request timed out for %s: %s", endpoint, exc)
-        return jsonify({
-            "status": "error",
-            "message": "OpenAlgo request timed out",
-        }), 504
-    except httpx.HTTPError as exc:
-        logger.error("HTTP error forwarding %s to OpenAlgo: %s", endpoint, exc)
-        return jsonify({
-            "status": "error",
-            "message": "Unexpected HTTP error communicating with OpenAlgo",
-        }), 502
-
-    try:
-        data = response.json()
-    except Exception:
-        # OpenAlgo returned non-JSON — propagate the status code raw
-        data = {"status": "error", "message": f"Non-JSON response from OpenAlgo (HTTP {response.status_code})"}
-
-    return jsonify(data), response.status_code
+            "message": "X-FlintTrade-Mode does not match the authenticated mode",
+        }
+    ), 403
 
 
 def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
@@ -352,7 +229,7 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         Product,
     )
 
-    # Quantity is an OpenAlgo string field but must be a whole number of units —
+    # Quantity is represented as a decimal string but must be a whole number of units —
     # validate up-front so a fat-finger "10.5"/"abc" is a clean 400, not a 500
     # from the int(...) coercion inside SafetySystem.check_order.
     quantity = str(body.get("quantity", "1"))
@@ -373,9 +250,14 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         # conditions). They live on the Order model, so the SafetyContext
         # canonical hash covers them.
         for key in (
-            "price1", "trigger_price1", "quantity1",
-            "target_price", "stop_loss_price",
-            "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+            "price1",
+            "trigger_price1",
+            "quantity1",
+            "target_price",
+            "stop_loss_price",
+            "entry_trigger_type",
+            "stop_loss_trigger_type",
+            "target_trigger_type",
         ):
             value = body.get(key)
             if value is not None:
@@ -385,9 +267,7 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         symbol=str(body.get("symbol") or ""),
         action=Action(str(body.get("action", "BUY")).upper()),
         exchange=Exchange(str(body.get("exchange", "NSE")).upper()),
-        pricetype=PriceType(
-            str(body.get("pricetype") or body.get("order_type") or "MARKET").upper()
-        ),
+        pricetype=PriceType(str(body.get("pricetype") or body.get("order_type") or "MARKET").upper()),
         product=Product(str(body.get("product", "MIS")).upper()),
         quantity=quantity,
         price=str(body.get("price", "0")),
@@ -401,10 +281,12 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
 
 
 def _safety_runtime_unavailable_response() -> tuple[Any, int]:
-    return jsonify({
-        "status": "error",
-        "message": "Validated order safety configuration is unavailable; no broker write was sent.",
-    }), 503
+    return jsonify(
+        {
+            "status": "error",
+            "message": "Validated order safety configuration is unavailable; no broker write was sent.",
+        }
+    ), 503
 
 
 def _require_live_safety() -> Any:
@@ -434,7 +316,7 @@ def _gather_l2_state(adapter_id: str, *, account_id: str = "default") -> tuple[l
     """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
 
     Sync wrapper over the ONE shared :func:`flinttrade_core.l2_state.gather_l2_state`
-    implementation (also used by the webhook dispatcher) — the openalgo-vs-native
+    implementation (also used by the webhook dispatcher) — the native
     branch, session resolution, and error classification must never drift
     between copies. Runs two reads on the human order path; acceptable latency
     for the cumulative-exposure brake.
@@ -531,12 +413,14 @@ def _exit_pending_response(contract: str) -> tuple[Any, int]:
     from flinttrade_engine.reduce_only import exit_already_pending_message  # noqa: PLC0415
 
     message = exit_already_pending_message(contract)
-    return jsonify({
-        "status": "error",
-        "code": "exit_pending",
-        "message": message,
-        "reason": message,
-    }), 409
+    return jsonify(
+        {
+            "status": "error",
+            "code": "exit_pending",
+            "message": message,
+            "reason": message,
+        }
+    ), 409
 
 
 def _exit_orders_unreadable_response(contract: str) -> tuple[Any, int]:
@@ -544,12 +428,14 @@ def _exit_orders_unreadable_response(contract: str) -> tuple[Any, int]:
     from flinttrade_engine.reduce_only import exit_orders_unreadable_message  # noqa: PLC0415
 
     message = exit_orders_unreadable_message(contract)
-    return jsonify({
-        "status": "error",
-        "code": "exit_orders_unreadable",
-        "message": message,
-        "reason": message,
-    }), 409
+    return jsonify(
+        {
+            "status": "error",
+            "code": "exit_orders_unreadable",
+            "message": message,
+            "reason": message,
+        }
+    ), 409
 
 
 def _own_exit_pending(
@@ -645,13 +531,15 @@ def _normalise_exit_positions(raw: Any) -> list[dict[str, Any]]:
             continue
         if not symbol or not exchange:
             continue
-        positions.append({
-            "symbol": symbol,
-            "exchange": exchange,
-            "product": product,
-            "net_qty": quantity,
-            "quantity": quantity,
-        })
+        positions.append(
+            {
+                "symbol": symbol,
+                "exchange": exchange,
+                "product": product,
+                "net_qty": quantity,
+                "quantity": quantity,
+            }
+        )
     return positions
 
 
@@ -677,16 +565,18 @@ def _normalise_exit_orders(raw: Any) -> list[dict[str, Any]]:
             filled = 0
         if not symbol or not exchange or action not in {"BUY", "SELL"}:
             continue
-        orders.append({
-            "symbol": symbol,
-            "exchange": exchange,
-            "product": product,
-            "action": action,
-            "status": status,
-            "order_id": order_id,
-            "quantity": quantity,
-            "filled_qty": filled,
-        })
+        orders.append(
+            {
+                "symbol": symbol,
+                "exchange": exchange,
+                "product": product,
+                "action": action,
+                "status": status,
+                "order_id": order_id,
+                "quantity": quantity,
+                "filled_qty": filled,
+            }
+        )
     return orders
 
 
@@ -703,10 +593,10 @@ async def _fetch_broker_exit_books(
     from flinttrade_core.l2_state import _read, _resolve_account_source  # noqa: PLC0415
 
     source = _resolve_account_source(current_app.config, adapter_id, account_id)
-    positions_raw = await _read(source, "positionbook", "positions")
+    positions_raw = await _read(source, "positions")
     positions = _normalise_exit_positions(positions_raw)
     try:
-        orders_raw = await _read(source, "orderbook", "order_book")
+        orders_raw = await _read(source, "order_book")
     except Exception:  # noqa: BLE001 - keep the position; cap uses our own exits
         logger.info(
             "Broker order book unreadable; reduce-only cap uses our own pending exits | adapter=%s",
@@ -864,10 +754,12 @@ def _prepare_live_reduce_only(
 
 
 def _safety_state_unavailable_response() -> tuple[Any, int]:
-    return jsonify({
-        "status": "error",
-        "message": "Order safety state unavailable; no order was sent.",
-    }), 503
+    return jsonify(
+        {
+            "status": "error",
+            "message": "Order safety state unavailable; no order was sent.",
+        }
+    ), 503
 
 
 def _check_order_with_state(
@@ -904,10 +796,12 @@ def _check_order_with_state(
         getattr(order, "symbol", "?"),
         blocked.reason,
     )
-    return jsonify({
-        "status": "error",
-        "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-    }), 403
+    return jsonify(
+        {
+            "status": "error",
+            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+        }
+    ), 403
 
 
 def _check_order_through_safety(
@@ -1166,9 +1060,7 @@ def _admit_position_conversion(
         from_product = _conversion_product(
             req.get("from_product", req.get("from_product_type", req.get("old_product")))
         )
-        to_product = _conversion_product(
-            req.get("to_product", req.get("to_product_type", req.get("new_product")))
-        )
+        to_product = _conversion_product(req.get("to_product", req.get("to_product_type", req.get("new_product"))))
         quantity = _conversion_quantity(req.get("quantity", req.get("convert_qty")))
         side = _conversion_side(req)
         if not symbol or not exchange or from_product == to_product:
@@ -1190,10 +1082,12 @@ def _admit_position_conversion(
             pricetype="MARKET",
         )
     except Exception:
-        return jsonify({
-            "status": "error",
-            "message": "Position conversion intent could not be verified.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Position conversion intent could not be verified.",
+            }
+        ), 400
 
     try:
         authoritative_positions = _run_on_client_loop(
@@ -1229,19 +1123,17 @@ def _admit_position_conversion(
             )
         )
     except ValueError:
-        return jsonify({
-            "status": "error",
-            "message": "Position conversion does not match an authoritative open position.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Position conversion does not match an authoritative open position.",
+            }
+        ), 400
     except Exception as exc:  # noqa: BLE001 - state and margin reads must fail closed
         logger.error("Position conversion safety state unavailable | adapter=%s: %s", adapter_id, type(exc).__name__)
         return _safety_state_unavailable_response()
 
-    proven_no_increase = (
-        from_product in {"CNC", "NRML"}
-        and to_product == "MIS"
-        and new_margin <= old_margin + 1e-9
-    )
+    proven_no_increase = from_product in {"CNC", "NRML"} and to_product == "MIS" and new_margin <= old_margin + 1e-9
     if proven_no_increase:
         return None
     try:
@@ -1253,10 +1145,12 @@ def _admit_position_conversion(
             side,
         )
     except ValueError:
-        return jsonify({
-            "status": "error",
-            "message": "Position conversion does not match an authoritative open position.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Position conversion does not match an authoritative open position.",
+            }
+        ), 400
     except Exception as exc:  # noqa: BLE001 - complete safety state must fail closed
         logger.error("Position conversion safety state unavailable | adapter=%s: %s", adapter_id, type(exc).__name__)
         return _safety_state_unavailable_response()
@@ -1370,10 +1264,12 @@ def _admit_and_route_live_order(
                 f"{ft_action} {body.get('symbol', '?')}: {blocked.reason}",
             )
             return False, (
-                jsonify({
-                    "status": "error",
-                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-                }),
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                    }
+                ),
                 403,
             )
 
@@ -1402,7 +1298,7 @@ def _dispatch_live_order(
     body: dict[str, Any],
     payload: dict[str, Any],
     *,
-    adapter_id: str = "openalgo",
+    adapter_id: str = "",
     account_id: str | None = None,
     variety: str | None = None,
 ) -> tuple[Any, int]:
@@ -1412,7 +1308,7 @@ def _dispatch_live_order(
     one-shot selector-bound ``SafetyContext`` via ``gate_order`` and dispatches
     through the app's :class:`BrokerRouter` — which ACL-checks the ``(actor,
     account)`` and re-verifies the gate before any broker write. Used by BOTH the
-    legacy ``/place`` live branch (``adapter_id="openalgo"``) and the
+    legacy ``/place`` live branch (``adapter_id=""``) and the
     ``/<broker>/place`` routed endpoint, so live placement has exactly one gated
     path. Fails CLOSED with an actionable message on every misconfiguration — it
     never forwards an ungated order.
@@ -1426,31 +1322,37 @@ def _dispatch_live_order(
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
     account_id = account_id or str(body.get("account_id") or "default")
+    if not adapter_id or not account_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
 
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
         logger.error(
             "Live order rejected — BROKER_ROUTER unavailable | action=%s adapter=%s",
-            ft_action, adapter_id,
+            ft_action,
+            adapter_id,
         )
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Order routing unavailable — workspace.json brokers configuration is "
-                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Order routing unavailable — workspace.json brokers configuration is "
+                    "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+                ),
+            }
+        ), 503
 
     if str(adapter_id).strip().lower() == "kotakneo":
         for field in ("variety", "validity"):
-            if field in body and (
-                body[field] is None
-                or type(body[field]) is str and not body[field].strip()
-            ):
-                return jsonify({
-                    "status": "error",
-                    "message": f"Kotak Neo {field} must not be empty.",
-                }), 501
+            if field in body and (body[field] is None or type(body[field]) is str and not body[field].strip()):
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Kotak Neo {field} must not be empty.",
+                    }
+                ), 501
 
     request_ctx = RequestContext(
         jti=str(payload.get("jti") or ""),
@@ -1471,7 +1373,9 @@ def _dispatch_live_order(
     except ValueError as exc:
         logger.warning(
             "Live order rejected by order-model validation | action=%s adapter=%s: %s",
-            ft_action, adapter_id, exc,
+            ft_action,
+            adapter_id,
+            exc,
         )
         message = "Order validation failed"
         raw_quantity = body.get("quantity")
@@ -1485,7 +1389,9 @@ def _dispatch_live_order(
     except ValidationError as exc:
         logger.warning(
             "Live order rejected by order-model validation | action=%s adapter=%s: %s",
-            ft_action, adapter_id, exc,
+            ft_action,
+            adapter_id,
+            exc,
         )
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
@@ -1536,36 +1442,45 @@ def _dispatch_live_order(
                 # Label GTT/variety dispatches distinctly so the admin history
                 # does not conflate them with regular placements.
                 _op = "PLACE" if not variety else f"{variety.upper()}-PLACE"
-                _persistent_monitor.record(
-                    adapter_id, _op, _latency_ms, symbol=_symbol
-                )
+                _persistent_monitor.record(adapter_id, _op, _latency_ms, symbol=_symbol)
         except Exception:  # pragma: no cover - monitoring must never break orders
             logger.debug("order latency record failed", exc_info=True)
     except SafetyBypassError as exc:
         logger.warning(
             "Live order refused by safety gate | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
+            ft_action,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
         return jsonify({"status": "error", "message": "Order refused"}), 403
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning(
             "Live order — broker not connected | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
+            ft_action,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                    "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+                ),
+            }
+        ), 503
     except AlgoTagLimitError as exc:
         # The router's algo-tag guard refused the dispatch: the operator's
         # per-(broker, exchange) per-second algo-order ceiling would be breached.
         # A throttle refusal, not a safety bypass — map to 429 so callers retry.
         logger.warning(
             "Live order refused by algo-tag guard | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
+            ft_action,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
         return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
@@ -1575,16 +1490,23 @@ def _dispatch_live_order(
         # available", not a server fault — map to 501 with the adapter message.
         logger.warning(
             "Live order — adapter capability not available | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
+            ft_action,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
-        return jsonify({
-            "status": "error",
-            "message": f"Order placement ({ft_action}) is not yet available for broker '{adapter_id}'.",
-        }), 501
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Order placement ({ft_action}) is not yet available for broker '{adapter_id}'.",
+            }
+        ), 501
     except Exception:
         logger.exception(
             "Live order dispatch failed | action=%s adapter=%s account=%s",
-            ft_action, adapter_id, safe_account,
+            ft_action,
+            adapter_id,
+            safe_account,
         )
         return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
     finally:
@@ -1626,7 +1548,10 @@ def _dispatch_live_order(
         logger.debug("trade journal stamp failed for live order", exc_info=True)
     logger.info(
         "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
-        ft_action, adapter_id, safe_account, body.get("symbol", "?"),
+        ft_action,
+        adapter_id,
+        safe_account,
+        body.get("symbol", "?"),
     )
     # Native desktop notification (best-effort, desktop-shell only) — after the
     # order is already placed, so it can never affect execution.
@@ -1634,7 +1559,7 @@ def _dispatch_live_order(
         "Live order dispatched",
         f"{ft_action} {body.get('symbol', '?')} via {adapter_id}",
     )
-    # Return both keys: ``orderid`` (legacy OpenAlgo response shape the UI reads)
+    # Return both keys: ``orderid`` (legacy native broker response shape the UI reads)
     # and ``data`` (the routed-path shape) so the frontend works either way.
     return jsonify({"status": "success", "orderid": result, "data": result}), 200
 
@@ -1705,9 +1630,7 @@ def _record_trade_journal(typed_order: Any, orderid: str, strategy: str = "manua
         _insert()
 
 
-def _audit_write_event(
-    event_type: str, adapter_id: str, account_id: str, actor_id: str, order_id: str
-) -> None:
+def _audit_write_event(event_type: str, adapter_id: str, account_id: str, actor_id: str, order_id: str) -> None:
     """Best-effort audit stamp for a gated broker write (never breaks the order path)."""
     try:
         audit = current_app.config.get("AUDIT")
@@ -1756,13 +1679,15 @@ def _gated_write_dispatch(
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
         logger.error("Live %s rejected — BROKER_ROUTER unavailable | adapter=%s", op, adapter_id)
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Order routing unavailable — workspace.json brokers configuration is "
-                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Order routing unavailable — workspace.json brokers configuration is "
+                    "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+                ),
+            }
+        ), 503
 
     request_ctx = RequestContext(
         jti=str(payload.get("jti") or ""),
@@ -1776,7 +1701,10 @@ def _gated_write_dispatch(
 
     try:
         safety_ctx = gate_order(
-            canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id,
+            canonical_order,
+            request_ctx,
+            adapter_id=adapter_id,
+            account_id=account_id,
             backend_lease_proof=router.backend_lease_proof,
         )
         reservation = None
@@ -1800,15 +1728,20 @@ def _gated_write_dispatch(
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning(
             "Live %s — broker not connected | adapter=%s account=%s: %s",
-            op, adapter_id, safe_account, _redact_exc(exc, account_id),
+            op,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                    "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+                ),
+            }
+        ), 503
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
         # Gated-skeleton adapters raise NotImplementedError for un-built write
         # paths; UnsupportedCapabilityError signals a capability the adapter does
@@ -1820,10 +1753,12 @@ def _gated_write_dispatch(
             safe_account,
             _redact_exc(exc, account_id),
         )
-        return jsonify({
-            "status": "error",
-            "message": f"This operation ({op}) is not yet available for broker '{adapter_id}'.",
-        }), 501
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"This operation ({op}) is not yet available for broker '{adapter_id}'.",
+            }
+        ), 501
     except Exception:
         logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, safe_order, adapter_id)
         return jsonify({"status": "error", "message": fail_message}), 500
@@ -1873,9 +1808,7 @@ def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
         "amo": ("amo",),
     }
     return sorted(
-        field
-        for field, request_keys in aliases.items()
-        if any(request_key in body for request_key in request_keys)
+        field for field, request_keys in aliases.items() if any(request_key in body for request_key in request_keys)
     )
 
 
@@ -1883,7 +1816,7 @@ def _dispatch_live_modify(
     body: dict[str, Any],
     payload: dict[str, Any],
     *,
-    adapter_id: str = "openalgo",
+    adapter_id: str = "",
     account_id: str | None = None,
 ) -> tuple[Any, int]:
     """Gate a live order MODIFY through the BrokerRouter (one-shot gate + ACL).
@@ -1901,6 +1834,10 @@ def _dispatch_live_modify(
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
+    if not adapter_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
     safe_order = log_ref(order_id, kind="order")
 
     # Kotak Neo v3 removed the quick/legacy modify arguments below.  Reject an
@@ -1919,10 +1856,12 @@ def _dispatch_live_modify(
     }
     if str(adapter_id).strip().lower() == "kotakneo":
         if kotakneo_removed_fields.intersection(body):
-            return jsonify({
-                "status": "error",
-                "message": "The requested Kotak Neo modify fields are not available in SDK v3.",
-            }), 501
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "The requested Kotak Neo modify fields are not available in SDK v3.",
+                }
+            ), 501
         replacement_keys = {
             "symbol",
             "exchange",
@@ -1943,20 +1882,24 @@ def _dispatch_live_modify(
             if body[field] is None or type(body[field]) is str and not body[field].strip()
         )
         if empty_fields:
-            return jsonify({
-                "status": "error",
-                "message": f"Kotak Neo modify fields must not be empty: {empty_fields}",
-            }), 501
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": f"Kotak Neo modify fields must not be empty: {empty_fields}",
+                }
+            ), 501
 
     blocked, unavailable = _live_kill_switch_block()
     if unavailable is not None:
         return unavailable
     if blocked is not None:
         logger.warning("Live modify blocked by kill switch | order=%s: %s", safe_order, blocked.reason)
-        return jsonify({
-            "status": "error",
-            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+            }
+        ), 403
 
     changes = _modify_changes(body)
     requested_fields = _requested_modify_fields(body)
@@ -1988,10 +1931,12 @@ def _dispatch_live_modify(
             except (TypeError, ValueError):
                 trigger = 0.0
             if not math.isfinite(trigger) or trigger <= 0:
-                return jsonify({
-                    "status": "error",
-                    "message": "A positive trigger price is required to modify a stop-loss order",
-                }), 400
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": "A positive trigger price is required to modify a stop-loss order",
+                    }
+                ), 400
 
         canonical = {
             "_op": "modify",
@@ -2023,7 +1968,7 @@ def _dispatch_live_cancel(
     body: dict[str, Any],
     payload: dict[str, Any],
     *,
-    adapter_id: str = "openalgo",
+    adapter_id: str = "",
     account_id: str | None = None,
 ) -> tuple[Any, int]:
     """Gate a live order CANCEL through the BrokerRouter (one-shot gate + ACL).
@@ -2044,6 +1989,10 @@ def _dispatch_live_cancel(
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
     account_id = account_id or str(body.get("account_id") or "default")
+    if not adapter_id or not account_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Cancel requires an 'orderid'"}), 400
@@ -2051,19 +2000,23 @@ def _dispatch_live_cancel(
     if unavailable is not None:
         return unavailable
     if blocked is not None:
-        return jsonify({
-            "status": "error",
-            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+            }
+        ), 403
 
     extras: dict[str, Any] = {}
     authoritative_context: dict[str, Any] = {}
     if str(adapter_id).strip().lower() == "kotakneo":
         if "trading_symbol" in body:
-            return jsonify({
-                "status": "error",
-                "message": "Kotak Neo v3 cancel does not accept a trading symbol.",
-            }), 501
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Kotak Neo v3 cancel does not accept a trading symbol.",
+                }
+            ), 501
         from .l2_state import (  # noqa: PLC0415
             CancelCapabilityError,
             PortfolioSafetyStateError,
@@ -2116,7 +2069,11 @@ def _dispatch_live_cancel(
         account_id=account_id,
         order_id=order_id,
         dispatch=lambda router, ctx, sctx: router.cancel_order(
-            ctx, order=canonical, order_id=order_id, safety_ctx=sctx, hint=hint,
+            ctx,
+            order=canonical,
+            order_id=order_id,
+            safety_ctx=sctx,
+            hint=hint,
             extras=extras or None,
         ),
         audit_event="ORDER_CANCELLED",
@@ -2131,7 +2088,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     correct execution path (explore / practice / live).
 
     Args:
-        ft_action: The FlintTrade action key (matches ``_ENDPOINT_MAP``), e.g.
+        ft_action: The FlintTrade action key (belongs to ``_ORDER_ACTIONS``), e.g.
             ``"place"``, ``"cancel"``.
 
     Returns:
@@ -2147,28 +2104,27 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return mismatch
 
     if not mode:
-        logger.warning(
-            "Order request to /%s missing valid JWT with mode claim — rejected", ft_action
-        )
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT with a mode claim",
-        }), 401
+        logger.warning("Order request to /%s missing valid JWT with mode claim — rejected", ft_action)
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT with a mode claim",
+            }
+        ), 401
 
     if mode not in _VALID_MODES:
-        logger.warning(
-            "Order request to /%s has invalid JWT mode '%s' — rejected", ft_action, mode
-        )
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Invalid mode '{mode}' in JWT claim. "
-                "Expected one of: explore, practice, live"
-            ),
-        }), 400
+        logger.warning("Order request to /%s has invalid JWT mode '%s' — rejected", ft_action, mode)
+        return jsonify(
+            {
+                "status": "error",
+                "message": (f"Invalid mode '{mode}' in JWT claim. Expected one of: explore, practice, live"),
+            }
+        ), 400
 
     body = request.get_json(silent=True) or {}
-    openalgo_endpoint = _ENDPOINT_MAP[ft_action]
+    if ft_action not in _ORDER_ACTIONS:
+        raise ValueError("Unknown local order action")
+    broker_action = ft_action
 
     # ------------------------------------------------------------------
     # Example (explore claim) — orders never permitted
@@ -2176,13 +2132,16 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     if mode == _MODE_EXPLORE:
         logger.info(
             "Order blocked — explore mode | action=%s symbol=%s",
-            ft_action, body.get("symbol", "?"),
+            ft_action,
+            body.get("symbol", "?"),
         )
-        return jsonify({
-            "status": "error",
-            "message": _EXAMPLE_ORDERS_REFUSAL,
-            "code": "mode_blocked",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": _EXAMPLE_ORDERS_REFUSAL,
+                "code": "mode_blocked",
+            }
+        ), 403
 
     # ------------------------------------------------------------------
     # Practice mode — paper trading via SandboxEngine
@@ -2195,28 +2154,26 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
 
         sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
         if sandbox is None:
-            logger.error(
-                "SandboxEngine not configured in app.config — cannot process practice order"
-            )
-            return jsonify({
-                "status": "error",
-                "message": "Practice trading engine not available",
-            }), 500
+            logger.error("SandboxEngine not configured in app.config — cannot process practice order")
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Practice trading engine not available",
+                }
+            ), 500
 
-        practice_order_type = str(
-            body.get("order_type") or body.get("pricetype") or "MARKET"
-        ).strip().upper()
+        practice_order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
         if (
             ft_action == "modify"
             and practice_order_type != "MARKET"
             and current_app.config.get("TICK_RECORDER") is None
         ):
-            return jsonify({
-                "status": "error",
-                "message": (
-                    "Practice LIMIT and stop orders require tick capture to be running"
-                ),
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": ("Practice LIMIT and stop orders require tick capture to be running"),
+                }
+            ), 503
 
         # Placement is handled only by ``_dispatch_practice_place``. Cancel and
         # modify still reach the sandbox book; other actions do not create orders.
@@ -2225,12 +2182,16 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         except Exception as exc:
             logger.exception(
                 "SandboxEngine error for action=%s symbol=%s: %s",
-                ft_action, body.get("symbol", "?"), exc,
+                ft_action,
+                body.get("symbol", "?"),
+                exc,
             )
-            return jsonify({
-                "status": "error",
-                "message": "Practice trading engine encountered an error",
-            }), 500
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Practice trading engine encountered an error",
+                }
+            ), 500
 
         logger.info(
             "Practice order | action=%s symbol=%s exchange=%s qty=%s → %s",
@@ -2241,10 +2202,12 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             result.get("status", "?"),
         )
         if str(result.get("status", "")).upper() == "REJECTED":
-            return jsonify({
-                "status": "error",
-                "message": str(result.get("message") or "Practice order rejected"),
-            }), 400
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": str(result.get("message") or "Practice order rejected"),
+                }
+            ), 400
         return jsonify(result), 200
 
     # ------------------------------------------------------------------
@@ -2257,28 +2220,29 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     # ``cancel-all`` for an explicitly-named native broker routes through the
     # gated ``cancel_all_orders`` verb.
     #
-    # Other legacy OpenAlgo write verbs intentionally fail closed until they
-    # have BrokerRouter verbs. Workspace/UI OpenAlgo settings can now provide a
-    # live API key, so leaving the old direct forward in place would wake an
-    # ungated order path.
+    # Additional actions remain unavailable until a gated native verb exists.
     # ------------------------------------------------------------------
     if not _is_live_mode_unlocked():
         logger.warning(
-            "Live order rejected — JWT does not contain live_mode_unlocked claim | "
-            "action=%s symbol=%s",
-            ft_action, body.get("symbol", "?"),
+            "Live order rejected — JWT does not contain live_mode_unlocked claim | action=%s symbol=%s",
+            ft_action,
+            body.get("symbol", "?"),
         )
-        return jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Live mode not unlocked — verify PIN first",
+            }
+        ), 403
 
     live_payload = _decode_request_payload()
     if live_payload is None:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — JWT could not be decoded",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — JWT could not be decoded",
+            }
+        ), 401
 
     adapter_id, account_id = _gated_target(body)
     if ft_action == "modify":
@@ -2286,7 +2250,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     if ft_action == "cancel":
         return _dispatch_live_cancel(body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "cancel-all":
-        # Every adapter, including the OpenAlgo bridge, sweeps through the
+        # Every native adapter sweeps through the
         # gated cancel_all_orders verb
         # (one-shot SafetyContext + ACL), forwarding only tag/segment. A
         # STRATEGY-scoped cancel-all cannot be honoured — the native verb has no
@@ -2303,34 +2267,40 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
                 "would cancel the whole account | adapter=%s",
                 adapter_id,
             )
-            return jsonify({
-                "status": "error",
-                "message": (
-                    "Strategy-scoped cancel-all is not supported for native brokers "
-                    "— it would cancel every open order on the account, including "
-                    "other strategies' orders. Cancel by tag/segment, or cancel "
-                    "orders individually."
-                ),
-            }), 400
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "Strategy-scoped cancel-all is not supported for native brokers "
+                        "— it would cancel every open order on the account, including "
+                        "other strategies' orders. Cancel by tag/segment, or cancel "
+                        "orders individually."
+                    ),
+                }
+            ), 400
         fields = {k: str(body[k]) for k in ("tag", "segment") if body.get(k) is not None}
         return _gated_verb_write(
-            "cancel_all_orders", fields, live_payload,
-            adapter_id=adapter_id, account_id=account_id,
-            audit_event="ORDERS_CANCELLED_ALL", fail_message="Cancel-all failed",
+            "cancel_all_orders",
+            fields,
+            live_payload,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            audit_event="ORDERS_CANCELLED_ALL",
+            fail_message="Cancel-all failed",
         )
 
     logger.warning(
-        "Live order action rejected until gated BrokerRouter support exists | "
-        "action=%s endpoint=%s symbol=%s",
-        ft_action, openalgo_endpoint, body.get("symbol", "?"),
+        "Live order action rejected until gated BrokerRouter support exists | action=%s endpoint=%s symbol=%s",
+        ft_action,
+        broker_action,
+        body.get("symbol", "?"),
     )
-    return jsonify({
-        "status": "error",
-        "message": (
-            f"Live action '{ft_action}' is disabled until it is routed through "
-            "the gated broker router"
-        ),
-    }), 501
+    return jsonify(
+        {
+            "status": "error",
+            "message": (f"Live action '{ft_action}' is disabled until it is routed through the gated broker router"),
+        }
+    ), 501
 
 
 def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -2345,7 +2315,7 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
         body: Decoded JSON request body.
 
     Returns:
-        Dict response in OpenAlgo-compatible format.
+        Dict response in native broker-compatible format.
     """
     if ft_action in {"place", "place-smart", "open-position", "close-position"}:
         return {
@@ -2398,8 +2368,7 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
             "trigger_id": "",
             "status": "REJECTED",
             "message": (
-                "GTT (Good Till Triggered) orders require live mode — "
-                "they are not simulated in Practice mode."
+                "GTT (Good Till Triggered) orders require live mode — they are not simulated in Practice mode."
             ),
         }
 
@@ -2552,10 +2521,13 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
             refused = agent_guard(body, positions, orders)
         except Exception:
             logger.exception("Practice agent authority recheck failed")
-            return jsonify({
-                "status": "error", "code": "practice_agent_guard_unavailable",
-                "message": "Practice agent authority could not be verified",
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "code": "practice_agent_guard_unavailable",
+                    "message": "Practice agent authority could not be verified",
+                }
+            ), 503
         if isinstance(refused, AbstractContextManager):
             # Only the in-process guard can return this capability. Enter it
             # after Laya and hold it solely across the synchronous sandbox
@@ -2566,20 +2538,22 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
 
     sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
     if sandbox is None:
-        logger.error(
-            "SandboxEngine not configured in app.config — cannot process practice order"
-        )
-        return jsonify({
-            "status": "error",
-            "message": "Practice trading engine not available",
-        }), 500
+        logger.error("SandboxEngine not configured in app.config — cannot process practice order")
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Practice trading engine not available",
+            }
+        ), 500
 
     order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
     if order_type != "MARKET" and current_app.config.get("TICK_RECORDER") is None:
-        return jsonify({
-            "status": "error",
-            "message": "Practice LIMIT and stop orders require tick capture to be running",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Practice LIMIT and stop orders require tick capture to be running",
+            }
+        ), 503
 
     try:
         quantity = int(body.get("quantity", 0))
@@ -2618,19 +2592,19 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                 order_type=order_type,
                 trigger_price=trigger_price,
                 strategy=str(body.get("strategy") or "").strip(),
-                instrument_token=str(
-                    body.get("instrument_token") or body.get("security_id") or ""
-                ).strip(),
+                instrument_token=str(body.get("instrument_token") or body.get("security_id") or "").strip(),
                 **provenance,
             )
         if not _subscribe_pending_practice_order(result, body):
             order_id = str(result.get("order_id") or "")
             if order_id:
                 sandbox.cancel_order(order_id)
-            return jsonify({
-                "status": "error",
-                "message": "Practice order was cancelled because its tick subscription failed",
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Practice order was cancelled because its tick subscription failed",
+                }
+            ), 503
     except Exception as exc:
         if isinstance(exc, PracticeAgentError) and not sandbox_write_started:
             return jsonify({"status": "error", "code": exc.code, "message": exc.code}), 409
@@ -2639,10 +2613,12 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
             body.get("symbol", "?"),
             exc,
         )
-        return jsonify({
-            "status": "error",
-            "message": "Practice trading engine encountered an error",
-        }), 500
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Practice trading engine encountered an error",
+            }
+        ), 500
 
     logger.info(
         "Practice order | action=place symbol=%s exchange=%s qty=%s → %s",
@@ -2652,13 +2628,15 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         result.get("status", "?"),
     )
     if str(result.get("status", "")).upper() == "REJECTED":
-        return jsonify({
-            "status": "error",
-            "message": _visible_practice_refusal(
-                str(result.get("message") or "Practice order rejected"),
-                str(body.get("symbol") or ""),
-            ),
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": _visible_practice_refusal(
+                    str(result.get("message") or "Practice order rejected"),
+                    str(body.get("symbol") or ""),
+                ),
+            }
+        ), 400
     if fill is not None and getattr(fill, "label", None):
         result = {
             **result,
@@ -2697,11 +2675,13 @@ def _gtt_contract_refusal(body: Mapping[str, Any]) -> tuple[Any, int] | None:
     """
     if _gtt_variety_token(body.get("variety")) != "gtt":
         return None
-    return jsonify({
-        "status": "error",
-        "code": "gtt_unsupported",
-        "message": GTT_UNSUPPORTED_MESSAGE,
-    }), 422
+    return jsonify(
+        {
+            "status": "error",
+            "code": "gtt_unsupported",
+            "message": GTT_UNSUPPORTED_MESSAGE,
+        }
+    ), 422
 
 
 def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tuple[Any, int]:
@@ -2719,37 +2699,44 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
     if mismatch is not None:
         return mismatch
     if not mode:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT with a mode claim",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT with a mode claim",
+            }
+        ), 401
     if mode not in _VALID_MODES:
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Invalid mode '{mode}' in JWT claim. "
-                "Expected one of: explore, practice, live"
-            ),
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": (f"Invalid mode '{mode}' in JWT claim. Expected one of: explore, practice, live"),
+            }
+        ), 400
     if mode == _MODE_EXPLORE:
-        return jsonify({
-            "status": "error",
-            "message": _EXAMPLE_ORDERS_REFUSAL,
-            "code": "mode_blocked",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": _EXAMPLE_ORDERS_REFUSAL,
+                "code": "mode_blocked",
+            }
+        ), 403
     if mode == _MODE_PRACTICE:
         return _dispatch_practice_place(payload_body)
     if not _is_live_mode_unlocked():
-        return jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Live mode not unlocked — verify PIN first",
+            }
+        ), 403
     live_payload = _decode_request_payload()
     if live_payload is None:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — JWT could not be decoded",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — JWT could not be decoded",
+            }
+        ), 401
     adapter_id, account_id = _gated_target(payload_body)
     variety = _variety_from_body(payload_body)
     return _dispatch_live_order(
@@ -2815,10 +2802,12 @@ def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, 
             live=True,
         )
         if not decision.qualifies:
-            return jsonify({
-                "status": "error",
-                "message": "Square-off stopped because a position is not a reduce-only exit.",
-            }), 409
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Square-off stopped because a position is not a reduce-only exit.",
+                }
+            ), 409
         _record_reduce_only(body, _MODE_LIVE)
     return None
 
@@ -2826,7 +2815,7 @@ def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, 
 @orders_bp.route("/place", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_order() -> tuple[Any, int]:
-    """Place a regular order — maps to OpenAlgo ``placeorder``.
+    """Place a regular order — maps to native broker ``placeorder``.
 
     Practice orders are admitted through Laya before the sandbox engine.
     Live orders run SafetySystem L1–L5 and the one-shot gate.
@@ -2874,10 +2863,15 @@ def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int
     """Validate common auth/live-unlock gates for selector-bound routed writes."""
     payload = _decode_request_payload()
     if not payload:
-        return None, (jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401)
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Authentication required — provide a valid JWT",
+                }
+            ),
+            401,
+        )
 
     jwt_mode = str(payload.get("mode") or "").strip().lower()
     mismatch = _mode_header_mismatch_response(jwt_mode, route_label="Routed order request")
@@ -2885,19 +2879,28 @@ def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int
         return None, mismatch
 
     if jwt_mode != _MODE_LIVE:
-        return None, (jsonify({
-            "status": "error",
-            "message": (
-                "The routed order path serves live mode only. Use "
-                "/api/v1/orders/place for explore/practice."
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice."
+                    ),
+                }
             ),
-        }), 400)
+            400,
+        )
 
     if not _is_live_mode_unlocked():
-        return None, (jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403)
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Live mode not unlocked — verify PIN first",
+                }
+            ),
+            403,
+        )
 
     return payload, None
 
@@ -2940,7 +2943,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
 @orders_bp.route("/modify", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def modify_order() -> tuple[Any, int]:
-    """Modify an existing open order — maps to OpenAlgo ``modifyorder``.
+    """Modify an existing open order — maps to native broker ``modifyorder``.
 
     Request headers:
         X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
@@ -2972,7 +2975,7 @@ def modify_order_routed(broker: str) -> tuple[Any, int]:
 @orders_bp.route("/cancel", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def cancel_order() -> tuple[Any, int]:
-    """Cancel an open order — maps to OpenAlgo ``cancelorder``.
+    """Cancel an open order — maps to native broker ``cancelorder``.
 
     Request headers:
         X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
@@ -3001,7 +3004,7 @@ def cancel_order_routed(broker: str) -> tuple[Any, int]:
 @orders_bp.route("/cancel-all", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def cancel_all_orders() -> tuple[Any, int]:
-    """Cancel all open orders — maps to OpenAlgo ``cancelallorder``.
+    """Cancel all open orders — maps to native broker ``cancelallorder``.
 
     Request headers:
         X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
@@ -3015,81 +3018,42 @@ def cancel_all_orders() -> tuple[Any, int]:
 @orders_bp.route("/options", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def options_order() -> tuple[Any, int]:
-    """Place a single-leg options order — maps to OpenAlgo ``optionsorder``.
-
-    Routes a generic single-leg options order through the FT safety proxy
-    so that explore and practice modes are handled before
-    any live-capable route can reach a broker adapter. Added 2026-05-19 to close the
-    gap flagged by the Codex stop-gate review (options orders were briefly
-    falling through to OpenAlgo direct, bypassing the mode gate).
-
-    Request headers:
-        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
-
-    Request JSON: forwarded as-is to OpenAlgo's ``optionsorder`` endpoint.
-        Typical fields: ``symbol``, ``exchange``, ``action``, ``quantity``,
-        ``price``, ``product``, ``order_type``, ``strike``, ``expiry``,
-        ``option_type`` (``CE``/``PE``).
-
-    Returns:
-        JSON with ``status``, ``order_id``, and ``message``.
-    """
+    """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("options")
 
 
 @orders_bp.route("/options-multi", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def options_multi_order() -> tuple[Any, int]:
-    """Place a multi-leg options order — maps to OpenAlgo ``optionsmultiorder``.
-
-    Like :func:`options_order` but for multi-leg payloads (spreads,
-    straddles, condors written as a legs array). Same safety-proxy
-    semantics — mode gate applied before any live-capable broker route.
-
-    Request headers:
-        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
-
-    Request JSON: forwarded as-is to OpenAlgo's ``optionsmultiorder``
-        endpoint. Typical shape: ``{"legs": [{"strike": ..., "option_type":
-        ..., "action": ..., "quantity": ...}, ...], "exchange": ...,
-        "product": ..., "expiry": ...}``.
-
-    Returns:
-        JSON with ``status``, ``order_id``s per leg, and ``message``.
-    """
+    """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("options-multi")
 
 
 # ---------------------------------------------------------------------------
 # GTT (Good Till Triggered) — placed/modified/cancelled through the same
 # safety proxy as regular orders so live-mode JWT unlock and explore-mode
-# blocking apply identically. Upstream live broker support: Dhan + Zerodha.
+# blocking apply identically. Broker-specific trigger writes use the native gated routes below.
 # ---------------------------------------------------------------------------
 
 
 @orders_bp.route("/gtt-place", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def gtt_place_order() -> tuple[Any, int]:
-    """Place a GTT (Good Till Triggered) order — maps to ``placegttorder``.
-
-    Single-leg or two-leg OCO triggers. Upstream rejects MIS product
-    because triggers can sit for days; expects ``triggerprice_sl`` /
-    ``triggerprice_tg`` and (for OCO) ``stoploss`` / ``target`` limits.
-    """
+    """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-place")
 
 
 @orders_bp.route("/gtt-modify", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def gtt_modify_order() -> tuple[Any, int]:
-    """Modify an active GTT — maps to ``modifygttorder``. Full replacement."""
+    """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-modify")
 
 
 @orders_bp.route("/gtt-cancel", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def gtt_cancel_order() -> tuple[Any, int]:
-    """Cancel an active GTT by ``trigger_id`` — maps to ``cancelgttorder``."""
+    """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-cancel")
 
 
@@ -3101,8 +3065,8 @@ def gtt_cancel_order() -> tuple[Any, int]:
 # route → validate body → live-mode guard → gate_broker_write (one-shot HMAC
 # SafetyContext over the canonical payload, ``_op`` inside the signed hash)
 # → BrokerRouter.execute_gated (re-verify + ACL + one-shot consume + verb
-# table). Reads (the listings) traverse the same ACL-enforcing session
-# provider but mint no SafetyContext — nothing is written.
+# table). HTTP listings stay frozen with a 409 response until the reviewed
+# native read cutover; they never resolve session or provider authority.
 # ---------------------------------------------------------------------------
 
 # Dhan super-order legs (mirror flinttrade_gateway.brokers.dhan_mapping
@@ -3112,7 +3076,7 @@ _SUPER_ORDER_LEGS = frozenset({"ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"})
 
 
 def _configured_execution_target() -> tuple[str, str]:
-    """Return the router's configured execution default, or OpenAlgo/default."""
+    """Return the explicitly configured native execution target, or no target."""
     router = current_app.config.get("BROKER_ROUTER")
     selector = str(getattr(router, "default_selector", None) or "").strip()
     if selector:
@@ -3125,7 +3089,7 @@ def _configured_execution_target() -> tuple[str, str]:
                 "Ignoring malformed brokers.execution.default selector: %s",
                 log_ref(selector, kind="selector"),
             )
-    return "openalgo", "default"
+    return "", ""
 
 
 def _gated_target(params: Any) -> tuple[str, str]:
@@ -3138,11 +3102,11 @@ def _gated_target(params: Any) -> tuple[str, str]:
     Returns:
         ``(adapter_id, account_id)``. With no explicit target, the running
         ``brokers.execution.default`` selector wins; if no configured router is
-        available this falls back to ``("openalgo", "default")``.
+        available this falls back to ``("", "")``.
     """
     if not str(params.get("broker") or "").strip() and not str(params.get("account_id") or "").strip():
         return _configured_execution_target()
-    adapter_id = str(params.get("broker") or "openalgo").strip().lower()
+    adapter_id = str(params.get("broker") or "").strip().lower()
     account_id = str(params.get("account_id") or "default").strip() or "default"
     return adapter_id, account_id
 
@@ -3166,10 +3130,15 @@ def _require_live_payload(*, require_unlock: bool) -> tuple[dict[str, Any] | Non
     """
     payload = _decode_request_payload()
     if not payload:
-        return None, (jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401)
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Authentication required — provide a valid JWT",
+                }
+            ),
+            401,
+        )
 
     jwt_mode = str(payload.get("mode") or "").strip().lower()
     mismatch = _mode_header_mismatch_response(jwt_mode, route_label="Extended gated route request")
@@ -3177,20 +3146,30 @@ def _require_live_payload(*, require_unlock: bool) -> tuple[dict[str, Any] | Non
         return None, mismatch
 
     if jwt_mode != _MODE_LIVE:
-        return None, (jsonify({
-            "status": "error",
-            "message": (
-                "This endpoint serves live mode only — forever (GTT), super orders, "
-                "conditional triggers, and position writes are live-broker constructs. "
-                "Switch to Live mode first."
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "This endpoint serves live mode only — forever (GTT), super orders, "
+                        "conditional triggers, and position writes are live-broker constructs. "
+                        "Switch to Live mode first."
+                    ),
+                }
             ),
-        }), 403)
+            403,
+        )
 
     if require_unlock and not _is_live_mode_unlocked():
-        return None, (jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403)
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Live mode not unlocked — verify PIN first",
+                }
+            ),
+            403,
+        )
 
     return payload, None
 
@@ -3248,6 +3227,10 @@ def _gated_verb_write(
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
+    if not adapter_id or not account_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
     safe_ref = log_ref(ref or "none", kind="ref")
     if kill_switch_gated:
         blocked, unavailable = _live_kill_switch_block()
@@ -3255,21 +3238,25 @@ def _gated_verb_write(
             return unavailable
         if blocked is not None:
             logger.warning("Live %s blocked by kill switch | ref=%s: %s", verb, safe_ref, blocked.reason)
-            return jsonify({
-                "status": "error",
-                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-            }), 403
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                }
+            ), 403
 
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
         logger.error("Live %s rejected — BROKER_ROUTER unavailable | adapter=%s", verb, adapter_id)
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Order routing unavailable — workspace.json brokers configuration is "
-                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Order routing unavailable — workspace.json brokers configuration is "
+                    "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+                ),
+            }
+        ), 503
 
     request_ctx = RequestContext(
         jti=str(jwt_payload.get("jti") or ""),
@@ -3283,7 +3270,11 @@ def _gated_verb_write(
     canonical: dict[str, Any] = {"_op": verb, **fields}
     try:
         safety_ctx = gate_broker_write(
-            verb, canonical, request_ctx, adapter_id, account_id=account_id,
+            verb,
+            canonical,
+            request_ctx,
+            adapter_id,
+            account_id=account_id,
             backend_lease_proof=router.backend_lease_proof,
         )
         reservations = []
@@ -3322,31 +3313,41 @@ def _gated_verb_write(
             safe_account,
             _redact_exc(exc, account_id),
         )
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                    "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+                ),
+            }
+        ), 503
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
         # An adapter without the verb refuses cleanly — an honest "not yet
         # available" for this broker, not a server fault.
         logger.warning(
             "Live %s — adapter capability not available | adapter=%s account=%s: %s",
-            verb, adapter_id, safe_account, _redact_exc(exc, account_id),
+            verb,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
-        return jsonify({
-            "status": "error",
-            "message": f"This operation ({verb}) is not yet available for broker '{adapter_id}'.",
-        }), 501
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"This operation ({verb}) is not yet available for broker '{adapter_id}'.",
+            }
+        ), 501
     except (BrokerError, ValueError) as exc:
         # The broker/adapter refused after the FlintTrade gate succeeded. Keep the
         # detailed exception in logs, but return the route-specific bounded message
         # so adapter tracebacks, paths, or tokens cannot reach HTTP callers.
         logger.warning(
             "Live %s rejected by broker/adapter | adapter=%s account=%s: %s",
-            verb, adapter_id, safe_account, _redact_exc(exc, account_id),
+            verb,
+            adapter_id,
+            safe_account,
+            _redact_exc(exc, account_id),
         )
         return jsonify({"status": "error", "message": fail_message}), 502
     except Exception:
@@ -3368,100 +3369,18 @@ def _gated_broker_read(
     adapter_id: str,
     account_id: str,
 ) -> tuple[Any, int]:
-    """Run an adapter read (forever/super/trigger listings) through the ACL'd session path.
+    """Refuse native HTTP listings until the reviewed read cutover is enabled.
 
-    The BrokerRouter exposes no public read-dispatch for these listings yet
-    (only ``quotes``), so this mirrors its resolve → session → adapter read
-    sequence directly — INCLUDING the ``AuthenticatingSessionProvider``, which
-    is the single per-(actor, account) ACL gate for reads and writes alike.
-    Reads mint no SafetyContext (nothing is written), exactly like the router's
-    own read path. Promoting this into a public ``BrokerRouter`` read verb is a
-    gateway-owned follow-up (router.py is out of scope here).
-
-    Args:
-        read_verb: Adapter read method name (``forever_orders`` /
-            ``super_orders`` / ``conditional_triggers``).
-        jwt_payload: Decoded JWT of the calling operator.
-        adapter_id: Target broker adapter id.
-        account_id: Target account within the adapter.
-
-    Returns:
-        A ``(flask.Response, http_status_code)`` tuple; 200 carries
-        ``{"status": "success", "data": [...]}``.
+    Route handlers have already authenticated the operator and mode. No
+    registry, session authority or adapter is accessed while this boundary is
+    frozen; internal admission reads use their separate in-process owner.
     """
-
-    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
-    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
-
-    router = current_app.config.get("BROKER_ROUTER")
-    if router is None:
-        return jsonify({
+    return jsonify(
+        {
             "status": "error",
-            "message": (
-                "Order routing unavailable — workspace.json brokers configuration is "
-                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
-            ),
-        }), 503
-
-    request_ctx = RequestContext(
-        jti=str(jwt_payload.get("jti") or ""),
-        actor_type="human",
-        actor_id=str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "unknown"),
-        mode=_MODE_LIVE,
-        selector=f"{adapter_id}:{account_id}",
-    )
-    safe_account = account_ref(account_id)
-
-    try:
-        # Private access mirrors BrokerRouter.quotes — the session provider IS
-        # the read-path ACL gate, so it must not be bypassed with a raw
-        # registry lookup.
-        session = router._session_provider(request_ctx, adapter_id, account_id)  # noqa: SLF001
-        adapter = router._adapters.get(adapter_id)  # noqa: SLF001
-        if adapter is None:
-            raise BrokerNotFoundError(f"no adapter registered for {adapter_id!r}")
-        method = getattr(adapter, read_verb, None)
-        if not callable(method):
-            raise UnsupportedCapabilityError(
-                f"broker adapter {adapter_id!r} does not support the {read_verb!r} listing"
-            )
-        rows = _run_on_client_loop(method(session))
-    except SafetyBypassError as exc:
-        logger.warning(
-            "Broker read %s refused | adapter=%s account=%s: %s",
-            read_verb, adapter_id, safe_account, _redact_exc(exc, account_id),
-        )
-        return jsonify({"status": "error", "message": "Request refused"}), 403
-    except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning(
-            "Broker read %s — not connected | adapter=%s account=%s: %s",
-            read_verb,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-            ),
-        }), 503
-    except (NotImplementedError, UnsupportedCapabilityError) as exc:
-        logger.warning(
-            "Broker read %s — adapter capability not available | adapter=%s account=%s: %s",
-            read_verb, adapter_id, safe_account, _redact_exc(exc, account_id),
-        )
-        return jsonify({
-            "status": "error",
-            "message": f"This listing ({read_verb}) is not yet available for broker '{adapter_id}'.",
-        }), 501
-    except Exception:
-        logger.exception("Broker read %s failed | adapter=%s account=%s", read_verb, adapter_id, safe_account)
-        return jsonify({"status": "error", "message": f"Failed to fetch {read_verb}"}), 500
-
-    return jsonify({"status": "success", "data": rows}), 200
+            "message": "Native broker HTTP reads are unavailable until the read cutover",
+        }
+    ), 409
 
 
 def _changes_from_body(body: dict[str, Any]) -> dict[str, Any] | None:
@@ -3638,13 +3557,17 @@ def _check_legs_through_safety(
         if blocked is not None:
             logger.warning(
                 "Conditional-trigger leg blocked by safety layer %s | symbol=%s: %s",
-                blocked.layer, getattr(leg, "symbol", "?"), blocked.reason,
+                blocked.layer,
+                getattr(leg, "symbol", "?"),
+                blocked.reason,
             )
             return (
-                jsonify({
-                    "status": "error",
-                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-                }),
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                    }
+                ),
                 403,
             ), []
     return None, exposure_positions
@@ -3700,6 +3623,10 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
     contract_error = _forever_contract_error(changes, adapter_id, modifying=True)
     if contract_error is not None:
         return jsonify({"status": "error", "message": contract_error}), 400
+    if not adapter_id or not account_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
@@ -3717,10 +3644,15 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
         if admission_block is not None:
             return admission_block
         return _gated_verb_write(
-            "modify_forever", {"order_id": order_id, "changes": changes}, payload,
-            adapter_id=adapter_id, account_id=account_id,
-            audit_event="FOREVER_MODIFIED", fail_message="Forever order modify failed",
-            ref=order_id, kill_switch_gated=True,
+            "modify_forever",
+            {"order_id": order_id, "changes": changes},
+            payload,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            audit_event="FOREVER_MODIFIED",
+            fail_message="Forever order modify failed",
+            ref=order_id,
+            kill_switch_gated=True,
             admission_lease=lease,
             exposure_orders=([exposure_order] if exposure_order is not None else []),
             exposure_positions=([positions] if exposure_order is not None else []),
@@ -3743,20 +3675,20 @@ def forever_cancel(order_id: str) -> tuple[Any, int]:
     params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
-        "cancel_forever", {"order_id": order_id}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="FOREVER_CANCELLED", fail_message="Forever order cancel failed",
+        "cancel_forever",
+        {"order_id": order_id},
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        audit_event="FOREVER_CANCELLED",
+        fail_message="Forever order cancel failed",
         ref=order_id,
     )
 
 
 @orders_bp.route("/forever", methods=["GET"])
 def forever_list() -> tuple[Any, int]:
-    """List resting forever (GTT) orders — adapter ``forever_orders`` read.
-
-    Target via ``?broker=`` / ``?account_id=`` query parameters. 501 for
-    brokers whose adapter does not expose the listing.
-    """
+    """Authenticate a GTT listing request, then refuse the frozen native HTTP read."""
     payload, err = _require_live_payload(require_unlock=False)
     if err is not None:
         return err
@@ -3794,6 +3726,10 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
     if changes is None:
         return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
     adapter_id, account_id = _gated_target(body)
+    if not adapter_id or not account_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
@@ -3811,10 +3747,15 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
         if admission_block is not None:
             return admission_block
         return _gated_verb_write(
-            "modify_super_order", {"order_id": order_id, "changes": changes}, payload,
-            adapter_id=adapter_id, account_id=account_id,
-            audit_event="SUPER_ORDER_MODIFIED", fail_message="Super order modify failed",
-            ref=order_id, kill_switch_gated=True,
+            "modify_super_order",
+            {"order_id": order_id, "changes": changes},
+            payload,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            audit_event="SUPER_ORDER_MODIFIED",
+            fail_message="Super order modify failed",
+            ref=order_id,
+            kill_switch_gated=True,
             admission_lease=lease,
             exposure_orders=([exposure_order] if exposure_order is not None else []),
             exposure_positions=([positions] if exposure_order is not None else []),
@@ -3839,16 +3780,22 @@ def super_order_cancel(order_id: str) -> tuple[Any, int]:
     if leg is not None:
         leg = str(leg).strip().upper()
         if leg not in _SUPER_ORDER_LEGS:
-            return jsonify({
-                "status": "error",
-                "message": f"'leg' must be one of {sorted(_SUPER_ORDER_LEGS)}, got {leg!r}",
-            }), 400
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": f"'leg' must be one of {sorted(_SUPER_ORDER_LEGS)}, got {leg!r}",
+                }
+            ), 400
         fields["leg"] = leg
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
-        "cancel_super_order", fields, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="SUPER_ORDER_CANCELLED", fail_message="Super order cancel failed",
+        "cancel_super_order",
+        fields,
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        audit_event="SUPER_ORDER_CANCELLED",
+        fail_message="Super order cancel failed",
         ref=order_id,
     )
 
@@ -3902,6 +3849,10 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "Trigger validation failed"}), 400
     adapter_id, account_id = _gated_target(body)
+    if not adapter_id or not account_id:
+        return jsonify(
+            {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
+        ), 503
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
@@ -3920,9 +3871,12 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
             "modify_conditional_trigger",
             {"alert_id": alert_id, "condition": condition, "orders": legs},
             payload,
-            adapter_id=adapter_id, account_id=account_id,
-            audit_event="TRIGGER_MODIFIED", fail_message="Conditional trigger modify failed",
-            ref=alert_id, kill_switch_gated=True,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            audit_event="TRIGGER_MODIFIED",
+            fail_message="Conditional trigger modify failed",
+            ref=alert_id,
+            kill_switch_gated=True,
             admission_lease=lease,
             exposure_orders=legs,
             exposure_positions=exposure_positions,
@@ -3940,9 +3894,13 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
     params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
-        "cancel_conditional_trigger", {"alert_id": alert_id}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="TRIGGER_CANCELLED", fail_message="Conditional trigger cancel failed",
+        "cancel_conditional_trigger",
+        {"alert_id": alert_id},
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        audit_event="TRIGGER_CANCELLED",
+        fail_message="Conditional trigger cancel failed",
         ref=alert_id,
     )
 
@@ -3996,9 +3954,13 @@ def smart_order_cancel(order_id: str) -> tuple[Any, int]:
         fields["segment"] = str(params["segment"])
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
-        "cancel_smart_order", fields, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="SMART_ORDER_CANCELLED", fail_message="Smart order cancel failed",
+        "cancel_smart_order",
+        fields,
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        audit_event="SMART_ORDER_CANCELLED",
+        fail_message="Smart order cancel failed",
         ref=order_id,
     )
 
@@ -4122,7 +4084,10 @@ def place_basket() -> tuple[Any, int]:
             logger.warning("Basket leg %s parse error: %s", i, exc)
             return jsonify({"status": "error", "message": f"Leg {i} parse error"}), 400
 
-    principal = _request_principal(body)
+    try:
+        principal = _request_principal(body)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Choose a native execution account"}), 503
     try:
         typed_legs = [_leg_to_order(leg, strategy) for leg in legs]
     except (TypeError, ValueError):
@@ -4211,7 +4176,10 @@ def place_split() -> tuple[Any, int]:
         )
         for quantity in chunk_quantities
     ]
-    principal = _request_principal(body)
+    try:
+        principal = _request_principal(body)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Choose a native execution account"}), 503
     blocked, _exposure_positions = _check_legs_through_safety(
         typed_chunks,
         principal.adapter_id,
@@ -4244,8 +4212,7 @@ def place_options_strategy() -> tuple[Any, int]:
             {
                 "status": "error",
                 "message": (
-                    f"Unknown strategy_name '{strategy_name}'. "
-                    f"Must be one of: {sorted(_ADVANCED_STRATEGY_NAMES)}"
+                    f"Unknown strategy_name '{strategy_name}'. Must be one of: {sorted(_ADVANCED_STRATEGY_NAMES)}"
                 ),
             }
         ), 400
@@ -4285,7 +4252,10 @@ def place_options_strategy() -> tuple[Any, int]:
     except (KeyError, ValueError, TypeError):
         return jsonify({"status": "error", "message": "Strategy build error"}), 400
 
-    principal = _request_principal(body)
+    try:
+        principal = _request_principal(body)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Choose a native execution account"}), 503
     try:
         typed_legs = [_leg_to_order(leg, basket_strategy) for leg in legs]
     except (TypeError, ValueError):

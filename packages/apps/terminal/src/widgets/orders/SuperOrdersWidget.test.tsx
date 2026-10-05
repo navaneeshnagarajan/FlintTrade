@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useConnectionStore } from "@/stores/connectionStore";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -20,6 +19,7 @@ vi.mock("@/stores/modeStore", () => ({
   ),
 }));
 
+import { useBrokerStore } from "@/stores/brokerStore";
 import SuperOrdersWidget from "./SuperOrdersWidget";
 
 const LIST_ROW = {
@@ -73,7 +73,7 @@ function renderWidget() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockMode = "live";
-  useConnectionStore.setState({ openAlgoHydrated: true });
+  useBrokerStore.setState({ activeAccountId: "native:dhan:D1", accounts: [{ account_id: "D1", broker: "dhan", source: "native", status: "connected", label: "Dhan", connected_at: null, error_message: null, is_primary: true }] });
   listRows = [LIST_ROW];
   listStatus = 200;
   listMessage = "";
@@ -144,7 +144,7 @@ describe("SuperOrdersWidget", () => {
 
   it("maps the 501 unsupported-broker refusal honestly", async () => {
     listStatus = 501;
-    listMessage = "broker adapter 'openalgo' does not support the 'super_orders' listing";
+    listMessage = "broker adapter 'dhan' does not support the 'super_orders' listing";
     renderWidget();
     await waitFor(() =>
       expect(screen.getByText("Not available for this broker.")).toBeInTheDocument(),

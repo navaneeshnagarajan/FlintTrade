@@ -2022,7 +2022,7 @@ MARKET_HOURS: dict[str, tuple[dt_time, dt_time]] = {
 # Index segments cannot be traded directly; they price the underlying baskets
 # that NSE/BSE/MCX list as derivatives instruments. MCX_INDEX (commodity
 # indices) and GLOBAL_INDEX (foreign + IFSC reference indices) are added
-# alongside NSE_INDEX / BSE_INDEX in the OpenAlgo v2.0.1.0 sync.
+# alongside NSE_INDEX / BSE_INDEX in the broker v2.0.1.0 sync.
 _QUOTE_ONLY_EXCHANGES = {
     "NSE_INDEX",
     "BSE_INDEX",
@@ -2030,8 +2030,8 @@ _QUOTE_ONLY_EXCHANGES = {
     "GLOBAL_INDEX",
 }
 
-# Exchange routing: all exchanges route through OpenAlgo (including Delta Exchange).
-OPENALGO_EXCHANGES = {
+# Exchange routing: all exchanges route through broker (including Delta Exchange).
+SUPPORTED_EXCHANGES = {
     "NSE",
     "BSE",
     "NFO",
@@ -2053,14 +2053,14 @@ def is_market_open(exchange: str, at: datetime | None = None) -> bool:
     """Check if the given exchange is currently open for trading.
 
     - NSE_INDEX / BSE_INDEX: always False (quote-only, no orders)
-    - DELTA: always True (24/7 crypto via ccxt, not OpenAlgo)
+    - DELTA: always True (24/7 crypto via ccxt, not broker)
     - Unknown exchanges: False
     - Known exchanges: True only if current IST time is within market hours
     """
     if exchange in _QUOTE_ONLY_EXCHANGES:
         return False
 
-    # Delta Exchange — 24/7 via native OpenAlgo broker integration
+    # Delta Exchange — 24/7 via native broker broker integration
     if exchange == "DELTA":
         return True
 
@@ -2174,10 +2174,10 @@ class OrderValidation:
                 f"{exchange} is open {hours}. Current time: {current_time}. Market closed.",
             )
 
-        # Log Delta Exchange orders routed through native OpenAlgo broker
+        # Log Delta Exchange orders routed through native broker broker
         if exchange == "DELTA":
             logger.info(
-                "Order for DELTA exchange — routes via OpenAlgo Delta Exchange broker integration",
+                "Order for DELTA exchange — routes via broker Delta Exchange broker integration",
             )
 
         # Symbol check

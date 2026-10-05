@@ -60,7 +60,7 @@ export const CINEMATIC_STEP_SCHEDULE = [
 ] as const;
 
 const WELCOME_FEATURES = [
-  "OpenAlgo bridge plus verified native brokers",
+  "Supported native brokers",
   "Practice, Connected (read), and Live",
   "Option chain, Greeks, order flow, and depth",
   "Strategy lab, SIP tracking, and AI context",

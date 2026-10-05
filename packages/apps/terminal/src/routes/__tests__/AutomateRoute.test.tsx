@@ -57,7 +57,6 @@ vi.mock("@/services/ftApi", () => ({
 }));
 
 // Mock the section components to avoid deep dependency trees
-vi.mock("../automate/FlowsSection", () => ({ default: () => <div data-testid="flows-section">Flows</div> }));
 vi.mock("../automate/CronSection", () => ({ default: () => <div data-testid="cron-section">Cron</div> }));
 vi.mock("../automate/MonitorsSection", () => ({ default: () => <div data-testid="monitors-section">Monitors</div> }));
 vi.mock("../automate/LogsSection", () => ({ default: () => <div data-testid="logs-section">Logs</div> }));
@@ -128,7 +127,7 @@ describe("AutomateRoute", () => {
 
   it("has section tabs for all sections at advanced level", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Flow Builder")).toBeInTheDocument();
+    expect(screen.queryByText("Flow Builder")).not.toBeInTheDocument();
     expect(screen.getByText("Schedules")).toBeInTheDocument();
     expect(screen.getByText("Monitors")).toBeInTheDocument();
     expect(screen.getByText("Strategies")).toBeInTheDocument();

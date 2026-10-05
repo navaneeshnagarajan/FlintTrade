@@ -26,8 +26,10 @@ def test_genesis_recovers_exact_own_witness_after_each_durable_boundary(owned, m
     path, _, _, store, participant, _ = owned
     from flinttrade_core import workspace_migrations
 
-    target, name = (workspace_migrations, "_atomic_write") if boundary == "replace" else (
-        store, "prepare_enrolment" if boundary == "prepare" else "complete_enrolment"
+    target, name = (
+        (workspace_migrations, "_atomic_write")
+        if boundary == "replace"
+        else (store, "prepare_enrolment" if boundary == "prepare" else "complete_enrolment")
     )
     original = getattr(target, name)
 
@@ -118,9 +120,16 @@ def test_admission_is_resumable_but_incomplete_authentication_is_unknown(owned, 
     snapshot = owned[4].assert_coherent()
     selector = BrokerSelector("dhan", "Synthetic")
     request = AccountMutationRequest(
-        uuid4(), AccountMutationKind.CONNECT, selector, AccountActorContext("operator", "session:" + "a" * 64),
-        snapshot.version, broker_workspace_version(snapshot), owned[2].selector_state(selector).version,
-        "dhan", "Synthetic", {"token": "input"},
+        uuid4(),
+        AccountMutationKind.CONNECT,
+        selector,
+        AccountActorContext("operator", "session:" + "a" * 64),
+        snapshot.version,
+        broker_workspace_version(snapshot),
+        owned[2].selector_state(selector).version,
+        "dhan",
+        "Synthetic",
+        {"token": "input"},
     )
     owned[3].admit(request)
     if stage == "authentication_started":
@@ -144,7 +153,7 @@ def test_abandonment_before_witness_rejects_and_after_witness_rolls_forward(owne
     if after_witness:
         witness = owned[4].commit(request.operation_id, patch)
     owned[3].abandon(request.operation_id, committed=after_witness, reason="caller_cancelled")
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.state is (AccountOperationStage.COMMITTED if after_witness else AccountOperationStage.REJECTED)
     assert owned[2].selector_state(request.selector).version.generation == int(after_witness)
     if after_witness:
@@ -175,14 +184,16 @@ def test_remove_recovery_has_no_auth_candidate_or_setup_invention(owned):
     request, patch, _ = planned(owned)
     finish(owned, request, patch)
     request, _, _ = planned(owned, kind=AccountMutationKind.REMOVE)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.kind is AccountMutationKind.REMOVE
     state = owned[2].selector_state(request.selector)
     assert not state.credential_present and not state.setup_present
     assert state.version.generation == 2
 
 
-@pytest.mark.parametrize("boundary", ["genesis_prepare", "genesis_replace", "workspace_replace", "vault_apply", "hidden_witness"])
+@pytest.mark.parametrize(
+    "boundary", ["genesis_prepare", "genesis_replace", "workspace_replace", "vault_apply", "hidden_witness"]
+)
 def test_process_death_reopens_real_ledger_and_recovers_once(tmp_path, monkeypatch, boundary):
     from flinttrade_core.backend_instance import acquire_backend_instance_lease
     from flinttrade_core.secure_file import harden_directory
@@ -294,7 +305,7 @@ def test_vault_application_result_loss_is_reconciled_in_same_recovery(owned, mon
         raise OSError("synthetic result loss")
 
     monkeypatch.setattr(owned[3], "apply", applied_then_error)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt == owned[3].operation(request.operation_id).receipt
     assert receipt.credential_version.generation == 1
     assert owned[4].recover() == (receipt,)
@@ -348,8 +359,11 @@ def test_concurrent_ui_and_service_publications_preserve_owned_broker_commit(own
     def connection():
         barrier.wait()
         return service.mutate(
-            "create", {"provider_id": "llm:ollama", "label": "Local"}, connection_id=None,
-            expected_etag=etag, idempotency_key=str(uuid4()),
+            "create",
+            {"provider_id": "llm:ollama", "label": "Local"},
+            connection_id=None,
+            expected_etag=etag,
+            idempotency_key=str(uuid4()),
             actor_context=ConnectionActorContext("operator", "session:" + "a" * 64),
         )
 
@@ -415,9 +429,13 @@ def test_confirmed_foreign_conflict_remains_blocked_after_aba_restoration(owned,
     path.write_bytes(original)
     if foreign == "credential":
         with owned[3]._transaction(write=True) as conn:
-            conn.execute("DELETE FROM credential_selector_versions WHERE adapter_id=? AND account_id=?", (
-                request.selector.adapter_id, request.selector.account_id,
-            ))
+            conn.execute(
+                "DELETE FROM credential_selector_versions WHERE adapter_id=? AND account_id=?",
+                (
+                    request.selector.adapter_id,
+                    request.selector.account_id,
+                ),
+            )
     assert owned[4].recover() == (operation.receipt,)
     assert owned[4].recover() == (operation.receipt,)
     with pytest.raises(owned[5].BrokerAccountWorkspaceUnavailable):
@@ -436,6 +454,7 @@ def test_uncertain_workspace_preserves_plan_until_own_witness_can_be_read(owned,
     before = owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id)
     config = json.loads(original)
     from flinttrade_core import workspace_migrations
+
     original_reader = workspace_migrations._run_migrations_locked
     if uncertain == "missing_marker":
         config.pop("_broker_account_store")
@@ -446,6 +465,7 @@ def test_uncertain_workspace_preserves_plan_until_own_witness_can_be_read(owned,
     elif uncertain == "invalid_json":
         path.write_text("{unreadable")
     else:
+
         def unavailable(_path):
             raise OSError("synthetic unavailable workspace")
 
@@ -459,7 +479,7 @@ def test_uncertain_workspace_preserves_plan_until_own_witness_can_be_read(owned,
     assert path.read_bytes() == uncertain_bytes
     monkeypatch.setattr(workspace_migrations, "_run_migrations_locked", original_reader)
     path.write_bytes(original)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.state is AccountOperationStage.COMMITTED
     assert receipt.commit_workspace == witness.commit_workspace
     assert receipt.credential_version.generation == 1
@@ -477,7 +497,7 @@ def test_own_witness_domain_damage_is_uncertainty_not_commit_absence(owned):
         owned[4].recover()
     assert owned[3].operation(request.operation_id).state is AccountOperationStage.PLAN_READY
     path.write_bytes(original)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.commit_workspace == witness.commit_workspace
 
 
@@ -495,7 +515,7 @@ def test_invalid_vault_is_not_mutated_to_record_blocked_disposition(owned):
         assert conn.execute("SELECT mac FROM account_store_head").fetchone()[0] == "0" * 64
         conn.execute("UPDATE account_store_head SET mac=?", (original,))
     assert owned[3].operation(request.operation_id).state is AccountOperationStage.PLAN_READY
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.state is AccountOperationStage.COMMITTED
 
 
@@ -516,7 +536,7 @@ def test_recovery_persistence_failure_preserves_own_witness_and_staging(owned, m
     assert owned[3].operation(request.operation_id).state is AccountOperationStage.PLAN_READY
     assert (owned[0] / "workspace.json").read_bytes() == original
     monkeypatch.setattr(secure_file, "fsync_parent_directory", original_flush)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.commit_workspace == witness.commit_workspace
 
 
@@ -533,9 +553,11 @@ def test_committed_abandonment_evidence_prevents_false_commit_absence_dispositio
         owned[4].recover()
     operation = owned[3].operation(request.operation_id)
     assert operation.state is AccountOperationStage.PLAN_READY and operation.abandonment_committed
-    assert owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id).request is not None
+    assert (
+        owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id).request is not None
+    )
     path.write_bytes(original)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.state is AccountOperationStage.COMMITTED
     assert receipt.commit_workspace == witness.commit_workspace
 
@@ -556,10 +578,12 @@ def test_hidden_own_witness_retains_plan_rolls_forward_and_permanently_fences_pu
     operation = owned[3].operation(request.operation_id)
     assert operation.state is AccountOperationStage.PLAN_READY, "a hidden own commit must retain staging"
     assert operation.workspace_attempted and operation.workspace_conflicted
-    assert owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id).request is not None
+    assert (
+        owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id).request is not None
+    )
     assert path.read_bytes() == foreign_bytes
     path.write_bytes(own_bytes)
-    receipt, = owned[4].recover()
+    (receipt,) = owned[4].recover()
     assert receipt.state is AccountOperationStage.COMMITTED and receipt.commit_workspace == witness.commit_workspace
     assert receipt.credential_version.generation == 1
     assert owned[4].recover() == (receipt,)
@@ -612,7 +636,9 @@ def test_attempted_unknown_write_never_re_cas_after_foreign_and_original_base_re
     assert calls == [True], "an attempted operation dispatched another workspace CAS"
     assert path.read_bytes() == base_bytes
     assert owned[2].selector_state(request.selector).version.generation == 0
-    assert owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id).request is not None
+    assert (
+        owned[3].recovery_material(owned[3].owner_capability(owned[1].proof), request.operation_id).request is not None
+    )
 
 
 def test_interruption_after_attempt_record_before_dispatch_stays_unresolved(owned, monkeypatch):
@@ -664,7 +690,10 @@ def _foreign_committed_workspace(path, foreign):
 @pytest.mark.parametrize("release_claim", [False, True])
 @pytest.mark.parametrize("foreign", ["marker", "domain"])
 def test_foreign_committed_state_permanently_fences_retained_and_released_publication(
-    owned, entry, release_claim, foreign,
+    owned,
+    entry,
+    release_claim,
+    foreign,
 ):
     path, lease, credentials, store, participant, module = owned
     request, patch, _ = planned(owned)
@@ -733,7 +762,9 @@ lease.release()
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(path), str(request.operation_id)],
-        capture_output=True, text=True, timeout=20,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert workspace.read_bytes() == own_bytes
@@ -743,7 +774,11 @@ lease.release()
 @pytest.mark.parametrize("release_claim", [False, True])
 @pytest.mark.parametrize("unavailable", ["invalid", "unreadable", "revoked"])
 def test_untrusted_committed_vault_cannot_authorise_foreign_conflict_write(
-    owned, monkeypatch, entry, release_claim, unavailable,
+    owned,
+    monkeypatch,
+    entry,
+    release_claim,
+    unavailable,
 ):
     import sqlite3
 
@@ -760,6 +795,7 @@ def test_untrusted_committed_vault_cannot_authorise_foreign_conflict_write(
         if unavailable == "invalid":
             conn.execute("UPDATE account_store_head SET mac=?", ("0" * 64,))
     if unavailable == "unreadable":
+
         def unreadable(*_args, **_kwargs):
             raise OSError("synthetic unavailable vault")
 

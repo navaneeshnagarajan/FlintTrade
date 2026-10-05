@@ -19,9 +19,9 @@ feed.
 - Kotak Neo has **no sandbox**. Live read / API smoke only until funded
   Live unlock. Never offer “Neo Practice”. Operator copy is
   `Live read only until funded unlock.`
-- Prefer **native** Dhan + Neo. OpenAlgo is Settings / fallback only —
-  not the primary connect CTA.
+
 - `dhanhq` stays on latest stable **2.2.0** (not RC).
+
 - Neo v3 installs the `kotakneoapi` **3.0.7** distribution from exact
   upstream Git provenance. Runtime `main` is
   `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`; release tag `v3.0.7` peels
@@ -39,7 +39,7 @@ feed.
 | **Practice** | Simulated fills, no real money. Not a broker sandbox. |
 | **Live** | Fail-closed until MSI native read smoke is trusted **and** funded unlock. |
 
-Dhan Sandbox remains optional paper via OpenAlgo only. It is not the
+Dhan Sandbox remains optional paper via the native gateway only. It is not the
 primary Practice fill path.
 
 ## MSI broker chrome
@@ -50,8 +50,6 @@ failed login or read never fakes Connected. That chrome must never
 imply placeable Live orders.
 
 This native read smoke does **not** require funded Live unlock.
-
-## OpenAlgo
 
 Settings / fallback only. Not the primary connect CTA.
 
@@ -67,16 +65,20 @@ illustrative. Never paint green Connected without a real LLM
   **Connected (read)** / **API smoke** paints only after successful
   persisted REST smoke evidence — never login-only. A failed login or
   read never fakes Connected.
+
 - Live reads work or fail honestly (REST quotes / depth / historical /
   option chain where the SDK allows). Kotak Neo's recorded smoke covers only
   REST reads; a live SFeed / order-feed session was not required for this
   acceptance.
+
 - No funded Live unlock required for this native read smoke.
+
 - Neo never offered as Practice; copy stays
   `Live read only until funded unlock.`
-- Prefer native; OpenAlgo remains fallback only.
+
 - `dhanhq==2.2.0` (latest stable). `kotakneoapi==3.0.7` from the exact
   runtime Git commit, checked separately against the peeled v3.0.7 release.
+
 - Live place stays fail-closed.
 
 ## Out of scope

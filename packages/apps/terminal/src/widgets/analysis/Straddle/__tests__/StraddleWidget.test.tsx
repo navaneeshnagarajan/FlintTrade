@@ -18,10 +18,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import "@testing-library/jest-dom";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   CONNECTED_NATIVE_READ_CONTEXT,
+  EXPLORE_READ_CONTEXT,
   PRACTICE_READ_CONTEXT,
   UNCONFIGURED_LIVE_READ_CONTEXT,
 } from "@/test-utils/accountReadFixtures";
@@ -105,6 +107,22 @@ const accountReadState = vi.hoisted(() => {
   };
 });
 
+const marketScopeState = vi.hoisted(() => {
+  let current = "live:native:dhan:A1";
+  const listeners = new Set<() => void>();
+  return {
+    get current() { return current; },
+    set current(value: string) {
+      current = value;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+});
+
 // Mock API calls used by the widget
 vi.mock("@/services/api", () => ({
   getExpiry: apiMocks.getExpiry,
@@ -119,6 +137,16 @@ vi.mock("@/hooks/useAccountReadsEnabled", async () => {
     useAccountReadContext: () => useSyncExternalStore(
       accountReadState.subscribe,
       () => accountReadState.current,
+    ),
+  };
+});
+
+vi.mock("@/hooks/useDataScope", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useMarketDataScope: () => useSyncExternalStore(
+      marketScopeState.subscribe,
+      () => marketScopeState.current,
     ),
   };
 });
@@ -162,6 +190,7 @@ vi.mock("@/hooks/useChartTheme", () => ({
 
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import StraddleWidget, { computeImpliedMove } from "../StraddleWidget";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 
 const ACCOUNT_B_READ_CONTEXT = Object.freeze({
   identity: Object.freeze({
@@ -171,8 +200,6 @@ const ACCOUNT_B_READ_CONTEXT = Object.freeze({
     accountId: "B2",
   }),
   enabled: true,
-  host: "",
-  apiKey: "",
 }) satisfies AccountReadContext;
 
 function deferred<T>() {
@@ -216,6 +243,7 @@ describe("StraddleWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
+    marketScopeState.current = "live:native:dhan:A1";
     chartMocks.reset();
     apiMocks.getExpiry.mockReset().mockResolvedValue([]);
     apiMocks.getOptionChain.mockReset().mockResolvedValue({ calls: [], puts: [] });
@@ -319,6 +347,215 @@ describe("StraddleWidget", () => {
     });
   });
 
+  it("pins expiry, chain and spot requests to the market scope with abort signals", async () => {
+    liveChainMocks();
+    renderWidget();
+
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledOnce());
+    expect(apiMocks.getExpiry).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "options", expect.any(AbortSignal), "live:native:dhan:A1",
+    );
+    expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), "live:native:dhan:A1",
+    );
+    expect(apiMocks.getQuotes).toHaveBeenCalledWith(
+      "NIFTY", "NSE_INDEX", apiMocks.getOptionChain.mock.calls[0]?.[3], "live:native:dhan:A1",
+    );
+  });
+
+  it.each(["straddle", "impliedmove"])("labels Example option figures in the %s view", async (view) => {
+    accountReadState.current = EXPLORE_READ_CONTEXT;
+    marketScopeState.current = "explore:mock";
+    liveChainMocks();
+    renderWidget({ view });
+
+    expect(await screen.findByText("200")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Example option quotes" })).toHaveTextContent("Example data");
+    expect(screen.queryByText(/live ATM/i)).not.toBeInTheDocument();
+    expect(apiMocks.getPositionbook).not.toHaveBeenCalled();
+  });
+
+  it.each(["live", "practice"])("shows unavailable straddle quotes after a %s provider failure", async (mode) => {
+    accountReadState.current = mode === "practice" ? PRACTICE_READ_CONTEXT : CONNECTED_NATIVE_READ_CONTEXT;
+    marketScopeState.current = `${mode}:native:dhan:A1`;
+    liveChainMocks();
+    apiMocks.getOptionChain.mockRejectedValue(new Error("Native option chain unavailable"));
+    renderWidget({ view: "impliedmove" });
+
+    expect(await screen.findByText("Chain error: Native option chain unavailable")).toBeInTheDocument();
+    expect(screen.getByLabelText("No option quote — implied move is unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("200")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Implied move range bar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Example option quotes" })).not.toBeInTheDocument();
+  });
+
+  it.each(["live", "practice"])(
+    "hides account-A observations on the first %s render after the market source changes",
+    async (mode) => {
+      accountReadState.current = mode === "practice" ? PRACTICE_READ_CONTEXT : CONNECTED_NATIVE_READ_CONTEXT;
+      marketScopeState.current = `${mode}:native:dhan:A1`;
+      liveChainMocks();
+      const pendingExpiryB = deferred<string[]>();
+      apiMocks.getExpiry.mockResolvedValueOnce(["2026-07-30"]).mockImplementationOnce(() => pendingExpiryB.promise);
+      const firstBRender: string[] = [];
+      const props = makeWidgetPanelProps();
+      function ScopeAudit() {
+        const scope = useMarketDataScope();
+        useLayoutEffect(() => {
+          if (scope === `${mode}:native:upstox:B2`) firstBRender.push(document.body.textContent ?? "");
+        }, [scope]);
+        return <StraddleWidget {...props} />;
+      }
+      render(<ScopeAudit />);
+      expect(await screen.findByText("200")).toBeInTheDocument();
+      expect(screen.getByText("25,000")).toBeInTheDocument();
+      expect(chartMocks.createdLineSeries.some((series) => series.setData.mock.calls.some(
+        ([points]) => (points as Array<{ value: number }>).some((point) => point.value === 200),
+      ))).toBe(true);
+
+      act(() => { marketScopeState.current = `${mode}:native:upstox:B2`; });
+
+      expect(firstBRender).toHaveLength(1);
+      expect(firstBRender[0]).not.toContain("25,000");
+      expect(firstBRender[0]).not.toContain("ATM 25,000");
+      expect(firstBRender[0]).not.toContain("30 Jul");
+      expect(screen.queryByText("200")).not.toBeInTheDocument();
+      expect(screen.getByText("Select an expiry to load straddle data")).toBeInTheDocument();
+      await waitFor(() => expect(apiMocks.getExpiry).toHaveBeenCalledTimes(2));
+      expect(apiMocks.getOptionChain).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("aborts and discards a late expiry list from the former market source", async () => {
+    const pendingExpiryA = deferred<string[]>();
+    apiMocks.getExpiry.mockImplementationOnce(() => pendingExpiryA.promise).mockResolvedValueOnce(["2026-08-27"]);
+    liveChainMocks();
+    renderWidget();
+    await waitFor(() => expect(apiMocks.getExpiry).toHaveBeenCalledOnce());
+    const signalA = apiMocks.getExpiry.mock.calls[0]?.[3] as AbortSignal;
+
+    act(() => { marketScopeState.current = "live:native:upstox:B2"; });
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledOnce());
+    await act(async () => {
+      pendingExpiryA.resolve(["2026-07-30"]);
+      await pendingExpiryA.promise;
+    });
+
+    expect(signalA.aborted).toBe(true);
+    expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-08-27", expect.any(AbortSignal), "live:native:upstox:B2",
+    );
+    expect(screen.queryByText("30 Jul")).not.toBeInTheDocument();
+    expect(screen.getByText("27 Aug")).toBeInTheDocument();
+  });
+
+  it("discards late chain and spot responses when Practice switches native market accounts", async () => {
+    accountReadState.current = PRACTICE_READ_CONTEXT;
+    marketScopeState.current = "practice:native:dhan:A1";
+    const pendingChainA = deferred<unknown>();
+    const pendingSpotA = deferred<unknown>();
+    liveChainMocks();
+    apiMocks.getOptionChain.mockImplementationOnce(() => pendingChainA.promise).mockResolvedValue({
+      atm_strike: 26000, chain: [{ strike: 26000, ce: { ltp: 180 }, pe: { ltp: 150 } }],
+    });
+    apiMocks.getQuotes.mockImplementationOnce(() => pendingSpotA.promise).mockResolvedValue({ ltp: 26000 });
+    renderWidget();
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledOnce());
+    const signalA = apiMocks.getOptionChain.mock.calls[0]?.[3] as AbortSignal;
+
+    act(() => { marketScopeState.current = "practice:native:upstox:B2"; });
+    expect(await screen.findByText("330")).toBeInTheDocument();
+    await act(async () => {
+      pendingChainA.resolve({ atm_strike: 25000, chain: [{ strike: 25000, ce: { ltp: 112.5 }, pe: { ltp: 87.5 } }] });
+      pendingSpotA.resolve({ ltp: 25000 });
+      await Promise.all([pendingChainA.promise, pendingSpotA.promise]);
+    });
+
+    expect(signalA.aborted).toBe(true);
+    expect(screen.getByText("330")).toBeInTheDocument();
+    expect(screen.queryByText("200")).not.toBeInTheDocument();
+    expect(screen.queryByText("25,000")).not.toBeInTheDocument();
+    const plottedPoints = chartMocks.createdLineSeries.flatMap((series) => series.setData.mock.calls.flatMap(
+      ([points]) => points as Array<{ value: number }>,
+    ));
+    expect(plottedPoints.some((point) => point.value === 330)).toBe(true);
+    expect(plottedPoints.some((point) => point.value === 200 || point.value === 25000)).toBe(false);
+    expect(apiMocks.getPositionbook.mock.calls.every(([context]) => context === PRACTICE_READ_CONTEXT)).toBe(true);
+  });
+
+  it("clears observations and expiry selection when the underlying symbol changes", async () => {
+    const pendingBankExpiry = deferred<string[]>();
+    liveChainMocks();
+    apiMocks.getExpiry.mockResolvedValueOnce(["2026-07-30"]).mockImplementationOnce(() => pendingBankExpiry.promise);
+    renderWidget();
+    expect(await screen.findByText("200")).toBeInTheDocument();
+
+    act(() => screen.getByRole("button", { name: "NIFTY" }).click());
+    act(() => screen.getByRole("button", { name: "BANKNIFTY" }).click());
+
+    expect(screen.queryByText("200")).not.toBeInTheDocument();
+    expect(screen.queryByText("25,000")).not.toBeInTheDocument();
+    expect(screen.queryByText("30 Jul")).not.toBeInTheDocument();
+    expect(screen.getByText("Select an expiry to load straddle data")).toBeInTheDocument();
+    expect(apiMocks.getExpiry).toHaveBeenLastCalledWith(
+      "BANKNIFTY", "NFO", "options", expect.any(AbortSignal), "live:native:dhan:A1",
+    );
+    expect(apiMocks.getOptionChain).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a fresh chart when the selected expiry changes", async () => {
+    const pendingNextChain = deferred<unknown>();
+    liveChainMocks();
+    apiMocks.getExpiry.mockResolvedValue(["2026-07-30", "2026-08-06"]);
+    apiMocks.getOptionChain.mockResolvedValueOnce({
+      atm_strike: 25000, chain: [{ strike: 25000, ce: { ltp: 112.5 }, pe: { ltp: 87.5 } }],
+    }).mockImplementationOnce(() => pendingNextChain.promise);
+    renderWidget();
+    expect(await screen.findByText("200")).toBeInTheDocument();
+
+    act(() => screen.getByRole("button", { name: "6 Aug" }).click());
+    expect(screen.queryByText("200")).not.toBeInTheDocument();
+    expect(screen.queryByText("25,000")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading straddle…")).toBeInTheDocument();
+    await act(async () => {
+      pendingNextChain.resolve({ atm_strike: 25000, chain: [{ strike: 25000, ce: { ltp: 180 }, pe: { ltp: 150 } }] });
+      await pendingNextChain.promise;
+    });
+
+    expect(await screen.findByText("330")).toBeInTheDocument();
+    expect(apiMocks.getOptionChain).toHaveBeenLastCalledWith(
+      "NIFTY", "NFO", "2026-08-06", expect.any(AbortSignal), "live:native:dhan:A1",
+    );
+    const latestChart = chartMocks.createdLineSeries.slice(-3);
+    const latestStraddlePoints = latestChart[0]?.setData.mock.calls.at(-1)?.[0] as Array<{ value: number }>;
+    expect(latestStraddlePoints.map((point) => point.value)).toEqual([330]);
+  });
+
+  it("restores scope-pinned reads after root StrictMode replay and aborts on unmount", async () => {
+    liveChainMocks();
+    const pendingChain = deferred<unknown>();
+    apiMocks.getOptionChain.mockReturnValue(pendingChain.promise);
+    const { unmount } = render(<StraddleWidget {...makeWidgetPanelProps()} />, { reactStrictMode: true });
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledOnce());
+    expect(apiMocks.getExpiry).toHaveBeenCalledTimes(2);
+    const firstExpirySignal = apiMocks.getExpiry.mock.calls[0]?.[3] as AbortSignal;
+    const activeExpirySignal = apiMocks.getExpiry.mock.calls[1]?.[3] as AbortSignal;
+    const dataSignal = apiMocks.getOptionChain.mock.calls[0]?.[3] as AbortSignal;
+    expect(firstExpirySignal.aborted).toBe(true);
+    expect(activeExpirySignal.aborted).toBe(false);
+    expect(dataSignal.aborted).toBe(false);
+
+    unmount();
+    expect(activeExpirySignal.aborted).toBe(true);
+    expect(dataSignal.aborted).toBe(true);
+    await act(async () => {
+      pendingChain.resolve({ atm_strike: 25000, chain: [{ strike: 25000, ce: { ltp: 112.5 }, pe: { ltp: 87.5 } }] });
+      await pendingChain.promise;
+    });
+    expect(screen.queryByText("200")).not.toBeInTheDocument();
+    expect(chartMocks.createdLineSeries).toHaveLength(0);
+  });
+
   it("makes zero position requests when Live account reads are unconfigured", async () => {
     accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
     liveChainMocks();
@@ -391,6 +628,7 @@ describe("StraddleWidget — implied-move view", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
+    marketScopeState.current = "live:native:dhan:A1";
     chartMocks.reset();
     apiMocks.getExpiry.mockReset().mockResolvedValue([]);
     apiMocks.getOptionChain.mockReset().mockResolvedValue({ calls: [], puts: [] });
@@ -441,7 +679,7 @@ describe("StraddleWidget — implied-move view", () => {
     });
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(
-      screen.queryByLabelText("No live option chain — implied move is unavailable"),
+      screen.queryByLabelText("No option quote — implied move is unavailable"),
     ).not.toBeInTheDocument();
   });
 
@@ -452,10 +690,10 @@ describe("StraddleWidget — implied-move view", () => {
     renderWidget({ view: "impliedmove" });
 
     const badge = screen.getByLabelText(
-      "No live option chain — implied move is unavailable",
+      "No option quote — implied move is unavailable",
     );
-    expect(badge.textContent).toBe("No live data");
-    expect(screen.getByText("Implied move needs a live ATM straddle quote")).toBeInTheDocument();
+    expect(badge.textContent).toBe("No quote data");
+    expect(screen.getByText("Implied move needs an ATM straddle quote")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Implied move range bar")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Probability zones table")).not.toBeInTheDocument();
@@ -512,9 +750,13 @@ describe("StraddleWidget — implied-move view", () => {
     renderWidget({ view: "impliedmove" });
 
     await waitFor(() => {
-      expect(apiMocks.getOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "2026-07-30");
+      expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+        "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), "live:native:dhan:A1",
+      );
     });
-    expect(apiMocks.getQuotes).toHaveBeenCalledWith("NIFTY", "NSE_INDEX");
+    expect(apiMocks.getQuotes).toHaveBeenCalledWith(
+      "NIFTY", "NSE_INDEX", expect.any(AbortSignal), "live:native:dhan:A1",
+    );
   });
 });
 

@@ -39,9 +39,7 @@ logger = logging.getLogger("flinttrade.historical.cache")
 _DEFAULT_TTL_INTRADAY = 3600
 _DEFAULT_TTL_DAILY = 86400
 
-_INTRADAY_INTERVALS: frozenset[str] = frozenset(
-    {"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"}
-)
+_INTRADAY_INTERVALS: frozenset[str] = frozenset({"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"})
 
 _CACHE_META_DDL = """
 CREATE TABLE IF NOT EXISTS _cache_meta (
@@ -136,7 +134,7 @@ class OHLCVCache:
         from .data_provider import ProviderRegistry
         from .cache import OHLCVCache
 
-        registry = ProviderRegistry(openalgo_client)
+        registry = ProviderRegistry(broker_client)
         cache = OHLCVCache(registry=registry)
         cache.initialise()
 
@@ -265,8 +263,11 @@ class OHLCVCache:
         if isinstance(head_bar_ts, str):
             head_bar_ts = datetime.fromisoformat(head_bar_ts)
         return CacheEntry(
-            symbol=row[0], exchange=row[1], interval=row[2],
-            last_fetch=last_fetch, head_bar_ts=head_bar_ts,
+            symbol=row[0],
+            exchange=row[1],
+            interval=row[2],
+            last_fetch=last_fetch,
+            head_bar_ts=head_bar_ts,
             provider=row[5] or "",
         )
 
@@ -340,8 +341,7 @@ class OHLCVCache:
             interval: Canonical interval string.
         """
         self.pipeline.connection.execute(
-            "UPDATE _cache_meta SET last_fetch = NULL "
-            "WHERE symbol = ? AND exchange = ? AND interval = ?",
+            "UPDATE _cache_meta SET last_fetch = NULL WHERE symbol = ? AND exchange = ? AND interval = ?",
             [symbol, exchange, interval],
         )
         logger.info("Invalidated cache for %s %s %s", symbol, exchange, interval)
@@ -415,11 +415,19 @@ class OHLCVCache:
 
             logger.info(
                 "Cache miss/stale for %s %s %s — fetching %s → %s",
-                symbol, exchange, canonical, fetch_start, end_date,
+                symbol,
+                exchange,
+                canonical,
+                fetch_start,
+                end_date,
             )
 
             provider_result = self._registry.fetch(
-                symbol, exchange, interval, fetch_start, end_date,
+                symbol,
+                exchange,
+                interval,
+                fetch_start,
+                end_date,
             )
 
             if provider_result.success:
@@ -431,9 +439,12 @@ class OHLCVCache:
                     [
                         {
                             "timestamp": b.timestamp,
-                            "open": b.open, "high": b.high,
-                            "low": b.low, "close": b.close,
-                            "volume": b.volume, "oi": b.oi,
+                            "open": b.open,
+                            "high": b.high,
+                            "low": b.low,
+                            "close": b.close,
+                            "volume": b.volume,
+                            "oi": b.oi,
                         }
                         for b in provider_result.bars
                     ],
@@ -446,14 +457,20 @@ class OHLCVCache:
                     raw_bars = [
                         {
                             "timestamp": b.timestamp,
-                            "open": b.open, "high": b.high,
-                            "low": b.low, "close": b.close,
-                            "volume": b.volume, "oi": b.oi,
+                            "open": b.open,
+                            "high": b.high,
+                            "low": b.low,
+                            "close": b.close,
+                            "volume": b.volume,
+                            "oi": b.oi,
                         }
                         for b in norm_result.bars
                     ]
                     result.new_bars = self.pipeline.store_bars(
-                        table, symbol, exchange, raw_bars,
+                        table,
+                        symbol,
+                        exchange,
+                        raw_bars,
                     )
 
                 if norm_result.warnings:
@@ -463,13 +480,18 @@ class OHLCVCache:
             elif not cache_is_fresh and provider_result.error:
                 logger.warning(
                     "Provider error for %s %s %s: %s",
-                    symbol, exchange, canonical, provider_result.error,
+                    symbol,
+                    exchange,
+                    canonical,
+                    provider_result.error,
                 )
 
             # Update meta regardless — record the attempt
             new_head = self._get_head_bar_ts(table, symbol, exchange)
             self._upsert_entry(
-                symbol, exchange, canonical,
+                symbol,
+                exchange,
+                canonical,
                 head_bar_ts=new_head,
                 provider=provider_result.provider,
             )
@@ -481,7 +503,11 @@ class OHLCVCache:
 
         logger.info(
             "Cache get: %s %s %s → %d bars (%d new)",
-            symbol, exchange, canonical, result.total_bars, result.new_bars,
+            symbol,
+            exchange,
+            canonical,
+            result.total_bars,
+            result.new_bars,
         )
         return result
 
@@ -515,10 +541,14 @@ class OHLCVCache:
             result.bars = [
                 {
                     "timestamp": b.timestamp,
-                    "open": b.open, "high": b.high,
-                    "low": b.low, "close": b.close,
-                    "volume": b.volume, "oi": b.oi,
-                    "symbol": symbol, "exchange": exchange,
+                    "open": b.open,
+                    "high": b.high,
+                    "low": b.low,
+                    "close": b.close,
+                    "volume": b.volume,
+                    "oi": b.oi,
+                    "symbol": symbol,
+                    "exchange": exchange,
                 }
                 for b in provider_result.bars
             ]
@@ -563,7 +593,10 @@ class OHLCVCache:
             results.append(res)
             logger.debug(
                 "Batch fetch: %s %s → %d bars (%d new)",
-                sym, exch, res.total_bars, res.new_bars,
+                sym,
+                exch,
+                res.total_bars,
+                res.new_bars,
             )
         return results
 
@@ -590,8 +623,11 @@ class OHLCVCache:
                 last_fetch = datetime.fromisoformat(last_fetch).replace(tzinfo=UTC)
             entries.append(
                 CacheEntry(
-                    symbol=row[0], exchange=row[1], interval=row[2],
-                    last_fetch=last_fetch, head_bar_ts=row[4],
+                    symbol=row[0],
+                    exchange=row[1],
+                    interval=row[2],
+                    last_fetch=last_fetch,
+                    head_bar_ts=row[4],
                     provider=row[5] or "",
                 )
             )
@@ -605,8 +641,6 @@ class OHLCVCache:
         """
         counts: dict[str, int] = {}
         for table in set(INTERVAL_TABLES.values()):
-            row = self.pipeline.connection.execute(
-                f"SELECT COUNT(*) FROM {table}"
-            ).fetchone()
+            row = self.pipeline.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
             counts[table] = row[0] if row else 0
         return counts

@@ -12,9 +12,9 @@ diagnostics only.
 ## Broker-Mediated Orders
 
 FlintTrade routes order-capable actions through configured broker adapters or the
-OpenAlgo-compatible bridge. FlintTrade itself does not connect directly to an
+broker-compatible bridge. FlintTrade itself does not connect directly to an
 exchange. Every live-mode order path must traverse `gate_order` before reaching a
-broker adapter or `OpenAlgoClient.place_order`.
+broker adapter or `BrokerClient.place_order`.
 
 ## Audit Trail
 
@@ -67,5 +67,5 @@ adds local checks before routing:
 
 Never log or store PAN, Aadhaar, bank account details, demat account numbers, or
 broker credentials in FlintTrade's database. Native-adapter broker credentials
-belong in the encrypted gateway vault; OpenAlgo broker credentials remain inside
-OpenAlgo.
+belong in the encrypted gateway vault; broker broker credentials remain inside
+the native broker adapter.

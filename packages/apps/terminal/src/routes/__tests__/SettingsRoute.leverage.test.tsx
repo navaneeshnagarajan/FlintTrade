@@ -55,9 +55,6 @@ vi.mock("@/tools/Settings/GeneralSection", () => ({
 vi.mock("@/tools/Settings/AppearanceSection", () => ({
   AppearanceSection: () => <div data-testid="appearance-section">Appearance</div>,
 }));
-vi.mock("@/tools/Settings/ConnectionSection", () => ({
-  ConnectionSection: () => <div data-testid="connection-section">Connection</div>,
-}));
 vi.mock("@/components/account/BrokerConnect", () => ({
   BrokerConnect: () => <div data-testid="brokers-section">Brokers</div>,
 }));
@@ -117,7 +114,6 @@ vi.mock("@/hooks/useSettingsState", () => ({
     llmCredentialLast4: "live",
     telegram: {},
     dataPaths: {},
-    connection: {},
     restarting: false,
     updateGeneral: vi.fn(),
     updateTradingDefaults: vi.fn(),
@@ -128,7 +124,6 @@ vi.mock("@/hooks/useSettingsState", () => ({
     retryLlmHydration: vi.fn(),
     updateTelegram: vi.fn(),
     updateDataPaths: vi.fn(),
-    acceptConnection: vi.fn(),
     handleRestart: vi.fn(),
   }),
 }));
@@ -147,7 +142,7 @@ vi.mock("@/services/api", () => ({
 }));
 
 import SettingsRoute from "../SettingsRoute";
-import { useConnectionStore } from "@/stores/connectionStore";
+import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
 
 function renderSettings() {
@@ -165,10 +160,10 @@ describe("Settings #leverage blank-pane lock (FT-SET-004)", () => {
     // Visibility requires a connected UI snapshot; the capability query below
     // still exercises the real unsupported/empty LeverageSection.
     useModeStore.setState({ mode: "practice" });
-    useConnectionStore.setState({
-      ...useConnectionStore.getInitialState(),
-      status: "connected", openAlgoHydrated: true, apiKey: "synthetic-invalid-openalgo-key",
-    });
+    useBrokerStore.setState({ accounts: [{
+      account_id: "synthetic", broker: "dhan", source: "native", label: "Synthetic account",
+      status: "connected", connected_at: null, error_message: null, is_primary: false,
+    }], activeAccountId: "native:dhan:synthetic" });
     caps.data = {
       broker_name: "Zerodha",
       broker_type: "equity",

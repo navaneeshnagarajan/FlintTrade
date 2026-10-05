@@ -711,11 +711,14 @@ def test_missing_identity_with_unknown_prune_history_never_attests_complete_pref
         volume=1,
         timestamp_provenance="source",
     )
-    original.connection.execute("DELETE FROM flinttrade_storage_metadata WHERE key IN (?, ?, ?)", [
-        "tick_store_id",
-        "tick_pruned_ingest_high_water",
-        "tick_pruned_before_utc",
-    ])
+    original.connection.execute(
+        "DELETE FROM flinttrade_storage_metadata WHERE key IN (?, ?, ?)",
+        [
+            "tick_store_id",
+            "tick_pruned_ingest_high_water",
+            "tick_pruned_before_utc",
+        ],
+    )
     original.close()
     recovered = StorageManager(str(db_path))
     recovered.initialise()

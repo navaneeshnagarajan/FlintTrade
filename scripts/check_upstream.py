@@ -5,10 +5,6 @@ Compares local clones (external test-deps and absorbed repo snapshots)
 against their upstream remotes. Outputs a markdown table showing what's
 behind.
 
-The external test-dep (openalgo) used to be a
-git submodule under ``infra/``. It is now a plain clone under
-``.local/external/`` produced by ``scripts/setup-test-deps.sh``.
-
 Usage:
     python scripts/check_upstream.py
     python scripts/check_upstream.py --format json
@@ -46,62 +42,6 @@ def _run(cmd: list[str], cwd: Path | None = None) -> str:
         return result.stdout.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return ""
-
-
-def check_submodules() -> list[RepoStatus]:
-    """Check the external test-deps under .local/external/ for upstream drift."""
-    results: list[RepoStatus] = []
-
-    external_test_deps = [
-        (".local/external/openalgo", "marketcalls/openalgo", "main"),
-    ]
-
-    for path, repo, branch in external_test_deps:
-        sub_path = ROOT / path
-        if not sub_path.exists():
-            results.append(RepoStatus(
-                name=path, category="external-test-dep",
-                notes="Not present (run scripts/setup-test-deps.sh)",
-                url=f"https://github.com/{repo}",
-            ))
-            continue
-
-        # Get local commit
-        local = _run(["git", "rev-parse", "--short", "HEAD"], cwd=sub_path)
-
-        # Fetch upstream
-        _run(["git", "fetch", "origin", "--quiet"], cwd=sub_path)
-
-        # Get remote commit
-        remote = _run(
-            ["git", "rev-parse", "--short", f"origin/{branch}"],
-            cwd=sub_path,
-        )
-
-        # Count commits behind
-        behind_str = _run(
-            ["git", "rev-list", f"HEAD..origin/{branch}", "--count"],
-            cwd=sub_path,
-        )
-        behind = int(behind_str) if behind_str.isdigit() else 0
-
-        # Get latest tag on remote
-        latest_tag = _run(
-            ["git", "describe", "--tags", "--abbrev=0", f"origin/{branch}"],
-            cwd=sub_path,
-        )
-
-        results.append(RepoStatus(
-            name=path,
-            category="external-test-dep",
-            local_version=local,
-            remote_version=f"{remote} ({latest_tag})" if latest_tag else remote,
-            commits_behind=behind,
-            url=f"https://github.com/{repo}",
-            notes="UP TO DATE" if behind == 0 else f"{behind} commits behind",
-        ))
-
-    return results
 
 
 def check_npm_deps() -> list[RepoStatus]:
@@ -234,9 +174,6 @@ def main() -> None:
     args = parser.parse_args()
 
     results: list[RepoStatus] = []
-
-    print("Checking external test-deps under .local/external/...", file=sys.stderr)
-    results.extend(check_submodules())
 
     if not args.skip_npm:
         print("Checking npm dependencies...", file=sys.stderr)

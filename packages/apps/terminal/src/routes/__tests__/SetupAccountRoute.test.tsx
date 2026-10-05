@@ -272,11 +272,9 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "{}");
       expect(progress).not.toHaveProperty("totpUri");
       expect(progress).not.toHaveProperty("backupCodes");
-      expect(progress.connection).toEqual({
-        host: "http://localhost:5000",
-        port: "5000",
-        wsPort: "8765",
-      });
+      expect(progress.connection).toBeNull();
+      expect(JSON.stringify(progress)).not.toContain("localhost:5000");
+      expect(JSON.stringify(progress)).not.toContain("wsPort");
       expect(JSON.stringify(progress)).not.toContain("legacy-browser-secret");
       expect(JSON.stringify(progress)).not.toContain("AAAA1111");
       expect(JSON.stringify(progress)).not.toContain("secret=ABC");

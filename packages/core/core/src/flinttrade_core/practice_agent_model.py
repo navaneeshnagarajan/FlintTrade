@@ -21,7 +21,11 @@ class PracticeModelBudget:
     """Serialise a shared analysis/reflection budget behind durable evidence."""
 
     def __init__(
-        self, call_limit: int, output_limit: int, *, event_sink: Callable[[str, dict[str, Any]], None],
+        self,
+        call_limit: int,
+        output_limit: int,
+        *,
+        event_sink: Callable[[str, dict[str, Any]], None],
     ) -> None:
         if type(call_limit) is not int or not 1 <= call_limit <= 10_000:
             raise ValueError("model_call_limit must be an integer between 1 and 10000")
@@ -50,8 +54,13 @@ class PracticeModelBudget:
             "model_output_limit": self.output_limit,
             "model_calls_used": used,
             "model_calls_remaining": self.call_limit - used,
-            "status": ("evidence_unavailable" if self._evidence_failed
-                       else "exhausted" if used >= self.call_limit else "available"),
+            "status": (
+                "evidence_unavailable"
+                if self._evidence_failed
+                else "exhausted"
+                if used >= self.call_limit
+                else "available"
+            ),
         }
 
     def reserve(self, operation: str) -> int:

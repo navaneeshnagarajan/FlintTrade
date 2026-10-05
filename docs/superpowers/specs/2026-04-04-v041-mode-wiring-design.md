@@ -89,33 +89,11 @@ Exception: safety disclaimer text may reference "simulated trading."
 
 ### 3.1 The Problem
 
-Frontend calls OpenAlgo directly for orders (`api.ts → POST /api/v1/placeorder`). Neither `modeStore.mode` nor `settingsStore.sandboxMode` is checked. A user in "practice" mode can place real orders.
-
 ### 3.2 The Fix
 
 All order placement routes through FlintTrade backend (port 5001):
 
-```
-Frontend (order widgets)
-    │
-    ▼
-FlintTrade Backend (port 5001)
-    │ checks session mode
-    │
-    ├── mode = "explore" ──→ REJECT 403
-    ├── mode = "practice" ──→ Practice fill path (SQLite state.sqlite)
-    └── mode = "live"    ──→ OpenAlgo (real broker)
-```
-
 ### 3.3 Backend Changes
-
-1. Add `mode` field to JWT payload (set during login/mode-switch)
-2. Add `/v1/orders/place` endpoint on FlintTrade backend that:
-   - Validates JWT + extracts mode
-   - If explore → reject
-   - If practice → route to Practice fill path
-   - If live → forward to OpenAlgo
-3. Frontend `api.ts` order functions call FlintTrade backend, not OpenAlgo directly
 
 ### 3.4 Frontend Changes
 
@@ -233,18 +211,10 @@ User completes setup → logged in → lands in /trade. Never logged out after s
 
 ## 8. Order Safety
 
-- Paper trading through OpenAlgo (broker gateway) is broker-integrated, not third-party — permissible
 - Add disclaimer in practice mode: "Virtual trading results are simulated and do not represent actual trading outcomes"
+
 - Broker order-tagging requirements remain live-mode only; practice mode is clearly marked "SIMULATED"
 
 ---
 
 ## 9. Success Criteria
-
-1. No orders reach OpenAlgo when the session is example data or Practice (server-enforced)
-2. Mode is visible at all times — TopBar pill + coloured border + order button label
-3. Returning user reaches /trade in <5 seconds (PIN or password+TOTP, no intermediate screens)
-4. Setup completion logs user IN (never back to /welcome)
-5. All 4 orphaned components (MockDataEngine, DemoChoice, SandboxControls, ModeSelectRoute) are wired
-6. "Sandbox"/"Paper"/"Demo" removed from all user-facing UI text
-7. TypeScript builds clean, all vitest tests pass, all pytest tests pass

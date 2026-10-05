@@ -1,216 +1,59 @@
-// Adapted patterns from:
-//   openalgo-chart/src/components/OptionChainPicker/OptionChainPicker.jsx — multi-leg state, strategy templates, direction (buy/sell), net premium calc
-//   openalgo-chart/src/services/strategyTemplates.js — STRATEGY_TEMPLATES, calculateNetPremium, validateStrategy, formatStrategyName
+/** Local option modelling workspace. This tool does not submit orders. */
+import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { sampleChainOptionLtp } from '@/lib/sampleOptionChain';
+import { builderLegsFor, getStrategyTemplate } from '@/lib/strategyTemplates';
+import { UNDERLYINGS, type Leg } from './types';
+import { calculatePositionNetPremium, formatINR, genId } from './utils';
+import { LOAD_TEMPLATE_EVENT, readAndClearPendingTemplate, type BuilderTemplate } from './templateBridge';
+import { hasPendingPineDraft } from './pineBridge';
+import { LegsTab } from './LegsTab';
+import { PayoffTab } from './PayoffTab';
+import { MarginTab } from './MarginTab';
+import { PineTab } from './PineTab';
 
-import { useEffect, useRef, useState } from "react";
-import { Brain, TrendingUp, Zap, Code2, X } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { UNDERLYINGS } from "./types";
-import type { Leg, Underlying } from "./types";
-import { builderLegsFor, getStrategyTemplate } from "@/lib/strategyTemplates";
-import { calculatePositionNetPremium, formatINR, genId } from "./utils";
-import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
-import {
-  LOAD_TEMPLATE_EVENT,
-  readAndClearPendingTemplate,
-  type BuilderTemplate,
-} from "./templateBridge";
-import { hasPendingPineDraft } from "./pineBridge";
-import { LegsTab } from "./LegsTab";
-import { PayoffTab } from "./PayoffTab";
-import { MarginTab } from "./MarginTab";
-import { PineTab } from "./PineTab";
-
-interface Props {
-  onClose?: () => void;
-}
-
-export default function StrategyBuilderTool({ onClose }: Props) {
-  // A Pine draft stashed by the Pine Script Editor means the operator just
-  // clicked "Open in Strategy Builder" — land them straight in the Pine tab.
-  // Peek only (non-destructive): PineTab does the read-and-clear on mount.
-  const [initialTab] = useState<"pine" | "legs">(() =>
-    hasPendingPineDraft() ? "pine" : "legs",
-  );
-  const [legs, setLegs] = useState<Leg[]>([]);
-  const [underlying, setUnderlying] = useState<Underlying>(UNDERLYINGS[0]);
-  const [atm, setAtm] = useState(UNDERLYINGS[0].symbol === "NIFTY" ? 22500 : 48000);
-  const [strikeGap, setStrikeGap] = useState(UNDERLYINGS[0].strikeGap);
-
-  const positionNet = calculatePositionNetPremium(legs, underlying.lotSize);
-
-  const handleUnderlyingChange = (symbol: string) => {
-    const u = UNDERLYINGS.find((u) => u.symbol === symbol) ?? UNDERLYINGS[0];
-    setUnderlying(u);
-    setStrikeGap(u.strikeGap);
-    // Rough ballpark seeds only — the operator sets the real ATM from the
-    // live chain. Every catalogued underlying gets its OWN seed (MIDCPNIFTY
-    // previously inherited NIFTY's level, an order of magnitude off).
-    const ATM_SEEDS: Record<string, number> = {
-      NIFTY: 22500,
-      BANKNIFTY: 48000,
-      FINNIFTY: 22000,
-      MIDCPNIFTY: 12500,
-      SENSEX: 80000,
-    };
-    setAtm(ATM_SEEDS[symbol] ?? 22500);
-    setLegs([]);
-  };
-
-  const handleAdd = () => {
-    setLegs((prev) => [
-      ...prev,
-      { id: genId(), action: "BUY", optionType: "CE", strike: atm, lots: 1, premium: null },
-    ]);
-  };
-
-  const handleRemove = (id: string) => {
-    setLegs((prev) => prev.filter((l) => l.id !== id));
-  };
-
-  const handleChange = (id: string, field: keyof Leg, value: unknown) => {
-    setLegs((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        if (field === "premium") {
-          return { ...l, premium: value as number | null, premiumSource: undefined };
-        }
-        return { ...l, [field]: value };
-      }),
-    );
-  };
-
-  // Apply a hand-off template from the StrategyTemplates widget — the legs
-  // arrive via templateBridge. validateLegs caps at 6 legs, so trim anything
-  // longer. Long Call is the only template that seeds a labelled sample-chain
-  // LTP (FT-LAB-003); every other shape lands unset so payoff is not ₹0.
-  const applyBridgeTemplate = (tmpl: BuilderTemplate) => {
-    const seedSample = tmpl.id === "long-call";
-    const newLegs: Leg[] = tmpl.legs.slice(0, 6).map((lt) => {
-      const strike = atm + lt.strikeOffset * strikeGap;
-      return {
-        id: genId(),
-        action: lt.action,
-        optionType: lt.optionType,
-        strike,
-        lots: Math.max(1, lt.lots),
-        premium: seedSample ? sampleChainOptionLtp(atm, strike, strikeGap, lt.optionType) : null,
-        premiumSource: seedSample ? "sample" : undefined,
-      };
-    });
-    setLegs(newLegs);
-  };
-
-  // Apply a catalogue template picked from the in-builder pill bar. Routed
-  // through the same `builderLegsFor` gate the widget uses, so a reference-only
-  // entry (stock or multi-expiry legs) can never load a degenerate approximation.
-  const handleTemplate = (key: string) => {
-    const tmpl = getStrategyTemplate(key);
-    if (!tmpl) return;
-    const legs = builderLegsFor(tmpl);
-    if (!legs) return;
-    applyBridgeTemplate({ id: tmpl.id, name: tmpl.name, legs });
-  };
-
-  // Latest-ref so the mount-time stash read and the live event listener both
-  // see current ATM/strike-gap without re-registering on every change.
-  const applyBridgeTemplateRef = useRef(applyBridgeTemplate);
-  useEffect(() => {
-    applyBridgeTemplateRef.current = applyBridgeTemplate;
+export default function StrategyBuilderTool({ onClose }: { onClose?: () => void }) {
+  const [tab, setTab] = useState(() => hasPendingPineDraft() ? 'pine' : 'legs');
+  const [underlying, setUnderlying] = useState(UNDERLYINGS[0]);
+  const [atm, setAtm] = useState(22500);
+  const [gap, setGap] = useState(50);
+  const materialise = (template: BuilderTemplate, price: number, step: number): Leg[] => template.legs.map(shape => {
+    const strike = price + shape.strikeOffset * step;
+    return { id: genId(), action: shape.action, optionType: shape.optionType, lots: shape.lots,
+      strike, premium: sampleChainOptionLtp(price, strike, step, shape.optionType), premiumSource: 'sample' };
   });
-
-  useEffect(() => {
+  const [legs, setLegs] = useState<Leg[]>(() => {
     const pending = readAndClearPendingTemplate();
-    if (pending) applyBridgeTemplateRef.current(pending);
-
-    const onLoad = (e: Event) => {
-      const detail = (e as CustomEvent).detail as BuilderTemplate | undefined;
-      if (detail && Array.isArray(detail.legs) && detail.legs.length > 0) {
-        applyBridgeTemplateRef.current(detail);
-      }
+    return pending ? materialise(pending, 22500, 50) : [];
+  });
+  useEffect(() => {
+    const load = (event: Event) => {
+      const pending = readAndClearPendingTemplate() ?? (event as CustomEvent<BuilderTemplate>).detail;
+      if (pending?.legs?.length) { setLegs(materialise(pending, atm, gap)); setTab('legs'); }
     };
-    window.addEventListener(LOAD_TEMPLATE_EVENT, onLoad);
-    return () => window.removeEventListener(LOAD_TEMPLATE_EVENT, onLoad);
-  }, []);
-
-  return (
-    <div className="h-full flex flex-col bg-surface-base">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
-        <div className="flex items-center gap-2">
-          <Brain size={16} className="text-primary" />
-          <h2 className="font-heading font-bold text-lg text-text-primary">Strategy Builder</h2>
-          <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
-            {underlying.symbol}
-          </Badge>
-          {legs.length > 0 && positionNet != null && (
-            <Badge
-              variant="outline"
-              className={`text-xxs px-1.5 border-0 font-mono ${positionNet <= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
-            >
-              {positionNet <= 0 ? "Credit" : "Debit"} {formatINR(Math.abs(positionNet))}
-            </Badge>
-          )}
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onClose}
-          aria-label="Close the builder (discards the current legs)"
-          title="Close the builder (discards the current legs)"
-          className="h-6 w-6 text-text-muted hover:text-text-primary"
-        >
-          <X size={15} />
-        </Button>
-      </div>
-
-      {/* Tabs */}
-      <Tabs defaultValue={initialTab} className="flex-1 flex flex-col min-h-0">
-        <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
-          <TabsTrigger value="legs"   className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <Brain      size={11} className="mr-1" aria-hidden="true" />Strategy Legs
-          </TabsTrigger>
-          <TabsTrigger value="payoff" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <TrendingUp size={11} className="mr-1" aria-hidden="true" />Payoff
-          </TabsTrigger>
-          <TabsTrigger value="margin" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <Zap        size={11} className="mr-1" aria-hidden="true" />Margin
-          </TabsTrigger>
-          <TabsTrigger value="pine"   className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <Code2      size={11} className="mr-1" aria-hidden="true" />Pine Script
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="legs" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
-          <LegsTab
-            legs={legs}
-            onAdd={handleAdd}
-            onRemove={handleRemove}
-            onChange={handleChange}
-            onTemplate={handleTemplate}
-            atm={atm}
-            onAtmChange={setAtm}
-            underlying={underlying}
-            onUnderlyingChange={handleUnderlyingChange}
-            strikeGap={strikeGap}
-            onStrikeGapChange={setStrikeGap}
-          />
-        </TabsContent>
-
-        <TabsContent value="payoff" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
-          <PayoffTab legs={legs} atm={atm} underlying={underlying} />
-        </TabsContent>
-
-        <TabsContent value="margin" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
-          <MarginTab legs={legs} underlying={underlying} />
-        </TabsContent>
-
-        <TabsContent value="pine" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
-          <PineTab />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
+    window.addEventListener(LOAD_TEMPLATE_EVENT, load);
+    return () => window.removeEventListener(LOAD_TEMPLATE_EVENT, load);
+  }, [atm, gap]);
+  const net = calculatePositionNetPremium(legs, underlying.lotSize);
+  const premiumText = net === null ? 'Premium unavailable' : `${net >= 0 ? 'Debit' : 'Credit'} ${formatINR(Math.abs(net))}`;
+  return <section className="flex h-full min-h-0 flex-col text-text-primary">
+    <header className="flex items-center justify-between border-b border-border-default p-3">
+      <h2 className="font-semibold">Strategy Builder</h2><span>{premiumText}</span>
+      {onClose && <Button variant="ghost" onClick={onClose}>Close</Button>}
+    </header>
+    <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+      <TabsList className="justify-start">{[['legs', 'Strategy Legs'], ['payoff', 'Payoff'], ['margin', 'Margin'], ['pine', 'Pine Script']].map(([id, label]) => <TabsTrigger key={id} value={id}>{label}</TabsTrigger>)}</TabsList>
+      <TabsContent value="legs" className="min-h-0 flex-1 overflow-auto"><LegsTab legs={legs} atm={atm} onAtmChange={setAtm} underlying={underlying} strikeGap={gap} onStrikeGapChange={setGap}
+        onUnderlyingChange={symbol => { const selected = UNDERLYINGS.find(item => item.symbol === symbol); if (selected) { setUnderlying(selected); setGap(selected.strikeGap); } }}
+        onAdd={() => setLegs(current => [...current, { id: genId(), action: 'BUY', optionType: 'CE', strike: atm, lots: 1, premium: null }])}
+        onRemove={id => setLegs(current => current.filter(leg => leg.id !== id))}
+        onChange={(id, field, value) => setLegs(current => current.map(leg => leg.id === id ? { ...leg, [field]: value, ...(field === 'premium' ? { premiumSource: undefined } : {}) } : leg))}
+        onTemplate={id => { const template = getStrategyTemplate(id); const shapes = template && builderLegsFor(template); if (template && shapes) setLegs(materialise({ id, name: template.name, legs: shapes }, atm, gap)); }} />
+      </TabsContent>
+      <TabsContent value="payoff" className="min-h-0 flex-1 overflow-auto"><PayoffTab legs={legs} atm={atm} underlying={underlying} /></TabsContent>
+      <TabsContent value="margin" className="min-h-0 flex-1 overflow-auto"><MarginTab legs={legs} underlying={underlying} /></TabsContent>
+      <TabsContent value="pine" className="min-h-0 flex-1 overflow-auto"><PineTab /></TabsContent>
+    </Tabs>
+  </section>;
 }

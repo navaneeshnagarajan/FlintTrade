@@ -63,12 +63,6 @@ Affects ~36 tracked files; reshapes the tree everything else writes into.
 - Tech stack summary (frontend / backend / data / infra)
 - Three CTAs: "Try it" → quickstart, "Build with it" → DEVELOPER_GUIDE, "Contribute" → CONTRIBUTING
 
-**Footer:**
-- Community links: GitHub Issues, question template, contributing pointer
-- Project docs grid: USER_GUIDE / DEVELOPER_GUIDE / ARCHITECTURE / API / CHANGELOG / SECURITY
-- Credits: OpenAlgo, OpenClaw, and the ~215 absorbed reference repos (link to docs/REFERENCES.md)
-- License + Code of Conduct + Contributing pointers
-
 **Style:**
 - British English throughout (memory rule).
 - No personal hostnames, IPs, hardware specs, broker names tied to the author. Sanitised per `c563bd5`.
@@ -101,12 +95,6 @@ docs/
 - `docs/superpowers/plans/` (this spec stays under `docs/superpowers/specs/` until merged)
 - The original `RELEASE_NOTES_*.md` files (after copies move to `releases/`)
 - `docs/REFERENCES.md` (currently a giant table of every absorbed repo — replace with a slimmer credits page; keep full version archived)
-
-**Content rules:**
-- `USER_GUIDE.md`: install → first connection → sandbox order path → Live-mode safeguard verification → workspace tour → screener / Lab / Automate / AI / Ditto walkthroughs
-- `DEVELOPER_GUIDE.md`: repo layout → dev setup → test → build → adding a widget → adding a strategy → adding a broker adapter → security and compliance constraints
-- `API.md`: OpenAlgo passthrough + FlintTrade `/ft-api/v1/` endpoints, request / response examples
-- `ARCHITECTURE.md`: refreshed mermaid diagrams, package map, data flow, mode system, auth, WSGI prefix-strip explained
 
 ### Parcel 4 — CONTRIBUTING / Code of Conduct / SECURITY refresh (parallel)
 

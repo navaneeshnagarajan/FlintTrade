@@ -104,40 +104,46 @@ def indicators_compute() -> tuple[Any, int]:
     raw_indicators = body.get("indicators")
 
     if not isinstance(raw_bars, list) or len(raw_bars) == 0:
-        return jsonify({
-            "status": "error",
-            "message": "bars must be a non-empty list.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "bars must be a non-empty list.",
+            }
+        ), 400
 
     if not isinstance(raw_indicators, list) or len(raw_indicators) == 0:
-        return jsonify({
-            "status": "error",
-            "message": "indicators must be a non-empty list of strings.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "indicators must be a non-empty list of strings.",
+            }
+        ), 400
 
     if len(raw_bars) > 2000:
-        return jsonify({
-            "status": "error",
-            "message": "Maximum 2000 bars per request.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Maximum 2000 bars per request.",
+            }
+        ), 400
 
     # Validate and unpack bars
     try:
         # opens is validated for presence but not needed for indicator calcs
         _ = [float(b["open"]) for b in raw_bars]
-        highs   = np.array([float(b["high"])   for b in raw_bars], dtype=np.float64)
-        lows    = np.array([float(b["low"])    for b in raw_bars], dtype=np.float64)
-        closes  = np.array([float(b["close"])  for b in raw_bars], dtype=np.float64)
-        volumes = np.array(
-            [float(b.get("volume", 0) or 0) for b in raw_bars], dtype=np.float64
-        )
+        highs = np.array([float(b["high"]) for b in raw_bars], dtype=np.float64)
+        lows = np.array([float(b["low"]) for b in raw_bars], dtype=np.float64)
+        closes = np.array([float(b["close"]) for b in raw_bars], dtype=np.float64)
+        volumes = np.array([float(b.get("volume", 0) or 0) for b in raw_bars], dtype=np.float64)
         _ = [int(b["time"]) for b in raw_bars]  # validate time field exists
     except (KeyError, TypeError, ValueError) as exc:
         logger.debug("Invalid bar data in indicators/compute: %s", exc)
-        return jsonify({
-            "status": "error",
-            "message": "Invalid bar data. Ensure each bar has numeric open/high/low/close and int time fields.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Invalid bar data. Ensure each bar has numeric open/high/low/close and int time fields.",
+            }
+        ), 400
 
     def _to_list(arr: np.ndarray) -> list:
         """Convert numpy array to JSON-serialisable list (NaN -> None)."""
@@ -220,9 +226,7 @@ def indicators_compute() -> tuple[Any, int]:
                 }
 
             elif key.startswith("vwap"):
-                result[ind_name] = _to_list(
-                    vwap(highs, lows, closes, volumes)
-                )
+                result[ind_name] = _to_list(vwap(highs, lows, closes, volumes))
 
             elif key.startswith("supertrend"):
                 st_vals, st_dir = supertrend(highs, lows, closes)
@@ -344,9 +348,7 @@ def indicators_compute() -> tuple[Any, int]:
 
             elif key.startswith("keltner_channels"):
                 period = _parse_period(key, 20)
-                upper, middle, lower = keltner_channels(
-                    highs, lows, closes, ema_period=period
-                )
+                upper, middle, lower = keltner_channels(highs, lows, closes, ema_period=period)
                 result[ind_name] = {
                     "upper": _to_list(upper),
                     "middle": _to_list(middle),
@@ -412,10 +414,26 @@ def indicators_compute() -> tuple[Any, int]:
 
 # Banned identifiers that must never appear in Pine-converted code
 _PINE_BANNED_NAMES = {
-    "exec", "eval", "compile", "__import__", "open", "os", "sys",
-    "subprocess", "shutil", "pathlib", "importlib", "pickle",
-    "globals", "locals", "getattr", "setattr", "delattr",
-    "__builtins__", "__class__", "__subclasses__",
+    "exec",
+    "eval",
+    "compile",
+    "__import__",
+    "open",
+    "os",
+    "sys",
+    "subprocess",
+    "shutil",
+    "pathlib",
+    "importlib",
+    "pickle",
+    "globals",
+    "locals",
+    "getattr",
+    "setattr",
+    "delattr",
+    "__builtins__",
+    "__class__",
+    "__subclasses__",
 }
 
 
@@ -446,27 +464,33 @@ def pine_compile() -> tuple[Any, int]:
     code = body.get("code")
 
     if not isinstance(code, str) or not code.strip():
-        return jsonify({
-            "status": "error",
-            "message": "code must be a non-empty string.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "code must be a non-empty string.",
+            }
+        ), 400
 
     # Length guard — reject scripts that are unreasonably large
     if len(code) > 50_000:
-        return jsonify({
-            "status": "error",
-            "message": "Script too large. Maximum 50,000 characters.",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Script too large. Maximum 50,000 characters.",
+            }
+        ), 400
 
     try:
         converter = PineConverter()
         result = converter.convert(code)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Pine converter error: %s", exc)
-        return jsonify({
-            "status": "error",
-            "message": "Conversion failed",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Conversion failed",
+            }
+        ), 400
 
     # AST-based safety validation — ensure the generated Python does not
     # contain dangerous constructs (imports of os/sys, exec, eval, etc.)
@@ -478,16 +502,9 @@ def pine_compile() -> tuple[Any, int]:
             if isinstance(node, ast.Call):
                 func = node.func
                 if isinstance(func, ast.Name) and func.id in _PINE_BANNED_NAMES:
-                    safety_errors.append(
-                        f"Unsafe function call: {func.id}()"
-                    )
-                elif (
-                    isinstance(func, ast.Attribute)
-                    and func.attr in _PINE_BANNED_NAMES
-                ):
-                    safety_errors.append(
-                        f"Unsafe method call: .{func.attr}()"
-                    )
+                    safety_errors.append(f"Unsafe function call: {func.id}()")
+                elif isinstance(func, ast.Attribute) and func.attr in _PINE_BANNED_NAMES:
+                    safety_errors.append(f"Unsafe method call: .{func.attr}()")
             # Check for banned name references
             if isinstance(node, ast.Name) and node.id in _PINE_BANNED_NAMES:
                 safety_errors.append(f"Unsafe identifier: {node.id}")
@@ -497,19 +514,23 @@ def pine_compile() -> tuple[Any, int]:
         pass
 
     if safety_errors:
-        return jsonify({
-            "status": "error",
-            "message": "Generated code contains unsafe constructs.",
-            "data": {"safety_errors": safety_errors},
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Generated code contains unsafe constructs.",
+                "data": {"safety_errors": safety_errors},
+            }
+        ), 400
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "python_code": result.python_code,
-            "imports": result.imports,
-            "warnings": result.warnings,
-            "unsupported": result.unsupported,
-            "supported_functions": converter.get_supported_functions(),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "python_code": result.python_code,
+                "imports": result.imports,
+                "warnings": result.warnings,
+                "unsupported": result.unsupported,
+                "supported_functions": converter.get_supported_functions(),
+            },
+        }
+    ), 200

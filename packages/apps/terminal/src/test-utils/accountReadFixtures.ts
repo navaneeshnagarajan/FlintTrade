@@ -9,8 +9,6 @@ export const EXPLORE_READ_CONTEXT = Object.freeze({
     accountId: "default",
   }),
   enabled: false,
-  host: "",
-  apiKey: "",
 }) satisfies AccountReadContext;
 
 /** Connected native account authority used by account-query unit fixtures. */
@@ -22,8 +20,6 @@ export const CONNECTED_NATIVE_READ_CONTEXT = Object.freeze({
     accountId: "A1",
   }),
   enabled: true,
-  host: "",
-  apiKey: "",
 }) satisfies AccountReadContext;
 
 /** Fail-closed Live authority before a broker/account source is selected. */
@@ -35,8 +31,6 @@ export const UNCONFIGURED_LIVE_READ_CONTEXT = Object.freeze({
     accountId: "none",
   }),
   enabled: false,
-  host: "",
-  apiKey: "",
 }) satisfies AccountReadContext;
 
 /** Local Practice sandbox authority, independent of a Live broker session. */
@@ -48,6 +42,4 @@ export const PRACTICE_READ_CONTEXT = Object.freeze({
     accountId: "default",
   }),
   enabled: true,
-  host: "",
-  apiKey: "",
 }) satisfies AccountReadContext;

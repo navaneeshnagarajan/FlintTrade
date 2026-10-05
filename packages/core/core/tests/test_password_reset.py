@@ -61,8 +61,10 @@ class TestGetEmail:
     def test_returns_email_after_setup(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="alice", email="alice@example.com",
-            password="StrongP@ss123!", pin="123456",
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
         )
         assert svc.get_email() == "alice@example.com"
 
@@ -134,7 +136,8 @@ class TestResetToken:
 def app_with_auth(tmp_path: Path):
     """Create a Flask test app with auth service and optionally mocked mail."""
     import os
-    os.environ.setdefault("OPENALGO_API_KEY", "test-key-123")
+
+    os.environ.setdefault("FLINTTRADE_API_KEY", "test-key-123")
     # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app

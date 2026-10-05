@@ -159,71 +159,6 @@ AUDIT_LOG_DIR="${AUDIT_LOG_DIR:-$DATA_DIR/audit}"
 TICK_DATA_DIR="${TICK_DATA_DIR:-$DATA_DIR/ticks}"
 
 # ------------------------------------------------------------------
-# 4. External test-deps
-# ------------------------------------------------------------------
-header "External test-deps"
-
-# OpenAlgo and OpenClaw are no longer git submodules of FlintTrade. They
-# are EXTERNAL prerequisites. Install them yourself, OR run
-# scripts/setup-test-deps.sh to clone local-dev copies into
-# .local/external/. This installer continues if the local-dev clones
-# already exist, otherwise it tells the user how to get them.
-#
-# AlgoMirror is intentionally absent: its mirroring patterns are
-# absorbed into packages/services/ditto/ — nothing external to install.
-
-# ------------------------------------------------------------------
-# 5. OpenAlgo dependencies (only if local-dev clone exists)
-# ------------------------------------------------------------------
-header "OpenAlgo setup"
-
-OPENALGO_DIR="$FLINTTRADE_DIR/.local/external/openalgo"
-OPENALGO_ENV_CREATED=false
-OPENALGO_DEPS_INSTALLED=false
-if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
-    pip3 install -r "$OPENALGO_DIR/requirements.txt" --break-system-packages -q 2>/dev/null || \
-        pip3 install -r "$OPENALGO_DIR/requirements.txt" -q 2>/dev/null || \
-        warn "OpenAlgo deps install failed — may need manual install"
-    OPENALGO_DEPS_INSTALLED=true
-    ok "Optional OpenAlgo dependencies installed"
-
-    # gunicorn + eventlet are required for production but not in OpenAlgo's requirements.txt
-    pip3 install gunicorn eventlet --break-system-packages -q 2>/dev/null || \
-        pip3 install gunicorn eventlet -q 2>/dev/null || \
-        warn "gunicorn+eventlet install failed — the OpenAlgo local-dev service will fall back to 'python app.py'"
-    ok "gunicorn + eventlet installed"
-
-    # Copy .sample.env → .env if missing (OpenAlgo uses .sample.env, not .env.sample)
-    if [ ! -f "$OPENALGO_DIR/.env" ] && [ -f "$OPENALGO_DIR/.sample.env" ]; then
-        cp "$OPENALGO_DIR/.sample.env" "$OPENALGO_DIR/.env"
-        OPENALGO_ENV_CREATED=true
-        ok "Copied $OPENALGO_DIR/.sample.env → $OPENALGO_DIR/.env"
-
-        # Generate fresh security keys (replace defaults from sample)
-        SAMPLE_APP_KEY='3daa0403ce2501ee7432b75bf100048e3cf510d63d2754f952e93d88bf07ea84'
-        SAMPLE_PEPPER='a25d94718479b170c16278e321ea6c989358bf499a658fd20c90033cef8ce772'
-        CURRENT_APP_KEY=$(grep "^APP_KEY" "$OPENALGO_DIR/.env" | sed "s/.*= *'\(.*\)'/\1/")
-        CURRENT_PEPPER=$(grep "^API_KEY_PEPPER" "$OPENALGO_DIR/.env" | sed "s/.*= *'\(.*\)'/\1/")
-
-        if [ "$CURRENT_APP_KEY" = "$SAMPLE_APP_KEY" ] || [ "$CURRENT_PEPPER" = "$SAMPLE_PEPPER" ]; then
-            NEW_APP_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-            NEW_PEPPER=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-            sed -i "s/$SAMPLE_APP_KEY/$NEW_APP_KEY/" "$OPENALGO_DIR/.env"
-            sed -i "s/$SAMPLE_PEPPER/$NEW_PEPPER/" "$OPENALGO_DIR/.env"
-            ok "Generated fresh security keys in $OPENALGO_DIR/.env"
-        fi
-
-        warn "Configure broker credentials in $OPENALGO_DIR/.env"
-    elif [ -f "$OPENALGO_DIR/.env" ]; then
-        ok "$OPENALGO_DIR/.env exists"
-    fi
-else
-    warn "OpenAlgo is an optional external integration. To get a local-dev copy for testing, run:"
-    warn "    bash scripts/setup-test-deps.sh"
-    warn "Or install OpenAlgo separately and point FlintTrade at it from Setup/Settings."
-fi
-
-# ------------------------------------------------------------------
 # 6. FlintTrade Python dependencies
 # ------------------------------------------------------------------
 header "FlintTrade Python packages"
@@ -368,18 +303,9 @@ header "Setup complete"
 echo ""
 ok "System dependencies verified"
 ok "FlintTrade Python packages installed"
-if [ "$OPENALGO_DEPS_INSTALLED" = true ]; then
-    ok "Optional OpenAlgo dependencies installed"
-    ok "gunicorn + eventlet installed for optional OpenAlgo local-dev service"
-else
-    warn "Optional OpenAlgo local-dev dependencies skipped"
-fi
 [ "$HAS_NODE" = true ] && ok "React packages installed" || warn "React packages skipped (no Node.js)"
 ok "Workspace initialised"
 echo ""
-if [ "$OPENALGO_ENV_CREATED" = true ]; then
-    warn "Configure broker credentials in .local/external/openalgo/.env before trading"
-fi
 # The cross-platform runner, not `make`. This script now runs under Git Bash / MSYS
 # too (see the MINGW*|MSYS*|CYGWIN* branches above), and `make` exists on none of
 # those hosts — printing it here as the closing instruction sent every Windows user
@@ -387,7 +313,7 @@ fi
 echo "Next steps (run from $FLINTTRADE_DIR):"
 echo "  1. Start FlintTrade:  python scripts/ft.py start"
 echo "  2. Open the terminal app and finish setup"
-echo "  3. Configure OpenAlgo in Settings only if you want the OpenAlgo integration path"
+echo "  3. Configure available native brokers in Settings"
 echo "  4. Check it is up:    python scripts/ft.py status"
 echo ""
 echo "On macOS and Linux, 'make start' and 'make status' are aliases for the same runner."

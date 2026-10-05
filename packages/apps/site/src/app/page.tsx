@@ -17,7 +17,7 @@ const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted workflow workspace',
-    copy: 'React, FlexLayout, Python services, Rust tick processing, and the OpenAlgo-compatible bridge in one inspectable workspace. Native broker HTTP is evidence-gated and frozen until Task 9D and Task 7C.2.',
+    copy: 'React, FlexLayout, Python services, Rust tick processing, and the native broker gateway in one inspectable workspace. Native broker HTTP is evidence-gated and frozen until Task 9D and Task 7C.2.',
   },
   {
     icon: ShieldCheck,
@@ -37,10 +37,10 @@ const docsCards = [
     label: 'Install',
     copy: 'Install the self-hosted web app in one line. Electron installers stay withheld until a checksummed release exists.',
   },
-  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect the OpenAlgo-compatible bridge, open Practice, and learn the workspace.' },
+  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, open Practice, and learn the workspace. Native connections remain frozen.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
-  { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and OpenAlgo bridge routes.' },
+  { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade terminal endpoints, authentication, and native broker contracts.' },
 ];
 
 const wordmarkChars = BRAND_WORDMARK.split('');
@@ -54,7 +54,7 @@ const sloganWords = BRAND_SLOGAN_WORDS;
 
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
-  'OpenAlgo-compatible bridge is the working broker path',
+  'Five native adapters with evidence-gated availability',
   'Practice, Connected (read), and Live',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
@@ -163,7 +163,7 @@ export default async function HomePage() {
         <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
           <div className="screenshot-stack">
             <figure className="screen-frame main">
-              <Image src={flinttradeAsset('screenshots/01-welcome.png')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
+              <Image src={flinttradeAsset('screenshots/01-welcome.jpg')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
             </figure>
             <figure className="screen-frame side">
               <Image src={flinttradeAsset('screenshots/04-trade.png')} alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />
@@ -179,7 +179,7 @@ export default async function HomePage() {
         <div className="metric-rail" aria-label="Project facts">
           <div>
             <strong>Gateway</strong>
-            <span>OpenAlgo is the working broker path. Native broker HTTP is frozen until Task 9D and Task 7C.2; adapters stay evidence-gated behind credential, ACL, and SDK checks.</span>
+            <span>Broker connections use the native gateway. Native broker HTTP is frozen until Task 9D and Task 7C.2; adapters stay evidence-gated behind credential, ACL, and SDK checks.</span>
           </div>
           <div>
             <strong>18</strong>

@@ -39,7 +39,6 @@ export type SectionId =
   | "general"
   | "appearance"
   | "ticker"
-  | "api"
   | "brokers"
   | "trading"
   | "risk"
@@ -99,7 +98,6 @@ export const SECTION_GROUPS: readonly { id: SectionGroupId; label: string }[] = 
  * it against that origin.
  */
 export const DEMO_HIDDEN_SECTIONS: readonly SectionId[] = [
-  "api",       // OpenAlgo host + API key
   "brokers",   // broker account credentials
   "llm",       // LLM provider API keys
   "telegram",  // bot token

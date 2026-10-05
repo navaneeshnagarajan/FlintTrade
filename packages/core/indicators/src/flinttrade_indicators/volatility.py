@@ -170,9 +170,7 @@ def donchian_channels(
     validate_series(high, min_length=period)
     validate_series(low, min_length=1)
     if len(high) != len(low):
-        raise ValueError(
-            f"Array length mismatch: high={len(high)}, low={len(low)}"
-        )
+        raise ValueError(f"Array length mismatch: high={len(high)}, low={len(low)}")
     n = len(high)
     upper = np.full(n, np.nan, dtype=np.float64)
     lower = np.full(n, np.nan, dtype=np.float64)
@@ -283,9 +281,7 @@ def williams_vix_fix(
     validate_series(close, min_length=period)
     validate_series(low, min_length=period)
     if len(close) != len(low):
-        raise ValueError(
-            f"Array length mismatch: close={len(close)}, low={len(low)}"
-        )
+        raise ValueError(f"Array length mismatch: close={len(close)}, low={len(low)}")
 
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
@@ -334,9 +330,7 @@ def chaikin_volatility(
     validate_series(high, min_length=period)
     validate_series(low, min_length=period)
     if len(high) != len(low):
-        raise ValueError(
-            f"Array length mismatch: high={len(high)}, low={len(low)}"
-        )
+        raise ValueError(f"Array length mismatch: high={len(high)}, low={len(low)}")
     if period < 1:
         raise ValueError(f"chaikin_volatility period must be >= 1, got {period}")
     if roc_period < 1:
@@ -519,7 +513,7 @@ def ulcer_index(
         window = pct_dd[i - period + 1 : i + 1]
         if np.any(np.isnan(window)):
             continue
-        result[i] = float(np.sqrt(float(np.mean(window ** 2))))
+        result[i] = float(np.sqrt(float(np.mean(window**2))))
 
     return result
 

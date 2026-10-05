@@ -321,7 +321,7 @@ describe("PnLMonitorWidget", () => {
     expect(screen.getByTestId("net-pnl").textContent).toContain("700");
   });
 
-  // ── Broker numeric coercion + local P&L (OpenAlgo quirk 4) ────────────────
+  // ── Broker numeric coercion + local P&L (native broker quirk 4) ────────────────
 
   it("computes open-position P&L locally instead of trusting a wrong broker pnl", async () => {
     // Broker reports a wildly wrong pnl; local MTM = (110 − 100) × 10 = 100.

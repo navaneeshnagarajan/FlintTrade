@@ -1,7 +1,7 @@
 /**
  * Live feed-freshness for TopBar, ticker, and Market Clock.
  *
- * Combines execution mode, WebSocket diagnostics, and the REST ticker
+ * Combines execution mode, local registry diagnostics, and native REST ticker
  * fallback health report. Recomputes once a second so Stale/Unknown age
  * stays visible.
  */

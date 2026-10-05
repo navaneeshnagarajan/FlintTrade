@@ -88,31 +88,35 @@ class TestComputeMonthlySeasonality:
         """With 5+ years of data covering all months, all 12 months appear."""
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        data = _make_monthly_prices(
-            {y: [1.0] * 12 for y in range(2010, 2016)}
-        )
+        data = _make_monthly_prices({y: [1.0] * 12 for y in range(2010, 2016)})
         stats = compute_monthly_seasonality(data)
         assert len(stats) == 12
 
     def test_month_numbers_are_one_to_twelve(self):
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        data = _make_monthly_prices(
-            {y: [0.5] * 12 for y in range(2010, 2016)}
-        )
+        data = _make_monthly_prices({y: [0.5] * 12 for y in range(2010, 2016)})
         months = [s.month for s in compute_monthly_seasonality(data)]
         assert months == list(range(1, 13))
 
     def test_month_names_correct(self):
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        data = _make_monthly_prices(
-            {y: [0.0] * 12 for y in range(2010, 2013)}
-        )
+        data = _make_monthly_prices({y: [0.0] * 12 for y in range(2010, 2013)})
         stats = compute_monthly_seasonality(data)
         expected_names = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ]
         assert [s.month_name for s in stats] == expected_names
 
@@ -151,9 +155,7 @@ class TestComputeMonthlySeasonality:
         """Every Jan is positive → positive_rate == 1.0."""
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        data = _make_monthly_prices(
-            {y: [1.0] + [0.0] * 11 for y in range(2010, 2016)}
-        )
+        data = _make_monthly_prices({y: [1.0] + [0.0] * 11 for y in range(2010, 2016)})
         stats = compute_monthly_seasonality(data)
         jan = next(s for s in stats if s.month == 1)
         assert jan.positive_rate == pytest.approx(1.0)
@@ -163,12 +165,7 @@ class TestComputeMonthlySeasonality:
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
         oct_idx = 9  # October is index 9 (0-based)
-        data = _make_monthly_prices(
-            {
-                y: [0.0] * oct_idx + [-1.0] + [0.0] * (11 - oct_idx)
-                for y in range(2010, 2016)
-            }
-        )
+        data = _make_monthly_prices({y: [0.0] * oct_idx + [-1.0] + [0.0] * (11 - oct_idx) for y in range(2010, 2016)})
         stats = compute_monthly_seasonality(data)
         oct_stats = next(s for s in stats if s.month == 10)
         assert oct_stats.positive_rate == pytest.approx(0.0)
@@ -193,9 +190,7 @@ class TestComputeMonthlySeasonality:
     def test_years_count_matches_input(self):
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        data = _make_monthly_prices(
-            {y: [1.0] * 12 for y in range(2015, 2020)}
-        )
+        data = _make_monthly_prices({y: [1.0] * 12 for y in range(2015, 2020)})
         stats = compute_monthly_seasonality(data)
         # Each month should have 5 observations (2015–2019)
         for s in stats:
@@ -238,9 +233,7 @@ class TestComputeMonthlySeasonality:
     def test_std_pct_is_non_negative(self):
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        data = _make_monthly_prices(
-            {y: [float(y % 5)] * 12 for y in range(2010, 2016)}
-        )
+        data = _make_monthly_prices({y: [float(y % 5)] * 12 for y in range(2010, 2016)})
         for s in compute_monthly_seasonality(data):
             assert s.std_pct >= 0.0
 
@@ -257,8 +250,7 @@ class TestComputeMonthlySeasonality:
     def test_empty_dataframe_returns_empty_list(self):
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
-        empty = pd.DataFrame({"close": pd.Series([], dtype=float)},
-                             index=pd.DatetimeIndex([]))
+        empty = pd.DataFrame({"close": pd.Series([], dtype=float)}, index=pd.DatetimeIndex([]))
         assert compute_monthly_seasonality(empty) == []
 
     def test_single_row_no_pct_change_returns_empty(self):
@@ -345,8 +337,7 @@ class TestComputeWeekdaySeasonality:
     def test_empty_dataframe_returns_empty_list(self):
         from flinttrade_indicators.seasonality import compute_weekday_seasonality
 
-        empty = pd.DataFrame({"close": pd.Series([], dtype=float)},
-                             index=pd.DatetimeIndex([]))
+        empty = pd.DataFrame({"close": pd.Series([], dtype=float)}, index=pd.DatetimeIndex([]))
         assert compute_weekday_seasonality(empty) == []
 
     def test_single_row_returns_empty(self):
@@ -406,8 +397,7 @@ class TestComputeDayOfMonthSeasonality:
     def test_empty_dataframe_returns_empty_dict(self):
         from flinttrade_indicators.seasonality import compute_day_of_month_seasonality
 
-        empty = pd.DataFrame({"close": pd.Series([], dtype=float)},
-                             index=pd.DatetimeIndex([]))
+        empty = pd.DataFrame({"close": pd.Series([], dtype=float)}, index=pd.DatetimeIndex([]))
         assert compute_day_of_month_seasonality(empty) == {}
 
     def test_single_row_returns_empty(self):
@@ -438,9 +428,7 @@ class TestBuildSeasonalityMatrix:
     def test_shape_years_by_12_months(self):
         from flinttrade_indicators.seasonality import build_seasonality_matrix
 
-        data = _make_monthly_prices(
-            {y: [1.0] * 12 for y in range(2010, 2016)}
-        )
+        data = _make_monthly_prices({y: [1.0] * 12 for y in range(2010, 2016)})
         matrix = build_seasonality_matrix(data)
         assert list(matrix.columns) == list(range(1, 13))
         assert 2015 in matrix.index
@@ -462,8 +450,7 @@ class TestBuildSeasonalityMatrix:
     def test_empty_dataframe_returns_empty_dataframe(self):
         from flinttrade_indicators.seasonality import build_seasonality_matrix
 
-        empty = pd.DataFrame({"close": pd.Series([], dtype=float)},
-                             index=pd.DatetimeIndex([]))
+        empty = pd.DataFrame({"close": pd.Series([], dtype=float)}, index=pd.DatetimeIndex([]))
         result = build_seasonality_matrix(empty)
         assert result.empty
 
@@ -490,6 +477,7 @@ class TestInputValidation:
             compute_monthly_seasonality,
             compute_weekday_seasonality,
         )
+
         return [
             compute_monthly_seasonality,
             compute_weekday_seasonality,
@@ -555,18 +543,14 @@ class TestRealisticScenario:
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
         for s in compute_monthly_seasonality(nifty_like):
-            assert 0.0 <= s.positive_rate <= 1.0, (
-                f"{s.month_name}: positive_rate={s.positive_rate}"
-            )
+            assert 0.0 <= s.positive_rate <= 1.0, f"{s.month_name}: positive_rate={s.positive_rate}"
 
     def test_monthly_years_count_approx_20(self, nifty_like):
         from flinttrade_indicators.seasonality import compute_monthly_seasonality
 
         for s in compute_monthly_seasonality(nifty_like):
             # 20 years of data → each month ~20 observations
-            assert 15 <= s.years_count <= 21, (
-                f"{s.month_name}: years_count={s.years_count}"
-            )
+            assert 15 <= s.years_count <= 21, f"{s.month_name}: years_count={s.years_count}"
 
     def test_weekday_stats_count(self, nifty_like):
         from flinttrade_indicators.seasonality import compute_weekday_seasonality
@@ -617,3 +601,19 @@ class TestRealisticScenario:
             assert s.best_year[1] >= s.worst_year[1], (
                 f"{s.month_name}: best={s.best_year[1]:.2f} < worst={s.worst_year[1]:.2f}"
             )
+
+
+@pytest.mark.parametrize("bad_close", [float("inf"), float("-inf")])
+def test_non_finite_closes_never_generate_returns(bad_close):
+    from flinttrade_indicators.seasonality import (
+        build_seasonality_matrix,
+        compute_day_of_month_seasonality,
+        compute_monthly_seasonality,
+        compute_weekday_seasonality,
+    )
+
+    frame = pd.DataFrame({"close": [bad_close, 100.0]}, index=pd.to_datetime(["2025-01-31", "2025-02-28"]))
+    assert compute_monthly_seasonality(frame) == []
+    assert compute_weekday_seasonality(frame) == []
+    assert compute_day_of_month_seasonality(frame) == {}
+    assert build_seasonality_matrix(frame).empty

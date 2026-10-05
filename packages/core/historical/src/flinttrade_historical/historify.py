@@ -12,12 +12,12 @@ Example::
 
     import asyncio
     from datetime import date
-    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.broker_client import BrokerClient
     from flinttrade_historical.historify import HistorifyDownloader
     from flinttrade_historical.pipeline import DataPipeline
 
     async def main():
-        async with OpenAlgoClient() as client:
+        async with BrokerClient() as client:
             pipeline = DataPipeline()
             pipeline.initialise()
             dl = HistorifyDownloader(client, pipeline)
@@ -43,8 +43,8 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.db import open_sqlite
-from flinttrade_core.openalgo_client import OpenAlgoClient
 
 from .downloader import DownloadResult
 from .pipeline import INTERVAL_TABLES, DataPipeline
@@ -193,7 +193,7 @@ class HistorifyDownloader:
     computes daily delta syncs.
 
     Args:
-        client: Async :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`.
+        client: Async :class:`~flinttrade_core.broker_client.BrokerClient`.
         storage: :class:`~flinttrade_historical.pipeline.DataPipeline` instance.
         max_concurrent: Maximum concurrent symbol downloads (default 5).
         queue_db_path: Override path for the SQLite job queue.
@@ -212,7 +212,7 @@ class HistorifyDownloader:
 
     def __init__(
         self,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         storage: DataPipeline,
         max_concurrent: int = 5,
         queue_db_path: Path | None = None,
@@ -314,14 +314,15 @@ class HistorifyDownloader:
                 start = today - timedelta(days=365)
                 logger.info(
                     "delta_sync(%s/%s, %s): no prior data, fetching from %s",
-                    symbol, exchange, interval, start,
+                    symbol,
+                    exchange,
+                    interval,
+                    start,
                 )
             else:
                 start = last_ts + timedelta(days=1)
                 if start > today:
-                    logger.debug(
-                        "delta_sync(%s/%s, %s): already up-to-date", symbol, exchange, interval
-                    )
+                    logger.debug("delta_sync(%s/%s, %s): already up-to-date", symbol, exchange, interval)
                     continue
 
             dl_result = await self._downloader.download(
@@ -334,13 +335,9 @@ class HistorifyDownloader:
             if dl_result.bars:
                 inserted = self._storage.store_download(dl_result, interval)
                 total_inserted += inserted
-                logger.info(
-                    "delta_sync(%s/%s, %s): +%d bars", symbol, exchange, interval, inserted
-                )
+                logger.info("delta_sync(%s/%s, %s): +%d bars", symbol, exchange, interval, inserted)
             else:
-                logger.debug(
-                    "delta_sync(%s/%s, %s): no new bars", symbol, exchange, interval
-                )
+                logger.debug("delta_sync(%s/%s, %s): no new bars", symbol, exchange, interval)
 
         return total_inserted
 
@@ -378,9 +375,7 @@ class HistorifyDownloader:
                 self._storage.store_download(dl_result, interval)
                 result.succeeded += 1
                 self._queue.mark_done(job_id)
-                logger.info(
-                    "Historify: %s/%s %s — %d bars", symbol, exchange, interval, dl_result.total_bars
-                )
+                logger.info("Historify: %s/%s %s — %d bars", symbol, exchange, interval, dl_result.total_bars)
             else:
                 errors = "; ".join(dl_result.errors) if dl_result.errors else "no bars returned"
                 result.failed += 1
@@ -388,16 +383,17 @@ class HistorifyDownloader:
                 self._queue.mark_error(job_id, errors)
                 logger.warning(
                     "Historify: %s/%s %s — no bars (errors: %s)",
-                    symbol, exchange, interval, errors,
+                    symbol,
+                    exchange,
+                    interval,
+                    errors,
                 )
         except Exception as exc:
             msg = str(exc)
             result.failed += 1
             result.errors.append(f"{symbol}/{exchange}@{interval}: {msg}")
             self._queue.mark_error(job_id, msg)
-            logger.exception(
-                "Historify: exception for %s/%s %s: %s", symbol, exchange, interval, msg
-            )
+            logger.exception("Historify: exception for %s/%s %s: %s", symbol, exchange, interval, msg)
 
     def _last_stored_date(
         self,
@@ -429,7 +425,7 @@ class _AsyncDownloader:
     """Runs the synchronous HistoricalDownloader in a thread-pool executor.
 
     Args:
-        client: OpenAlgo client used to fetch history chunks.
+        client: native broker client used to fetch history chunks.
         throttle: Optional ``() -> Awaitable[None]`` awaited before each history
             call — bind it to a rate limiter (e.g. ``BrokerRateLimiter.acquire``)
             to stay under the broker's data rate and avoid a ban on a large
@@ -441,7 +437,7 @@ class _AsyncDownloader:
 
     def __init__(
         self,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         *,
         throttle: Callable[[], Awaitable[None]] | None = None,
         max_retries: int = 3,
@@ -469,7 +465,7 @@ class _AsyncDownloader:
             except Exception as exc:  # noqa: BLE001 - retried below, re-raised if exhausted
                 last_exc = exc
                 if attempt < self._max_retries - 1:
-                    await self._sleep(self._base_backoff * (2 ** attempt))
+                    await self._sleep(self._base_backoff * (2**attempt))
         assert last_exc is not None  # loop ran at least once
         raise last_exc
 
@@ -481,7 +477,7 @@ class _AsyncDownloader:
         start_date: str,
         end_date: str,
     ) -> DownloadResult:
-        """Async shim — delegates chunked download to async OpenAlgoClient."""
+        """Async shim — delegates chunked download to async BrokerClient."""
         from datetime import date as _date  # noqa: PLC0415
 
         from flinttrade_core.models import OHLCV  # noqa: PLC0415

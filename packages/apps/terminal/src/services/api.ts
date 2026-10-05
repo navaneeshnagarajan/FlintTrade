@@ -1,8 +1,4 @@
-/**
- * OpenAlgo REST API client (TypeScript).
- * Host & API key sourced from connectionStore (Zustand).
- * All responses are unwrapped: { data: X, status: "success" } → X
- */
+
 
 import type {
   Position,
@@ -48,13 +44,15 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { exchangeTransactionLabel } from "@/lib/indianCharges";
-import { buildCompactOptionSymbol, normaliseExpiryForOptionSymbol } from "@/lib/optionSymbols";
+import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   requireCurrentBrokerCapabilityScope,
   requireCurrentMarketDataScope,
   resolveAccountAuthorityIdentity,
+  resolveMarketDataScope,
+  resolveBrokerCapabilityScope,
   resolveNativeDataAccount,
   type AccountAuthorityIdentity,
 } from "@/hooks/useDataScope";
@@ -164,22 +162,19 @@ const NATIVE_ACCOUNT_SCOPED_KINDS = new Set<NativeReadKind>([
   "funds", "limits", "positions", "holdings", "orders", "orderstatus", "orderhistory", "ordertrades", "trades", "margin",
 ]);
 
-function getBase(): string {
-  // In dev mode, Vite proxy handles routing to OpenAlgo — use relative paths
-  // In production, use the full host from connectionStore
-  if (import.meta.env.DEV) return "";
-  return useConnectionStore.getState().host;
-}
 
 /** Base URL for the FlintTrade Python backend.
  *  In dev mode the Vite proxy maps /ft-api → localhost:5100.
  *  In production the backend shares the same origin. */
-function getApiKey(): string {
-  return useConnectionStore.getState().apiKey;
-}
 
 function isExploreMode(): boolean {
   return useModeStore.getState().mode === "explore";
+}
+
+function captureMarketDataScope(expectedScope?: string): string {
+  if (expectedScope) return expectedScope;
+  const { accounts, activeAccountId } = useBrokerStore.getState();
+  return resolveMarketDataScope({ mode: useModeStore.getState().mode, accounts, activeAccountId });
 }
 
 async function awaitMarketDataAuthority<T>(
@@ -217,7 +212,7 @@ async function primaryNativeReadAccountFor(
 ): Promise<NativeReadAccountCandidate | undefined> {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (isExploreMode()) return undefined;
   // Account-scoped reads expose the REAL broker account and must be Live-only.
   // Market-data kinds stay readable in every mode.
   if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
@@ -232,7 +227,7 @@ async function primaryNativeReadAccountFor(
   requireCurrentMarketDataScope(expectedDataScope);
   // Mode can change while discovery is in flight. Revalidate before the
   // caller starts the account-specific broker request on this authority.
-  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (isExploreMode()) return undefined;
   if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
     return undefined;
   }
@@ -322,67 +317,15 @@ function stringParam(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-/** Format an expiry as OpenAlgo OptionChainSchema DDMMMYY (e.g. 26MAR26). */
-function openAlgoOptionExpiryDate(value: string): string {
-  const expiry = value.trim();
-  return expiry ? normaliseExpiryForOptionSymbol(expiry) : expiry;
-}
+
 
 /** Official OptionSymbolSchema offset (ATM / ITM1-50 / OTM1-50), or null for an explicit strike. */
-function openAlgoOptionOffset(value: string): string | null {
-  const offset = value.trim().toUpperCase();
-  if (offset === "ATM") return offset;
-  if (offset.startsWith("ITM") || offset.startsWith("OTM")) {
-    const suffix = offset.slice(3);
-    if (/^\d+$/.test(suffix)) {
-      const number = Number(suffix);
-      if (number >= 1 && number <= 50) return `${offset.slice(0, 3)}${number}`;
-    }
-  }
-  return null;
-}
 
-/**
- * Fields OpenAlgo v2.0.2.2 accepts on the live POST body.
- *
- * Native reads keep the original `extra` (ISO expiry, symbol aliases). The
- * broker schema rejects undeclared keys such as `expiry` on optionchain and
- * `symbol` on syntheticfuture, so those are stripped here only.
- */
-function openAlgoRequestFields(endpoint: string, extra: object): object {
-  if (endpoint !== "optionchain" && endpoint !== "syntheticfuture" && endpoint !== "optionsymbol") {
-    return extra;
-  }
-  const params = extra as Record<string, unknown>;
-  const expiry = stringParam(params.expiry_date || params.expiry).trim();
-  if (!expiry) throw new Error("expiry_date is required");
-  const fields: Record<string, string> = {
-    underlying: stringParam(params.underlying) || stringParam(params.symbol),
-    exchange: stringParam(params.exchange),
-    expiry_date: openAlgoOptionExpiryDate(expiry),
-  };
-  if (endpoint === "optionsymbol") {
-    const offset = openAlgoOptionOffset(stringParam(params.offset));
-    if (offset === null) {
-      throw new Error("offset must be ATM, ITM1-ITM50, or OTM1-OTM50");
-    }
-    fields.offset = offset;
-    fields.option_type = stringParam(params.option_type, "CE");
-  }
-  return fields;
-}
 
-const OPENALGO_INTERVAL_BUCKETS = ["seconds", "minutes", "hours", "days", "weeks", "months"] as const;
 
-/** Flatten OpenAlgo interval buckets (or a legacy flat list) into Chart's array. */
-function flattenOpenAlgoIntervals(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => (typeof item === "string" && item.trim() ? [item.trim()] : []));
-  }
-  if (!isRecord(value)) return [];
-  if (Array.isArray(value.intervals)) return flattenOpenAlgoIntervals(value.intervals);
-  return OPENALGO_INTERVAL_BUCKETS.flatMap((key) => flattenOpenAlgoIntervals(value[key]));
-}
+
+
+
 
 function todayIstIsoDate(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -782,291 +725,6 @@ function normaliseNativeHolidays(value: unknown): Holiday[] {
   return parsed.data;
 }
 
-function normaliseCalendarDate(value: unknown): string | undefined {
-  if (value === null || value === undefined) return undefined;
-  const text = String(value).trim().slice(0, 10);
-  return isoCalendarDateSchema.safeParse(text).success ? text : undefined;
-}
-
-const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
-const CLOCK_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?$/;
-
-interface ClockBound {
-  hours: number;
-  minutes: number;
-  seconds: number;
-}
-
-type SessionBound =
-  | { kind: "numeric"; value: number }
-  | { kind: "clock"; seconds: number; clock: ClockBound };
-
-function parseClockBound(value: unknown): ClockBound | null {
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  if (!CLOCK_TIME_RE.test(text)) return null;
-  const [hoursText, minutesText, secondsText = "0"] = text.split(":");
-  const hours = Number(hoursText);
-  const minutes = Number(minutesText);
-  const seconds = Number(secondsText);
-  if (![hours, minutes, seconds].every(Number.isFinite)) return null;
-  return { hours, minutes, seconds };
-}
-
-function clockBoundSeconds(clock: ClockBound): number {
-  return clock.hours * 3600 + clock.minutes * 60 + clock.seconds;
-}
-
-function parseSessionBound(value: unknown): SessionBound | null {
-  const numeric = toStrictNumber(value);
-  if (numeric !== null) return { kind: "numeric", value: numeric };
-  const clock = parseClockBound(value);
-  if (clock === null) return null;
-  return { kind: "clock", seconds: clockBoundSeconds(clock), clock };
-}
-
-function istClockToEpochMs(isoDate: string, clock: ClockBound): number | null {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  if (![year, month, day].every(Number.isInteger)) return null;
-  return Date.UTC(
-    year,
-    month - 1,
-    day,
-    clock.hours,
-    clock.minutes,
-    Math.floor(clock.seconds),
-    Math.round((clock.seconds % 1) * 1000),
-  ) - IST_OFFSET_MS;
-}
-
-function usableSessionWindow(start: SessionBound, end: SessionBound): boolean {
-  if (start.kind !== end.kind) return false;
-  if (start.kind === "numeric" && end.kind === "numeric") return end.value > start.value;
-  return start.kind === "clock" && end.kind === "clock" && start.seconds !== end.seconds;
-}
-
-function normaliseOpenAlgoOpenExchange(
-  value: unknown,
-  holidayDate?: string,
-): Holiday["open_exchanges"][number] | undefined {
-  if (!isRecord(value)) return undefined;
-  const exchange = stringParam(value.exchange).trim().toUpperCase();
-  if (!exchange) return undefined;
-  const start = parseSessionBound(value.start_time);
-  const end = parseSessionBound(value.end_time);
-  if (start === null || end === null || !usableSessionWindow(start, end)) return undefined;
-  if (start.kind === "numeric" && end.kind === "numeric") {
-    return { exchange, start_time: start.value, end_time: end.value };
-  }
-  if (start.kind !== "clock" || end.kind !== "clock" || !holidayDate) return undefined;
-  const startMs = istClockToEpochMs(holidayDate, start.clock);
-  const endDate = start.seconds < end.seconds
-    ? holidayDate
-    : istCalendarDatePlusDays(holidayDate, 1);
-  const endMs = istClockToEpochMs(endDate, end.clock);
-  if (startMs === null || endMs === null || endMs <= startMs) return undefined;
-  return { exchange, start_time: startMs, end_time: endMs };
-}
-
-const AUTHORITATIVE_HOLIDAY_TYPES = new Set([
-  "SETTLEMENT_HOLIDAY",
-  "SPECIAL_SESSION",
-  "TRADING_HOLIDAY",
-]);
-
-function isAuthoritativeOpenExchange(value: unknown): boolean {
-  if (!isRecord(value) || !stringParam(value.exchange).trim()) return false;
-  const start = parseSessionBound(value.start_time);
-  const end = parseSessionBound(value.end_time);
-  return start !== null && end !== null && usableSessionWindow(start, end);
-}
-
-/** Port of Python `is_authoritative_market_calendar`. Empty success is a placeholder. */
-function isAuthoritativeMarketCalendar(payload: unknown, expectedYear?: number): boolean {
-  let data: unknown = payload;
-  for (let i = 0; i < 4; i += 1) {
-    if (!isRecord(data)) break;
-    if ("status" in data) {
-      const status = String(data.status).trim().toLowerCase();
-      if (status !== "ok" && status !== "success") return false;
-    }
-    if ("year" in data) {
-      const responseYear = toStrictNumber(data.year);
-      if (responseYear === null || !Number.isInteger(responseYear)) return false;
-      if (expectedYear !== undefined && responseYear !== expectedYear) return false;
-    }
-    if ("data" in data) {
-      data = data.data;
-      continue;
-    }
-    if ("holidays" in data) {
-      data = data.holidays;
-      continue;
-    }
-    break;
-  }
-
-  let candidates: unknown[];
-  if (Array.isArray(data)) {
-    candidates = data;
-  } else if (isRecord(data)) {
-    if (Object.keys(data).length === 0) return false;
-    candidates = [];
-    for (const values of Object.values(data)) {
-      if (!Array.isArray(values)) return false;
-      candidates.push(...values);
-    }
-  } else {
-    return false;
-  }
-
-  if (candidates.length === 0) return false;
-
-  for (const candidate of candidates) {
-    if (isRecord(candidate)) {
-      const rawDate = candidate.date ?? candidate.holiday_date ?? candidate.trading_date;
-      const holidayDate = normaliseCalendarDate(rawDate);
-      if (!holidayDate) return false;
-      if (expectedYear !== undefined && holidayDate.slice(0, 4) !== String(expectedYear)) return false;
-      if ("holiday_type" in candidate) {
-        const holidayType = String(candidate.holiday_type || "").trim().toUpperCase();
-        if (!AUTHORITATIVE_HOLIDAY_TYPES.has(holidayType)) return false;
-      }
-      if ("closed_exchanges" in candidate) {
-        const rawClosed = candidate.closed_exchanges;
-        if (!Array.isArray(rawClosed)) return false;
-        if (rawClosed.some((value) => typeof value !== "string" || !value.trim())) return false;
-      }
-      if ("open_exchanges" in candidate) {
-        const rawOpen = candidate.open_exchanges;
-        if (!Array.isArray(rawOpen)) return false;
-        if (rawOpen.some((value) => !isAuthoritativeOpenExchange(value))) return false;
-      }
-    } else {
-      const holidayDate = normaliseCalendarDate(candidate);
-      if (!holidayDate) return false;
-      if (expectedYear !== undefined && holidayDate.slice(0, 4) !== String(expectedYear)) return false;
-    }
-  }
-  return true;
-}
-
-/** Port of Python `normalise_market_calendar` for official OpenAlgo envelopes. */
-function normaliseMarketCalendar(payload: unknown): Holiday[] {
-  let data: unknown = payload;
-  for (let i = 0; i < 3; i += 1) {
-    if (!isRecord(data) || !("data" in data)) break;
-    data = data.data;
-  }
-
-  type CalendarRecord = {
-    date: string;
-    description: string;
-    holiday_type: string;
-    closed_exchanges: Set<string>;
-    open_exchanges: Holiday["open_exchanges"];
-  };
-  const records = new Map<string, CalendarRecord>();
-
-  const addEntry = (entry: unknown, defaultExchange = "*"): void => {
-    const rawDate = isRecord(entry)
-      ? (entry.date ?? entry.holiday_date ?? entry.trading_date)
-      : entry;
-    const holidayDate = normaliseCalendarDate(rawDate);
-    if (!holidayDate) return;
-
-    const currentContract = isRecord(entry) && (
-      "holiday_type" in entry || "closed_exchanges" in entry || "open_exchanges" in entry
-    );
-    const description = isRecord(entry) ? String(entry.description ?? "") : "";
-    const holidayType = isRecord(entry)
-      ? String(entry.holiday_type || "TRADING_HOLIDAY").trim().toUpperCase()
-      : "TRADING_HOLIDAY";
-
-    let closedExchanges: Set<string>;
-    const openExchanges: Holiday["open_exchanges"] = [];
-    if (currentContract && isRecord(entry)) {
-      const rawClosed = entry.closed_exchanges;
-      closedExchanges = Array.isArray(rawClosed)
-        ? new Set(
-            rawClosed.flatMap((candidate) => {
-              const closed = String(candidate).trim().toUpperCase();
-              return closed ? [closed] : [];
-            }),
-          )
-        : new Set();
-      if (Array.isArray(entry.open_exchanges)) {
-        for (const candidate of entry.open_exchanges) {
-          const session = normaliseOpenAlgoOpenExchange(candidate, holidayDate);
-          if (
-            session
-            && !openExchanges.some((existing) => (
-              existing.exchange === session.exchange
-              && existing.start_time === session.start_time
-              && existing.end_time === session.end_time
-            ))
-          ) {
-            openExchanges.push(session);
-          }
-        }
-      }
-      if (holidayType !== "SETTLEMENT_HOLIDAY" && closedExchanges.size === 0) {
-        closedExchanges = new Set(["*"]);
-      }
-    } else {
-      closedExchanges = new Set([defaultExchange]);
-    }
-
-    const record = records.get(holidayDate) ?? {
-      date: holidayDate,
-      description: "",
-      holiday_type: holidayType,
-      closed_exchanges: new Set<string>(),
-      open_exchanges: [],
-    };
-    if (description && !record.description) record.description = description;
-    if (holidayType === "SPECIAL_SESSION" || record.holiday_type === "SETTLEMENT_HOLIDAY") {
-      record.holiday_type = holidayType;
-    }
-    closedExchanges.forEach((exchange) => record.closed_exchanges.add(exchange));
-    for (const session of openExchanges) {
-      if (!record.open_exchanges.some((existing) => (
-        existing.exchange === session.exchange
-        && existing.start_time === session.start_time
-        && existing.end_time === session.end_time
-      ))) {
-        record.open_exchanges.push(session);
-      }
-    }
-    records.set(holidayDate, record);
-  };
-
-  if (isRecord(data) && "holidays" in data) {
-    data = data.holidays;
-  }
-
-  if (Array.isArray(data)) {
-    for (const candidate of data) addEntry(candidate);
-  } else if (isRecord(data)) {
-    for (const [exchange, candidates] of Object.entries(data)) {
-      const exchangeKey = exchange.trim().toUpperCase();
-      if (!exchangeKey || !Array.isArray(candidates)) continue;
-      for (const candidate of candidates) addEntry(candidate, exchangeKey);
-    }
-  }
-
-  return [...records.keys()].sort().map((date) => {
-    const record = records.get(date)!;
-    return {
-      date: record.date,
-      description: record.description,
-      holiday_type: record.holiday_type,
-      closed_exchanges: [...record.closed_exchanges].sort(),
-      open_exchanges: record.open_exchanges,
-    };
-  });
-}
-
 function normaliseNativeTimings(value: unknown): MarketTiming[] {
   const rows = Array.isArray(value) ? value : [];
   return rows.filter(isRecord).map((row) => ({
@@ -1247,59 +905,7 @@ function normaliseNativePreShapedOptionLeg(value: unknown, label: string): Recor
   return normaliseOptionLegNumericFields(value, label);
 }
 
-function normaliseOpenAlgoOptionLeg(value: unknown, label: string): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null;
-  if (!isRecord(value)) throw new Error(`Invalid OpenAlgo option-chain ${label} leg`);
-  return normaliseOptionLegNumericFields(value, label);
-}
 
-function normaliseOpenAlgoOptionChain(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) throw new Error("Invalid OpenAlgo option-chain response");
-
-  if (value.chain === undefined && value.calls === undefined && value.puts === undefined) {
-    throw new Error("OpenAlgo option-chain response contains no recognised chain arrays");
-  }
-  if (value.chain !== undefined && !Array.isArray(value.chain)) {
-    throw new Error("Invalid OpenAlgo option-chain chain array");
-  }
-  if (value.calls !== undefined && !Array.isArray(value.calls)) {
-    throw new Error("Invalid OpenAlgo option-chain calls array");
-  }
-  if (value.puts !== undefined && !Array.isArray(value.puts)) {
-    throw new Error("Invalid OpenAlgo option-chain puts array");
-  }
-
-  const chain = value.chain === undefined
-    ? undefined
-    : (value.chain as unknown[]).map((candidate, index) => {
-      if (!isRecord(candidate)) throw new Error(`Invalid OpenAlgo option-chain row ${index}`);
-      const strike = toPositiveFiniteNumber(candidate.strike ?? candidate.strike_price);
-      if (strike === null) throw new Error(`Invalid OpenAlgo option-chain strike at row ${index}`);
-      return {
-        ...candidate,
-        strike,
-        ce: normaliseOpenAlgoOptionLeg(candidate.ce, `CE row ${index}`),
-        pe: normaliseOpenAlgoOptionLeg(candidate.pe, `PE row ${index}`),
-      };
-    });
-
-  const normaliseLegacyRows = (rows: unknown[], label: "call" | "put") => rows.map((candidate, index) => {
-    if (!isRecord(candidate)) throw new Error(`Invalid OpenAlgo option-chain ${label} row ${index}`);
-    const strike = toPositiveFiniteNumber(candidate.strike_price ?? candidate.strike);
-    if (strike === null) throw new Error(`Invalid OpenAlgo option-chain ${label} strike at row ${index}`);
-    return {
-      ...normaliseOptionLegNumericFields(candidate, `${label} row ${index}`),
-      strike,
-      strike_price: strike,
-    };
-  });
-  return {
-    ...value,
-    ...(chain === undefined ? {} : { chain }),
-    ...(value.calls === undefined ? {} : { calls: normaliseLegacyRows(value.calls as unknown[], "call") }),
-    ...(value.puts === undefined ? {} : { puts: normaliseLegacyRows(value.puts as unknown[], "put") }),
-  };
-}
 
 function nativeOptionChainPCR(
   chain: Array<{ ce: Record<string, unknown> | null; pe: Record<string, unknown> | null }>,
@@ -1738,9 +1344,10 @@ async function getNativeSyntheticFuture(
   signal?: AbortSignal,
   expectedDataScope?: string,
 ): Promise<SyntheticFutureData | undefined> {
+  expectedDataScope = captureMarketDataScope(expectedDataScope);
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (isExploreMode()) return undefined;
   const chain = await getOptionChain(symbol, exchange, expiry_date, signal, expectedDataScope);
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
@@ -1872,11 +1479,11 @@ async function getNativeIntervals(
 ): Promise<string[] | undefined> {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (isExploreMode()) return undefined;
   const broker = await nativeCapabilityBroker(signal, expectedDataScope);
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (!broker || getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (!broker || isExploreMode()) return undefined;
   const endpoint = `broker/capabilities?broker=${encodeURIComponent(broker)}`;
   const intervals = intervalsFromCapability(await awaitMarketDataAuthority(
     () => getFtApi<BackendBrokerCapabilitiesData>(endpoint, signal),
@@ -1913,6 +1520,7 @@ async function readPrimaryNative<T>(
   signal?: AbortSignal,
   expectedDataScope?: string,
 ): Promise<T | undefined> {
+  expectedDataScope = captureMarketDataScope(expectedDataScope);
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
@@ -1924,7 +1532,7 @@ async function readPrimaryNative<T>(
   );
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (!account || getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (!account || isExploreMode()) return undefined;
   if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
     return undefined;
   }
@@ -1950,10 +1558,6 @@ async function readRequiredPrimaryNative<T>(endpoint: string, extra: object = {}
   throw new Error(`A live native broker account is required for ${endpoint}.`);
 }
 
-function requireApiKey(endpoint: string): void {
-  if (getApiKey().trim().length > 0) return;
-  throw new Error(`OpenAlgo API key is not configured for ${endpoint}. Check Settings -> Connection.`);
-}
 
 function findMockQuote(symbol = "NIFTY", exchange = "NSE_INDEX"): Quote {
   const snapshot = mockDataEngine.getSnapshot();
@@ -2038,7 +1642,7 @@ function makeMockHistory(symbol?: string, exchange?: string, interval?: string):
   });
 }
 
-/** Upcoming weekly Thursday expiries in OpenAlgo's "DD-MMM-YY" format. */
+
 function makeMockExpiries(count = 4): string[] {
   const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const expiries: string[] = [];
@@ -2052,13 +1656,7 @@ function makeMockExpiries(count = 4): string[] {
   return expiries;
 }
 
-/**
- * Synthetic option chain around the mock spot (OpenAlgo v2 shape), so the
- * Option Chain and OI Chart widgets render sample data in Explore instead of
- * erroring with "OpenAlgo API key is not configured". Values are derived
- * deterministically from the strike distance (no randomness), so re-fetches
- * agree with each other.
- */
+
 function makeMockOptionChain(symbol = "NIFTY", exchange = "NSE_INDEX"): Record<string, unknown> {
   const spot = findMockQuote(symbol, exchange).ltp || 24_150;
   const step = spot > 40_000 ? 100 : spot > 8_000 ? 50 : Math.max(2.5, Math.round(spot * 0.01));
@@ -2321,38 +1919,6 @@ function expectedNativeScope(brokerType: string, accountId: string): string {
   return ["live", "native", brokerType, accountId].map(encodeURIComponent).join(":");
 }
 
-async function postOpenAlgoSnapshot<T>(
-  endpoint: string,
-  extra: object,
-  context: AccountReadContext,
-  signal?: AbortSignal,
-): Promise<T> {
-  const base = import.meta.env.DEV ? "" : context.host;
-  let response: Response;
-  try {
-    response = await fetch(`${base}/api/v1/${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apikey: context.apiKey, ...extra }),
-      ...(signal ? { signal } : {}),
-    });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw new Error("Connection failed. Check OpenAlgo is running.");
-  }
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { message?: string; error?: string } | null;
-    const serverMessage = body?.message ?? body?.error ?? null;
-    if (response.status === 401) throw new Error("API key invalid. Check Settings → Connection.");
-    if (response.status === 500) {
-      throw new Error(serverMessage ?? "OpenAlgo server error. Try again in a few seconds.");
-    }
-    throw new Error(serverMessage ?? `Server error (${response.status})`);
-  }
-  const json = await response.json();
-  if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
-  return (json.data ?? json) as T;
-}
 
 /**
  * Read an account endpoint from the immutable source encoded by its query key.
@@ -2387,15 +1953,8 @@ async function readAccountSnapshot<T>(
   if (identity.mode !== "live") {
     throw new Error(`${endpoint} is not available in ${identity.mode} mode.`);
   }
-  if (identity.brokerType === "openalgo") {
-    if (!context.apiKey.trim() || !identity.scopeKey.startsWith("live:openalgo:")) {
-      throw new Error(`Account identity mismatch for ${endpoint}.`);
-    }
-    return postOpenAlgoSnapshot<T>(endpoint, extra, context, signal);
-  }
   if (
-    context.apiKey.trim()
-    || identity.brokerType === "unconfigured"
+    identity.brokerType === "unconfigured"
     || identity.scopeKey !== expectedNativeScope(identity.brokerType, identity.accountId)
   ) {
     throw new Error(`Account identity mismatch for ${endpoint}.`);
@@ -2421,8 +1980,6 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
   const exchange = typeof params.exchange === "string" ? params.exchange : undefined;
 
   switch (endpoint) {
-    case "ping":
-      return { status: "explore" } as T;
     case "quotes":
     case "ticker":
       return findMockQuote(symbol, exchange) as T;
@@ -2547,32 +2104,7 @@ export class OrderApiError extends Error {
   }
 }
 
-/** POST an order through the FlintTrade safety proxy.
- *
- *  The backend at order_routes.py:
- *    - Validates `X-API-Key` against FLINTTRADE_API_KEY, with
- *      OPENALGO_API_KEY retained only as a compatibility fallback.
- *    - Reads `X-FlintTrade-Mode` to enforce explore / practice / live gates.
- *    - For live-mode orders, additionally requires
- *      `Authorization: Bearer <jwt>` with the `live_mode_unlocked` claim.
- *
- *  Headers we attach:
- *    - `Content-Type: application/json`
- *    - `X-FlintTrade-Mode: <explore|practice|live>`
- *    - `X-API-Key: <connectionStore.apiKey>`  (gates the auth middleware when
- *      a backend key is configured)
- *    - `Authorization: Bearer <authStore.token>` when a session token is
- *      available; the backend ignores it in explore/practice mode and
- *      checks the `live_mode_unlocked` claim before letting a real order
- *      reach OpenAlgo.
- *
- *  Pre-2026-05-19 this function only sent `Content-Type` and
- *  `X-FlintTrade-Mode`. Codex stop-gate review (task-mpcpfmws-5rokaa)
- *  flagged that every real terminal order placement would 401 against
- *  the require_auth middleware, even though the backend tests passed
- *  because they fabricated `X-API-Key` and `Authorization` in the test
- *  client.
- */
+
 type ModeOrderAuthorityPin = {
   /**
    * Immutable mode captured at the irreversible UI boundary (e.g. Practice
@@ -2620,9 +2152,6 @@ function isRuntimeOrderMutationAuthorityPin(authority: unknown): authority is Or
       && accountId === "default";
   }
   if (mode !== "live") return false;
-  if (brokerType === "openalgo") {
-    return /^live:openalgo:[0-9a-f]{16}$/.test(scopeKey) && accountId === "default";
-  }
   return scopeKey === `live:native:${encodeURIComponent(brokerType)}:${encodeURIComponent(accountId)}`;
 }
 
@@ -2630,14 +2159,11 @@ function exactOrderAuthorityMatchesCurrent(
   authority: OrderAuthorityPin,
   currentMode: "explore" | "practice" | "live",
 ): boolean {
-  const { host, apiKey, openAlgoHydrated, status } = useConnectionStore.getState();
+  const { apiKey } = useConnectionStore.getState();
   const { accounts, activeAccountId } = useBrokerStore.getState();
-  if (authority.mode === "live" && !openAlgoHydrated) return false;
 
   const current = resolveAccountAuthorityIdentity({
     mode: currentMode,
-    host,
-    apiKey,
     accounts,
     activeAccountId,
   });
@@ -2649,9 +2175,6 @@ function exactOrderAuthorityMatchesCurrent(
   ) return false;
 
   if (authority.mode !== "live") return true;
-  if (authority.brokerType === "openalgo") {
-    return apiKey.trim().length > 0 && status === "connected";
-  }
   const nativeTarget = pickNativeWriteTarget(currentMode, apiKey);
   return nativeTarget?.broker === authority.brokerType
     && nativeTarget.accountId === authority.accountId;
@@ -2696,7 +2219,6 @@ async function postOrder<T>(
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
   }
 
-  // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
   if (!orderLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
   }
@@ -2830,8 +2352,9 @@ async function post<T>(
   signal?: AbortSignal,
   expectedDataScope?: string,
 ): Promise<T> {
+  const capturedScope = captureMarketDataScope(expectedDataScope);
   signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
+  requireCurrentMarketDataScope(capturedScope);
   // Enforce rate limits before making the request
   if (SMART_ORDER_ENDPOINTS.has(endpoint)) {
     if (!smartOrderLimiter.tryConsume()) {
@@ -2859,139 +2382,26 @@ async function post<T>(
   const practiceRead = await awaitMarketDataAuthority(
     () => readPracticeAccountData<T>(endpoint, extra),
     signal,
-    expectedDataScope,
+    capturedScope,
   );
   signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
+  requireCurrentMarketDataScope(capturedScope);
   if (practiceRead !== undefined) return practiceRead;
 
   const nativeRead = await awaitMarketDataAuthority(
-    () => readPrimaryNative<T>(endpoint, extra, signal, expectedDataScope),
+    () => readPrimaryNative<T>(endpoint, extra, signal, capturedScope),
     signal,
-    expectedDataScope,
+    capturedScope,
   );
   signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
+  requireCurrentMarketDataScope(capturedScope);
   if (nativeRead !== undefined) return nativeRead;
 
   if (isExploreMode()) {
     const fallback = getExplorePostFallback<T>(endpoint, extra);
     if (fallback !== undefined) return fallback;
-    requireApiKey(endpoint);
-  } else {
-    requireApiKey(endpoint);
   }
-
-  const openAlgoBody = openAlgoRequestFields(endpoint, extra);
-  let resp: Response;
-  requireCurrentMarketDataScope(expectedDataScope);
-  try {
-    resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apikey: getApiKey(), ...openAlgoBody }),
-      signal,
-    });
-  } catch {
-    signal?.throwIfAborted();
-    requireCurrentMarketDataScope(expectedDataScope);
-    throw new Error("Connection failed. Check OpenAlgo is running.");
-  }
-  signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
-
-  if (!resp.ok) {
-    const body = await awaitMarketDataAuthority(
-      () => resp.json().catch(() => null) as Promise<{ message?: string; error?: string } | null>,
-      signal,
-      expectedDataScope,
-    );
-    const serverMsg = body?.message ?? body?.error ?? null;
-    if (resp.status === 401) {
-      throw new Error("API key invalid. Check Settings → Connection.");
-    }
-    if (resp.status === 400) {
-      throw new Error(serverMsg ?? "Invalid order parameters. Check symbol and exchange.");
-    }
-    if (resp.status === 500) {
-      throw new Error(serverMsg ?? "OpenAlgo server error. Try again in a few seconds.");
-    }
-    throw new Error(serverMsg ?? `Server error (${resp.status})`);
-  }
-
-  const json = await awaitMarketDataAuthority(() => resp.json(), signal, expectedDataScope);
-  if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
-  const data = json.data ?? json;
-  if (endpoint === "optionchain") return normaliseOpenAlgoOptionChain(data) as T;
-  if (endpoint === "expiry") return normaliseNativeExpiry(data) as T;
-  if (endpoint === "market/holidays" || endpoint === "holidays") {
-    const requestedYear = toStrictNumber((openAlgoBody as Record<string, unknown>).year) ?? undefined;
-    if (!isAuthoritativeMarketCalendar(json, requestedYear)) {
-      throw new Error("OpenAlgo market calendar is not authoritative");
-    }
-    return normaliseMarketCalendar(data) as T;
-  }
-  return data as T;
-}
-
-async function get<T>(
-  endpoint: string,
-  signal?: AbortSignal,
-  expectedDataScope?: string,
-  query?: Record<string, string>,
-): Promise<T> {
-  signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
-  if (!generalLimiter.tryConsume()) {
-    throw new Error(`Rate limit exceeded for GET ${endpoint}`);
-  }
-
-  if (isExploreMode()) {
-    const fallback = getExploreGetFallback<T>(endpoint);
-    if (fallback !== undefined) return fallback;
-    requireApiKey(endpoint);
-  } else {
-    requireApiKey(endpoint);
-  }
-
-  const search = new URLSearchParams();
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      const trimmed = value.trim();
-      if (trimmed) search.set(key, trimmed);
-    }
-  }
-  const suffix = search.toString();
-  const url = `${getBase()}/api/v1/${endpoint}${suffix ? `?${suffix}` : ""}`;
-
-  let resp: Response;
-  requireCurrentMarketDataScope(expectedDataScope);
-  try {
-    resp = await fetch(
-      url,
-      signal ? { signal } : undefined,
-    );
-  } catch {
-    signal?.throwIfAborted();
-    requireCurrentMarketDataScope(expectedDataScope);
-    throw new Error("Connection failed. Check OpenAlgo is running.");
-  }
-  signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
-  if (!resp.ok) {
-    const body = await awaitMarketDataAuthority(
-      () => resp.json().catch(() => null) as Promise<{ message?: string; error?: string } | null>,
-      signal,
-      expectedDataScope,
-    );
-    const serverMsg = body?.message ?? body?.error ?? null;
-    if (resp.status === 401) throw new Error("API key invalid. Check Settings → Connection.");
-    if (resp.status === 500) throw new Error(serverMsg ?? "OpenAlgo server error. Try again in a few seconds.");
-    throw new Error(serverMsg ?? `Server error (${resp.status})`);
-  }
-  const json = await awaitMarketDataAuthority(() => resp.json(), signal, expectedDataScope);
-  if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
-  return (json.data ?? json) as T;
+  throw new Error(`A connected native broker account is required for ${endpoint}.`);
 }
 
 // --- Orders (routed through FlintTrade safety proxy) ---
@@ -3004,19 +2414,15 @@ async function get<T>(
 //
 // Practice opens and closes are `place` (an opposite MARKET order for a
 // close). Pre-2026-05-19 this file mixed FT-proxy names (place,
-// cancel-all) with OpenAlgo-style names (cancelorder,
 // openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
 // so half the order endpoints 404'd in production. Codex stop-gate review
 // caught the mismatch on 2026-05-19 (task-mpcpfmws-5rokaa). A follow-up
 // review then flagged that `optionsOrder` / `optionsMultiOrder` had been
-// routed through `post()` (OpenAlgo direct) as a stopgap, bypassing the
 // FT mode/safety gate. Both endpoints are now backed by /options and
-// /options-multi handlers in core orders_bp that delegate to OpenAlgo's
 // `optionsorder` and `optionsmultiorder` through `_dispatch_order`, so
 // every options trade is mode-gated identically to a regular order.
 //
 // `orderStatus` is a read-only query. Native-only workspaces route it through
-// the live native account; OpenAlgo-key workspaces keep the OpenAlgo direct
 // path for bridge parity.
 export const placeOrder = (
   params: PlaceOrderParams,
@@ -3117,9 +2523,8 @@ export const exitAllPositions = () => {
   }
   assertNativeWriteTargetReadyOrThrow(mode, apiKey);
   const nativeTarget = pickNativeWriteTarget(mode, apiKey);
-  const target = nativeTarget
-    ? { broker: nativeTarget.broker, account_id: nativeTarget.accountId }
-    : { broker: "openalgo", account_id: "default" };
+  if (!nativeTarget) throw new Error("A connected trading-capable native broker is required.");
+  const target = { broker: nativeTarget.broker, account_id: nativeTarget.accountId };
   return postFtApiWithMode<void>("positions/exit-all", { confirm: true, ...target }, mode);
 };
 export const modifyOrder = (params: ModifyOrderParams, authority: OrderAuthorityPin) =>
@@ -3170,7 +2575,6 @@ export const splitOrder = (params: SplitOrderParams) =>
 
 // --- GTT (Good Till Triggered) ---
 //
-// Legacy OpenAlgo-style GTT surface. Keep these exports for older callers, but
 // route them through the current gated forever-order client so every trigger
 // still passes SafetySystem/BrokerRouter and native broker targeting.
 
@@ -3328,10 +2732,7 @@ export const getGttOrderbook = async (target: BrokerTarget = {}): Promise<GttTri
 
 // --- Data ---
 
-/**
- * Shape returned by the OpenAlgo /multiquotes endpoint.
- * Each element is a per-symbol wrapper containing the quote payload under `data`.
- */
+
 export interface MultiQuoteResult {
   symbol: string;
   exchange: string;
@@ -3393,28 +2794,14 @@ export const searchScrip = (
   options: NativeScripSearchOptions = {},
 ) => readRequiredPrimaryNative<Array<Record<string, unknown>>>("search_scrip", { symbol, ...options });
 
-/**
- * Fetch quotes for multiple symbols in one request.
- *
- * OpenAlgo returns `{ results: MultiQuoteResult[], status }` which the `post<T>`
- * helper unwraps to `{ results: MultiQuoteResult[] }`.  Some broker adapters may
- * return a flat `Quote[]` directly — the union type covers both shapes.
- * Callers should check `Array.isArray(result)` vs `"results" in result`,
- * or use `normaliseMultiQuotes()` to get a flat `Quote[]` in one step.
- */
-export const getMultiQuotes = (symbols: Array<{ symbol: string; exchange: string }>) =>
-  post<{ results: MultiQuoteResult[] } | MultiQuoteResult[]>("multiquotes", { symbols });
 
-/**
- * Normalise the `getMultiQuotes` response into a flat `Quote[]`.
- *
- * Handles both shapes returned by different OpenAlgo broker adapters:
- *  - `{ results: [{ symbol, exchange, data: Quote }, ...] }` — standard v2 shape
- *  - `MultiQuoteResult[]` — flat array of wrapper objects
- *  - `Quote[]` — some adapters return flat quotes directly (no `data` wrapper)
- *
- * The returned quotes always have `symbol` and `exchange` fields set.
- */
+export const getMultiQuotes = (
+  symbols: Array<{ symbol: string; exchange: string }>,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => post<{ results: MultiQuoteResult[] } | MultiQuoteResult[]>("multiquotes", { symbols }, signal, expectedDataScope);
+
+
 export function normaliseMultiQuotes(
   raw: { results: MultiQuoteResult[] } | MultiQuoteResult[],
 ): Quote[] {
@@ -3428,8 +2815,8 @@ export function normaliseMultiQuotes(
     return item as unknown as Quote;
   });
 }
-export const getDepth = (symbol: string, exchange = "NSE") =>
-  post<MarketDepth>("depth", { symbol, exchange });
+export const getDepth = (symbol: string, exchange = "NSE", signal?: AbortSignal, expectedDataScope?: string) =>
+  post<MarketDepth>("depth", { symbol, exchange }, signal, expectedDataScope);
 export const getHistory = (
   symbol: string,
   exchange: string,
@@ -3494,9 +2881,11 @@ export function searchSymbol(
     expectedDataScope,
   );
 }
-export const getIntervals = async (signal?: AbortSignal, expectedDataScope?: string) =>
-  (await getNativeIntervals(signal, expectedDataScope))
-    ?? flattenOpenAlgoIntervals(await post<unknown>("intervals", {}, signal, expectedDataScope));
+export const getIntervals = async (signal?: AbortSignal, expectedDataScope?: string) => {
+  const scope = captureMarketDataScope(expectedDataScope);
+  return (await getNativeIntervals(signal, scope))
+    ?? (isExploreMode() ? getExploreGetFallback<string[]>("intervals") ?? [] : []);
+};
 export async function getMultiOptionGreeks(
   symbols: Array<{ symbol: string; exchange: string }>,
 ): Promise<Greeks[]> {
@@ -3549,16 +2938,7 @@ export const getOptionSymbol = (
 ) => {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  const officialOffset = openAlgoOptionOffset(offset);
-  if (isExploreMode() || getApiKey().trim().length === 0 || officialOffset === null) {
-    return Promise.resolve(compactOptionSymbolResult(underlying, exchange, expiry_date, option_type, offset));
-  }
-  return post<{ symbol: string; exchange: string }>(
-    "optionsymbol",
-    { underlying, exchange, expiry_date, option_type, offset: officialOffset },
-    signal,
-    expectedDataScope,
-  );
+  return Promise.resolve(compactOptionSymbolResult(underlying, exchange, expiry_date, option_type, offset));
 };
 export const getSymbol = (
   symbol: string,
@@ -3579,7 +2959,10 @@ export const getSyntheticFuture = async (
   signal?: AbortSignal,
   expectedDataScope?: string,
 ) => {
+  expectedDataScope = captureMarketDataScope(expectedDataScope);
   const native = await getNativeSyntheticFuture(symbol, exchange, expiry_date, signal, expectedDataScope);
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (native !== undefined) return native;
   const expiry = String(expiry_date ?? "").trim();
   return post<SyntheticFutureData>(
@@ -3591,33 +2974,26 @@ export const getSyntheticFuture = async (
 };
 export const getTicker = (symbol: string, exchange: string) =>
   getQuotes(symbol, exchange);
-/** Option-chain exchanges OpenAlgo must be queried for when no exchange is given. */
-const OPENALGO_INSTRUMENT_EXCHANGES = ["NFO", "BFO", "MCX", "CDS"] as const;
+/** Native instrument metadata from the configured broker. */
 export const getInstruments = async (
   signal?: AbortSignal,
   expectedDataScope?: string,
   exchange?: string,
 ): Promise<InstrumentRow[]> => {
-  signal?.throwIfAborted();
-  requireCurrentMarketDataScope(expectedDataScope);
-  if (isExploreMode() || getApiKey().trim().length === 0) return [];
-  const requested = String(exchange ?? "").trim().toUpperCase();
-  const exchanges = requested ? [requested] : [...OPENALGO_INSTRUMENT_EXCHANGES];
-  const batches = await Promise.all(exchanges.map((item) => (
-    get<InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] }>(
-      "instruments",
-      signal,
-      expectedDataScope,
-      { apikey: getApiKey(), exchange: item },
-    ).then(normaliseInstrumentList)
-  )));
-  return batches.flat();
+  if (isExploreMode()) return [];
+  const rows = await readPrimaryNative<unknown>("scrip_master", exchange ? { exchange } : {}, signal, expectedDataScope);
+  if (rows === undefined) throw new Error("A connected native broker account is required for instruments.");
+  return normaliseInstrumentList(rows as InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] });
 };
+function readDerivedMarket<T>(endpoint: string, body: object, signal?: AbortSignal): Promise<T> {
+  const scope = captureMarketDataScope();
+  return awaitMarketDataAuthority(() => postFtApi<T>(endpoint, body, signal), signal, scope);
+}
 export const getGex = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
-  postFtApi<BackendGexData | Array<BackendGexEntry | GexEntry>>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
+  readDerivedMarket<BackendGexData | Array<BackendGexEntry | GexEntry>>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseGexEntries);
 export const getIVSmile = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
-  postFtApi<BackendIVSmileData | IVSmileEntry[]>("ivsmile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
+  readDerivedMarket<BackendIVSmileData | IVSmileEntry[]>("ivsmile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseIVSmileEntries);
 export const getMaxPain = async (
   symbol: string,
@@ -3626,6 +3002,7 @@ export const getMaxPain = async (
   signal?: AbortSignal,
   expectedDataScope?: string,
 ) => {
+  expectedDataScope = captureMarketDataScope(expectedDataScope);
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
   if (isExploreMode()) throw new Error("Max Pain is not available in this session.");
@@ -3643,7 +3020,7 @@ export const getMaxPain = async (
   return normaliseMaxPainData(value);
 };
 export const getOIProfile = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
-  postFtApi<BackendOIProfileData | OIProfileEntry[]>("oiprofile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
+  readDerivedMarket<BackendOIProfileData | OIProfileEntry[]>("oiprofile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseOIProfileEntries);
 
 // --- Account ---
@@ -3669,7 +3046,6 @@ export const getOrderHistory = (orderId: string) =>
 export const getOrderTrades = (orderId: string) =>
   readRequiredPrimaryNative<Array<Record<string, unknown>>>("ordertrades", { order_id: orderId });
 
-// OpenAlgo wraps list responses: { data: { orders: [...], statistics: {...} } }
 // post() unwraps json.data, so we receive { orders: [...], statistics: {...} }.
 // We extract the nested array and fall back to the raw value for brokers that
 // return a plain array (future-proofing / broker inconsistency).
@@ -3725,7 +3101,6 @@ export const getHoldings = async (
 };
 
 // --- Utility ---
-export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
 export async function getHolidays(year?: number | string): Promise<Holiday[]> {
   if (year !== undefined && year !== "") {
     return post<Holiday[]>("market/holidays", { year: holidayYear(year) });
@@ -3756,13 +3131,14 @@ export const sendTelegram = (message: string, options: TelegramSendOptions = {})
 };
 
 // --- Broker Management ---
-// OpenAlgo-key workspaces keep using OpenAlgo's broker metadata. Native-only
 // workspaces use FlintTrade's own unified capability registry, normalised back
 // into the compact terminal contract consumed by Order Pad and Settings.
 export const getBrokerCapabilities = async (
   signal?: AbortSignal,
   expectedCapabilityScope?: string,
 ) => {
+  expectedCapabilityScope ??= resolveBrokerCapabilityScope(captureMarketDataScope());
+  try {
   signal?.throwIfAborted();
   requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
   if (isExploreMode()) {
@@ -3770,27 +3146,12 @@ export const getBrokerCapabilities = async (
     // key or native-account snapshot turn this read into a protected request.
     return getExploreBrokerCapabilities();
   }
-  if (getApiKey().trim().length > 0) {
-    const value = await get<BrokerCapabilities>(
-      "../broker/capabilities",
-      signal,
-    ); // actual path: /api/broker/capabilities
-    signal?.throwIfAborted();
-    requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
-    return value;
-  }
   const broker = await nativeCapabilityBroker(signal);
   signal?.throwIfAborted();
   requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
   // The authority can retire while native account discovery is in flight.
   // Never issue the follow-up protected capability request after Explore wins.
   if (isExploreMode()) return getExploreBrokerCapabilities();
-  if (getApiKey().trim().length > 0) {
-    const value = await get<BrokerCapabilities>("../broker/capabilities", signal);
-    signal?.throwIfAborted();
-    requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
-    return value;
-  }
   const endpoint = broker
     ? `broker/capabilities?broker=${encodeURIComponent(broker)}`
     : "broker/capabilities";
@@ -3798,6 +3159,11 @@ export const getBrokerCapabilities = async (
   signal?.throwIfAborted();
   requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
   return normaliseBrokerCapabilities(value);
+  } catch (error) {
+    signal?.throwIfAborted();
+    requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
+    throw error;
+  }
 };
 export const getLeverageSettings = async (): Promise<LeverageSettings> => {
   const { status: _status, ...settings } = await getFtApi<LeverageSettings & { status?: string }>("leverage/margin/current");
@@ -3810,5 +3176,3 @@ export const updateChartPreferences = (prefs: object) => postFtApi<object>("char
 
 // --- Analytics ---
 export const getOptionGreeks = (params: OptionGreeksParams) => post<Greeks>("optiongreeks", params);
-export const getAnalyzerStatus = () => post<{ enabled: boolean }>("analyzer/status", {});
-export const toggleAnalyzer = (enable: boolean) => post<{ enabled: boolean }>("analyzer/toggle", { enable });

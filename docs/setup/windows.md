@@ -33,11 +33,6 @@ installs never collide and can be run in either order.
 The install is per-user — **no admin rights needed**. An elevated Administrator
 PowerShell window is refused before installation begins.
 
-Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
-configuration is handled in the app; no `.env` file is required. Your workspace
-lives at `%APPDATA%\flinttrade\` (override with `FLINTTRADE_WORKSPACE_DIR`, or
-`FLINTTRADE_HOME`).
-
 ### If the site is unreachable (repo-direct fallback)
 
 Use this whenever the command above fails: the hosted URL is only a redirect to
@@ -110,22 +105,7 @@ before piping to a shell if that is your policy (it should be). If the site is
 unreachable, run it repo-direct with
 `irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-install.ps1 | iex`.
 
-Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
-in the app; no `.env` file is required.
-
 ## Manual `.exe` download (after release availability)
-
-1. Download the NSIS `FlintTrade-<version>-win-x64.exe` installer from the
-   release page.
-2. Run it. Authenticode signing is not configured, so a manually downloaded
-   installer triggers SmartScreen — choose **More info → Run anyway**. The
-   install is per-user; no admin rights needed.
-3. Electron includes its Chromium runtime; it does not download the retired
-   WebView2-based desktop runtime.
-4. On first launch, the shell verifies pinned tools and builds the official
-   source checkout with progress on the splash (needs internet).
-5. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
-   in the app; no `.env` file is required.
 
 **Windows 11 on ARM:** the x64 build runs via emulation — install the same
 `FlintTrade-<version>-win-x64.exe`.

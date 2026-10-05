@@ -52,7 +52,7 @@ vi.mock("@/services/api", () => ({
 import { useModeStore } from "@/stores/modeStore";
 import { EtfTab } from "../EtfTab";
 
-const LIVE_COPY = "live quotes via OpenAlgo. Refreshes every 30s";
+const LIVE_COPY = "live quotes via your native broker. Refreshes every 30s";
 const LOADED_QUOTES = [{ symbol: "NIFTYBEES", ltp: 2850, prev_close: 2800, volume: 10 }];
 
 describe("EtfTab", () => {
@@ -80,8 +80,17 @@ describe("EtfTab", () => {
 
     expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
     expect(screen.getByText(/ETFs —/).textContent).toBe(
-      "10 ETFs — live quotes via OpenAlgo. Refreshes every 30s.",
+      "10 ETFs — live quotes via your native broker. Refreshes every 30s.",
     );
+  });
+
+  it.each(["practice", "live"] as const)("labels fallback prices in %s even outside Example mode", (mode) => {
+    useModeStore.setState({ mode });
+    quoteQuery.data = [];
+    render(<EtfTab />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getByText(/ETFs — sample prices/)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(LIVE_COPY))).not.toBeInTheDocument();
   });
 
   it("keeps live quote wording in Live when quotes are loaded", () => {
@@ -90,5 +99,32 @@ describe("EtfTab", () => {
 
     expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
     expect(screen.getByText(new RegExp(LIVE_COPY))).toBeInTheDocument();
+  });
+
+  it.each(["practice", "live", "explore"] as const)("identifies pending %s quotes without claiming live figures", (mode) => {
+    useModeStore.setState({ mode });
+    quoteQuery.data = [];
+    quoteQuery.isLoading = true;
+    render(<EtfTab />);
+    expect(screen.getByRole("status", { name: "Loading ETF quotes" })).toBeInTheDocument();
+    expect(screen.getByText(mode === "explore"
+      ? /fetching Example quotes/
+      : /fetching native quotes/)).toBeInTheDocument();
+    expect(screen.queryByText(/live quotes/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("₹2,850")).not.toBeInTheDocument();
+    expect(screen.queryByText("₹265")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("uses disclosed example rows when a refetch fails with native data still cached", () => {
+    useModeStore.setState({ mode: "practice" });
+    const view = render(<EtfTab />);
+    expect(screen.getAllByText("₹2,850").length).toBeGreaterThan(0);
+    quoteQuery.isError = true;
+    view.rerender(<EtfTab />);
+    expect(screen.queryByText("₹2,850")).not.toBeInTheDocument();
+    expect(screen.getAllByText("₹265").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
+    expect(screen.getByText(/Example prices illustrate this ETF universe/)).toBeInTheDocument();
   });
 });

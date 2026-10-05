@@ -225,10 +225,7 @@ class QuestDBClient:
             QuestDBClientError: If the connection attempt fails.
         """
         if not _PSYCOPG2_AVAILABLE:
-            raise QuestDBClientError(
-                "psycopg2 is not installed. "
-                "Run: pip install psycopg2-binary"
-            )
+            raise QuestDBClientError("psycopg2 is not installed. Run: pip install psycopg2-binary")
 
         # Close any stale connection before re-connecting.
         self._close_internal()
@@ -242,15 +239,11 @@ class QuestDBClient:
                 password=self.password,
             )
             self._cursor = self._conn.cursor()
-            logger.info(
-                "QuestDB connected: %s:%d db=%s", self.host, self.port, self.database
-            )
+            logger.info("QuestDB connected: %s:%d db=%s", self.host, self.port, self.database)
         except Exception as exc:
             self._conn = None
             self._cursor = None
-            raise QuestDBClientError(
-                f"QuestDB connection to {self.host}:{self.port} failed: {exc}"
-            ) from exc
+            raise QuestDBClientError(f"QuestDB connection to {self.host}:{self.port} failed: {exc}") from exc
 
     def is_connected(self) -> bool:
         """Return ``True`` if the connection is open and not closed.
@@ -283,9 +276,7 @@ class QuestDBClient:
     def _require_connection(self) -> None:
         """Raise :class:`QuestDBClientError` if not connected."""
         if not self.is_connected():
-            raise QuestDBClientError(
-                "Not connected to QuestDB. Call connect() first."
-            )
+            raise QuestDBClientError("Not connected to QuestDB. Call connect() first.")
 
     # ------------------------------------------------------------------
     # DDL
@@ -312,9 +303,7 @@ class QuestDBClient:
                 self._conn.commit()
             except Exception as exc:
                 self._conn.rollback()
-                raise QuestDBClientError(
-                    f"Failed to create table: {exc}"
-                ) from exc
+                raise QuestDBClientError(f"Failed to create table: {exc}") from exc
 
         logger.info("QuestDB tables created/verified: ticks_ltp, ticks_quote, ticks_depth")
 
@@ -347,8 +336,7 @@ class QuestDBClient:
         ts = _coerce_ts(timestamp)
         try:
             self._cursor.execute(
-                "INSERT INTO ticks_ltp (timestamp, symbol, exchange, ltp) "
-                "VALUES (%s, %s, %s, %s)",
+                "INSERT INTO ticks_ltp (timestamp, symbol, exchange, ltp) VALUES (%s, %s, %s, %s)",
                 (ts, symbol, exchange, float(ltp)),
             )
             self._conn.commit()
@@ -435,8 +423,7 @@ class QuestDBClient:
                 "INSERT INTO ticks_quote "
                 "(timestamp, symbol, exchange, ltp, bid, ask, volume, oi) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (ts, symbol, exchange, float(ltp), float(bid), float(ask),
-                 int(volume), int(oi)),
+                (ts, symbol, exchange, float(ltp), float(bid), float(ask), int(volume), int(oi)),
             )
             self._conn.commit()
             return True
@@ -466,17 +453,14 @@ class QuestDBClient:
             return 0
 
         values = [
-            (_coerce_ts(r[7]), r[0], r[1], float(r[2]), float(r[3]),
-             float(r[4]), int(r[5]), int(r[6]))
-            for r in rows
+            (_coerce_ts(r[7]), r[0], r[1], float(r[2]), float(r[3]), float(r[4]), int(r[5]), int(r[6])) for r in rows
         ]
         try:
             import psycopg2.extras as _pg_extras
 
             _pg_extras.execute_values(
                 self._cursor,
-                "INSERT INTO ticks_quote "
-                "(timestamp, symbol, exchange, ltp, bid, ask, volume, oi) VALUES %s",
+                "INSERT INTO ticks_quote (timestamp, symbol, exchange, ltp, bid, ask, volume, oi) VALUES %s",
                 values,
             )
             self._conn.commit()
@@ -527,8 +511,7 @@ class QuestDBClient:
                 "INSERT INTO ticks_depth "
                 "(timestamp, symbol, exchange, level, bid_price, bid_qty, ask_price, ask_qty) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (ts, symbol, exchange, int(level), float(bid_price),
-                 int(bid_qty), float(ask_price), int(ask_qty)),
+                (ts, symbol, exchange, int(level), float(bid_price), int(bid_qty), float(ask_price), int(ask_qty)),
             )
             self._conn.commit()
             return True
@@ -539,9 +522,7 @@ class QuestDBClient:
 
     def insert_depth_bulk(
         self,
-        rows: list[
-            tuple[str, str, int, float, int, float, int, datetime | None]
-        ],
+        rows: list[tuple[str, str, int, float, int, float, int, datetime | None]],
     ) -> int:
         """Bulk insert depth rows using ``execute_values``.
 
@@ -560,9 +541,7 @@ class QuestDBClient:
             return 0
 
         values = [
-            (_coerce_ts(r[7]), r[0], r[1], int(r[2]), float(r[3]),
-             int(r[4]), float(r[5]), int(r[6]))
-            for r in rows
+            (_coerce_ts(r[7]), r[0], r[1], int(r[2]), float(r[3]), int(r[4]), float(r[5]), int(r[6])) for r in rows
         ]
         try:
             import psycopg2.extras as _pg_extras
@@ -644,9 +623,7 @@ class QuestDBClient:
             self._cursor.execute(sql, (symbol, exchange, start_ts, end_ts))
             rows = self._cursor.fetchall()
         except Exception as exc:
-            raise QuestDBClientError(
-                f"generate_candles query failed: {exc}"
-            ) from exc
+            raise QuestDBClientError(f"generate_candles query failed: {exc}") from exc
 
         return [
             OHLCV(
@@ -745,9 +722,7 @@ CROSS JOIN day_range dr
             )
             row = self._cursor.fetchone()
         except Exception as exc:
-            raise QuestDBClientError(
-                f"get_market_stats query failed: {exc}"
-            ) from exc
+            raise QuestDBClientError(f"get_market_stats query failed: {exc}") from exc
 
         if row is None:
             return MarketStats(
@@ -780,7 +755,7 @@ CROSS JOIN day_range dr
 
 _INTERVAL_TO_TRUNC: dict[str, str] = {
     "1m": "minute",
-    "5m": "minute",   # QuestDB date_trunc doesn't have 5m; caller post-groups
+    "5m": "minute",  # QuestDB date_trunc doesn't have 5m; caller post-groups
     "15m": "minute",
     "30m": "minute",
     "1h": "hour",
@@ -819,10 +794,7 @@ def _interval_to_trunc_unit(interval: str) -> str:
     """
     unit = _INTERVAL_TO_TRUNC.get(interval.lower())
     if unit is None:
-        raise QuestDBClientError(
-            f"Unsupported interval '{interval}'. "
-            f"Supported: {list(_INTERVAL_TO_TRUNC)}"
-        )
+        raise QuestDBClientError(f"Unsupported interval '{interval}'. Supported: {list(_INTERVAL_TO_TRUNC)}")
     return unit
 
 
@@ -866,9 +838,7 @@ def _parse_ts_arg(value: datetime | str) -> datetime:
         dt = datetime.fromisoformat(str(value))
         return _coerce_ts(dt)
     except ValueError as exc:
-        raise QuestDBClientError(
-            f"Cannot parse timestamp argument '{value}': {exc}"
-        ) from exc
+        raise QuestDBClientError(f"Cannot parse timestamp argument '{value}': {exc}") from exc
 
 
 def _today_midnight_utc() -> datetime:

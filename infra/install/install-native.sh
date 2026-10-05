@@ -5,12 +5,6 @@
 # and configures systemd services.
 # Idempotent — safe to run multiple times.
 #
-# IMPORTANT: This installer no longer bundles OpenAlgo or OpenClaw.
-# Those are external prerequisites — install them yourself, OR run
-# scripts/setup-test-deps.sh to clone local-dev copies into
-# .local/external/ for testing. The systemd unit emitted below assumes
-# the local-dev OpenAlgo path; adjust WorkingDirectory + ExecStart for
-# your actual install location.
 #
 # AlgoMirror is intentionally not in scope: its mirroring patterns are
 # absorbed into packages/services/ditto/ and run in-process — nothing external
@@ -181,7 +175,6 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     {
         echo "# FlintTrade server fallback environment."
         echo "# Native desktop and normal source runs use Setup/Settings instead."
-        echo "# Keep OpenAlgo API keys in the app workspace UI unless this service"
         echo "# must run before the UI is available."
     } > "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/.env"
@@ -243,9 +236,9 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
-    # OpenAlgo API proxy
+    # Native broker API proxy
     location /api/ {
-        proxy_pass http://127.0.0.1:5000/api/;
+        proxy_pass http://127.0.0.1:5100/api/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -254,22 +247,13 @@ server {
 
     # FlintTrade backend API proxy
     location /ft-api/ {
-        proxy_pass http://127.0.0.1:5100/ft-api/;
+        proxy_pass http://127.0.0.1:5100/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # WebSocket proxy
-    location /ws {
-        proxy_pass http://127.0.0.1:8765;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_read_timeout 86400;
-    }
 
     # Security headers
     add_header X-Frame-Options DENY always;
@@ -293,47 +277,6 @@ ok "Nginx configured"
 # ── Step 7: Install systemd units ─────────────────────────────────────
 log "Installing systemd services..."
 
-INSTALL_OPENALGO_SERVICE="${INSTALL_OPENALGO_SERVICE:-0}"
-OPENALGO_DIR="${OPENALGO_DIR:-$INSTALL_DIR/.local/external/openalgo}"
-
-if [ "$INSTALL_OPENALGO_SERVICE" = "1" ]; then
-    if [ ! -d "$OPENALGO_DIR" ]; then
-        die "INSTALL_OPENALGO_SERVICE=1 but OPENALGO_DIR does not exist: $OPENALGO_DIR"
-    fi
-    tee /etc/systemd/system/flinttrade-openalgo.service >/dev/null <<UNIT_EOF
-[Unit]
-Description=FlintTrade OpenAlgo Gateway (external dependency)
-After=network.target
-
-[Service]
-Type=simple
-User=$FLINTTRADE_USER
-Group=$FLINTTRADE_USER
-WorkingDirectory=$OPENALGO_DIR
-ExecStart=$VENV_DIR/bin/python app.py
-Restart=on-failure
-RestartSec=5
-EnvironmentFile=$INSTALL_DIR/.env
-
-# Security hardening — match standalone systemd units
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$OPENALGO_DIR/db
-PrivateTmp=true
-
-[Install]
-WantedBy=flinttrade.target
-UNIT_EOF
-    OPENALGO_TARGET_WANTS="Wants=flinttrade-openalgo.service"
-    OPENALGO_TARGET_AFTER="After=flinttrade-openalgo.service flinttrade-backend.service"
-else
-    OPENALGO_TARGET_WANTS=""
-    OPENALGO_TARGET_AFTER="After=flinttrade-backend.service"
-    log "Skipping flinttrade-openalgo.service; configure OpenAlgo in Settings -> Broker Gateway or set INSTALL_OPENALGO_SERVICE=1"
-fi
-
-# FlintTrade backend service
 tee /etc/systemd/system/flinttrade-backend.service >/dev/null <<UNIT_EOF
 [Unit]
 Description=FlintTrade Backend
@@ -367,8 +310,7 @@ tee /etc/systemd/system/flinttrade.target >/dev/null <<UNIT_EOF
 [Unit]
 Description=FlintTrade Application
 Requires=flinttrade-backend.service
-$OPENALGO_TARGET_WANTS
-$OPENALGO_TARGET_AFTER
+After=flinttrade-backend.service
 
 [Install]
 WantedBy=multi-user.target
@@ -376,9 +318,6 @@ UNIT_EOF
 
 systemctl daemon-reload
 systemctl enable flinttrade.target
-if [ "$INSTALL_OPENALGO_SERVICE" = "1" ]; then
-    systemctl enable flinttrade-openalgo.service
-fi
 systemctl enable flinttrade-backend.service
 systemctl start flinttrade.target
 
@@ -421,18 +360,13 @@ echo ""
 echo "  Application URLs:"
 if [ -n "$DOMAIN" ]; then
     echo "    Terminal:   https://$DOMAIN"
-    echo "    OpenAlgo:   https://$DOMAIN/api/"
-    echo "    WebSocket:  wss://$DOMAIN/ws"
 else
     echo "    Terminal:   http://$(hostname -I | awk '{print $1}'):80"
-    echo "    OpenAlgo:   http://localhost:5000"
-    echo "    WebSocket:  ws://localhost:8765"
 fi
 echo ""
 echo "  Service management:"
 echo "    sudo systemctl status flinttrade.target"
 echo "    sudo systemctl restart flinttrade.target"
-echo "    sudo journalctl -u flinttrade-openalgo -f"
 echo "    sudo journalctl -u flinttrade-backend -f"
 echo ""
 echo "  Configuration:"
@@ -443,7 +377,7 @@ echo "    Logs:       journalctl -u flinttrade-*"
 echo ""
 echo "  Next steps:"
 echo "    1. Visit the terminal URL and complete Setup"
-echo "    2. Configure OpenAlgo URL/API key in Settings -> Broker Gateway if needed"
-echo "    3. Keep broker credentials inside OpenAlgo or the encrypted FlintTrade vault"
+echo "    2. Configure available native accounts in Settings -> Brokers"
+echo "    3. Keep broker credentials in the encrypted FlintTrade vault"
 echo "    4. sudo systemctl restart flinttrade.target after changing server-only fallback values"
 echo ""

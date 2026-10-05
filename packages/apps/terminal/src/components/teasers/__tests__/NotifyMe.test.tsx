@@ -46,7 +46,7 @@ beforeEach(() => {
 
 describe("NotifyMe", () => {
   it("shows Notify me button initially", () => {
-    render(<NotifyMe config={{ featureName: "Flow Builder" }} />);
+    render(<NotifyMe config={{ featureName: "Custom Scanner" }} />);
 
     // ShimmerButton renders a <button> whose accessible name comes from text content
     expect(

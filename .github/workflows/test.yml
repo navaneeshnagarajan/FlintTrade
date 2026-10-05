@@ -22,7 +22,6 @@ env:
   # explicitly empties every broker credential var so a leaked higher-scope secret cannot
   # inherit into the test run. Default-mock (Identity H9) is enforced in tests/mocks/.
   FLINTTRADE_CI: "1"
-  OPENALGO_API_KEY: ""
   DHAN_ACCESS_TOKEN: ""
   DHAN_API_KEY: ""
   DHAN_API_SECRET: ""
@@ -170,7 +169,7 @@ jobs:
               # Pin against the module constant, not a literal, so a workspace
               # version bump cannot silently strand this inline check again.
               assert result["version"] == WORKSPACE_VERSION
-              assert result["brokers"]["execution"]["default"] == "openalgo:default"
+              assert result["brokers"]["execution"]["default"] == ""
           PY
       # --timeout-method=thread uses a watchdog thread + _thread.interrupt_main()
       # instead of SIGALRM. SIGALRM can't reliably interrupt CPython's

@@ -86,20 +86,20 @@ class TestAccountStatus:
 class TestBrokerInfo:
     def test_creation_with_required_fields(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE", "BSE", "NFO"],
         )
-        assert info.name == "zerodha"
-        assert info.display_name == "Zerodha"
+        assert info.name == "dhan"
+        assert info.display_name == "Dhan"
         assert info.auth_flow == AuthFlowType.totp_form
         assert info.exchanges == ["NSE", "BSE", "NFO"]
 
     def test_default_max_symbols_per_ws(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE"],
         )
@@ -107,8 +107,8 @@ class TestBrokerInfo:
 
     def test_default_supports_streaming_true(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE"],
         )
@@ -116,8 +116,8 @@ class TestBrokerInfo:
 
     def test_default_oauth_url_template_none(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE"],
         )
@@ -125,8 +125,8 @@ class TestBrokerInfo:
 
     def test_default_is_sandbox_false(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE"],
         )
@@ -150,8 +150,8 @@ class TestBrokerInfo:
 
     def test_serialization_round_trip(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE", "NFO"],
             max_symbols_per_ws=3000,
@@ -162,8 +162,8 @@ class TestBrokerInfo:
 
     def test_json_round_trip(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.totp_form,
             exchanges=["NSE"],
         )
@@ -173,8 +173,8 @@ class TestBrokerInfo:
 
     def test_auth_flow_string_coercion(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow="totp_form",  # type: ignore[arg-type]
             exchanges=["NSE"],
         )
@@ -182,8 +182,8 @@ class TestBrokerInfo:
 
     def test_default_aux_params_is_empty_list(self) -> None:
         info = BrokerInfo(
-            name="zerodha",
-            display_name="Zerodha",
+            name="dhan",
+            display_name="Dhan",
             auth_flow=AuthFlowType.oauth_redirect,
             exchanges=["NSE"],
         )
@@ -218,42 +218,42 @@ class TestBrokerInfo:
 
 class TestBrokerAccountInfo:
     def test_default_status_is_disconnected(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
-            label="My Zerodha",
+            broker="dhan",
+            label="My Dhan",
         )
         assert account.status == AccountStatus.disconnected
 
     def test_default_connected_at_none(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
-            label="My Zerodha",
+            broker="dhan",
+            label="My Dhan",
         )
         assert account.connected_at is None
 
     def test_default_error_message_none(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
-            label="My Zerodha",
+            broker="dhan",
+            label="My Dhan",
         )
         assert account.error_message is None
 
     def test_default_is_primary_false(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
-            label="My Zerodha",
+            broker="dhan",
+            label="My Dhan",
         )
         assert account.is_primary is False
 
     def test_connected_state(self) -> None:
         now = datetime.now(tz=timezone.utc)
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
+            broker="dhan",
             label="Primary",
             status=AccountStatus.connected,
             connected_at=now,
@@ -264,9 +264,9 @@ class TestBrokerAccountInfo:
         assert account.is_primary is True
 
     def test_error_state(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
+            broker="dhan",
             label="Primary",
             status=AccountStatus.error,
             error_message="TOTP mismatch",
@@ -275,9 +275,9 @@ class TestBrokerAccountInfo:
         assert account.error_message == "TOTP mismatch"
 
     def test_token_expired_state(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
+            broker="dhan",
             label="Primary",
             status=AccountStatus.token_expired,
         )
@@ -285,9 +285,9 @@ class TestBrokerAccountInfo:
 
     def test_serialization_round_trip(self) -> None:
         now = datetime.now(tz=timezone.utc)
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
+            broker="dhan",
             label="Primary",
             status=AccountStatus.connected,
             connected_at=now,
@@ -298,9 +298,9 @@ class TestBrokerAccountInfo:
         assert restored == account
 
     def test_json_round_trip(self) -> None:
-        account = BrokerAccountInfo(adapter_id="openalgo",
+        account = BrokerAccountInfo(adapter_id="dhan",
             account_id="AB1234",
-            broker="zerodha",
+            broker="dhan",
             label="Primary",
         )
         json_str = account.model_dump_json()
@@ -309,9 +309,9 @@ class TestBrokerAccountInfo:
 
     def test_multiple_accounts_different_brokers(self) -> None:
         accounts = [
-            BrokerAccountInfo(adapter_id="openalgo", account_id="Z1", broker="zerodha", label="Zerodha Main"),
-            BrokerAccountInfo(adapter_id="openalgo", account_id="A1", broker="angel", label="Angel Secondary"),
+            BrokerAccountInfo(adapter_id="dhan", account_id="Z1", broker="dhan", label="Dhan Main"),
+            BrokerAccountInfo(adapter_id="upstox", account_id="A1", broker="upstox", label="Upstox Secondary"),
         ]
-        assert accounts[0].broker == "zerodha"
-        assert accounts[1].broker == "angel"
+        assert accounts[0].broker == "dhan"
+        assert accounts[1].broker == "upstox"
         assert all(a.status == AccountStatus.disconnected for a in accounts)

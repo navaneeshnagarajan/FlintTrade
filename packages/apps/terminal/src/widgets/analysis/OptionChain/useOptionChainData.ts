@@ -218,7 +218,7 @@ export function useOptionChainData(
         setLastRefresh(new Date());
       }
     }
-   
+
   }, [
     dataScope,
     requests,
@@ -255,7 +255,7 @@ export function useOptionChainData(
     const putMap:  Record<number, RawOptionRow> = {};
 
     if (currentChain.chain && currentChain.chain.length > 0) {
-      // OpenAlgo v2 format: chain[].strike, chain[].ce, chain[].pe
+      // Native chain normalisation: strike rows with call/put legs
       for (const entry of currentChain.chain) {
         const strike = positiveFiniteNumber(entry.strike);
         if (strike === null) continue;

@@ -1,7 +1,7 @@
 /**
  * TimeSalesWidget — Tape & Microstructure (W3).
  *
- * Streams inferred trade prints for the selected instrument: the OpenAlgo
+ * Streams inferred trade prints for the selected instrument: the broker
  * WebSocket carries quote ticks (LTP + cumulative volume), not per-trade data,
  * so each print is derived from a tick (size = volume delta, aggressor side by
  * the tick rule) and the header says so honestly. Follows the instrument
@@ -353,7 +353,8 @@ function TimeSalesWidget(props: WidgetProps) {
               them. Keep it visible in both views. */}
           <p className="text-[10px] text-text-muted">
             {instrument.symbol} · prints inferred from quote ticks (tick rule)
-            
+            {isSample && <span className="ml-1 text-warning" role="status">Sample data</span>}
+
           </p>
         </div>
         <div className="flex items-center gap-1 flex-none">

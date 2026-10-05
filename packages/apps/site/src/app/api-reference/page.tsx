@@ -1,4 +1,4 @@
-import { ArrowRight, Braces, Cable, KeyRound, Radio } from 'lucide-react';
+import { ArrowRight, Braces, Cable, KeyRound } from 'lucide-react';
 import Link from 'next/link';
 
 import { SiteFooter } from '@/components/site-footer';
@@ -9,12 +9,7 @@ const areas = [
   {
     icon: Braces,
     title: 'REST endpoints',
-    copy: 'FlintTrade /ft-api/v1 endpoints and OpenAlgo-compatible bridge routes share one reference path.',
-  },
-  {
-    icon: Radio,
-    title: 'WebSocket contracts',
-    copy: 'Streaming market data and gateway protocol details live beside the HTTP contract.',
+    copy: 'FlintTrade endpoints describe authenticated terminal transport and native broker contracts.',
   },
   {
     icon: KeyRound,
@@ -25,7 +20,7 @@ const areas = [
 
 export const metadata = {
   title: 'API Reference',
-  description: 'FlintTrade API reference overview for HTTP, WebSocket, and auth contracts.',
+  description: 'FlintTrade API reference overview for first-party HTTP and authentication contracts.',
 };
 
 export default function ApiReferencePage() {
@@ -36,9 +31,9 @@ export default function ApiReferencePage() {
     <main className="site-shell">
       <SiteHeader />
       <section className="subpage">
-        <h1>API contracts for integrators.</h1>
+        <h1>Terminal transport contracts.</h1>
         <p>
-          The public site mirrors the repository API reference so endpoint docs, WebSocket behaviour, and
+          The public site mirrors the repository API reference so endpoint docs and
           auth notes stay close to implementation changes.
         </p>
 

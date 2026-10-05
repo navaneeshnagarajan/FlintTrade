@@ -10,7 +10,7 @@ fail-closed behaviour and the frozen-clock 10/11 burst against a real
 ``SandboxEngine``.
 
 This is not the Phase 4 exit. The market-day Practice run remains a separate
-operator gate. Live broker adapters, OpenAlgo and ``BrokerRouter`` stay
+operator gate. Live broker adapters, native broker and ``BrokerRouter`` stay
 unreachable sentinels here.
 
 Run with:
@@ -46,7 +46,7 @@ _PRACTICE_BODY = {
 
 
 class _LivePathSentinel:
-    """Fail-fast stand-in for live broker / OpenAlgo handles.
+    """Fail-fast stand-in for live broker / native broker handles.
 
     Practice dispatch must never read these config keys. Attribute access is
     counted so a later assertion can prove the live path stayed dark.
@@ -93,7 +93,7 @@ def _minimal_practice_app(db_path: Path) -> Flask:
     app.config["RATE_LIMITER"] = RateLimiter(global_rate=100, per_user_rate=10)
     app.config["BROKER_ROUTER"] = _LivePathSentinel()
     app.config["CLIENT"] = _LivePathSentinel()
-    app.config["OPENALGO_CLIENT"] = _LivePathSentinel()
+    app.config["BROKER_CLIENT"] = _LivePathSentinel()
     app.config["TICK_RECORDER"] = None
     app.register_blueprint(orders_bp)
     return app
@@ -127,7 +127,7 @@ def test_practice_jwt_fills_real_sandbox_without_live_sentinels(practice_app: Fl
     assert orders[0]["action"] == "BUY"
     assert practice_app.config["BROKER_ROUTER"].accesses == []
     assert practice_app.config["CLIENT"].accesses == []
-    assert practice_app.config["OPENALGO_CLIENT"].accesses == []
+    assert practice_app.config["BROKER_CLIENT"].accesses == []
 
 
 @pytest.mark.unit
@@ -149,7 +149,7 @@ def test_practice_jwt_with_forged_live_header_rejected_before_sandbox(
     assert sandbox.get_orders() == []
     assert practice_app.config["BROKER_ROUTER"].accesses == []
     assert practice_app.config["CLIENT"].accesses == []
-    assert practice_app.config["OPENALGO_CLIENT"].accesses == []
+    assert practice_app.config["BROKER_CLIENT"].accesses == []
 
 
 @pytest.mark.unit
@@ -224,7 +224,7 @@ def test_frozen_clock_21_call_http_burst_uses_real_sandbox(tmp_path: Path) -> No
         assert len(sandbox.get_orders()) == 10
         assert app.config["BROKER_ROUTER"].accesses == []
         assert app.config["CLIENT"].accesses == []
-        assert app.config["OPENALGO_CLIENT"].accesses == []
+        assert app.config["BROKER_CLIENT"].accesses == []
 
 
 def _frozen_place_burst(
@@ -284,7 +284,7 @@ def test_practice_jwt_forged_x_user_id_cannot_rotate_order_buckets(tmp_path: Pat
     assert len(app.config["DATA_SANDBOX_ENGINE"].get_orders()) == 10
     assert app.config["BROKER_ROUTER"].accesses == []
     assert app.config["CLIENT"].accesses == []
-    assert app.config["OPENALGO_CLIENT"].accesses == []
+    assert app.config["BROKER_CLIENT"].accesses == []
 
 
 @pytest.mark.unit

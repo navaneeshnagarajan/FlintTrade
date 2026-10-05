@@ -31,22 +31,31 @@ logger = logging.getLogger("flinttrade.data.security_tracker")
 # observability §10.2 — tracked security event taxonomy.
 EVENT_TYPES: frozenset[str] = frozenset(
     {
-        "WEBHOOK_REJECTED", "WEBHOOK_REPLAY_REJECTED",
+        "WEBHOOK_REJECTED",
+        "WEBHOOK_REPLAY_REJECTED",
         "MCP_TOOL_ERROR",
-        "SANDBOX_BLOCKED_IMPORT", "SANDBOX_OS_HARDENING_LIMITED",
-        "auth.failed_login", "auth.pin_failed", "auth.totp_failed", "auth.rate_limit_hit",
-        "broker_401_or_403", "BROKER_IP_MISMATCH", "BROKER_RATE_LIMIT_HIT",
-        "BROKER_READ_ONLY_ENGAGED", "BROKER_SESSION_REFRESH_FAILED",
-        "BROKER_WS_DEAD", "BROKER_WS_STALE_INSTRUMENT", "BROKER_SDK_ATTEST_FAIL",
-        "INSTRUMENTS_CACHE_REFUSED", "cert_validation_failure",
+        "SANDBOX_BLOCKED_IMPORT",
+        "SANDBOX_OS_HARDENING_LIMITED",
+        "auth.failed_login",
+        "auth.pin_failed",
+        "auth.totp_failed",
+        "auth.rate_limit_hit",
+        "broker_401_or_403",
+        "BROKER_IP_MISMATCH",
+        "BROKER_RATE_LIMIT_HIT",
+        "BROKER_READ_ONLY_ENGAGED",
+        "BROKER_SESSION_REFRESH_FAILED",
+        "BROKER_WS_DEAD",
+        "BROKER_WS_STALE_INSTRUMENT",
+        "BROKER_SDK_ATTEST_FAIL",
+        "INSTRUMENTS_CACHE_REFUSED",
+        "cert_validation_failure",
         "OTP_MAILER_DOWNGRADE_REFUSED",
     }
 )
 
 # valid mcp_tool_counters.decision values (§10.3)
-MCP_DECISIONS: frozenset[str] = frozenset(
-    {"allowed", "denied", "rate_limited", "external_input_refused", "other"}
-)
+MCP_DECISIONS: frozenset[str] = frozenset({"allowed", "denied", "rate_limited", "external_input_refused", "other"})
 
 _SCHEMA = """
 -- legacy convenience tables (timestamps unix-epoch REAL) --------------------
@@ -144,9 +153,7 @@ class SecurityTracker:
             "INSERT INTO security_404s (event_id, ts, ip, path) VALUES (?, ?, ?, ?)",
             [secrets.token_hex(8), time.time(), ip, path],
         )
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM security_404s WHERE ip = ?", [ip]
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) FROM security_404s WHERE ip = ?", [ip]).fetchone()
         return int(row[0]) if row else 1
 
     # ------------------------------------------------------------------

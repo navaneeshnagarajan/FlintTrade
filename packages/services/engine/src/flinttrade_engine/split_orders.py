@@ -49,7 +49,7 @@ from flinttrade_engine.bracket_order import (
 
 logger = logging.getLogger("flinttrade.engine.split_orders")
 
-# Hard cap to prevent accidental runaway loops (mirrors OpenAlgo MAX_ORDERS=100)
+# Hard cap to prevent accidental runaway loops (mirrors broker MAX_ORDERS=100)
 MAX_CHUNKS = 100
 
 

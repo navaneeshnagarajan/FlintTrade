@@ -110,13 +110,6 @@ export const TOUR_DEFINITIONS: Record<string, TourStep[]> = {
 
   "automate-beginner": [
     {
-      target: "flow-builder",
-      title: "Flow Builder",
-      description:
-        "Create automated trading flows with visual drag-and-drop. Connect triggers, conditions, and actions without writing code.",
-      position: "bottom",
-    },
-    {
       target: "cron-manager",
       title: "Scheduled Tasks",
       description:

@@ -371,7 +371,7 @@ def test_release_contract_preserves_source_with_exact_release_dependency(tmp_pat
         text=True,
         check=True,
     ).stdout.split("\0")
-    tracked = {Path(path).relative_to("packages/integrations/gateway") for path in tracked if path}
+    tracked = {Path(path).relative_to("packages/integrations/gateway") for path in tracked if path and (checker.REPO / path).is_file()}
     release_projects = []
 
     def run(args, **kwargs):

@@ -75,5 +75,5 @@ export const ohlcvCacheSchema = z.object({
   scope: z.string().min(1),
 });
 
-/** Raw WebSocket envelope from OpenAlgo port 8765 */
+/** Generic JSON object envelope; callers validate their own typed fields */
 export const wsMessageSchema = z.record(z.string(), z.unknown());

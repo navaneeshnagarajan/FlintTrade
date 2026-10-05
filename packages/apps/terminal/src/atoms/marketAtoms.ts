@@ -1,8 +1,65 @@
-import { atom } from "jotai";
+import { atom, type WritableAtom } from "jotai";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useModeStore } from "@/stores/modeStore";
+import { resolveMarketDataScope } from "@/lib/marketDataScope";
 import type { WsTick, WsInstrument } from "@/types/api";
 
 /** Writable per-instrument tick atom, as returned by {@link tickAtomFamily}. */
-export type TickAtom = ReturnType<typeof atom<WsTick | null>>;
+export type TickAtom = WritableAtom<WsTick | null, [WsTick | null | ((previous: WsTick | null) => WsTick | null), string?], void>;
+
+function currentMarketScope(): string {
+  const { accounts, activeAccountId } = useBrokerStore.getState();
+  return resolveMarketDataScope({ mode: useModeStore.getState().mode, accounts, activeAccountId });
+}
+
+// Weak observations keep no abandoned Jotai store alive. Synchronous Zustand
+// notifications retire even unmounted cached observations before a B render.
+const scopeObservers = new Set<WeakRef<(scope: string) => void>>();
+function retireOtherScopes(): void {
+  if (scopeObservers.size === 0) return;
+  const scope = currentMarketScope();
+  for (const reference of scopeObservers) {
+    const notify = reference.deref();
+    if (notify) notify(scope);
+    else scopeObservers.delete(reference);
+  }
+}
+useModeStore.subscribe?.(retireOtherScopes);
+useBrokerStore.subscribe?.(retireOtherScopes);
+
+interface TickObservation {
+  scope: string;
+  tick: WsTick;
+  notify: (scope: string) => void;
+  reference: WeakRef<(scope: string) => void>;
+}
+function scopedTickAtom(): TickAtom {
+  const observation = atom<TickObservation | null>(null);
+  return atom(
+    (get) => {
+      const stored = get(observation);
+      if (!stored) return null;
+      return stored.scope === currentMarketScope() ? stored.tick : null;
+    },
+    (get, set, update: WsTick | null | ((previous: WsTick | null) => WsTick | null), capturedScope = currentMarketScope()) => {
+      const scope = currentMarketScope();
+      if (capturedScope !== scope) return;
+      const previous = get(observation);
+      const current = previous?.scope === scope ? previous.tick : null;
+      const tick = typeof update === "function" ? update(current) : update;
+      if (previous) scopeObservers.delete(previous.reference);
+      if (!tick) { set(observation, null); return; }
+      const notify = (nextScope: string) => {
+        if (nextScope === scope) return;
+        scopeObservers.delete(reference);
+        set(observation, null);
+      };
+      const reference = new WeakRef(notify);
+      scopeObservers.add(reference);
+      set(observation, { scope, tick, notify, reference });
+    },
+  );
+}
 
 /**
  * Atom cache for per-instrument tick data.
@@ -66,7 +123,7 @@ export function tickAtomFamily(key: string): TickAtom {
     _tickAtomCache.set(key, existing);
     return existing.atom;
   }
-  const entry: TickAtomEntry = { atom: atom<WsTick | null>(null), mountCount: 0 };
+  const entry: TickAtomEntry = { atom: scopedTickAtom(), mountCount: 0 };
   // Track active subscribers through jotai's own mount lifecycle. onMount runs
   // when the first subscriber in a store mounts the atom; the returned cleanup
   // runs when the last one in that store releases it.

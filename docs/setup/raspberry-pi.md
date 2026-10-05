@@ -50,9 +50,5 @@ sudoedit /opt/flinttrade/.env
 sudo systemctl start flinttrade
 ```
 
-Broker/OpenAlgo configuration belongs in Setup or Settings. Use `sudoedit`
-on `/opt/flinttrade/.env` only for server-only fallback values that cannot be
-supplied through the UI.
-
 Note: Backtest and AI packages may be slow on Pi 4. Prefer disabling optional
 modules from the workspace settings for lightweight installations.

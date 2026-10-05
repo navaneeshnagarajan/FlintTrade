@@ -30,21 +30,21 @@ class _OfflineDhanClient:
         self.calls = []
         self.forbidden_calls = []
         self.depth = {
-            "buy": [{"price": 99.5, "quantity": 8, "orders": 2},
-                    {"price": 99.0, "quantity": 13, "orders": 3}],
-            "sell": [{"price": 100.5, "quantity": 5, "orders": 1},
-                     {"price": 101.0, "quantity": 11, "orders": 2}],
+            "buy": [{"price": 99.5, "quantity": 8, "orders": 2}, {"price": 99.0, "quantity": 13, "orders": 3}],
+            "sell": [{"price": 100.5, "quantity": 5, "orders": 1}, {"price": 101.0, "quantity": 11, "orders": 2}],
         }
 
     def quote_data(self, securities):
         self.calls.append(("quote_data", deepcopy(securities)))
         return {
             "status": "success",
-            "data": {"status": "success", "data": {
-                segment: {str(token): {"last_price": 100.0, "depth": deepcopy(self.depth)}
-                          for token in tokens}
-                for segment, tokens in securities.items()
-            }},
+            "data": {
+                "status": "success",
+                "data": {
+                    segment: {str(token): {"last_price": 100.0, "depth": deepcopy(self.depth)} for token in tokens}
+                    for segment, tokens in securities.items()
+                },
+            },
         }
 
     def get_fund_limits(self):
@@ -61,32 +61,46 @@ def practice_runtime(runtime, backend_lease_proof, tmp_path, monkeypatch):
     sdk = _OfflineDhanClient()
     native = DhanAdapter(
         client_factory=lambda _session: sdk,
-        security_resolver=build_security_resolver([
-            {"SECURITY_ID": token, "EXCH_ID": exchange, "SEGMENT": "E",
-             "TRADING_SYMBOL": _SYMBOL, "INSTRUMENT": "EQUITY", "INSTRUMENT_TYPE": "ES"}
-            for exchange, token in _TOKENS.items()
-        ]),
+        security_resolver=build_security_resolver(
+            [
+                {
+                    "SECURITY_ID": token,
+                    "EXCH_ID": exchange,
+                    "SEGMENT": "E",
+                    "TRADING_SYMBOL": _SYMBOL,
+                    "INSTRUMENT": "EQUITY",
+                    "INSTRUMENT_TYPE": "ES",
+                }
+                for exchange, token in _TOKENS.items()
+            ]
+        ),
     )
     runtime.dependencies.adapters["dhan"] = native
     sandbox = SandboxEngine(str(tmp_path / "practice-depth.sqlite3"), initial_capital=100_000.0)
     forbidden_calls = []
 
     def forbidden(*_args, **_kwargs):
-        forbidden_calls.append("live_or_bridge")
-        pytest.fail("Practice must never call a Live/bridge write or transport")
+        forbidden_calls.append("live_write_or_unowned_read")
+        pytest.fail("Practice must never call a Live write or an unowned read")
 
     for operation in ("place_order", "modify_order", "cancel_order"):
         monkeypatch.setattr(native, operation, forbidden)
-    monkeypatch.setattr(runtime.client, "_post", forbidden)
+    monkeypatch.setattr(runtime.client, "_read_port", forbidden)
     app = runtime.app
-    app.config.update(DATA_SANDBOX_ENGINE=sandbox, RATE_LIMITER=RateLimiter(),
-                      BACKEND_LEASE_PROOF=backend_lease_proof, SAFETY=SafetySystem(),
-                      BROKER_ROUTER=SimpleNamespace(place_order=forbidden), TICK_RECORDER=None)
+    app.config.update(
+        DATA_SANDBOX_ENGINE=sandbox,
+        RATE_LIMITER=RateLimiter(),
+        BACKEND_LEASE_PROOF=backend_lease_proof,
+        SAFETY=SafetySystem(),
+        BROKER_ROUTER=SimpleNamespace(place_order=forbidden),
+        TICK_RECORDER=None,
+    )
     app.register_blueprint(order_routes.orders_bp)
     events = []
     practice = PracticeAgentAdapter(app, runtime.token(), event_sink=lambda kind, data: events.append((kind, data)))
-    yield SimpleNamespace(practice=practice, sdk=sdk, audit=runtime.audit,
-                          history=runtime.adapter, sandbox=sandbox, events=events)
+    yield SimpleNamespace(
+        practice=practice, sdk=sdk, audit=runtime.audit, history=runtime.adapter, sandbox=sandbox, events=events
+    )
     practice.close()
     assert not sdk.forbidden_calls
     assert not forbidden_calls
@@ -94,8 +108,11 @@ def practice_runtime(runtime, backend_lease_proof, tmp_path, monkeypatch):
 
 
 def _audit_events(runtime):
-    return [event for filename in runtime.audit.list_audit_files()
-            for event in runtime.audit.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))]
+    return [
+        event
+        for filename in runtime.audit.list_audit_files()
+        for event in runtime.audit.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))
+    ]
 
 
 @pytest.mark.parametrize("exchange", ["NSE", "BSE"])
@@ -128,25 +145,38 @@ async def test_practice_consumes_native_dhan_depth_with_owned_read_receipt(pract
     assert runtime.sandbox.get_trades() == []
 
 
-@pytest.mark.parametrize("malformed_depth", [
-    None,
-    {"buy": [{"price": 99.5, "quantity": True, "orders": 1}],
-     "sell": [{"price": 100.5, "quantity": 5, "orders": 1}]},
-    {"buy": [{"price": float("nan"), "quantity": 8, "orders": 1}],
-     "sell": [{"price": 100.5, "quantity": 5, "orders": 1}]},
-    {"buy": [{"price": 99.5, "quantity": 8}],
-     "sell": [{"price": 100.5, "quantity": 5, "orders": 1}]},
-], ids=["null-depth", "boolean-quantity", "non-finite-price", "missing-orders"])
+@pytest.mark.parametrize(
+    "malformed_depth",
+    [
+        None,
+        {
+            "buy": [{"price": 99.5, "quantity": True, "orders": 1}],
+            "sell": [{"price": 100.5, "quantity": 5, "orders": 1}],
+        },
+        {
+            "buy": [{"price": float("nan"), "quantity": 8, "orders": 1}],
+            "sell": [{"price": 100.5, "quantity": 5, "orders": 1}],
+        },
+        {"buy": [{"price": 99.5, "quantity": 8}], "sell": [{"price": 100.5, "quantity": 5, "orders": 1}]},
+    ],
+    ids=["null-depth", "boolean-quantity", "non-finite-price", "missing-orders"],
+)
 async def test_malformed_native_depth_blocks_practice_before_any_write(practice_runtime, malformed_depth):
     runtime = practice_runtime
     runtime.sdk.depth = malformed_depth
 
     with pytest.raises(PracticeAgentError, match="broker_context_invalid_response"):
         await runtime.practice.depth(symbol=_SYMBOL, exchange="NSE")
-    decision = await runtime.practice.route_order(Order(
-        symbol=_SYMBOL, exchange=Exchange.NSE, action=Action.BUY,
-        quantity="1", product=Product.MIS, pricetype=PriceType.MARKET,
-    ))
+    decision = await runtime.practice.route_order(
+        Order(
+            symbol=_SYMBOL,
+            exchange=Exchange.NSE,
+            action=Action.BUY,
+            quantity="1",
+            product=Product.MIS,
+            pricetype=PriceType.MARKET,
+        )
+    )
 
     assert decision.passed is False
     assert decision.response["code"] == "broker_context_invalid_response"

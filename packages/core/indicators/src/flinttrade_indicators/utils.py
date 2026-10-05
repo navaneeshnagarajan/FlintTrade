@@ -45,9 +45,7 @@ def validate_ohlcv(
     validate_series(low, min_length)
     validate_series(close, min_length)
     if not (len(high) == len(low) == len(close)):
-        raise ValueError(
-            f"Array length mismatch: high={len(high)}, low={len(low)}, close={len(close)}"
-        )
+        raise ValueError(f"Array length mismatch: high={len(high)}, low={len(low)}, close={len(close)}")
 
 
 def as_float64(data: NDArray[np.floating]) -> NDArray[np.float64]:

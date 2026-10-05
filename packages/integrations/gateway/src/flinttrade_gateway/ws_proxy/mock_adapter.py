@@ -8,7 +8,7 @@ Tick generation strategy:
 - LTP ticks: random walk around a base price per symbol
 - QUOTE ticks: LTP + open/high/low/close synthesised from the random walk
 - DEPTH ticks: QUOTE + 5-level synthetic order book on each side
-- DEPTH20 ticks: QUOTE + 20-level synthetic order book (OpenAlgo v2 mode 4)
+- DEPTH20 ticks: QUOTE + 20-level synthetic order book (native broker v2 mode 4)
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from .depth_20 import Depth20Tick, parse_depth_20_payload
 
 logger = logging.getLogger("flinttrade.gateway.ws_proxy.mock_adapter")
 
-# Mode 4 string constant (OpenAlgo v2 depth with 20 levels)
+# Mode 4 string constant (native broker v2 depth with 20 levels)
 _MODE_DEPTH20 = "DEPTH20"
 
 # Default base prices for well-known Indian indices and stocks
@@ -232,7 +232,7 @@ class MockBrokerAdapter(AbstractBrokerAdapter):
             ]
 
         if mode == _MODE_DEPTH20:
-            # OpenAlgo v2 mode 4 — 20 levels, list-of-lists format
+            # native broker v2 mode 4 — 20 levels, list-of-lists format
             tick["mode"] = _MODE_DEPTH20
             tick["bids"] = [
                 [

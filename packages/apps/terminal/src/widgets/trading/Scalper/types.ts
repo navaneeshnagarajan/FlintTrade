@@ -2,7 +2,7 @@
 
 import type { WsTick } from "@/types/api";
 
-/** WsTick extended with optional prev_close that some OpenAlgo responses carry */
+/** WsTick extended with optional prev_close that some broker responses carry */
 export interface TickData extends WsTick {
   prev_close?: number;
 }

@@ -68,10 +68,10 @@ description: Delta, gamma, theta, vega explained with practical trading implicat
 - Payoff drivers: big move (gamma) + IV spike (vega)
 - Risk: time decay (theta) if no move occurs
 
-## Fetching Greeks via OpenAlgo
+## Fetching Greeks via broker
 
 ```
-POST /api/v1/optiongreeks
+Read option Greeks from an authorised native option-chain snapshot
 Body: { "symbol": "NIFTY", "expiry": "26APR2025", "strike": 22000, "option_type": "CE" }
 Returns: delta, gamma, theta, vega, IV
 ```

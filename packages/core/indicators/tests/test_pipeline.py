@@ -40,6 +40,7 @@ class TestIndicatorPipeline:
         from flinttrade_indicators.pipeline import IndicatorPipeline
 
         import numpy as np
+
         prices = list(100.0 + np.cumsum(np.random.default_rng(1).normal(0, 1, 60)))
 
         stage1a = StreamingEMA(5)

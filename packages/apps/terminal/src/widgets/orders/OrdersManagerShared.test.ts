@@ -27,8 +27,8 @@ describe("broker order target selection", () => {
     expect(isBrokerOrderTargetableAccount(account({ status: "disconnected" }))).toBe(false);
   });
 
-  it("keeps OpenAlgo available but rejects stale native targets", () => {
-    expect(brokerOrderTargetExists(DEFAULT_BROKER_TARGET, [])).toBe(true);
+  it("rejects placeholder and stale native targets", () => {
+    expect(brokerOrderTargetExists(DEFAULT_BROKER_TARGET, [])).toBe(false);
     expect(
       brokerOrderTargetExists(
         { broker: "dhan", account_id: "A1" },
@@ -52,7 +52,6 @@ describe("broker order target selection", () => {
         account({ account_id: "D2", broker: "dhan", source: "gateway" }),
       ],
       {
-        includeOpenAlgo: false,
         nativeOnly: true,
         supportedBrokers: ["dhan", "upstox"],
       },

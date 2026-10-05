@@ -906,21 +906,6 @@ def test_one_to_two_reserved_absent_and_setup_tombstones_do_not_bump_without_rem
     assert len(store.list_quarantine()) == int(setup == 1)
 
 
-def test_unrelated_setup_and_versions_are_byte_preserved_by_reserved_cutover(tmp_path):
-    path = source(tmp_path, version=1)
-    with closing(sqlite3.connect(path)) as conn:
-        add(conn, "default", "openalgo", "openalgo", version=1)
-        conn.execute("INSERT INTO credential_selector_versions VALUES('openalgo','Other',14,1,'managed')")
-        conn.execute(
-            "INSERT INTO broker_selector_setup VALUES('openalgo','Other',1,?)",
-            ('{"base_url":"https://example.com:8443","ws_port":8766}',),
-        )
-        before = conn.execute("SELECT * FROM broker_selector_setup").fetchall()
-        conn.commit()
-    store = vault.CredentialStore(path, "synthetic")
-    assert store.selector_state(BrokerSelector("openalgo", "Other")).version.generation == 14
-    with closing(sqlite3.connect(path)) as conn:
-        assert conn.execute("SELECT * FROM broker_selector_setup").fetchall() == before
 
 
 @pytest.mark.parametrize(
@@ -944,76 +929,6 @@ def test_missing_or_wrong_quarantine_schema_is_global_corruption(tmp_path, chang
     assert logical(path) == before
 
 
-@pytest.mark.parametrize("first", ["credentials", "setup"])
-def test_first_component_cannot_bypass_unified_sibling_presence(tmp_path, first):
-    store = vault.CredentialStore(source(tmp_path), "synthetic")
-    native, bridge = BrokerSelector("dhan", "SHARED"), BrokerSelector("openalgo", "SHARED")
-    if first == "credentials":
-        store.put_credentials(native, "dhan", "Synthetic", {}, expected=store.selector_state(native).version)
-
-        def call():
-            return store.put_setup(
-                bridge, {"base_url": "https://example.com"}, expected=store.selector_state(bridge).version
-            )
-    else:
-        store.put_setup(bridge, {"base_url": "https://example.com"}, expected=store.selector_state(bridge).version)
-
-        def call():
-            return store.put_credentials(native, "dhan", "Synthetic", {}, expected=store.selector_state(native).version)
-
-    before = logical(store._db_path)
-    with pytest.raises(vault.CredentialConflictError):
-        call()
-    assert logical(store._db_path) == before
-    if first == "setup":
-        with pytest.raises(vault.CredentialConflictError):
-            store.stage_credentials(native, {}, broker="dhan", label="Synthetic")
-
-
-def test_setup_sibling_update_allowed_but_missing_setup_restore_refused(tmp_path):
-    store = vault.CredentialStore(source(tmp_path), "synthetic")
-    native, bridge = BrokerSelector("dhan", "SHARED"), BrokerSelector("openalgo", "SHARED")
-    expected = store.selector_state(bridge).version
-    store.put_credentials(bridge, "openalgo", "Synthetic", {}, expected=expected)
-    store.put_setup(bridge, {"base_url": "https://example.com"}, expected=store.selector_state(bridge).version)
-    with closing(sqlite3.connect(store._db_path)) as conn:
-        conn.execute(
-            "INSERT INTO accounts SELECT account_id,'dhan','dhan',label,salt,encrypted_creds,0,created_at FROM accounts"
-        )
-        conn.execute("INSERT INTO credential_selector_versions VALUES('dhan','SHARED',1,1,'managed')")
-        conn.commit()
-    native_version = store.selector_state(native).version
-    snap = store.snapshot_selector(bridge)
-    changed = store.put_setup(
-        bridge, {"base_url": "https://example.com:8443"}, expected=store.selector_state(bridge).version
-    )
-    restored = store.restore_selector(snap, expected=changed)
-    assert store.retrieve_setup(bridge) == {"base_url": "https://example.com"}
-    assert store.selector_state(native).version == native_version
-    removed = store.remove_setup(bridge, expected=restored)
-    before = logical(store._db_path)
-    with pytest.raises(vault.CredentialConflictError):
-        store.restore_selector(snap, expected=removed)
-    with pytest.raises(vault.CredentialConflictError):
-        store.put_setup(bridge, {"base_url": "https://example.com"}, expected=removed)
-    assert logical(store._db_path) == before
-
-
-def test_absent_sibling_tombstone_does_not_prevent_first_component(tmp_path):
-    store = vault.CredentialStore(source(tmp_path), "synthetic")
-    native, bridge = BrokerSelector("dhan", "SHARED"), BrokerSelector("openalgo", "SHARED")
-    absent = store.remove_selector(bridge, expected=store.selector_state(bridge).version)
-    native_version = store.put_credentials(
-        native, "dhan", "Synthetic", {}, expected=store.selector_state(native).version
-    )
-    snapshot = store.snapshot_selector(native)
-    assert store.selector_state(bridge).version == absent
-    native_absent = store.remove_selector(native, expected=native_version)
-    store.put_setup(bridge, {"base_url": "https://example.com"}, expected=absent)
-    before = logical(store._db_path)
-    with pytest.raises(vault.CredentialConflictError):
-        store.restore_selector(snapshot, expected=native_absent)
-    assert logical(store._db_path) == before
 
 
 def test_version_two_open_refuses_failed_sqlite_integrity_check(tmp_path, monkeypatch):

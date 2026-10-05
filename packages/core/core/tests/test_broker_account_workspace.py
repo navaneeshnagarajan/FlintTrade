@@ -55,9 +55,17 @@ def planned(owned, *, kind=AccountMutationKind.CONNECT, selector=None, roles=(),
     snapshot = participant.assert_coherent()
     selector = selector or BrokerSelector("dhan", "Synthetic")
     request = AccountMutationRequest(
-        uuid4(), kind, selector, AccountActorContext("operator", "session:" + "a" * 64),
-        snapshot.version, broker_workspace_version(snapshot), credentials.selector_state(selector).version,
-        selector.adapter_id, "Synthetic", None if kind is AccountMutationKind.REMOVE else {"token": "input"}, roles,
+        uuid4(),
+        kind,
+        selector,
+        AccountActorContext("operator", "session:" + "a" * 64),
+        snapshot.version,
+        broker_workspace_version(snapshot),
+        credentials.selector_state(selector).version,
+        selector.adapter_id,
+        "Synthetic",
+        None if kind is AccountMutationKind.REMOVE else {"token": "input"},
+        roles,
     )
     patch = module.BrokerAccountPatch(kind, selector, roles, None if kind is AccountMutationKind.REMOVE else read_only)
     store.admit(request)
@@ -67,7 +75,8 @@ def planned(owned, *, kind=AccountMutationKind.CONNECT, selector=None, roles=(),
         request.operation_id,
         replay_credentials=None if kind is AccountMutationKind.REMOVE else {"token": "replay"},
         read_only=None if kind is AccountMutationKind.REMOVE else read_only,
-        before_digest=broker_account_digest(snapshot), after_digest=broker_account_digest(patch.apply(snapshot.config)),
+        before_digest=broker_account_digest(snapshot),
+        after_digest=broker_account_digest(patch.apply(snapshot.config)),
     )
     return request, patch, snapshot
 
@@ -95,7 +104,7 @@ def test_genesis_stamps_actual_versions_without_changing_broker_liveness(owned):
     assert read_workspace_snapshot(path).version == after.version
 
 
-@pytest.mark.parametrize("change", ["remove", "replace", "brokers", "legacy"])
+@pytest.mark.parametrize("change", ["remove", "replace", "brokers", "registered"])
 def test_generic_updates_cannot_change_enrolled_marker_or_broker_domain(owned, change):
     path, _, _, _, participant, _ = owned
     participant.enrol()
@@ -109,7 +118,7 @@ def test_generic_updates_cannot_change_enrolled_marker_or_broker_domain(owned, c
         elif change == "brokers":
             config["brokers"]["execution"]["default"] = "dhan:Other"
         else:
-            config["openalgo"]["port"] = 7777
+            config["brokers"]["registered"].append("upstox:Other")
 
     with pytest.raises(ValueError, match="broker_account_workspace_owned"):
         update_workspace_config(path, mutate)
@@ -129,7 +138,7 @@ def test_connect_rebases_unrelated_ui_and_service_changes_without_acl_or_default
     def unrelated(config):
         config["ui"]["theme"] = "light"
         config["services"]["connection_epoch"] = 1
-        config["openalgo"]["telegram_username"] = "ordinary-metadata"
+        config["ui"]["ordinary_metadata"] = "ordinary-metadata"
 
     update_workspace_config(path, unrelated)
     current = read_workspace_snapshot(path)
@@ -140,7 +149,7 @@ def test_connect_rebases_unrelated_ui_and_service_changes_without_acl_or_default
     assert witness.commit_broker_workspace.generation == broker_workspace_version(before).generation + 1
     assert after.config["ui"]["theme"] == "light"
     assert after.config["services"]["connection_epoch"] == 1
-    assert after.config["openalgo"]["telegram_username"] == "ordinary-metadata"
+    assert after.config["ui"]["ordinary_metadata"] == "ordinary-metadata"
     assert after.config["brokers"]["data"]["quote"] == "dhan:Synthetic"
     assert after.config["brokers"]["execution"]["default"] == before.config["brokers"]["execution"]["default"]
     assert after.config["brokers"]["account_acls"] == before.config["brokers"]["account_acls"]
@@ -222,6 +231,7 @@ def test_publication_callback_uses_one_locked_current_snapshot_and_exact_credent
     expected = read_workspace_snapshot(owned[0])
     # A second FileLock acquisition is forbidden, even in one process.
     from flinttrade_core import workspace_migrations
+
     original = workspace_migrations._migration_lock
     calls = []
 
@@ -276,6 +286,7 @@ def test_unowned_generic_marker_insertion_is_rejected(tmp_path):
 def test_workspace_replace_result_loss_returns_exact_written_witness(owned, monkeypatch):
     request, patch, _ = planned(owned)
     from flinttrade_core import workspace_migrations
+
     original = workspace_migrations._atomic_write
 
     def installed_then_error(*args, **kwargs):
@@ -331,6 +342,7 @@ def test_abandoned_commit_or_removal_has_no_publication_authority(owned, remove)
 def test_replace_result_reconciliation_requires_directory_persistence_barrier(owned, monkeypatch, persistent):
     request, patch, _ = planned(owned)
     from flinttrade_core import secure_file
+
     original = secure_file.fsync_parent_directory
     calls = []
 
@@ -363,8 +375,11 @@ def test_private_writer_rejects_forged_duck_typed_workspace_owner(owned):
     before = (owned[0] / "workspace.json").read_bytes()
     with pytest.raises(ValueError):
         workspace_migrations._commit_update_locked(
-            owned[0], read_workspace_snapshot(owned[0]).as_dict(), lambda config: config,
-            _account_owner=(ForgedStore(), object(), object()), _account_stamp=lambda _actual: {"schema": 1},
+            owned[0],
+            read_workspace_snapshot(owned[0]).as_dict(),
+            lambda config: config,
+            _account_owner=(ForgedStore(), object(), object()),
+            _account_stamp=lambda _actual: {"schema": 1},
         )
     assert (owned[0] / "workspace.json").read_bytes() == before
 
@@ -388,6 +403,7 @@ def test_result_loss_reconciliation_requires_json_type_exact_full_config(owned, 
 
     request, patch, _ = planned(owned)
     from flinttrade_core import workspace_migrations
+
     original = workspace_migrations._atomic_write
 
     def foreign_after_install(*args, **kwargs):
@@ -414,6 +430,7 @@ def test_result_loss_reconciliation_requires_json_type_exact_full_config(owned, 
 def test_attempt_phase_is_durable_before_locked_workspace_writer_dispatch(owned, monkeypatch):
     request, patch, _ = planned(owned)
     from flinttrade_core import workspace_migrations
+
     original = workspace_migrations._atomic_write
 
     def verify_before_write(*args, **kwargs):

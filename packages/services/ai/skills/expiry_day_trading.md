@@ -74,7 +74,7 @@ Rolling = closing the expiring contract and opening the next week/month.
 - **Roll cost:** Bid-ask spread of closing leg + bid-ask spread of opening leg
 - **Best time to roll:** Tuesday or Wednesday, before expiry-day liquidity rush in the near contract
 - For monthly → monthly rolls: roll 3–5 trading days before expiry (last Thursday − 3 days)
-- Use `optionsmultiorder` in OpenAlgo to execute both legs simultaneously and reduce slippage
+- Use `optionsmultiorder` in broker to execute both legs simultaneously and reduce slippage
 
 ## Risk Limits on Expiry Day
 

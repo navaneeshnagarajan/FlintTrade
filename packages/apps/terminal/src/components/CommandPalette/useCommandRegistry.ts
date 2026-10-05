@@ -157,17 +157,6 @@ export function useCommandRegistry() {
         },
       },
       {
-        id:          "tool:flow-builder",
-        title:       "Open Flow Builder",
-        description: "Design and save local flow drafts",
-        category:    "tool",
-        action:      () => {
-          window.dispatchEvent(
-            new CustomEvent("flinttrade:navigate", { detail: { path: "/automate" } }),
-          );
-        },
-      },
-      {
         id:          "tool:strategy-builder",
         title:       "Open Strategy Builder",
         description: "Create and manage trading strategies",

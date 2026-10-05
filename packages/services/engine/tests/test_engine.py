@@ -1,6 +1,6 @@
 """Tests for FlintTrade engine package.
 
-DO NOT RUN — these require no live OpenAlgo instance. All API calls are mocked.
+DO NOT RUN — these require no live broker instance. All API calls are mocked.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ class TestOrderValidation:
         from flinttrade_engine.safety import OrderValidation
         layer = OrderValidation(check_market_hours=False)
         # NCO (NSE Commodities, Zerodha-only) joined the tradeable list in
-        # the OpenAlgo v2.0.0.7 sync.
+        # the broker v2.0.0.7 sync.
         for exch in ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "NCO"]:
             order = self._make_order(exchange=exch)
             assert layer.validate(order).passed, f"{exch} should pass"
@@ -229,9 +229,9 @@ class TestMarketHours:
         from flinttrade_engine.safety import get_expiry_time
         assert get_expiry_time("DELTA") == time(18, 0)
 
-    def test_delta_in_openalgo_exchanges(self):
-        from flinttrade_engine.safety import OPENALGO_EXCHANGES
-        assert "DELTA" in OPENALGO_EXCHANGES
+    def test_delta_in_broker_exchanges(self):
+        from flinttrade_engine.safety import SUPPORTED_EXCHANGES
+        assert "DELTA" in SUPPORTED_EXCHANGES
 
     def test_delta_order_passes_with_warning(self):
         from flinttrade_engine.safety import OrderValidation
@@ -251,13 +251,13 @@ class TestMarketHours:
         result = layer.validate(order, at=night)
         assert result.passed
 
-    def test_openalgo_exchanges_complete(self):
-        from flinttrade_engine.safety import OPENALGO_EXCHANGES
+    def test_broker_exchanges_complete(self):
+        from flinttrade_engine.safety import SUPPORTED_EXCHANGES
         for exch in [
             "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
             "NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
         ]:
-            assert exch in OPENALGO_EXCHANGES, f"{exch} missing from OPENALGO_EXCHANGES"
+            assert exch in SUPPORTED_EXCHANGES, f"{exch} missing from SUPPORTED_EXCHANGES"
 
     def test_order_rejected_outside_market_hours(self):
         from flinttrade_engine.safety import OrderValidation
@@ -528,7 +528,7 @@ class TestDailyPnLLimits:
     def test_zero_capital_fails_closed(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits()
-        result = layer.validate(daily_pnl=-1000, starting_capital=0, selector="openalgo:default")
+        result = layer.validate(daily_pnl=-1000, starting_capital=0, selector="broker:default")
         assert not result.passed
         assert "opening risk capital" in result.reason.lower()
 

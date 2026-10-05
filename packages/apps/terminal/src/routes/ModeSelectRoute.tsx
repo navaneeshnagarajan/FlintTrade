@@ -58,7 +58,7 @@ const MODE_CARDS: ModeCardConfig[] = [
   {
     id: "practice",
     label: "Practice",
-    // "with live data" overpromised: without a broker or OpenAlgo connection
+    // "with live data" overpromised: without a native broker session
     // there is no market feed, so a fresh install sees honest dashes and the
     // sandbox refuses market fills (no LTP). Say what actually happens.
     description: "Simulated fills, no real money.",

@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_backtest_routes.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -17,6 +18,7 @@ _TEST_API_KEY = "test-backtest-routes-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -25,8 +27,9 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def flask_app(monkeypatch_module):
     """Create a Flask app with backtest blueprint registered."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     from flinttrade_core.app import create_flask_app
+
     app = create_flask_app()
     app.config["TESTING"] = True
     return app
@@ -133,34 +136,45 @@ class TestBacktestRun:
     """POST /api/v1/backtest/run — execute a backtest."""
 
     def test_missing_symbol_returns_400(self, client):
-        resp = client.post("/api/v1/backtest/run", json={
-            "strategy": "EMACrossover",
-        }, headers=_auth_headers())
+        resp = client.post(
+            "/api/v1/backtest/run",
+            json={
+                "strategy": "EMACrossover",
+            },
+            headers=_auth_headers(),
+        )
         assert resp.status_code in (400, 500)
         data = resp.get_json()
         assert data["status"] == "error"
 
     def test_missing_strategy_returns_400(self, client):
-        resp = client.post("/api/v1/backtest/run", json={
-            "symbol": "RELIANCE",
-        }, headers=_auth_headers())
+        resp = client.post(
+            "/api/v1/backtest/run",
+            json={
+                "symbol": "RELIANCE",
+            },
+            headers=_auth_headers(),
+        )
         assert resp.status_code in (400, 500)
         data = resp.get_json()
         assert data["status"] == "error"
 
     def test_invalid_initial_capital_returns_400(self, client):
-        resp = client.post("/api/v1/backtest/run", json={
-            "symbol": "RELIANCE",
-            "strategy": "EMACrossover",
-            "initial_capital": "not-a-number",
-        }, headers=_auth_headers())
+        resp = client.post(
+            "/api/v1/backtest/run",
+            json={
+                "symbol": "RELIANCE",
+                "strategy": "EMACrossover",
+                "initial_capital": "not-a-number",
+            },
+            headers=_auth_headers(),
+        )
         assert resp.status_code in (400, 500)
         data = resp.get_json()
         assert data["status"] == "error"
 
     def test_empty_body_returns_error(self, client):
-        resp = client.post("/api/v1/backtest/run", json={},
-                           headers=_auth_headers())
+        resp = client.post("/api/v1/backtest/run", json={}, headers=_auth_headers())
         assert resp.status_code in (400, 500)
         data = resp.get_json()
         assert data["status"] == "error"
@@ -236,11 +250,18 @@ class TestBacktestRun:
 
         monkeypatch.setattr(br, "_load_backtest_engine", _fake_engine)
         try:
-            resp = client.post("/api/v1/backtest/run", json={
-                "symbol": "RELIANCE", "exchange": "NSE", "interval": "5m",
-                "start_date": "2025-01-01", "end_date": "2025-02-01",
-                "strategy": "EMACrossover",
-            }, headers=_auth_headers())
+            resp = client.post(
+                "/api/v1/backtest/run",
+                json={
+                    "symbol": "RELIANCE",
+                    "exchange": "NSE",
+                    "interval": "5m",
+                    "start_date": "2025-01-01",
+                    "end_date": "2025-02-01",
+                    "strategy": "EMACrossover",
+                },
+                headers=_auth_headers(),
+            )
             assert resp.status_code == 200
 
             # Response metrics use the frontend's contract keys (sharpe_ratio /
@@ -410,11 +431,18 @@ class TestStrategyLibrary:
     def test_run_accepts_a_previously_unreachable_strategy(self, client):
         # A strategy from ALL_STRATEGIES must pass the strategy lookup (it may
         # later fail on data availability, but it is no longer "Unknown").
-        resp = client.post("/api/v1/backtest/run", json={
-            "symbol": "RELIANCE", "exchange": "NSE", "interval": "1d",
-            "start_date": "2025-01-01", "end_date": "2025-02-01",
-            "strategy": "SMACrossover",
-        }, headers=_auth_headers())
+        resp = client.post(
+            "/api/v1/backtest/run",
+            json={
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "interval": "1d",
+                "start_date": "2025-01-01",
+                "end_date": "2025-02-01",
+                "strategy": "SMACrossover",
+            },
+            headers=_auth_headers(),
+        )
         body = resp.get_json()
         # Whatever the outcome (data/engine), it must NOT be the unknown-strategy 400.
         assert not (resp.status_code == 400 and "Unknown strategy" in body.get("message", ""))
@@ -427,6 +455,7 @@ class TestRegistryStrategies:
     @staticmethod
     def _sine_bars(n: int = 360):
         import math
+
         return [
             {
                 "timestamp": f"2025-{(i // 30) + 1:02d}-{(i % 30) + 1:02d}T09:15:00",
@@ -452,9 +481,13 @@ class TestRegistryStrategies:
         from flinttrade_backtest.simulator import BacktestConfig, BacktestResult
 
         config = BacktestConfig(
-            symbol="RELIANCE", exchange="NSE", interval="1d",
-            start_date="2025-01-01", end_date="2025-12-01",
-            initial_capital=1_000_000, position_size_pct=20,
+            symbol="RELIANCE",
+            exchange="NSE",
+            interval="1d",
+            start_date="2025-01-01",
+            end_date="2025-12-01",
+            initial_capital=1_000_000,
+            position_size_pct=20,
         )
         result = _run_registry_backtest(_registry_strategy("EMACrossoverStrategy"), config, self._sine_bars())
 
@@ -482,10 +515,17 @@ class TestRegistryStrategies:
 
     def test_run_accepts_a_registry_strategy_name(self, client):
         # Must pass the strategy lookup (may then fail on data, but not "Unknown").
-        resp = client.post("/api/v1/backtest/run", json={
-            "symbol": "RELIANCE", "exchange": "NSE", "interval": "1d",
-            "start_date": "2025-01-01", "end_date": "2025-02-01",
-            "strategy": "RSIStrategy",
-        }, headers=_auth_headers())
+        resp = client.post(
+            "/api/v1/backtest/run",
+            json={
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "interval": "1d",
+                "start_date": "2025-01-01",
+                "end_date": "2025-02-01",
+                "strategy": "RSIStrategy",
+            },
+            headers=_auth_headers(),
+        )
         body = resp.get_json()
         assert not (resp.status_code == 400 and "Unknown strategy" in body.get("message", ""))

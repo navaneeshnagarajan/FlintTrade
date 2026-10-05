@@ -1,175 +1,49 @@
-// Types and constants for StrategyBuilder — extracted from StrategyBuilderTool.tsx
-
-import { lotSizeFromMaster } from "@/lib/instrumentLots";
-
-export type OptionType = "CE" | "PE";
-export type Direction = "BUY" | "SELL";
-
-/** How a builder premium was set. Cleared when the operator edits the field. */
-export type PremiumSource = "sample";
-
-export interface Leg {
-  id: string;
-  action: Direction;
-  optionType: OptionType;
-  strike: number;
-  lots: number;
-  /**
-   * Per-unit premium. `null` means unset / unknown — never treat as ₹0.
-   * `0` is an explicit free premium the operator typed.
-   */
-  premium: number | null;
-  /** Set when Explore seeded a sample-chain LTP. */
-  premiumSource?: PremiumSource;
-}
-
-export interface PayoffPoint {
-  price: number;
-  pnl: number;
-}
-
-export interface EquityPoint {
-  bar: number;
-  equity: number;
-}
-
-export interface PerfMetrics {
-  totalReturn: number;
-  totalSignals: number;
-  buySignals: number;
-  sellSignals: number;
-  sharpeApprox: number;
-}
-
-function listedUnderlying(
-  symbol: string,
-  exchange: string,
-  strikeGap: number,
-  seed: number | null = null,
-): Underlying {
-  return {
-    symbol,
-    exchange,
-    strikeGap,
-    get lotSize(): number | null {
-      return lotSizeFromMaster(symbol) ?? seed;
-    },
-  };
-}
-
-// Default underlyings for Indian F&O.
-// Nifty, Bank Nifty, and Sensex lot sizes come from the broker instrument
-// master. The margin tab is an estimate and the operator confirms with the
-// broker calculator. Finnifty and Midcap Nifty are not in the cached master,
-// so those rows keep their last published seeds. `lotSize` is read when the
-// builder uses it, so a later master refresh is visible.
-export const UNDERLYINGS = [
-  listedUnderlying("NIFTY", "NSE_INDEX", 50),
-  listedUnderlying("BANKNIFTY", "NSE_INDEX", 100),
-  listedUnderlying("FINNIFTY", "NSE_INDEX", 50, 65),
-  listedUnderlying("MIDCPNIFTY", "NSE_INDEX", 25, 140),
-  listedUnderlying("SENSEX", "BSE_INDEX", 100),
-];
-
-export type Underlying = {
-  symbol: string;
-  exchange: string;
-  lotSize: number | null;
-  strikeGap: number;
-};
-
-// The option-strategy template catalogue lives in `lib/strategyTemplates` — one
-// definition shared by this builder, the StrategyTemplates widget, and the
-// OptionChain LegBuilder. It is re-exported here only so existing importers of
-// `./types` keep working; do not add strategy rows to this file.
-//
-// The former local copy keyed a LONG straddle/strangle as `straddle`/`strangle`
-// while the LegBuilder keyed a SHORT one under the same ids. Both directions now
-// carry explicit ids (`long-straddle` / `short-straddle`, …).
-export {
-  LOADABLE_STRATEGY_TEMPLATES,
-  STRATEGY_TEMPLATES,
-  builderLegsFor,
-  getStrategyTemplate,
-} from "@/lib/strategyTemplates";
-export type { StrategyTemplate, StrategyTemplateLeg } from "@/lib/strategyTemplates";
-
-// Exchange codes aligned with FlintTrade multi-exchange support.
-// Mirrors lib/tradingConstants.EXCHANGES — including the new NCO,
-// MCX_INDEX, and GLOBAL_INDEX segments added in the OpenAlgo v2.0.1.1 sync.
-export const EXCHANGES = [
-  "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NCO",
-  "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
-] as const;
-
-// Interval labels — OpenAlgo supported intervals
-export const INTERVALS = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"] as const;
-
-// Pine Script template library
+/** FlintTrade option-lab contracts, instrument metadata and illustrative Pine programs. */
+import { lotSizeFromMaster } from '@/lib/instrumentLots';
+export type OptionType = 'CE' | 'PE';
+export type Direction = 'BUY' | 'SELL';
+export type PremiumSource = 'sample';
+export interface Leg { id: string; action: Direction; optionType: OptionType; strike: number; lots: number; premium: number | null; premiumSource?: PremiumSource }
+export interface PayoffPoint { price: number; pnl: number }
+export interface EquityPoint { bar: number; equity: number }
+export interface PerfMetrics { totalReturn: number; totalSignals: number; buySignals: number; sellSignals: number; sharpeApprox: number }
+export interface Underlying { symbol: string; exchange: string; lotSize: number | null; strikeGap: number }
+export const UNDERLYINGS: Underlying[] = [
+  ['NIFTY', 'NSE_INDEX', 50], ['BANKNIFTY', 'NSE_INDEX', 100], ['FINNIFTY', 'NSE_INDEX', 50],
+  ['MIDCPNIFTY', 'NSE_INDEX', 25], ['SENSEX', 'BSE_INDEX', 100],
+].map(([symbol, exchange, gap]) => ({ symbol: String(symbol), exchange: String(exchange), strikeGap: Number(gap), get lotSize() { return lotSizeFromMaster(String(symbol)); } }));
+export { LOADABLE_STRATEGY_TEMPLATES, STRATEGY_TEMPLATES, builderLegsFor, getStrategyTemplate } from '@/lib/strategyTemplates';
+export type { StrategyTemplate, StrategyTemplateLeg } from '@/lib/strategyTemplates';
+export const EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS', 'BCD', 'NSE_INDEX', 'BSE_INDEX', 'MCX_INDEX', 'GLOBAL_INDEX'] as const;
+export const INTERVALS = ['1m', '3m', '5m', '10m', '15m', '30m', '1h', '2h', '4h', '1d', '1w'] as const;
+const crossover = (name: string, average: 'ema' | 'sma', fast: number, slow: number) => `//@version=5
+strategy("${name}", overlay=true)
+shortAverage = ta.${average}(close, ${fast})
+longAverage = ta.${average}(close, ${slow})
+plot(shortAverage)
+plot(longAverage)
+if ta.crossover(shortAverage, longAverage)
+    strategy.entry("Long", strategy.long)
+if ta.crossunder(shortAverage, longAverage)
+    strategy.close("Long")`;
 export const PINE_TEMPLATES: Record<string, { label: string; description: string; code: string }> = {
-  ema_crossover: {
-    label: "EMA Crossover",
-    description: "Fast EMA(20) crosses above/below slow EMA(50)",
-    code: `//@version=5
-strategy("EMA Crossover", overlay=true)
-fast = ta.ema(close, 20)
-slow = ta.ema(close, 50)
-if ta.crossover(fast, slow)
+  ema_crossover: { label: 'EMA Crossover', description: 'Illustrative exponential-average cross', code: crossover('Flint EMA study', 'ema', 9, 21) },
+  sma_crossover: { label: 'SMA Crossover', description: 'Illustrative moving-average cross', code: crossover('Flint SMA study', 'sma', 20, 50) },
+  rsi_mean_reversion: { label: 'RSI Mean Reversion', description: 'Illustrative oversold entry and recovery exit', code: `//@version=5
+strategy("Flint RSI study")
+momentum = ta.rsi(close, 14)
+plot(momentum)
+if momentum < 30
     strategy.entry("Long", strategy.long)
-if ta.crossunder(fast, slow)
-    strategy.close("Long")
-plot(fast, title="EMA 20", color=color.blue)
-plot(slow, title="EMA 50", color=color.red)`,
-  },
-  sma_crossover: {
-    label: "SMA Crossover",
-    description: "Fast SMA(20) crosses above/below slow SMA(50)",
-    code: `//@version=5
-strategy("SMA Crossover", overlay=true)
-fast = ta.sma(close, 20)
-slow = ta.sma(close, 50)
-if ta.crossover(fast, slow)
+if momentum > 50
+    strategy.close("Long")` },
+  ema_ribbon: { label: 'EMA Ribbon', description: 'Fast and slow average study', code: crossover('Flint ribbon study', 'ema', 8, 34) },
+  macd_signal: { label: 'MACD Signal', description: 'Moving-average convergence study', code: `//@version=5
+strategy("Flint MACD study")
+[macdLine, signalLine, histogram] = ta.macd(close, 12, 26, 9)
+plot(histogram)
+if ta.crossover(macdLine, signalLine)
     strategy.entry("Long", strategy.long)
-if ta.crossunder(fast, slow)
-    strategy.close("Long")
-plot(fast, title="SMA 20", color=color.green)
-plot(slow, title="SMA 50", color=color.orange)`,
-  },
-  rsi_mean_reversion: {
-    label: "RSI Mean Reversion",
-    description: "Buy when RSI dips below 30, exit when above 70",
-    code: `//@version=5
-strategy("RSI Mean Reversion", overlay=false)
-myRsi = ta.rsi(close, 14)
-if myRsi < 30
-    strategy.entry("Long", strategy.long)
-if myRsi > 70
-    strategy.close("Long")
-plot(myRsi, title="RSI", color=color.purple)`,
-  },
-  ema_ribbon: {
-    label: "EMA Ribbon",
-    description: "Three EMAs — 9, 21, 55. Plot only, no signals.",
-    code: `//@version=5
-strategy("EMA Ribbon", overlay=true)
-e9  = ta.ema(close, 9)
-e21 = ta.ema(close, 21)
-e55 = ta.ema(close, 55)
-plot(e9,  title="EMA 9",  color=color.lime)
-plot(e21, title="EMA 21", color=color.blue)
-plot(e55, title="EMA 55", color=color.orange)`,
-  },
-  macd_signal: {
-    label: "MACD Signal",
-    description: "Entry on MACD crossover the signal line",
-    code: `//@version=5
-strategy("MACD Signal", overlay=false)
-myMacd = ta.macd(close, 12, 26, 9)
-if ta.crossover(myMacd, myMacd_signal)
-    strategy.entry("Long", strategy.long)
-if ta.crossunder(myMacd, myMacd_signal)
-    strategy.close("Long")
-plot(myMacd,        title="MACD",   color=color.blue)
-plot(myMacd_signal, title="Signal", color=color.orange)`,
-  },
+if ta.crossunder(macdLine, signalLine)
+    strategy.close("Long")` },
 };

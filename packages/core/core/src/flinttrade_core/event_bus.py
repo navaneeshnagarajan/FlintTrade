@@ -235,9 +235,7 @@ class EventBus:
         all_events = list(self._history)
 
         if event_pattern != "*":
-            all_events = [
-                e for e in all_events if fnmatch.fnmatch(e["event"], event_pattern)
-            ]
+            all_events = [e for e in all_events if fnmatch.fnmatch(e["event"], event_pattern)]
 
         return all_events[-limit:]
 

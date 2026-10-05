@@ -139,6 +139,7 @@ def test_format_includes_collected_depth() -> None:
 @pytest.mark.asyncio
 async def test_monday_ai_snapshot_keeps_peer_when_one_quote_fails() -> None:
     """A failed quote is ok=False — callers can keep other sessions."""
+
     class _Flaky:
         async def quotes(self, *_a: object, **_k: object) -> list[dict]:
             raise TimeoutError("transient")

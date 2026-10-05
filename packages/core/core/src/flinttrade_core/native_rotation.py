@@ -52,9 +52,13 @@ class _RotationAdmissionRevoked(RuntimeError):
 class NativeRotationAdmission:
     """Generation-fence refresh admission and shared publication during shutdown."""
 
-    def __init__(self, *, publication_lock: Any | None = None,
-                 publication_admission: Callable[[], bool] | None = None,
-                 refresh_admission: Callable[[], bool] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        publication_lock: Any | None = None,
+        publication_admission: Callable[[], bool] | None = None,
+        refresh_admission: Callable[[], bool] | None = None,
+    ) -> None:
         self._condition = threading.Condition()
         self._publication_lock = publication_lock or threading.Lock()
         self._publication_admission = publication_admission
@@ -130,12 +134,14 @@ def _rotation_admission(app: Any) -> NativeRotationAdmission:
         admission = app.config.get(_NATIVE_ROTATION_ADMISSION_CONFIG)
         if admission is None:
             from .app import _account_publication_allowed  # noqa: PLC0415
+
             admission = NativeRotationAdmission(
                 publication_lock=app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock()),
                 publication_admission=lambda: _account_publication_allowed(app),
                 refresh_admission=lambda: (
                     app.extensions.get("flinttrade.broker_account_lifecycle_owner") is None
-                    or app.extensions["flinttrade.broker_account_lifecycle_owner"].legacy_mutation_admission_allowed()),
+                    or app.extensions["flinttrade.broker_account_lifecycle_owner"].legacy_mutation_admission_allowed()
+                ),
             )
             app.config[_NATIVE_ROTATION_ADMISSION_CONFIG] = admission
         if not isinstance(admission, NativeRotationAdmission):
@@ -186,9 +192,11 @@ class NativeSessionRefresher:
         self._mutation_admission()
         from .app import registry_publication_owner_for
         from .native_account_routes import NATIVE_ACCOUNT_MUTATION_LOCK  # noqa: PLC0415
+
         owner = registry_publication_owner_for(self._app, self._app.config.get("REGISTRY"))
         if self._registry_publication_owner is not owner:
             from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
             raise RegistrySessionUnavailable
         generation = self._admission.acquire()
         try:
@@ -228,10 +236,7 @@ class NativeSessionRefresher:
         if adapter is None or registry is None or store is None:
             raise RuntimeError(f"native adapter {broker!r} is not active")
 
-        rows = [
-            r for r in store.list_accounts()
-            if str(r.get("adapter_id") or r.get("broker") or "") == broker
-        ]
+        rows = [r for r in store.list_accounts() if str(r.get("adapter_id") or r.get("broker") or "") == broker]
         if not rows:
             raise RuntimeError(f"no stored accounts for {broker!r}")
 
@@ -272,13 +277,16 @@ class NativeSessionRefresher:
                 from flinttrade_core.workspace import workspace_dir
                 from flinttrade_core.workspace_migrations import broker_workspace_version, read_workspace_snapshot
                 from flinttrade_gateway.registry import ManagedLookupAuthority
+
                 try:
-                    prior_session = registry.get_connected_session_for(BrokerSelector(broker, account_id),
-                        current_authority=ManagedLookupAuthority(credential_generation,
-                            broker_workspace_version(read_workspace_snapshot(workspace_dir()))))
+                    prior_session = registry.get_connected_session_for(
+                        BrokerSelector(broker, account_id),
+                        current_authority=ManagedLookupAuthority(
+                            credential_generation, broker_workspace_version(read_workspace_snapshot(workspace_dir()))
+                        ),
+                    )
                 except RegistrySessionUnavailable:
                     prior_session = None
-
 
                 # Every loop-carried value this coroutine reads is bound HERE, at
                 # definition time, rather than looked up when the thread happens to
@@ -300,11 +308,7 @@ class NativeSessionRefresher:
                     if callable(renew) and prior_session is not None:
                         try:
                             renewed = await renew(prior_session)
-                            token = str(
-                                (renewed or {}).get("accessToken")
-                                or (renewed or {}).get("access_token")
-                                or ""
-                            )
+                            token = str((renewed or {}).get("accessToken") or (renewed or {}).get("access_token") or "")
                             if not token:
                                 raise RuntimeError("native_renewal_unavailable")
                             credentials = {**credentials, "access_token": token}
@@ -379,19 +383,16 @@ class NativeSessionRefresher:
                 if not registry_published:
                     continue
                 self._admission.assert_current(generation)
-                if (
-                    not _selector_credential_generation_matches(
-                        store,
-                        broker,
-                        account_id,
-                        committed_generation,
-                    )
-                    or not _registry_session_generation_matches(
-                        registry,
-                        broker,
-                        account_id,
-                        candidate_session.registry_version,
-                    )
+                if not _selector_credential_generation_matches(
+                    store,
+                    broker,
+                    account_id,
+                    committed_generation,
+                ) or not _registry_session_generation_matches(
+                    registry,
+                    broker,
+                    account_id,
+                    candidate_session.registry_version,
                 ):
                     self._admission.publish_if_current(
                         generation,
@@ -455,6 +456,7 @@ class NativeSessionRefresher:
             finally:
                 if candidate_session is not None and candidate_session.registry_version is None:
                     from flinttrade_gateway.native_login import quarantine_native_candidate
+
                     quarantine_native_candidate(candidate_session)
         if failures:
             raise RuntimeError("; ".join(failures))
@@ -486,8 +488,12 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
     admission = _rotation_admission(app)
     mutation_admission = mutation_admission_for(app)
     rotator = CredentialsRotator(
-        NativeSessionRefresher(app, admission, mutation_admission=mutation_admission,
-            registry_publication_owner=app.extensions.get("flinttrade.registry_publication_owner")),
+        NativeSessionRefresher(
+            app,
+            admission,
+            mutation_admission=mutation_admission,
+            registry_publication_owner=app.extensions.get("flinttrade.registry_publication_owner"),
+        ),
         scheduler,
         mutation_admission=mutation_admission,
     )
@@ -502,11 +508,13 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
 
         registered = [str(s) for s in ((_read_workspace_brokers() or {}).get("registered") or [])]
         active_adapters = set((app.config.get("NATIVE_ADAPTERS") or {}).keys())
-        native_brokers = sorted({
-            s.split(":", 1)[0]
-            for s in registered
-            if is_native_broker(s.split(":", 1)[0]) and s.split(":", 1)[0] in active_adapters
-        })
+        native_brokers = sorted(
+            {
+                s.split(":", 1)[0]
+                for s in registered
+                if is_native_broker(s.split(":", 1)[0]) and s.split(":", 1)[0] in active_adapters
+            }
+        )
         for broker in native_brokers:
             rotator.schedule_daily_refresh(broker, "08:05")
     except BrokerAccountCutoverUnavailable as exc:

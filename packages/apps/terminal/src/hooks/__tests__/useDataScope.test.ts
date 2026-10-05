@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  connectionScopeFingerprint,
   resolveDataScope,
   resolveMarketDataScope,
 } from "@/hooks/useDataScope";
@@ -22,11 +21,9 @@ function account(overrides: Partial<BrokerAccount>): BrokerAccount {
 }
 
 describe("resolveDataScope", () => {
-  it("keeps Explore synthetic even when OpenAlgo is configured", () => {
+  it("keeps Explore synthetic with connected native accounts", () => {
     expect(resolveDataScope({
       mode: "explore",
-      host: "http://127.0.0.1:5000",
-      apiKey: "configured",
       accounts: [account({})],
       activeAccountId: "native:dhan:A1",
     })).toBe("explore:mock");
@@ -35,72 +32,25 @@ describe("resolveDataScope", () => {
   it("keeps Practice on its account-independent sandbox", () => {
     expect(resolveDataScope({
       mode: "practice",
-      host: "http://127.0.0.1:5000",
-      apiKey: "configured",
       accounts: [account({})],
       activeAccountId: "native:dhan:A1",
     })).toBe("practice:sandbox:default");
   });
 
-  it("partitions Practice market data by its real OpenAlgo or native authority", () => {
-    const openAlgoA = resolveMarketDataScope({
-      mode: "practice",
-      host: "https://oa.example/TenantA",
-      apiKey: "configured",
-      accounts: [],
-      activeAccountId: null,
-    });
-    const openAlgoB = resolveMarketDataScope({
-      mode: "practice",
-      host: "https://oa.example/TenantB",
-      apiKey: "configured",
-      accounts: [],
-      activeAccountId: null,
-    });
-    const native = resolveMarketDataScope({
-      mode: "practice",
-      host: "",
-      apiKey: "",
-      accounts: [account({ broker: "upstox", account_id: "U1", is_primary: true })],
-      activeAccountId: null,
-    });
-
-    expect(openAlgoA).toMatch(/^practice:openalgo:[0-9a-f]{16}$/);
-    expect(new Set([openAlgoA, openAlgoB, native])).toHaveLength(3);
-    expect(native).toBe("practice:native:upstox:U1");
+  it("partitions Practice market data by its exact native account", () => {
+    const accounts = [account({}), account({ account_id: "B1" })];
+    expect(resolveMarketDataScope({ mode: "practice", accounts, activeAccountId: "native:dhan:A1" }))
+      .toBe("practice:native:dhan:A1");
+    expect(resolveMarketDataScope({ mode: "practice", accounts, activeAccountId: "native:dhan:B1" }))
+      .toBe("practice:native:dhan:B1");
   });
 
-  it("isolates OpenAlgo caches by host and key without retaining either value", () => {
-    const first = resolveDataScope({
-      mode: "live",
-      host: "http://127.0.0.1:5000/",
-      apiKey: "configured",
-      accounts: [account({})],
-      activeAccountId: "native:dhan:A1",
-    });
-    const second = resolveDataScope({
-      mode: "live",
-      host: "http://127.0.0.1:5001",
-      apiKey: "configured",
-      accounts: [account({})],
-      activeAccountId: "native:dhan:A1",
-    });
-    const third = resolveDataScope({
-      mode: "live",
-      host: "http://127.0.0.1:5000",
-      apiKey: "replacement",
-      accounts: [account({})],
-      activeAccountId: "native:dhan:A1",
-    });
-
-    expect(first).toMatch(/^live:openalgo:[0-9a-f]{16}$/);
-    expect(first).not.toContain("configured");
-    expect(first).not.toContain("127.0.0.1");
-    expect(new Set([first, second, third])).toHaveLength(3);
-    expect(connectionScopeFingerprint("http://127.0.0.1:5000/", "configured"))
-      .not.toBe(connectionScopeFingerprint("http://127.0.0.1:5000", "configured"));
-    expect(connectionScopeFingerprint("https://oa.example/TenantA", "configured"))
-      .not.toBe(connectionScopeFingerprint("https://oa.example/tenanta", "configured"));
+  it("does not let stale transport credentials change native authority", () => {
+    const input = { mode: "live" as const, accounts: [account({})], activeAccountId: "native:dhan:A1" };
+    const emptyLegacyFields = { ...input, host: "", apiKey: "" };
+    const retiredLegacyFields = { ...input, host: "https://retired.invalid", apiKey: "stale" };
+    expect(resolveDataScope(emptyLegacyFields)).toBe("live:native:dhan:A1");
+    expect(resolveDataScope(retiredLegacyFields)).toBe("live:native:dhan:A1");
   });
 
   it("distinguishes same-id native accounts by source and broker", () => {
@@ -110,8 +60,6 @@ describe("resolveDataScope", () => {
     ];
     expect(resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts,
       activeAccountId: "native:upstox:SHARED",
     })).toBe("live:native:upstox:SHARED");
@@ -120,8 +68,6 @@ describe("resolveDataScope", () => {
   it("falls back to the primary connected native account", () => {
     expect(resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts: [
         account({ account_id: "D1", status: "disconnected" }),
         account({ account_id: "U1", broker: "upstox", is_primary: true }),
@@ -141,15 +87,11 @@ describe("resolveDataScope", () => {
 
     const before = resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts: connected,
       activeAccountId: null,
     });
     const after = resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts: disconnected,
       activeAccountId: null,
     });
@@ -164,15 +106,11 @@ describe("resolveDataScope", () => {
 
     expect(resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts: [connected],
       activeAccountId: null,
     })).toBe("live:native:dhan:A1");
     expect(resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts: [disconnected],
       activeAccountId: null,
     })).toBe("live:native:dhan:A1");
@@ -181,8 +119,6 @@ describe("resolveDataScope", () => {
   it("does not reuse a different connected account when native identity is ambiguous", () => {
     expect(resolveDataScope({
       mode: "live",
-      host: "",
-      apiKey: "",
       accounts: [
         account({ account_id: "A1", status: "disconnected", is_primary: false }),
         account({ account_id: "B2", broker: "upstox", status: "connected", is_primary: false }),

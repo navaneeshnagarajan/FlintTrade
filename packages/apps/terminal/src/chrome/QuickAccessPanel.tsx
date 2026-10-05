@@ -199,7 +199,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
       {authFailed && wsFailure && (
         <p className="mt-1 pl-4 text-xxs text-text-muted" role="status">
           {wsFailure.reason}
-          {wsFailure.fatal ? " — update the API key in Settings to retry" : ""}
+          {wsFailure.fatal ? " — re-authenticate the broker in Settings to retry" : ""}
         </p>
       )}
     </div>

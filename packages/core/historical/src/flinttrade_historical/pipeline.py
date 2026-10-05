@@ -44,9 +44,7 @@ def _validate_table(table: str) -> str:
         if valid == table:
             return valid
 
-    raise ValueError(
-        f"Invalid table name: {table!r}. Must be one of: {sorted(VALID_TABLES)}"
-    )
+    raise ValueError(f"Invalid table name: {table!r}. Must be one of: {sorted(VALID_TABLES)}")
 
 
 def _validate_path(path: str, base_dir: str | None = None) -> Path:
@@ -55,15 +53,14 @@ def _validate_path(path: str, base_dir: str | None = None) -> Path:
     if base_dir:
         base = Path(base_dir).resolve()
         if not resolved.is_relative_to(base):
-            raise ValueError(
-                f"Path {path!r} is outside allowed directory {base_dir!r}"
-            )
+            raise ValueError(f"Path {path!r} is outside allowed directory {base_dir!r}")
     return resolved
 
 
 def _default_db_path() -> str:
     """Resolve the shared DuckDB path through the workspace authority."""
     return str(duckdb_path())
+
 
 # Aggregation relationships: source → target with bar count
 _AGGREGATION_MAP: list[tuple[str, str, int]] = [
@@ -109,7 +106,13 @@ def aggregate_bars(bars: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
         groups: dict[str, list[dict[str, Any]]] = {}
         for bar in bars:
             ts = bar["timestamp"]
-            day = str(ts)[:10] if isinstance(ts, str) else ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]
+            day = (
+                str(ts)[:10]
+                if isinstance(ts, str)
+                else ts.strftime("%Y-%m-%d")
+                if hasattr(ts, "strftime")
+                else str(ts)[:10]
+            )
             groups.setdefault(day, []).append(bar)
 
         result = []
@@ -298,8 +301,13 @@ class DataPipeline:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
-                    bar["timestamp"], symbol, exchange,
-                    bar["open"], bar["high"], bar["low"], bar["close"],
+                    bar["timestamp"],
+                    symbol,
+                    exchange,
+                    bar["open"],
+                    bar["high"],
+                    bar["low"],
+                    bar["close"],
                     bar.get("volume", 0) or 0,
                     bar.get("oi", 0) or 0,
                 )
@@ -334,7 +342,11 @@ class DataPipeline:
 
         logger.info(
             "Merged %d/%d bars into %s for %s:%s",
-            inserted, len(bars), table, exchange, symbol,
+            inserted,
+            len(bars),
+            table,
+            exchange,
+            symbol,
         )
         return inserted
 
@@ -446,7 +458,11 @@ class DataPipeline:
             if count > 0:
                 logger.info(
                     "Aggregated %s → %s for %s:%s: %d new bars",
-                    source, target, exchange, symbol, count,
+                    source,
+                    target,
+                    exchange,
+                    symbol,
+                    count,
                 )
         return results
 

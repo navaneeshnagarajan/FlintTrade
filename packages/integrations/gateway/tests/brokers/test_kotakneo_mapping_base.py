@@ -412,7 +412,7 @@ def test_to_quote_tokens_maps_segments():
 
 
 def test_to_quote_tokens_maps_index_exchanges_to_cash_segments():
-    """NSE_INDEX/BSE_INDEX (the OpenAlgo/terminal index convention) must ride
+    """NSE_INDEX/BSE_INDEX (the canonical terminal index convention) must ride
     the NEO cash segments — the old ex.lower() fallback emitted the invalid
     segment "nse_index" and the broker rejected every index quote."""
     tokens = to_quote_tokens([("Nifty 50", "NSE_INDEX"), ("SENSEX", "BSE_INDEX")])

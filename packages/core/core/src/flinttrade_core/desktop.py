@@ -15,10 +15,8 @@ Design goals (distinct from :func:`flinttrade_core.app.FlintTradeApp.run`):
   degrade gracefully when unavailable.
 * **No ``.env`` dependency.** Configuration comes from ``workspace.json``
   under ``~/.flinttrade/`` (auto-created on first launch). Infrastructure
-  defaults (OpenAlgo on ``127.0.0.1:5000``, empty API key) are baked into
-  :class:`flinttrade_core.config.Settings`, so a fresh install runs with no
-  files to edit — the user configures OpenAlgo, if they want it, from the
-  in-app Settings panel.
+  configuration is available on first launch without files to edit. Broker
+  credentials belong to the encrypted gateway vault.
 * **Loopback only.** The server always binds ``127.0.0.1`` — never a routable
   interface — so the desktop backend is unreachable from the network.
 * **Lifecycle handshake.** Once the listening socket is bound, a single
@@ -57,7 +55,6 @@ from .app import (
     _pending_tick_count,
     _prepare_tick_orderflow_state,
     _record_tick_capture_failure,
-    _sanitise_tick_capture_error,
     _set_tick_capture_intent,
     _shutdown_rotation_scheduler,
     _start_rotation_scheduler,
@@ -80,7 +77,7 @@ from .backend_instance import (
     require_backend_lease_proof,
     retain_backend_instance_lease,
 )
-from .openalgo_client import client_close_sync
+from .broker_client import client_close_sync
 from .workspace import Workspace
 
 logger = logging.getLogger("flinttrade.desktop")
@@ -93,8 +90,8 @@ class DesktopBackendShutdownIncomplete(RuntimeError):
         super().__init__(message)
         self.recovery_owner = recovery_owner
 
-#: Default loopback port for the desktop backend. Kept distinct from OpenAlgo's
-#: 5000-5009 range (see CLAUDE.md). Overridable via ``--port`` or the
+
+#: Default loopback port for the desktop backend. Overridable via ``--port`` or the
 #: ``FLINTTRADE_BACKEND_PORT`` environment variable.
 DEFAULT_PORT = 5100
 
@@ -221,21 +218,17 @@ class _DesktopTickStorageRollbackOwner:
     def __init__(
         self,
         storage: Any,
-        api_key: str,
         *,
         storage_lock: Any | None = None,
         on_storage_closed: Callable[[], None] | None = None,
     ) -> None:
         self.storage = storage
-        self.api_key = api_key
         self._storage_lock = storage_lock
         self._on_storage_closed = on_storage_closed
         self._state_lock = threading.Lock()
         self._storage_closed = False
         self._owner_released = False
-        self._close_worker = _RetainedBoundedWorker(
-            "flinttrade-desktop-tick-startup-storage-close"
-        )
+        self._close_worker = _RetainedBoundedWorker("flinttrade-desktop-tick-startup-storage-close")
 
     def sanitise_error(self, error: Any) -> str:
         """Expose only bounded exception context during construction rollback."""
@@ -288,7 +281,6 @@ class _DesktopTickCaptureRuntime:
         self,
         recorder: Any,
         storage: Any,
-        api_key: str,
         *,
         storage_lock: Any | None = None,
         checkpoint_owner: _OrderFlowCheckpointOwner | None = None,
@@ -300,7 +292,6 @@ class _DesktopTickCaptureRuntime:
     ) -> None:
         self.recorder = recorder
         self.storage = storage
-        self.api_key = api_key
         self._storage_lock = storage_lock
         self._checkpoint_owner = checkpoint_owner
         self._retention_days = retention_days
@@ -310,8 +301,6 @@ class _DesktopTickCaptureRuntime:
         self._retention_pruning = False
         self._retention_started = False
         self._recorder_finished = threading.Event()
-        self._redaction_lock = threading.Lock()
-        self._redaction_keys = {api_key} if api_key else set()
         self._on_failure = on_failure
         self._on_unpublish = on_unpublish
         self._on_storage_closed = on_storage_closed
@@ -370,23 +359,11 @@ class _DesktopTickCaptureRuntime:
         with self._stop_lock:
             return self._stopped
 
-    def update_api_key(self, api_key: str) -> None:
-        """Add a hot-reloaded key to the runtime's error-redaction set."""
-        with self._redaction_lock:
-            self.api_key = api_key
-            if api_key:
-                self._redaction_keys.add(api_key)
-
     def _sanitise(self, error: Any) -> str:
-        with self._redaction_lock:
-            keys = tuple(self._redaction_keys)
-        diagnostic = _sanitise_tick_capture_error(error, "")
-        for key in keys:
-            diagnostic = _sanitise_tick_capture_error(diagnostic, key)
-        return diagnostic
+        return _external_exception_context(error) if isinstance(error, BaseException) else "Tick capture unavailable"
 
     def sanitise_error(self, error: Any) -> str:
-        """Sanitise a diagnostic with every API key seen by this runtime."""
+        """Return failure classification without exposing external payloads."""
         return self._sanitise(error)
 
     def _signal_startup(self, task: asyncio.Task[Any]) -> None:
@@ -781,7 +758,7 @@ def _configure_tick_capture(
 ) -> _DesktopTickCaptureRuntime | None:
     """Apply capture intent and start the desktop recorder when configured."""
     enabled = _tick_capture_enabled()
-    _set_tick_capture_intent(flask_app, enabled)
+    _set_tick_capture_intent(flask_app)
     if not enabled:
         return None
 
@@ -789,7 +766,6 @@ def _configure_tick_capture(
     storage_lock: Any | None = None
     runtime: _DesktopTickCaptureRuntime | None = None
     checkpoint_owner: _OrderFlowCheckpointOwner | None = None
-    api_key = str(getattr(settings, "openalgo_api_key", "") or "")
     try:
         if storage_factory is None:
             from flinttrade_data.storage import StorageManager  # noqa: PLC0415
@@ -838,11 +814,7 @@ def _configure_tick_capture(
             orderflow=orderflow,
             watchlist=watchlist,
             mode=_tick_capture_mode(),
-            post_flush_callback=(
-                checkpoint_owner.persist_locked
-                if checkpoint_owner is not None
-                else None
-            ),
+            post_flush_callback=(checkpoint_owner.persist_locked if checkpoint_owner is not None else None),
         )
 
         def capture_failed(diagnostic: str) -> None:
@@ -868,7 +840,6 @@ def _configure_tick_capture(
         runtime = _DesktopTickCaptureRuntime(
             recorder,
             storage,
-            api_key,
             storage_lock=storage_lock,
             checkpoint_owner=checkpoint_owner,
             retention_days=_TICK_RETENTION_DAYS,
@@ -914,7 +885,6 @@ def _configure_tick_capture(
 
             rollback_owner = _DesktopTickStorageRollbackOwner(
                 storage,
-                api_key,
                 storage_lock=storage_lock,
                 on_storage_closed=release_rollback_owner,
             )
@@ -936,8 +906,7 @@ def _configure_tick_capture(
                 flask_app.config.pop(_CAPTURE_RUNTIME_CONFIG, None)
         _record_tick_capture_failure(
             flask_app,
-            _external_exception_context(exc),
-            "",
+            exc,
         )
         return None
 
@@ -963,7 +932,7 @@ def _bind_desktop_safety_runtime(flask_app: Any, safety: Any, client: Any) -> An
     """Bind desktop MTM checks to the shared broker loop and current dispatcher.
 
     The packaged desktop deliberately does not start the full async application
-    runtime. It must therefore reuse the OpenAlgo client's persistent owner
+    runtime. It must therefore reuse the native broker client's persistent owner
     loop rather than creating a second safety monitor or per-request loop.
     """
     if safety is None or client is None:
@@ -1100,15 +1069,9 @@ class _DesktopStartupRollbackRecoveryOwner:
         self._owners_complete = False
         self._smart_order_started = smart_order_started
         self._startup_error_context = startup_error_context
-        self._rollback_worker = _RetainedBoundedWorker(
-            "flinttrade-desktop-startup-rollback"
-        )
-        self._local_ai_worker = _RetainedBoundedWorker(
-            "flinttrade-desktop-startup-local-ai"
-        )
-        self._lease_worker = _RetainedBoundedWorker(
-            "flinttrade-desktop-startup-lease-release"
-        )
+        self._rollback_worker = _RetainedBoundedWorker("flinttrade-desktop-startup-rollback")
+        self._local_ai_worker = _RetainedBoundedWorker("flinttrade-desktop-startup-local-ai")
+        self._lease_worker = _RetainedBoundedWorker("flinttrade-desktop-startup-lease-release")
         self._attempt_lock = threading.Lock()
         self._lease_lock = threading.Lock()
         self._backend_lease: Any = None
@@ -1169,9 +1132,7 @@ class _DesktopStartupRollbackRecoveryOwner:
                 logger.warning("Desktop startup managed local AI rollback timed out")
         if not self._owners_complete:
             try:
-                self._owners_complete = bool(
-                    self._rollback_worker.run(self._rollback_once, deadline=deadline)
-                )
+                self._owners_complete = bool(self._rollback_worker.run(self._rollback_once, deadline=deadline))
             except TimeoutError:
                 logger.warning("Desktop backend startup rollback timed out")
                 return False
@@ -1246,7 +1207,7 @@ def _build_app(backend_lease_proof: BackendLeaseProof) -> object:
 
     Mirrors the wiring :meth:`FlintTradeApp.start` performs, minus the async
     automation loops: a :class:`SafetySystem`, :class:`AuditLogger`, and
-    :class:`OpenAlgoClient` are passed in so the gated order path and the
+    :class:`BrokerClient` are passed in so the gated order path and the
     safety endpoints are fully live. The broker router, credential vault,
     registry, and contract manager are self-bootstrapped inside
     :func:`create_flask_app` when not supplied.
@@ -1278,14 +1239,14 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
         )
 
     try:
+        from .broker_client import BrokerClient  # noqa: PLC0415
         from .config import Settings  # noqa: PLC0415
-        from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
 
         settings = Settings.from_env()
-        client = OpenAlgoClient(settings)
+        client = BrokerClient(settings)
     except Exception as exc:  # pragma: no cover - defensive
         print(
-            f"[desktop] OpenAlgo client unavailable ({_external_exception_context(exc)})",
+            f"[desktop] native broker client unavailable ({_external_exception_context(exc)})",
             file=sys.stderr,
         )
 
@@ -1294,7 +1255,10 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
     smart_order_started = False
     try:
         flask_app = create_flask_app(
-            safety=safety, audit=audit, client=client, backend_lease_proof=backend_lease_proof,
+            safety=safety,
+            audit=audit,
+            client=client,
+            backend_lease_proof=backend_lease_proof,
         )
         from .local_ai_routes import start_configured_local_ai_runtime  # noqa: PLC0415
 
@@ -1321,7 +1285,7 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
                 settings = Settings.from_env()
             except Exception as exc:  # pragma: no cover - defensive
                 enabled = _tick_capture_enabled()
-                _set_tick_capture_intent(flask_app, enabled)
+                _set_tick_capture_intent(flask_app)
                 if enabled:
                     _record_tick_capture_failure(
                         flask_app,
@@ -1333,11 +1297,7 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
         return flask_app
     except BaseException as startup_error:
         startup_error_context = _external_exception_context(startup_error)
-        startup_signal = (
-            startup_error
-            if isinstance(startup_error, (KeyboardInterrupt, SystemExit))
-            else None
-        )
+        startup_signal = startup_error if isinstance(startup_error, (KeyboardInterrupt, SystemExit)) else None
         recovery_owner = _DesktopStartupRollbackRecoveryOwner(
             flask_app,
             client=client,
@@ -1346,9 +1306,7 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
             smart_order_started=smart_order_started,
             startup_error_context=startup_error_context,
         )
-        rollback_complete = recovery_owner.attempt_rollback(
-            deadline=time.monotonic() + _DESKTOP_SHUTDOWN_TIMEOUT
-        )
+        rollback_complete = recovery_owner.attempt_rollback(deadline=time.monotonic() + _DESKTOP_SHUTDOWN_TIMEOUT)
 
     if not rollback_complete:
         raise DesktopBackendShutdownIncomplete(
@@ -1357,9 +1315,7 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
         ) from None
     if startup_signal is not None:
         raise startup_signal from None
-    raise RuntimeError(
-        f"Desktop backend startup failed ({startup_error_context})"
-    ) from None
+    raise RuntimeError(f"Desktop backend startup failed ({startup_error_context})") from None
 
 
 def _close_waitress_channels(server: Any, socket_map: dict[Any, Any]) -> None:
@@ -1417,9 +1373,7 @@ class _DesktopShutdownRecoveryOwner:
         self.app = app
         self.server = server
         self.waitress_dispatcher = waitress_dispatcher
-        self.waitress_socket_map = (
-            waitress_socket_map if waitress_socket_map is not None else {}
-        )
+        self.waitress_socket_map = waitress_socket_map if waitress_socket_map is not None else {}
         self.shutdown_signal = shutdown_signal
         self.shutdown_callback = shutdown_callback
         self._tracker = app.config.get("RUNTIME_REQUEST_TRACKER")
@@ -1481,9 +1435,7 @@ class _DesktopShutdownRecoveryOwner:
         except BaseException as exc:  # noqa: BLE001 - exact owner remains retryable
             logger.warning(failure_message, error_context(exc))
             return False
-        if require_live_deadline_for_success and (
-            not deadline_was_live or _remaining_shutdown_budget(deadline) <= 0.0
-        ):
+        if require_live_deadline_for_success and (not deadline_was_live or _remaining_shutdown_budget(deadline) <= 0.0):
             logger.warning(timeout_message)
             return False
         if require_truthy and not result:
@@ -1744,9 +1696,7 @@ class _DesktopShutdownRecoveryOwner:
                     timeout_message="Desktop tick capture shutdown timed out",
                     error_context=self._runtime_error_context,
                 )
-            capture_storage_known = not self._capture_deadline_aware or callable(
-                self._deferred_capture_storage
-            )
+            capture_storage_known = not self._capture_deadline_aware or callable(self._deferred_capture_storage)
 
         owner_quiesced = all(
             (
@@ -1820,9 +1770,7 @@ class _DesktopShutdownRecoveryOwner:
                     require_truthy=True,
                 )
 
-        post_drain_quiesced = all(
-            (post_strategies_stopped, post_ditto_stopped, post_router_retired)
-        )
+        post_drain_quiesced = all((post_strategies_stopped, post_ditto_stopped, post_router_retired))
         if requests_drained and owner_quiesced and post_drain_quiesced:
             if self._deferred_capture_storage is None:
                 capture_storage_closed = self._complete_without_work("tick-storage")
@@ -1862,14 +1810,14 @@ class _DesktopShutdownRecoveryOwner:
             client = app.config.get("CLIENT")
             client_closed = (
                 self._run_worker(
-                    "openalgo-client",
+                    "broker-read-client",
                     lambda: client_close_sync(client),
                     deadline=deadline,
-                    failure_message="Desktop OpenAlgo client shutdown failed (%s)",
-                    timeout_message="Desktop OpenAlgo client shutdown timed out",
+                    failure_message="Desktop native broker client shutdown failed (%s)",
+                    timeout_message="Desktop native broker client shutdown timed out",
                 )
                 if client is not None
-                else self._complete_without_work("openalgo-client")
+                else self._complete_without_work("broker-read-client")
             )
 
             audit = app.config.get("AUDIT")
@@ -1995,9 +1943,7 @@ def serve(
     except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
         lease_failure_context = _external_exception_context(exc)
     if lease_failure_context is not None:
-        raise RuntimeError(
-            f"Desktop backend startup failed ({lease_failure_context})"
-        ) from None
+        raise RuntimeError(f"Desktop backend startup failed ({lease_failure_context})") from None
 
     serve_error: BaseException | None = None
     try:
@@ -2025,9 +1971,7 @@ def serve(
     except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
         lease_release_context = _external_exception_context(exc)
     if lease_release_context is not None:
-        raise RuntimeError(
-            f"Desktop backend lease release failed ({lease_release_context})"
-        ) from None
+        raise RuntimeError(f"Desktop backend lease release failed ({lease_release_context})") from None
     if serve_error is not None:
         raise serve_error from None
 
@@ -2118,9 +2062,7 @@ def _serve_owned(
     if shutdown_failure is not None:
         raise shutdown_failure from None
     if failure_context is not None:
-        raise RuntimeError(
-            f"Desktop backend {failure_phase} failed ({failure_context})"
-        ) from None
+        raise RuntimeError(f"Desktop backend {failure_phase} failed ({failure_context})") from None
 
 
 def main(
@@ -2152,9 +2094,7 @@ def main(
     except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
         workspace_failure_context = _external_exception_context(exc)
     if workspace_failure_context is not None:
-        raise RuntimeError(
-            f"Desktop backend startup failed ({workspace_failure_context})"
-        ) from None
+        raise RuntimeError(f"Desktop backend startup failed ({workspace_failure_context})") from None
     serve(
         _resolve_port(args.port),
         shutdown_signal=shutdown_signal,

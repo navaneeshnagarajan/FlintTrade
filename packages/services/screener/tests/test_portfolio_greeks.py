@@ -486,3 +486,29 @@ class TestEnhancedPortfolioGreeks:
         }
         result = epg.calculate_enhanced(positions, greeks_override=override)
         assert result.is_delta_neutral
+
+
+def test_local_call_put_delta_parity_and_rate_sensitivity():
+    from flinttrade_screener.greeks import PortfolioGreeks, _option_value
+    from flinttrade_screener.portfolio_greeks import _bs_rho
+
+    call = PortfolioGreeks.local_greeks("CE", 100, 100, 0.25, 0.05, 0.2)
+    put = PortfolioGreeks.local_greeks("PE", 100, 100, 0.25, 0.05, 0.2)
+    assert call.delta - put.delta == pytest.approx(1)
+    assert call.gamma == put.gamma
+    shift = 0.001
+    difference = (_option_value("c", 100 + shift, 100, 0.25, 0.05, 0.2)
+                  - _option_value("c", 100 - shift, 100, 0.25, 0.05, 0.2)) / (2 * shift)
+    assert call.delta == pytest.approx(difference, abs=0.0001)
+    assert _bs_rho("c", 100, 100, 0.25, 0.05, 0.2) > 0
+    assert _bs_rho("p", 100, 100, 0.25, 0.05, 0.2) < 0
+
+
+def test_client_cannot_reintroduce_implicit_greek_fetch():
+    from unittest.mock import MagicMock
+    from flinttrade_screener.greeks import OptionPosition, PortfolioGreeks
+
+    client = MagicMock()
+    with pytest.raises(RuntimeError, match="admitted typed snapshot"):
+        PortfolioGreeks(client).calculate([OptionPosition("TEST")])
+    assert client.mock_calls == []

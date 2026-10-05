@@ -61,7 +61,9 @@ def test_stopped_proof_watch_cannot_request_late_shutdown(backend_lease_proof):
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_wsgi_revocation_snapshots_current_owners_then_requests_host_shutdown(
-    monkeypatch, backend_lease_proof, cleanup_fails,
+    monkeypatch,
+    backend_lease_proof,
+    cleanup_fails,
 ):
     import flinttrade_core.app as app_module
     import flinttrade_core.desktop as desktop_module
@@ -83,7 +85,8 @@ def test_wsgi_revocation_snapshots_current_owners_then_requests_host_shutdown(
                 events.append("owners-retained")
                 cleanup_attempted.set()
                 raise desktop_module.DesktopBackendShutdownIncomplete(
-                    "Synthetic retained cleanup", recovery_owner=self,
+                    "Synthetic retained cleanup",
+                    recovery_owner=self,
                 )
             events.append("owners-drained")
 
@@ -119,7 +122,10 @@ def test_wsgi_revocation_snapshots_current_owners_then_requests_host_shutdown(
 @pytest.mark.parametrize("stage", ["stat", "proof"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
-    tmp_path, monkeypatch, stage, cleanup_fails,
+    tmp_path,
+    monkeypatch,
+    stage,
+    cleanup_fails,
 ):
     import flinttrade_core.backend_instance as module
 
@@ -147,12 +153,18 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
         with monkeypatch.context() as fault:
             fault.setattr(os, "open", record_open)
             fault.setattr(Path, "stat", fail_stat) if stage == "stat" else fault.setattr(
-                module, "BackendLeaseProof", fail_proof,
+                module,
+                "BackendLeaseProof",
+                fail_proof,
             )
             if cleanup_fails:
-                fault.setattr(module._PosixBackendFileLease, "release", lambda self: (_ for _ in ()).throw(
-                    OSError("injected cleanup failure"),
-                ))
+                fault.setattr(
+                    module._PosixBackendFileLease,
+                    "release",
+                    lambda self: (_ for _ in ()).throw(
+                        OSError("injected cleanup failure"),
+                    ),
+                )
             with pytest.raises((PermissionError, OSError)):
                 module.acquire_backend_instance_lease()
         retained = [owner for owner in module._RETAINED_FAILED_LEASES if owner not in retained_before]
@@ -206,10 +218,10 @@ def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monke
     def forbidden(*args, **kwargs):
         pytest.fail("proofless construction acquired scheduling ownership")
 
-    # Sibling xdist modules assign OPENALGO_API_KEY / FLINTTRADE_API_KEY on
+    # Sibling xdist modules assign FLINTTRADE_API_KEY / FLINTTRADE_API_KEY on
     # os.environ directly. A leftover key is not what this probe is checking;
     # the status route still needs a session before the proofless 503.
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     for owner in ("TimeScheduler", "CronStrategyScheduler"):
         monkeypatch.setattr(scheduling, owner, forbidden)
@@ -363,7 +375,6 @@ def test_standalone_construction_defers_broker_owners(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("broker authority constructed before backend ownership")
 
-    monkeypatch.setattr(module, "OpenAlgoClient", forbidden)
     monkeypatch.setattr(module, "CredentialStore", forbidden)
     monkeypatch.setattr(module, "create_owned_registry", forbidden)
     runtime = module.FlintTradeApp()
@@ -400,17 +411,17 @@ def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("proofless factory constructed broker authority")
 
-    # Sibling modules assign OPENALGO_API_KEY / FLINTTRADE_API_KEY on
+    # Sibling modules assign FLINTTRADE_API_KEY / FLINTTRADE_API_KEY on
     # os.environ directly. The public liveness probe does not need a key.
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.setattr(module, "CredentialStore", forbidden)
     monkeypatch.setattr(module, "create_owned_registry", forbidden)
-    monkeypatch.setattr(module, "OpenAlgoClient", forbidden)
     app = module.create_flask_app()
     assert app.config["REGISTRY"] is None
     assert app.config["CREDENTIAL_STORE"] is None
-    assert app.config["CLIENT"] is None
+    assert app.config["CLIENT"]._app is app
+    assert not hasattr(app.config["CLIENT"], "place_order")
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BACKEND_LEASE_READY"] is False
     assert app.test_client().get("/api/v1/ping").status_code == 200
@@ -469,6 +480,7 @@ def test_guardian_handoff_binds_child_and_revokes_on_parent_release(tmp_path, mo
     try:
         handoff.publish(child)
         import select
+
         assert select.select([result_read], [], [], 5)[0]
         assert os.read(result_read, 4) == b"live"
         if termination == "release":
@@ -858,9 +870,7 @@ def test_failed_retained_release_keeps_global_retry_authority() -> None:
     finally:
         with backend_instance._RETAINED_FAILED_LEASES_LOCK:
             backend_instance._RETAINED_FAILED_LEASES[:] = [
-                retained
-                for retained in backend_instance._RETAINED_FAILED_LEASES
-                if retained is not lease
+                retained for retained in backend_instance._RETAINED_FAILED_LEASES if retained is not lease
             ]
 
 
@@ -898,9 +908,7 @@ def test_failed_release_keeps_descriptor_wrapper_and_recovery_owner_attached() -
     finally:
         with backend_instance._RETAINED_FAILED_LEASES_LOCK:
             backend_instance._RETAINED_FAILED_LEASES[:] = [
-                retained
-                for retained in backend_instance._RETAINED_FAILED_LEASES
-                if retained is not lease
+                retained for retained in backend_instance._RETAINED_FAILED_LEASES if retained is not lease
             ]
 
 
@@ -933,9 +941,7 @@ def test_direct_release_failure_self_retains_global_authority_until_retry() -> N
     finally:
         with backend_instance._RETAINED_FAILED_LEASES_LOCK:
             backend_instance._RETAINED_FAILED_LEASES[:] = [
-                retained
-                for retained in backend_instance._RETAINED_FAILED_LEASES
-                if retained is not lease
+                retained for retained in backend_instance._RETAINED_FAILED_LEASES if retained is not lease
             ]
 
 

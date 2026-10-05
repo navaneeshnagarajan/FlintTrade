@@ -32,7 +32,7 @@ def _restore_env():
 @pytest.fixture(scope="module")
 def client(_restore_env):
     """Flask test client with a pre-set API key."""
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
 
     app = create_flask_app()
@@ -78,7 +78,7 @@ class TestSecurityHeaders:
         resp = _authed_get(client, "/v1/admin/health")
         val = resp.headers.get("Permissions-Policy", "")
         assert "camera=()" in val
-        assert "microphone=()" in val
+        assert "microphone=(self)" in val
         assert "geolocation=()" in val
 
     def test_headers_on_401_response(self, client):
@@ -99,19 +99,11 @@ class TestSecurityHeaders:
         # the script directive must carry a nonce and must NOT allow inline scripts
         import re
 
-        script_src = next(
-            (d for d in csp.split(";") if d.strip().startswith("script-src")), ""
-        )
+        script_src = next((d for d in csp.split(";") if d.strip().startswith("script-src")), "")
         assert "'nonce-" in script_src, f"script directive lacks a nonce: {script_src!r}"
-        assert "'unsafe-inline'" not in script_src, (
-            f"script directive must not allow inline scripts: {script_src!r}"
-        )
+        assert "'unsafe-inline'" not in script_src, f"script directive must not allow inline scripts: {script_src!r}"
         # nonce must differ across requests (per-request randomness)
         resp2 = _authed_get(client, "/v1/admin/health")
         nonce1 = re.search(r"'nonce-([^']+)'", csp)
-        nonce2 = re.search(
-            r"'nonce-([^']+)'", resp2.headers.get("Content-Security-Policy", "")
-        )
-        assert nonce1 and nonce2 and nonce1.group(1) != nonce2.group(1), (
-            "CSP nonce must be unique per request"
-        )
+        nonce2 = re.search(r"'nonce-([^']+)'", resp2.headers.get("Content-Security-Policy", ""))
+        assert nonce1 and nonce2 and nonce1.group(1) != nonce2.group(1), "CSP nonce must be unique per request"

@@ -253,7 +253,7 @@ class TestGEXEndpoint:
         payload = _chain_payload()
         payload.pop("lot_size")
         app.config["REGISTRY"] = _PayloadRegistry(payload)
-        app.config["OPENALGO_CLIENT"] = _InstrumentClient()
+        app.config["BROKER_CLIENT"] = _InstrumentClient()
 
         response, body = _post(
             client,
@@ -270,7 +270,7 @@ class TestGEXEndpoint:
         payload = _chain_payload()
         payload.pop("lot_size")
         app.config["REGISTRY"] = _PayloadRegistry(payload)
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         _, body = _post(
             client,
@@ -980,8 +980,8 @@ class TestSampleDataHonesty:
 
 
 class TestLiveOptionChain:
-    """With an OpenAlgo client configured, the option-chain endpoints fetch a REAL
-    chain (via OpenAlgoClient.option_chain) and report is_sample_data=False — the
+    """With an broker client configured, the option-chain endpoints fetch a REAL
+    chain (via BrokerClient.option_chain) and report is_sample_data=False — the
     other half of the honesty fix: sample only when genuinely unavailable."""
 
     class _Strike:
@@ -1003,7 +1003,7 @@ class TestLiveOptionChain:
             self.spot_price = spot_price
             self.expiry_date = expiry_date
 
-    class _FakeOpenAlgo:
+    class _Fakebroker:
         def __init__(self):
             self.chain_calls = []
 
@@ -1031,7 +1031,7 @@ class TestLiveOptionChain:
             }
 
     def _post_with_client(self, app, client, path):
-        app.config["OPENALGO_CLIENT"] = self._FakeOpenAlgo()
+        app.config["BROKER_CLIENT"] = self._Fakebroker()
         return _post(
             client,
             path,
@@ -1041,7 +1041,7 @@ class TestLiveOptionChain:
     def test_gex_uses_live_chain(self, app, client):
         _, body = self._post_with_client(app, client, "/api/v1/gex")
         assert body["status"] == "success"
-        assert body["is_sample_data"] is False  # real chain via OpenAlgo, not sample
+        assert body["is_sample_data"] is False  # real chain via broker, not sample
         assert body["data"]["strikes"]
 
     def test_maxpain_uses_live_chain(self, app, client):
@@ -1053,9 +1053,9 @@ class TestLiveOptionChain:
         _, body = self._post_with_client(app, client, "/api/v1/ivsmile")
         assert body["is_sample_data"] is False
 
-    def test_ivsmile_passes_underlying_exchange_and_selected_expiry_to_openalgo(self, app, client):
-        openalgo = self._FakeOpenAlgo()
-        app.config["OPENALGO_CLIENT"] = openalgo
+    def test_ivsmile_passes_underlying_exchange_and_selected_expiry_to_broker(self, app, client):
+        broker = self._Fakebroker()
+        app.config["BROKER_CLIENT"] = broker
         expiry = _future_expiry()
 
         _, body = _post(
@@ -1065,16 +1065,16 @@ class TestLiveOptionChain:
         )
 
         assert body["is_sample_data"] is False
-        assert openalgo.chain_calls == [("NIFTY", "NSE_INDEX", expiry)]
+        assert broker.chain_calls == [("NIFTY", "NSE_INDEX", expiry)]
 
-    def test_openalgo_chain_without_response_expiry_identity_is_not_live(self, app, client):
-        class _MissingExpiryOpenAlgo(self._FakeOpenAlgo):
+    def test_broker_chain_without_response_expiry_identity_is_not_live(self, app, client):
+        class _MissingExpirybroker(self._Fakebroker):
             async def option_chain(inner_self, symbol, exchange="NSE_INDEX", expiry=""):
                 chain = await super().option_chain(symbol, exchange, expiry)
                 chain.expiry_date = ""
                 return chain
 
-        app.config["OPENALGO_CLIENT"] = _MissingExpiryOpenAlgo()
+        app.config["BROKER_CLIENT"] = _MissingExpirybroker()
 
         _, body = _post(
             client,
@@ -1084,7 +1084,7 @@ class TestLiveOptionChain:
 
         assert body["is_sample_data"] is True
 
-    def test_native_session_complete_greeks_outrank_incomplete_openalgo_chain(self, app, client):
+    def test_native_session_complete_greeks_outrank_incomplete_broker_chain(self, app, client):
         import time
         from types import SimpleNamespace
 
@@ -1104,7 +1104,7 @@ class TestLiveOptionChain:
                     "pe_iv": 13.1,
                 }
 
-        class _IncompleteOpenAlgo:
+        class _Incompletebroker:
             async def option_chain(self, _symbol, _exchange="NSE_INDEX", _expiry=""):
                 return TestLiveOptionChain._Chain([_IncompleteStrike()], spot_price=24000.0)
 
@@ -1113,7 +1113,7 @@ class TestLiveOptionChain:
         registry = SimpleNamespace(is_connected=lambda: False, list_connected_adapter_sessions=lambda: (("dhan", "native-1", session),))
         app.config["REGISTRY"] = registry
         app.config["NATIVE_ADAPTERS"] = {"dhan": _NativeAdapter()}
-        app.config["OPENALGO_CLIENT"] = _IncompleteOpenAlgo()
+        app.config["BROKER_CLIENT"] = _Incompletebroker()
 
         expiry = _future_expiry()
         _, body = _post(
@@ -1160,7 +1160,7 @@ class TestLiveOptionChain:
             "spotless": _NativeAdapter(spotless),
             "usable": _NativeAdapter(usable),
         }
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         _, body = _post(
             client,
@@ -1198,7 +1198,7 @@ class TestLiveOptionChain:
             "invalid": _NativeAdapter(zero_strike),
             "usable": _NativeAdapter(usable),
         }
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         _, body = _post(
             client,
@@ -1221,11 +1221,11 @@ class TestLiveOptionChain:
                     "pe_gamma": None,
                 }
 
-        class _IncompleteOpenAlgo:
+        class _Incompletebroker:
             async def option_chain(self, _symbol, _exchange="NSE_INDEX", _expiry=""):
                 return TestLiveOptionChain._Chain([_IncompleteStrike()], spot_price=24000.0)
 
-        app.config["OPENALGO_CLIENT"] = _IncompleteOpenAlgo()
+        app.config["BROKER_CLIENT"] = _Incompletebroker()
 
         _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
 
@@ -1235,7 +1235,7 @@ class TestLiveOptionChain:
 
     def test_registry_chain_maps_bse_index_identity(self, app, client):
         registry = _ConnectedRegistry()
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         app.config["REGISTRY"] = registry
 
         expiry = _future_expiry()
@@ -1252,13 +1252,13 @@ class TestLiveOptionChain:
         )]
 
     def test_ivsmile_live_chain_without_spot_uses_labelled_sample(self, app, client):
-        class _NoSpotOpenAlgo(self._FakeOpenAlgo):
+        class _NoSpotbroker(self._Fakebroker):
             async def option_chain(inner_self, symbol, exchange="NSE_INDEX", expiry=""):
                 chain = await super().option_chain(symbol, exchange, expiry)
                 chain.spot_price = 0.0
                 return chain
 
-        app.config["OPENALGO_CLIENT"] = _NoSpotOpenAlgo()
+        app.config["BROKER_CLIENT"] = _NoSpotbroker()
 
         _, body = _post(
             client,
@@ -1279,7 +1279,7 @@ class TestLiveOptionChain:
         them. Guards the dte echo at the route boundary, not just in isolation."""
         from datetime import date, timedelta
 
-        app.config["OPENALGO_CLIENT"] = self._FakeOpenAlgo()
+        app.config["BROKER_CLIENT"] = self._Fakebroker()
         future_iso = (date.today() + timedelta(days=20)).isoformat()  # YYYY-MM-DD
         _, body = _post(
             client,
@@ -1305,7 +1305,7 @@ class TestOptionChainTruthfulness:
     def _configure_registry(app, payload: dict) -> _PayloadRegistry:
         registry = _PayloadRegistry(payload)
         app.config["REGISTRY"] = registry
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         return registry
 
     @staticmethod
@@ -1585,9 +1585,9 @@ class TestOptionChainTruthfulness:
         assert all("pe_oi_change" not in row for row in data["profile_strikes"])
         assert data["futures_ohlcv"] == []
 
-    def test_vol_surface_attempts_openalgo_without_a_connected_registry(self, app, client):
-        openalgo = TestLiveOptionChain._FakeOpenAlgo()
-        app.config["OPENALGO_CLIENT"] = openalgo
+    def test_vol_surface_attempts_broker_without_a_connected_registry(self, app, client):
+        broker = TestLiveOptionChain._Fakebroker()
+        app.config["BROKER_CLIENT"] = broker
         expiry = _future_expiry()
 
         response, body = _post(
@@ -1598,7 +1598,7 @@ class TestOptionChainTruthfulness:
 
         assert response.status_code == 200
         assert body["is_sample_data"] is False
-        assert openalgo.chain_calls == [("NIFTY", "NSE_INDEX", expiry)]
+        assert broker.chain_calls == [("NIFTY", "NSE_INDEX", expiry)]
 
 
 class TestLiveRegistryHistory:
@@ -1728,7 +1728,7 @@ class TestGammaDensityRoute:
     def test_omitted_expiry_does_not_trigger_an_invented_live_read(self, app, client):
         registry = _PayloadRegistry(_chain_payload())
         app.config["REGISTRY"] = registry
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         response, payload = _post(
             client,
@@ -1750,7 +1750,7 @@ class TestGammaDensityRoute:
 
         registry = _PayloadRegistry(_chain_payload())
         app.config["REGISTRY"] = registry
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         body = {
             "symbol": "NIFTY",
             "exchange": "NFO",
@@ -1768,7 +1768,7 @@ class TestGammaDensityRoute:
 
         registry = _PayloadRegistry(_chain_payload())
         app.config["REGISTRY"] = registry
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         expiry = (date.today() + timedelta(days=9)).isoformat()
 
         response, payload = _post(
@@ -1783,7 +1783,7 @@ class TestGammaDensityRoute:
 
     @pytest.mark.parametrize("expiry", ["", "not-a-date"])
     def test_unparseable_expiry_never_labels_live_density(self, app, client, expiry):
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
 
         resp, body = _post(
@@ -1799,7 +1799,7 @@ class TestGammaDensityRoute:
     def test_non_future_expiry_never_labels_live_density(self, app, client, day_offset):
         from datetime import date, timedelta
 
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
         expiry = (date.today() + timedelta(days=day_offset)).isoformat()
 
@@ -1815,7 +1815,7 @@ class TestGammaDensityRoute:
     def test_future_expiry_uses_exact_live_horizon(self, app, client):
         from datetime import date, timedelta
 
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
         app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
         expiry = (date.today() + timedelta(days=12)).isoformat()
 
@@ -1911,7 +1911,7 @@ class TestSecondAdversarialChainAdmission:
         payload = _chain_payload()
         payload["strikes"].append({**payload["strikes"][0]})
         app.config["REGISTRY"] = _PayloadRegistry(payload)
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         response, body = _post(client, path, self._request_body(path, expiry))
 
@@ -1937,7 +1937,7 @@ class TestSecondAdversarialChainAdmission:
     def test_unusable_expiry_never_publishes_connected_chain_as_live(self, app, client, path, expiry):
         registry = _PayloadRegistry(_chain_payload())
         app.config["REGISTRY"] = registry
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         response, body = _post(client, path, self._request_body(path, expiry))
 
@@ -1998,7 +1998,7 @@ class TestSecondAdversarialChainAdmission:
         payload = _chain_payload()
         payload_mutator(payload)
         app.config["REGISTRY"] = _PayloadRegistry(payload)
-        app.config["OPENALGO_CLIENT"] = None
+        app.config["BROKER_CLIENT"] = None
 
         response, body = _post(client, path, self._request_body(path, expiry))
 
@@ -2106,7 +2106,7 @@ def test_real_registry_native_enumeration_refuses_all_provider_fallbacks(app, tm
             calls.append((args, kwargs))
             raise AssertionError("provider must not run")
     registry, owner = create_owned_registry()
-    app.config.update(REGISTRY=registry, NATIVE_ADAPTERS={"dhan": Forbidden()}, OPENALGO_CLIENT=Forbidden())
+    app.config.update(REGISTRY=registry, NATIVE_ADAPTERS={"dhan": Forbidden()}, BROKER_CLIENT=Forbidden())
     with app.app_context():
         assert _live_option_chain("NIFTY", "NFO", _future_expiry()) is None
     assert calls == []

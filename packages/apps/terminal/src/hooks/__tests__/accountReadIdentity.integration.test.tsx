@@ -89,10 +89,8 @@ function setRuntime(accounts: BrokerAccount[], activeAccountId: string | null): 
   act(() => {
     useModeStore.setState({ mode: "live" });
     useConnectionStore.setState({
-      host: "",
       apiKey: "",
       status: "disconnected",
-      openAlgoHydrated: true,
     });
     useBrokerStore.setState({ accounts, activeAccountId });
   });

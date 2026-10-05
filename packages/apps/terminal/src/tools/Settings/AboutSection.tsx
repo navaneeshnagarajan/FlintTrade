@@ -27,7 +27,7 @@ export function AboutSection() {
         <p className="text-xs text-text-secondary leading-relaxed">
           Research markets, practise strategies with simulated funds, and manage your trading workspace.
           Connect supported brokers when you are ready; live trading remains subject to account permissions and safety checks.
-          FlintTrade runs on your own machine, with an optional OpenAlgo bridge.
+          FlintTrade runs on your own machine.
         </p>
       </div>
 
@@ -54,16 +54,7 @@ export function AboutSection() {
             <span>Technology stack — versions and dependency purposes</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>
-          <a
-            href="https://github.com/navaneeshnagarajan/openalgo"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <ExternalLink size={12} className="flex-none text-text-muted" />
-            <span>OpenAlgo — optional broker bridge</span>
-            <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
-          </a>
+
           <a
             href="https://www.gnu.org/licenses/agpl-3.0.html"
             target="_blank"

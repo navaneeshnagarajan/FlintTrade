@@ -100,9 +100,3 @@ If something goes wrong during market hours:
 2. Fix and restart only after your market closes.
 
 ## Service order
-
-1. `flinttrade.service` starts the FlintTrade backend on port 5100.
-2. OpenAlgo is optional; install and start `openalgo.service` separately only
-   when using the OpenAlgo integration path. That unit is a template — edit
-   its paths to your OpenAlgo install before enabling it.
-3. If FlintTrade fails, the unit restarts after 5 seconds (`RestartSec=5`).

@@ -23,7 +23,7 @@ _SERVICES = {"connection_epoch": 0, "connections": [], "routing": {}, "budgets":
 
 def _current():
     return {
-        "version": "1.3.0",
+        "version": "1.4.0",
         "workspace_instance_id": _INSTANCE,
         "workspace_generation": 1,
         "broker_authority_generation": 1,
@@ -42,7 +42,7 @@ def _seed(tmp_path, config):
 def test_current_read_hardens_every_supported_existing_rollback_file(tmp_path, version):
     _seed(tmp_path, _current())
     rollback = tmp_path / f"workspace.{version}.bak.json"
-    rollback.write_text(json.dumps({"version": version, "openalgo": {"api_key": "1111"}}))
+    rollback.write_text(json.dumps({"version": version, "dhan": {"api_key": "1111"}}))
     rollback.chmod(0o644)
     persistence.read_workspace_snapshot(tmp_path)
     assert stat.S_IMODE(rollback.stat().st_mode) == 0o600
@@ -149,7 +149,7 @@ def test_credential_database_delete_recreate_does_not_change_workspace_identity(
 def test_every_legacy_edge_mints_current_authority_once(tmp_path, version):
     _seed(tmp_path, {"version": version, "extension": {"preserved": [1, 2]}})
     config = persistence.run_migrations(tmp_path)
-    assert config["version"] == "1.3.0"
+    assert config["version"] == "1.4.0"
     assert config["workspace_generation"] == 1
     assert config["broker_authority_generation"] == 1
     assert str(UUID(config["workspace_instance_id"])) == config["workspace_instance_id"]
@@ -347,12 +347,7 @@ def test_noop_and_failed_writes_do_not_advance_authority(tmp_path, monkeypatch):
         ("ui.theme", "light", 1),
         ("services.connection_epoch", 1, 1),
         ("llm.model", "fixture", 1),
-        ("openalgo.telegram_username", "fixture-user", 1),
-        ("openalgo.host", "https://fixture.invalid", 2),
-        ("openalgo.port", 9000, 2),
-        ("openalgo.ws_port", 9001, 2),
-        ("openalgo.api_key", "fixture-key", 2),
-        ("openalgo.unknown", True, 2),
+        ("dhan.telegram_username", "fixture-user", 1),
         ("brokers.execution.default", "fixture:account", 2),
         ("brokers.account_acls.fixture.account", ["operator"], 2),
         ("brokers.data.ticks", "fixture:account", 2),
@@ -404,7 +399,7 @@ def test_malformed_current_services_rejected_on_every_snapshot_read(tmp_path, se
 
 def test_corrupt_current_workspace_load_fails_without_default_fallback(tmp_path):
     path = tmp_path / "workspace.json"
-    path.write_text('{"version":"1.3.0",broken')
+    path.write_text('{"version":"1.4.0",broken')
     before = path.read_bytes()
     with pytest.raises(json.JSONDecodeError):
         Workspace(tmp_path)

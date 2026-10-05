@@ -1,6 +1,6 @@
 /**
  * placeholderCardBadges.test — home Bento cards that still render fabricated
- * numbers show a visible Example label. The retired Sample chip stays quiet.
+ * numbers disclose their illustrative source with visible Example and Sample markers.
  *
  * BreadthCard is LIVE-capable (it fetches /ft-api/v1/breadth/current and
  * labels the footer NSE only for genuine non-sample data).
@@ -44,10 +44,10 @@ beforeEach(() => {
   mockConnected.mockReturnValue(false);
 });
 
-describe("home placeholder cards show Example and stay free of the retired Sample chip", () => {
-  it.each(CARDS)("$name shows Example and does not render a Sample badge", ({ node, badgeTestId, exampleTestId }) => {
+describe("home placeholder cards disclose their Example source", () => {
+  it.each(CARDS)("$name shows visible Example and Sample provenance", ({ node, badgeTestId, exampleTestId }) => {
       renderCard(node);
-      expect(screen.queryByTestId(badgeTestId)).not.toBeInTheDocument();
+      expect(screen.getByTestId(badgeTestId)).toHaveTextContent("Sample");
       expect(screen.getByTestId(exampleTestId)).toHaveTextContent("Example");
     });
 
@@ -95,7 +95,7 @@ describe("home placeholder cards show Example and stay free of the retired Sampl
     try {
       renderCard(<BreadthCard />);
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-      expect(screen.queryByTestId("breadth-demo-badge")).not.toBeInTheDocument();
+      expect(screen.getByTestId("breadth-demo-badge")).toHaveTextContent("Sample");
       expect(screen.getByTestId("breadth-example-label")).toHaveTextContent("Example");
       expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
       expect(screen.queryByText(/NSE ·/)).not.toBeInTheDocument();

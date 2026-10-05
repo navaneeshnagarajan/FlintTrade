@@ -74,9 +74,7 @@ class TestConnectWithoutPsycopg2:
             import importlib.util
             import os
 
-            path = os.path.join(
-                os.path.dirname(__file__), "..", "src", "flinttrade_data", "questdb_client.py"
-            )
+            path = os.path.join(os.path.dirname(__file__), "..", "src", "flinttrade_data", "questdb_client.py")
             spec = importlib.util.spec_from_file_location(mod_key, path)
             mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
             sys.modules[mod_key] = mod
@@ -147,9 +145,7 @@ class TestCreateTables:
         # Three DDL statements → three execute calls
         assert mock_cursor.execute.call_count == 3
         # All three table names appear in the executed SQL
-        all_sql = " ".join(
-            str(call.args[0]) for call in mock_cursor.execute.call_args_list
-        )
+        all_sql = " ".join(str(call.args[0]) for call in mock_cursor.execute.call_args_list)
         assert "ticks_ltp" in all_sql
         assert "ticks_quote" in all_sql
         assert "ticks_depth" in all_sql
@@ -258,18 +254,14 @@ class TestInsertLtpBulk:
 class TestInsertQuote:
     def test_insert_quote_returns_true_on_success(self):
         client, mock_conn, mock_cursor = _make_client()
-        result = client.insert_quote(
-            "RELIANCE", "NSE", 2985.0, 2984.5, 2985.5, 1200, 0
-        )
+        result = client.insert_quote("RELIANCE", "NSE", 2985.0, 2984.5, 2985.5, 1200, 0)
         assert result is True
         mock_cursor.execute.assert_called_once()
 
     def test_insert_quote_returns_false_on_error(self):
         client, mock_conn, mock_cursor = _make_client()
         mock_cursor.execute.side_effect = Exception("constraint")
-        result = client.insert_quote(
-            "RELIANCE", "NSE", 2985.0, 2984.5, 2985.5, 1200, 0
-        )
+        result = client.insert_quote("RELIANCE", "NSE", 2985.0, 2984.5, 2985.5, 1200, 0)
         assert result is False
         mock_conn.rollback.assert_called_once()
 
@@ -282,18 +274,14 @@ class TestInsertQuote:
 class TestInsertDepth:
     def test_insert_depth_returns_true_on_success(self):
         client, mock_conn, mock_cursor = _make_client()
-        result = client.insert_depth(
-            "NIFTY", "NSE_INDEX", 0, 24498.0, 50, 24501.0, 60
-        )
+        result = client.insert_depth("NIFTY", "NSE_INDEX", 0, 24498.0, 50, 24501.0, 60)
         assert result is True
         mock_cursor.execute.assert_called_once()
 
     def test_insert_depth_returns_false_on_error(self):
         client, mock_conn, mock_cursor = _make_client()
         mock_cursor.execute.side_effect = Exception("table missing")
-        result = client.insert_depth(
-            "NIFTY", "NSE_INDEX", 0, 24498.0, 50, 24501.0, 60
-        )
+        result = client.insert_depth("NIFTY", "NSE_INDEX", 0, 24498.0, 50, 24501.0, 60)
         assert result is False
         mock_conn.rollback.assert_called_once()
 
@@ -316,7 +304,8 @@ class TestGenerateCandles:
         client, _, mock_cursor = _make_client()
         self._stub_cursor_with_rows(mock_cursor)
         result = client.generate_candles(
-            "NIFTY", "NSE_INDEX",
+            "NIFTY",
+            "NSE_INDEX",
             start=datetime(2026, 4, 13, 9, 15),
             end=datetime(2026, 4, 13, 15, 30),
         )
@@ -366,7 +355,8 @@ class TestGenerateCandles:
         mock_cursor.fetchall.return_value = []
         # Should not raise
         client.generate_candles(
-            "NIFTY", "NSE_INDEX",
+            "NIFTY",
+            "NSE_INDEX",
             start="2026-04-13T09:15:00",
             end="2026-04-13T15:30:00",
         )
@@ -387,9 +377,9 @@ class TestGetMarketStats:
             24500.0,  # current_price
             24800.0,  # high_24h
             24200.0,  # low_24h
-            0.25,     # change_pct_1h
-            1.5,      # change_pct_24h
-            4200,     # trade_count
+            0.25,  # change_pct_1h
+            1.5,  # change_pct_24h
+            4200,  # trade_count
         )
         result = client.get_market_stats("NIFTY", "NSE_INDEX")
         assert isinstance(result, MarketStats)

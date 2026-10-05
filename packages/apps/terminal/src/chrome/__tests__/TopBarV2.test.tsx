@@ -435,7 +435,7 @@ describe("TopBarV2", () => {
     useBrokerStore.setState({ accounts: [] });
   });
 
-  it("keeps the terminal connected when a direct broker session exists and OpenAlgo ping fails", async () => {
+  it("keeps the terminal connected when a direct broker session exists and native broker ping fails", async () => {
     mockDirectBrokerConnected.value = true;
     useModeStore.setState({ mode: "live" });
 

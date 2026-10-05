@@ -72,14 +72,14 @@ class TestGetSystemMetricsPsutilAvailable:
 
         mem = MagicMock()
         mem.percent = 55.5
-        mem.used = int(8.5 * 1024 ** 3)
-        mem.total = int(16.0 * 1024 ** 3)
+        mem.used = int(8.5 * 1024**3)
+        mem.total = int(16.0 * 1024**3)
         mock.virtual_memory.return_value = mem
 
         disk = MagicMock()
         disk.percent = 40.0
-        disk.used = int(200 * 1024 ** 3)
-        disk.total = int(512 * 1024 ** 3)
+        disk.used = int(200 * 1024**3)
+        disk.total = int(512 * 1024**3)
         mock.disk_usage.return_value = disk
 
         mock.boot_time.return_value = 0.0  # will be subtracted from time.time()
@@ -187,7 +187,7 @@ class TestAdminSystemRoute:
     """GET /v1/admin/system — requires FLINTTRADE_DEV=1 and a valid API key."""
 
     def test_route_returns_200_with_metrics(self, monkeypatch):
-        monkeypatch.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+        monkeypatch.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
         monkeypatch.setenv("FLINTTRADE_DEV", "1")
         from flinttrade_core.app import create_flask_app
         from flinttrade_core.system_metrics import SystemMetrics
@@ -217,7 +217,7 @@ class TestAdminSystemRoute:
         assert data["data"]["psutil_available"] is True
 
     def test_route_returns_empty_metrics_when_psutil_missing(self, monkeypatch):
-        monkeypatch.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+        monkeypatch.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
         monkeypatch.setenv("FLINTTRADE_DEV", "1")
         from flinttrade_core.app import create_flask_app
         from flinttrade_core.system_metrics import SystemMetrics

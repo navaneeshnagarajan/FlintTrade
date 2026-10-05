@@ -120,10 +120,7 @@ def test_operators_keep_leaves_one_operator_backup_and_migrates(tmp_path, monkey
     try:
         names = [row[0] for row in live.execute("SELECT username FROM account ORDER BY id")]
         sessions = [row[0] for row in live.execute("SELECT account_id FROM sessions ORDER BY account_id")]
-        indexes = {
-            row[0]
-            for row in live.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
-        }
+        indexes = {row[0] for row in live.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
     finally:
         live.close()
     assert names == ["alice"]
@@ -160,7 +157,10 @@ def test_operators_keep_unknown_id_does_not_change_the_database(tmp_path, monkey
 @pytest.mark.unit
 @pytest.mark.parametrize("answer", ["", "n", "no", "N"])
 def test_operators_keep_aborts_unless_the_answer_is_yes(
-    tmp_path, monkeypatch, capsys, answer: str,
+    tmp_path,
+    monkeypatch,
+    capsys,
+    answer: str,
 ) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     db_path = tmp_path / "auth.db"
@@ -294,15 +294,9 @@ def _kept_operator_snapshot(db_path: Path) -> dict[str, object]:
         account = conn.execute(
             "SELECT id, username, email, password_hash, created_at FROM account ORDER BY id"
         ).fetchall()
-        sessions = conn.execute(
-            "SELECT account_id, token FROM sessions ORDER BY token"
-        ).fetchall()
-        settings = conn.execute(
-            "SELECT operator_id, key, value FROM settings ORDER BY value"
-        ).fetchall()
-        notes = conn.execute(
-            "SELECT user_id, body FROM desk_notes ORDER BY body"
-        ).fetchall()
+        sessions = conn.execute("SELECT account_id, token FROM sessions ORDER BY token").fetchall()
+        settings = conn.execute("SELECT operator_id, key, value FROM settings ORDER BY value").fetchall()
+        notes = conn.execute("SELECT user_id, body FROM desk_notes ORDER BY body").fetchall()
     finally:
         conn.close()
     return {
@@ -315,7 +309,9 @@ def _kept_operator_snapshot(db_path: Path) -> dict[str, object]:
 
 @pytest.mark.unit
 def test_operators_keep_renumbers_survivor_and_is_idempotent(
-    tmp_path, monkeypatch, capsys,
+    tmp_path,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     db_path = tmp_path / "auth.db"
@@ -350,7 +346,9 @@ def test_operators_keep_renumbers_survivor_and_is_idempotent(
 
 @pytest.mark.unit
 def test_operators_keep_rolls_back_when_the_renumber_fails(
-    tmp_path, monkeypatch, capsys,
+    tmp_path,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     db_path = tmp_path / "auth.db"

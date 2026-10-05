@@ -446,9 +446,7 @@ class TransactionFiles:
     @staticmethod
     def _bootstrap_temporaries(targets: tuple[str, ...], observed: set[str]) -> dict[str, str]:
         return {
-            name: original
-            for name in observed
-            if (original := _bootstrap_writer_temporary(name, targets)) is not None
+            name: original for name in observed if (original := _bootstrap_writer_temporary(name, targets)) is not None
         }
 
     def _discard_bootstrap_temporaries(self, temporaries: dict[str, str]) -> None:
@@ -503,10 +501,7 @@ class TransactionFiles:
         observed = set(os.listdir(self.control.path))
         temporaries = self._bootstrap_temporaries(_BOOTSTRAP_WRITE_TARGETS, observed)
         stable_observed = observed - temporaries.keys()
-        if (
-            not {"service.lock", "bootstrap.json"}.issubset(stable_observed)
-            or stable_observed - allowed
-        ):
+        if not {"service.lock", "bootstrap.json"}.issubset(stable_observed) or stable_observed - allowed:
             raise ValueError("incomplete bootstrap artefacts")
         prefix_length = self._bootstrap_prefix_length(stable_observed)
         self._validate_bootstrap_temporary_target(temporaries, prefix_length)

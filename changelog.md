@@ -19,6 +19,19 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
+- **Mode honesty bar.** One line under the TopBar for Example, and for
+  Practice and Live. Widgets also identify illustrative and fallback figures
+  with Sample/Example source labels. An incident, when one is showing, sits
+  above the mode line and does not replace it.
+
+- **Service connections and in-process `BrokerReadPort`.** The backend now
+  ships a rights-aware service-provider catalogue, static LLM/data profiles,
+  and an inert persisted service-connection control plane. Listing or saving a
+  connection does not resolve, probe, authenticate to, or start that provider.
+  Exact broker reads in this change are the in-process `BrokerReadPort`
+  contract (quotes, depth, history, balances, books, and related methods) —
+  not a restored terminal Brokers screen or a new public HTTP read family.
+
 - **Native broker account transaction foundation.** Strict mutation contracts,
   encrypted durable claims, witnessed workspace recovery and retained worker
   custody underpin the synthetic account coordinator. Read generations verify
@@ -30,6 +43,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 - **Estimated charges on Practice fills.** Every Practice fill runs through the shared Indian statutory calculator and stores the breakdown and the day's charges total. Fills show `Charges ₹X (estimated)`. Positions and Performance show net P&L, with gross and charges in the tooltip. Home and Invest subtract those charges from net worth. The Practice source line is `Practice account, after estimated charges`.
 
 ### Fixed
+
+- **Native broker HTTP freeze (accepted product decision).** Merging this work
+  onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
+  is accepted. Broker-account mutations — `/v1` account and auth writes, native
+  connect / login / set-primary / delete, OAuth start and callback, and the
+  other guarded account-authority routes — return a stable `503` with
+  `{error: broker_account_cutover_unavailable}` until Task 9D migrates the
+  handlers and removes `guard_broker_account_http` atomically. Native HTTP
+  account and market-data reads return `409` with zero provider calls until
+  the Task 7C.2 / 8B read-port cutover. The terminal still calls those routes,
+  so Setup → Brokers and Settings → Brokers will show the freeze rather than a
+  working native session. Service connections remain inert only.
 
 - **Desk routes, one Practice place path, and desk polling.** `/positions`,
   `/holdings`, `/monitoring`, `/schedules`, and `/glossary` open the screen
@@ -123,27 +148,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   document leaves the revision empty, FlintTrade fills the pinned
   revision from the verified manifest, so the chip leaves Still loading.
 
-- **Mode honesty bar.** One line under the TopBar for Example, and for
-  Practice and Live. Widgets no longer repeat a Sample chip. An incident, when
-  one is showing, sits above that line and does not replace it.
-- **Practice `SandboxEngine` primary fills (FT-MONDAY-001).**
-  Practice places and records native `SandboxEngine`
-  fills end-to-end as the primary paper path. The terminal
-  and AI read that same Practice book. Example stays
-  sample data. Live stays fail-closed until MSI
-  native read smoke is trusted and funded unlock. Practice
-  never leaks a live broker order. OpenAlgo is
-  Settings fallback only — not the primary
-  connect CTA. Kotak Neo has no sandbox — never offer
-  Neo Practice.
-- **Service connections and in-process `BrokerReadPort`.** The backend now
-  ships a rights-aware service-provider catalogue, static LLM/data profiles,
-  and an inert persisted service-connection control plane. Listing or saving a
-  connection does not resolve, probe, authenticate to, or start that provider.
-  Exact broker reads in this change are the in-process `BrokerReadPort`
-  contract (quotes, depth, history, balances, books, and related methods) —
-  not a restored terminal Brokers screen or a new public HTTP read family.
-
 - **Shared symbol bus from Watchlist (FT-TRADE-011).**
   Selecting a symbol in `/trade` Watchlist retargets
   Chart, Option Chain, and Scalper to that symbol —
@@ -160,6 +164,71 @@ changelog rebuilds itself from the first release cut after this baseline.
   expiry is an honest empty, not zeros-as-data.
 
 ### Changed
+
+- **Home and Invest net worth, greeting, benchmark legend, and Example markers.**
+  Home and Invest share one total: ledger cash, including blocked
+  margin, plus holdings at market value, plus open positions. Opening
+  an F&O position does not reduce the total by its margin. A Practice
+  round trip at an unchanged price leaves it at the starting cash, for
+  example ₹10,00,000. Options add signed market value. Futures add
+  unrealised P&L. Dhan marks from the mark-to-market average, or from
+  `costPrice` when that average is absent. Kotak Neo marks an open
+  future from the open-leg average. Practice marks a future from the
+  entry price. An estimated futures mark shows `≈`. Dhan does this for
+  `costPrice`. Kotak Neo does this for an open future. Practice never
+  does. The mark clears when that position is flat or the average
+  arrives. The tooltip and `≈` sit on the Home Net Worth amount, the
+  Known Total amount, and the Open Positions value. The Invest
+  Dashboard label `Net Worth (Cash + Holdings + Positions)` carries
+  the tooltip, and `≈` sits on the amount under it. Available Funds
+  shows that `≈` with no tooltip. Dhan's tooltip, when the average was
+  missing, is
+  `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+  Neo's is
+  `Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+  Several positions of one kind say `N futures positions` instead of
+  the symbol. The screen-reader name is `Net Worth, approximately …`.
+  Allocation percentages are not marked. Home allocation stays on the
+  Example split until funds, holdings, and positions have all loaded.
+  Home and Invest both wait for the position book before they publish
+  the total. The sample book does not. While that book is pending or
+  has failed, Home shows `—` and does not draw cash alone. A negative
+  total is the number, for example `-₹50,000`, or `≈ -₹50,000` when
+  the mark is approximate. Home derives each open position's P&L
+  percent from cost, and shows `—` when cost is missing or not above
+  zero.
+  The greeting uses the saved display name, then the username, and
+  stays plain `Good morning` (or afternoon or evening) until a name
+  is known. It never uses `Trader`. On Benchmark, real holdings use
+  `Your holdings (unrealised)` instead of
+  `Your Portfolio (since first buy)`. An empty book stays
+  `Your Portfolio`. Example holdings stay `Your Portfolio` with an
+  Example label, and the hard-coded index returns keep the Example
+  chip. Dashboard Net Worth, Available Funds, Invested Value, and Day P&L
+  show the final formatted value on the first frame in every mode, with
+  no count-up from zero, including `≈`, `-₹50,000`, and `—`.
+  The sample Dashboard XIRR is the inline `XIRR` figure plus
+  one Example chip. Portfolio Allocation on that sample dashboard omits
+  its broker sentence and does not carry its own Example chip. There
+  is no Portfolio XIRR card. On sample figures, Net Worth reads
+  `Example equity and cash. Connect a broker to see yours.`; the
+  allocation label is `Allocation` with the Example chip. Equity
+  Holdings and Cash leave their notes blank, and those rows do not
+  carry their own Example chip. In Example, Baskets show one Example
+  chip while quotes are loading and after they have loaded. ETFs show
+  one Example chip and `Example prices. Connect a broker for live quotes.`;
+  Practice and Live keep the live quote wording. Sector's header reads
+  `Example sector split. Connect a broker to see yours.` and the footer
+  reads `Example data. Not from your holdings.` Social shows exactly one
+  Example chip. The sample XIRR chip and the Net Worth allocation chip
+  paint only on example data. The Benchmark chip stays in Practice and
+  Live. A connected
+  book keeps the live equity sentence,
+  `Allocation (live assets only)`, and `Live from broker`. Mutual
+  Funds on example data reads
+  `Example NAVs · as of 10-Sep-2026`. Example order review confirms
+  with **Continue**. Practice review keeps **Confirm simulation**.
+
 
 - **Desk Laya chip follows the current mode (FT-LAYA-MODEL-001).**
   Practice shows sidecar Ready, Degraded, Down, Still loading, or
@@ -242,84 +311,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   of the Laya, strategy, benchmark, and training readers. `GET /healthz`
   and `GET /readyz` are public and return status only.
 
-- **Home and Invest net worth, greeting, benchmark legend, and Example markers.**
-  Home and Invest share one total: ledger cash, including blocked
-  margin, plus holdings at market value, plus open positions. Opening
-  an F&O position does not reduce the total by its margin. A Practice
-  round trip at an unchanged price leaves it at the starting cash, for
-  example ₹10,00,000. Options add signed market value. Futures add
-  unrealised P&L. Dhan marks from the mark-to-market average, or from
-  `costPrice` when that average is absent. Kotak Neo marks an open
-  future from the open-leg average. Practice marks a future from the
-  entry price. An estimated futures mark shows `≈`. Dhan does this for
-  `costPrice`. Kotak Neo does this for an open future. Practice never
-  does. The mark clears when that position is flat or the average
-  arrives. The tooltip and `≈` sit on the Home Net Worth amount, the
-  Known Total amount, and the Open Positions value. The Invest
-  Dashboard label `Net Worth (Cash + Holdings + Positions)` carries
-  the tooltip, and `≈` sits on the amount under it. Available Funds
-  shows that `≈` with no tooltip. Dhan's tooltip, when the average was
-  missing, is
-  `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
-  Neo's is
-  `Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
-  Several positions of one kind say `N futures positions` instead of
-  the symbol. The screen-reader name is `Net Worth, approximately …`.
-  Allocation percentages are not marked. Home allocation stays on the
-  Example split until funds, holdings, and positions have all loaded.
-  Home and Invest both wait for the position book before they publish
-  the total. The sample book does not. While that book is pending or
-  has failed, Home shows `—` and does not draw cash alone. A negative
-  total is the number, for example `-₹50,000`, or `≈ -₹50,000` when
-  the mark is approximate. Home derives each open position's P&L
-  percent from cost, and shows `—` when cost is missing or not above
-  zero.
-  The greeting uses the saved display name, then the username, and
-  stays plain `Good morning` (or afternoon or evening) until a name
-  is known. It never uses `Trader`. On Benchmark, real holdings use
-  `Your holdings (unrealised)` instead of
-  `Your Portfolio (since first buy)`. An empty book stays
-  `Your Portfolio`. Example holdings stay `Your Portfolio` with an
-  Example label, and the hard-coded index returns keep the Example
-  chip. Dashboard Net Worth, Available Funds, Invested Value, and Day P&L
-  show the final formatted value on the first frame in every mode, with
-  no count-up from zero, including `≈`, `-₹50,000`, and `—`.
-  The sample Dashboard XIRR is the inline `XIRR` figure plus
-  one Example chip. Portfolio Allocation on that sample dashboard omits
-  its broker sentence and does not carry its own Example chip. There
-  is no Portfolio XIRR card. On sample figures, Net Worth reads
-  `Example equity and cash. Connect a broker to see yours.`; the
-  allocation label is `Allocation` with the Example chip. Equity
-  Holdings and Cash leave their notes blank, and those rows do not
-  carry their own Example chip. In Example, Baskets show one Example
-  chip while quotes are loading and after they have loaded. ETFs show
-  one Example chip and `Example prices. Connect a broker for live quotes.`;
-  Practice and Live keep the live quote wording. Sector's header reads
-  `Example sector split. Connect a broker to see yours.` and the footer
-  reads `Example data. Not from your holdings.` Social shows exactly one
-  Example chip. The sample XIRR chip and the Net Worth allocation chip
-  paint only on example data. The Benchmark chip stays in Practice and
-  Live. A connected
-  book keeps the live equity sentence,
-  `Allocation (live assets only)`, and `Live from broker`. Mutual
-  Funds on example data reads
-  `Example NAVs · as of 10-Sep-2026`. Example order review confirms
-  with **Continue**. Practice review keeps **Confirm simulation**.
-- **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
-  When the vault is not yet secured, the required path is Create
-  operator, then Vault, then the Practice desk (Step 3 of 3). When the
-  vault is already secured, that vault step is skipped and the Practice
-  desk is Step 2 of 2. The Practice desk is Step 2 or 3; see the
-  step-count note below. Affirming Practice lands on `/trade`.
-  Authenticator, broker connect, LLM, Monitoring, trading defaults,
-  and risk are Later or Skip on that desk. They do not change the
-  step count and do not block Practice. On the broker Later path,
-  **Continue without a broker** is the primary control above
-  FlintTrade Native and OpenAlgo Bridge. First run has no Live
-  unlock. Live place stays fail-closed. Live still needs the
-  authenticator and PIN later. Persona is not a required first-run
-  gate. Refs #282.
-
 - **First-run Setup resume, Start over, and a fixed vault step count
   (FT-SETUP-HARDEN-001).** Reloading `/setup` mid-flow resumes the
   unfinished setup session. **Start over (deletes this unfinished
@@ -336,31 +327,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   operator is sent to `/trade`. A signed-out operator sees **Setup is
   complete. Sign in to open the desk.** with **Sign in** as the primary
   button. Refs #297.
-
-- **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
-  The path is native Dhan + Neo on the MSI
-  static-IP host with non-funded live REST API smoke
-  (quotes / depth / hist / chain where the SDK
-  allows). That historical evidence covers REST reads only.
-  Neo's v3 async SFeed and order-feed lifecycle is now
-  wired and locally synthetic-tested, without claiming
-  live-account or market-hours stream proof. Chrome is **Connected
-  (read)** / **API smoke** only after persisted REST
-  smoke evidence — never login-only, never placeable
-  Live orders. Neo has no sandbox: never offer Neo
-  Practice; copy is `Live read only until funded
-  unlock.` Live place stays fail-closed. Prefer
-  native; OpenAlgo is Settings / fallback only.
-  `dhanhq` stays on latest stable 2.2.0 (not RC).
-  Neo runs `kotakneoapi` 3.0.7 from exact upstream
-  `main` `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`, with
-  `v3.0.7` peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538`
-  as the release baseline. The `neo_api_client` import namespace stays;
-  the old `neo-api-client` distribution is prohibited. Sandbox proof is
-  unavailable because Neo offers no sandbox; live-account/market-hours feed,
-  funded-order, Live-promotion, and cross-platform proof remain outstanding.
-  Native HTTP freeze
-  (Task 9D / Task 7C.2) is not lifted. Refs #253.
 
 - **AI Chat Practice + native live-read context (FT-MONDAY-003).**
   When an LLM is configured, AI Chat may use Practice
@@ -399,27 +365,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   At most one primary banner (Example sample > Practice sample >
   Live risk > feed disconnected). External-action gates stay fail-closed
   for Example. Phone product and the marketing site are unchanged.
-
-- **OpenAlgo-style password-first Example; TOTP only before Live (FT-SETUP-002).**
-  Setup and daily login are password-only for Example and Practice.
-  Authenticator enrolment is optional (“Set up later”) on day one.
-  Confirming a live authenticator code enables TOTP for later logins.
-  Live unlock still requires that enrolment plus the PIN. The mid-step
-  Reset / Start-over wipe from #184 is unchanged.
-
-- **Native broker HTTP freeze (accepted product decision).** Merging this work
-  onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
-  is accepted. Broker-account mutations — `/v1` account and auth writes, native
-  connect / login / set-primary / delete, OAuth start and callback, and the
-  other guarded account-authority routes — return a stable `503` with
-  `{error: broker_account_cutover_unavailable}` until Task 9D migrates the
-  handlers and removes `guard_broker_account_http` atomically. Native HTTP
-  account and market-data reads return `409` with zero provider calls until
-  the Task 7C.2 / 8B read-port cutover. The terminal still calls those routes,
-  so Setup → Brokers and Settings → Brokers will show the freeze rather than a
-  working native session. Service connections remain inert only. OpenAlgo
-  bridge setup and gated live writes (`SafetySystem` L1–L5 → `gate_order` /
-  `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
 
@@ -545,7 +490,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Feed-freshness honesty (FT-CORE-002).**
   Example disclosure is the Mode honesty line.
-  Per-widget Sample chips are retired. Per-symbol
+  Widgets also label Sample/Example fallback figures. Per-symbol
   ticker Sample chips are optional. The Market
   Clock freshness chip appears only when that
   widget is mounted. Practice / Live still need
@@ -827,14 +772,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   otherwise the control stays disarmed with "Configure Telegram first".
   The backend rejects Example test sends with `mode_blocked`.
 
-- **Practice Trading has no OpenAlgo Gateway setup CTA (FT-LEARN-001).**
-  Example `/learn` Practice Trading now links to Settings → Broker
-  Gateway (`/settings#api`) so operators can configure OpenAlgo.
-  On ~390px the Learn section tabs stack above the page instead of
-  a 224px side column, and Practice copy, lists, sandbox rows and
-  the Gateway button wrap. The CTA does not send operators to
-  native Brokers.
-
 - **P&L columns unusable at ~390px (FT-MOBILE-001).**
   Example `/trade` Positions and Invest Holdings switch to stacked
   cards below 480px, so each row shows symbol, quantity, LTP, P&L
@@ -852,23 +789,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   disabled or hidden in the picker; choosing Watchlist focuses the
   existing card instead of duplicating it.
 
-- **Broker Gateway and Ditto default URLs diverge (FT-SET-002).**
-  Example `/settings#api` Broker Gateway and Example `/ditto` Add
-  Account now share the OpenAlgo default `http://127.0.0.1:5000`.
-  Add Account prefills the saved Gateway host and REST port
-  without retaining the bridge API key, so the two forms no
-  longer silently default to ports 5000 and 5001.
-
 - **Home greeting uses local evening at noon IST (FT-HOME-001).**
   Example `/home` greets from the Asia/Kolkata clock, so ~12:01 IST
   is Good afternoon (or Good morning before noon), not Good evening
   from a non-IST browser clock.
-
-- **Market status closed during NSE regular hours (FT-TRADE-004).**
-  Example `/trade` header treats OpenAlgo/Example session timings
-  as IST clock hours (09:15–15:30 on weekdays), not epoch
-  milliseconds. Mid-session no longer shows a false
-  “Market closed”. After hours and weekends stay closed.
 
 - **Chart stays stale when timeframe selector changes (FT-TRADE-003).**
   Example `/trade` timeframe buttons now refresh the chart
@@ -913,13 +837,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   drawdown, win rate, profit factor) now show a single formatted
   value. The leftover count-up `0.00` / `0.00%` beside the real
   figure is gone.
-
-- **Example Ctrl+K symbol search false unavailable error (FT-CMD-001).**
-  Example `search` now uses the same sample-instrument catalogue as
-  Example quotes and history. Ctrl+K → Symbols → NIFTY returns
-  sample hits (NIFTY, BANKNIFTY, FINNIFTY) instead of a false
-  connection error. Live and Practice still use native / OpenAlgo
-  search.
 
 - **Zero-premium long-call payoff (unbounded max profit + breakeven) (FT-LAB-001).**
   Options Builder Payoff now summarises expiry P&L from strike kinks

@@ -10,7 +10,7 @@ import { safeParse } from "@/lib/safeParse";
 
 /** Application operating mode.
  *  - explore:  Demo/sample data, no broker connection required (was "demo")
- *  - practice: Paper trading against a live broker sandbox (was "sandbox")
+ *  - practice: Paper trading in the FlintTrade sandbox (was "sandbox")
  *  - live:     Real money, requires PIN confirmation on every mode switch
  */
 export type AppMode = "explore" | "practice" | "live";

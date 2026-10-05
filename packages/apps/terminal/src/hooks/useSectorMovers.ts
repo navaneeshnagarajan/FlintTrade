@@ -18,6 +18,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import { useModeStore } from "@/stores/modeStore";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
@@ -201,11 +202,12 @@ export interface UseSectorMoversResult {
 
 export function useSectorMovers(): UseSectorMoversResult {
   const mode = useModeStore((s) => s.mode);
+  const scope = useMarketDataScope();
   const wantsLive = mode !== "explore";
 
   const query = useQuery({
-    queryKey: ["scanner", "multiquotes"],
-    queryFn: () => getMultiQuotes(SYMBOLS_FOR_QUOTES).then(normaliseMultiQuotes),
+    queryKey: ["scanner", "multiquotes", scope],
+    queryFn: ({ signal }) => getMultiQuotes(SYMBOLS_FOR_QUOTES, signal, scope).then(normaliseMultiQuotes),
     enabled: wantsLive,
     refetchInterval: 60_000, // auto-refresh every 60s
     staleTime: 30_000,

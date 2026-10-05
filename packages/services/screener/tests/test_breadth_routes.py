@@ -82,7 +82,7 @@ def test_breadth_current_live_from_quote_sweep(app):
     the old live branch called a registry method that does not exist, so the
     connected path was dead code and is_sample_data could never go false."""
     app.config["REGISTRY"] = _ConnectedRegistry()
-    app.config["OPENALGO_CLIENT"] = _FakeBridgeClient()
+    app.config["BROKER_CLIENT"] = _FakeBridgeClient()
     with app.test_client() as c:
         resp = c.get("/v1/breadth/current")
     body = resp.get_json()
@@ -102,7 +102,7 @@ def test_breadth_current_falls_back_to_sample_when_sweep_fails(app):
             raise RuntimeError("bridge down")
 
     app.config["REGISTRY"] = _ConnectedRegistry()
-    app.config["OPENALGO_CLIENT"] = _FailingClient()
+    app.config["BROKER_CLIENT"] = _FailingClient()
     with app.test_client() as c:
         resp = c.get("/v1/breadth/current")
     body = resp.get_json()
@@ -118,7 +118,7 @@ def test_breadth_current_refuses_thin_sweep_as_live(app):
             return [_Quote(101.0, 100.0) for _ in range(3)]
 
     app.config["REGISTRY"] = _ConnectedRegistry()
-    app.config["OPENALGO_CLIENT"] = _ThinClient()
+    app.config["BROKER_CLIENT"] = _ThinClient()
     with app.test_client() as c:
         resp = c.get("/v1/breadth/current")
     assert resp.get_json()["is_sample_data"] is True
@@ -166,7 +166,7 @@ def test_index_contribution_live_from_quote_sweep(app):
             ]
 
     app.config["REGISTRY"] = _ConnectedRegistry()
-    app.config["OPENALGO_CLIENT"] = _IdxClient()
+    app.config["BROKER_CLIENT"] = _IdxClient()
     with app.test_client() as c:
         resp = c.get("/v1/index-contribution?index=NIFTY")
     body = resp.get_json()
@@ -182,7 +182,7 @@ def test_index_contribution_thin_sweep_falls_back_to_sample(app):
             return [_SymbolQuote("HDFCBANK", 101.0, 100.0)]
 
     app.config["REGISTRY"] = _ConnectedRegistry()
-    app.config["OPENALGO_CLIENT"] = _ThinIdxClient()
+    app.config["BROKER_CLIENT"] = _ThinIdxClient()
     with app.test_client() as c:
         resp = c.get("/v1/index-contribution?index=NIFTY")
     assert resp.get_json()["data"]["is_sample_data"] is True
@@ -219,7 +219,7 @@ def test_breadth_history_serves_accumulated_live_points(app):
     serves the REAL points (is_sample_data False) — never padded with synthetic
     history; the series spans only the days actually computed."""
     app.config["REGISTRY"] = _ConnectedRegistry()
-    app.config["OPENALGO_CLIENT"] = _FakeBridgeClient()
+    app.config["BROKER_CLIENT"] = _FakeBridgeClient()
     with app.test_client() as c:
         # two polls on the same day — the day's latest computation wins
         assert c.get("/v1/breadth/current").get_json()["is_sample_data"] is False

@@ -43,7 +43,6 @@ from flinttrade_gateway.credentials import CredentialStore  # noqa: E402
 from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: E402
 from flinttrade_gateway.auth import gateway_bp  # noqa: E402
 from flinttrade_gateway.contracts import ContractManager  # noqa: E402
-from flinttrade_gateway.exceptions import AuthFlowError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -146,44 +145,3 @@ _fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Pat
 _fixture_module = importlib.util.module_from_spec(_fixture_spec)
 _fixture_spec.loader.exec_module(_fixture_module)
 RegistryFixture = _fixture_module.RegistryFixture
-
-
-def test_reconnect_with_no_saved_accounts(tmp_path, caplog):
-    import logging
-    from flinttrade_core.app import _reconnect_saved_accounts
-    fixture = RegistryFixture(tmp_path)
-    _reconnect_saved_accounts(fixture.registry, fixture.store, logging.getLogger("test.reconnect"),
-        registry_publication_owner=fixture.owner, workspace_path=tmp_path, mutation_admission=lambda: None)
-    assert fixture.registry.list_accounts() == []
-    fixture.close()
-
-
-def test_reconnect_partial_failure_uses_exact_owner_and_explicit_primary(tmp_path, monkeypatch, caplog):
-    import logging
-    from flinttrade_core.app import _reconnect_saved_accounts
-    from flinttrade_core.broker_identity import BrokerSelector
-    fixture = RegistryFixture(tmp_path)
-    for account in ("FAIL001", "OK001"):
-        selector = BrokerSelector("openalgo", account)
-        fixture.store.put_credentials(selector, "zerodha", "Private label", {"api_key": account},
-            expected=fixture.store.selector_state(selector).version)
-    calls = []
-    class Adapter:
-        def authenticate(self, credentials):
-            calls.append(credentials["api_key"])
-            if credentials["api_key"] == "FAIL001":
-                raise AuthFlowError("Rejected synthetic credential")
-            return "synthetic-token", None
-    monkeypatch.setattr("flinttrade_gateway.session.load_broker_adapter", lambda _: Adapter())
-    with caplog.at_level(logging.INFO):
-        _reconnect_saved_accounts(fixture.registry, fixture.store, logging.getLogger("test.reconnect"),
-            registry_publication_owner=fixture.owner, workspace_path=tmp_path,
-            execution_default_selector=BrokerSelector("openalgo", "OK001"), mutation_admission=lambda: None)
-    assert calls == ["FAIL001", "OK001"]
-    assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "OK001")).status == "connected"
-    assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "FAIL001")).status == "tombstoned"
-    assert fixture.registry.get_primary_session().info.account_id == "OK001"
-    logs = "\n".join(caplog.messages)
-    assert not any(secret in logs for secret in ("FAIL001", "OK001", "Private label", "synthetic-token"))
-    assert "account#" in logs
-    fixture.close()

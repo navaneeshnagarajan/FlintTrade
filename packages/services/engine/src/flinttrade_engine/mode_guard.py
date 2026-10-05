@@ -12,7 +12,7 @@ options-strategy, bracket, strategy start/stop) must consult the JWT's
 
 - :func:`require_live_unlocked` — stricter decorator for endpoints whose
   executors (BasketOrderExecutor, SplitOrderExecutor, BracketOrderService,
-  OptionsStrategyBuilder) call OpenAlgo *directly*, bypassing the
+  OptionsStrategyBuilder) call broker *directly*, bypassing the
   mode-aware ``core.order_routes`` safety proxy. Rejects explore (no
   orders ever), rejects practice (no sandbox executor parity yet) and
   rejects live without the ``live_mode_unlocked`` JWT claim (PIN re-verify
@@ -109,7 +109,7 @@ def require_live_unlocked(view: Callable[..., Any]) -> Callable[..., Any]:
     """Flask view decorator — full mode-safety stack for routes that bypass ``orders_bp``.
 
     Used by endpoints (basket, split, options-strategy, bracket) whose
-    executors place orders against OpenAlgo *directly* — i.e. they do not
+    executors place orders against broker *directly* — i.e. they do not
     re-enter the mode-aware ``core.order_routes`` proxy, so the proxy's
     explore/practice/live fan-out doesn't protect them. This decorator
     reproduces the equivalent of

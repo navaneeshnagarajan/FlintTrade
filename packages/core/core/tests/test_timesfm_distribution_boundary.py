@@ -40,7 +40,7 @@ def _contains_restricted_identifier(line: str) -> bool:
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
-_GUARD_STRUCTURE_DIGEST = "d59343c54643176e5aadf4fffff96ed60182c2d1dc345f34433a8eefb51a989a"
+_GUARD_STRUCTURE_DIGEST = "5ea967b3267ae823bfaab56cd2990475d16dfe785042ca0bfcdd5dc13e030e36"
 _RESTRICTED_IDENTIFIER_PATTERN = re.compile(
     r"t[._-]*i[._-]*m[._-]*e[._-]*s[._-]*f[._-]*m",
     flags=re.IGNORECASE,
@@ -52,7 +52,7 @@ _TIMESFM_PHRASE_PATTERN = re.compile(
 _STATIC_ESCAPE_PATTERN = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\\\"'nrtbfv])")
 _STATIC_ESCAPE_REPLACEMENTS = {
     r"\\": "\\",
-    r'\"': '"',
+    r"\"": '"',
     r"\'": "'",
     r"\n": "\n",
     r"\r": "\r",
@@ -101,7 +101,9 @@ def _python_static_strings(node: ast.AST) -> tuple[str, ...]:
     if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
         return (node.value.decode("utf-8", errors="ignore"),)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return tuple(left + right for left in _python_static_strings(node.left) for right in _python_static_strings(node.right))
+        return tuple(
+            left + right for left in _python_static_strings(node.left) for right in _python_static_strings(node.right)
+        )
     if isinstance(node, ast.JoinedStr):
         parts = [_python_static_strings(value) for value in node.values]
         if any(len(part) != 1 for part in parts):
@@ -116,9 +118,7 @@ def _python_source_contains_restricted_identifier(source: str) -> bool:
     except SyntaxError:
         return False
     return any(
-        _is_restricted_identifier_chain(value)
-        for node in ast.walk(tree)
-        for value in _python_static_strings(node)
+        _is_restricted_identifier_chain(value) for node in ast.walk(tree) for value in _python_static_strings(node)
     )
 
 
@@ -274,11 +274,11 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
         "packages/core/core/src/flinttrade_core/model_rights_policies.py",
         "packages/core/core/tests/test_timesfm_distribution_boundary.py",
     }
-    path_matches = {
-        path for path in tracked_files if "timesfm" in re.sub(r"[^a-z0-9]+", "", path.lower())
-    }
+    path_matches = {path for path in tracked_files if "timesfm" in re.sub(r"[^a-z0-9]+", "", path.lower())}
     content_matches: set[str] = set()
     for path in tracked_files:
+        if not (repository_root / path).is_file():
+            continue
         content = (repository_root / path).read_bytes()
         text = content.decode("utf-8", errors="ignore")
         if (
@@ -341,9 +341,7 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
         ".zip",
     }
     assert not {
-        path
-        for path in tracked_files
-        if any(path.lower().endswith(suffix) for suffix in blocked_artifact_suffixes)
+        path for path in tracked_files if any(path.lower().endswith(suffix) for suffix in blocked_artifact_suffixes)
     }
 
 
@@ -354,13 +352,9 @@ def test_neutral_catalogue_modules_import_no_provider_runtime_packages() -> None
     for module_name in ("service_providers.py", "model_rights_policies.py"):
         tree = ast.parse((source_root / module_name).read_text(encoding="utf-8"))
         from_imports = [
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
         ]
-        direct_imports = [
-            alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
-        ]
+        direct_imports = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
         assert all(not imported.startswith(prohibited_prefixes) for imported in from_imports + direct_imports)
 
 
@@ -400,18 +394,18 @@ def test_timesfm_allowlisted_policy_module_is_structurally_inert() -> None:
     }
     policy_attributes = [node for node in ast.walk(policy_tree) if isinstance(node, ast.Attribute)]
     assert all(isinstance(node.value, ast.Name) for node in policy_attributes)
-    assert {
-        f"{node.value.id}.{node.attr}"
-        for node in policy_attributes
-        if isinstance(node.value, ast.Name)
-    } == {
+    assert {f"{node.value.id}.{node.attr}" for node in policy_attributes if isinstance(node.value, ast.Name)} == {
         "EvidenceUseScope.ISOLATED_RESEARCH",
         "PermissionState.DENIED",
         "RightsBasis.FLINTTRADE_POLICY",
         "RightsBasis.LICENCE",
     }
     assert all(isinstance(node.value, str) for node in ast.walk(policy_tree) if isinstance(node, ast.Constant))
-    assert all(isinstance(node, ast.Tuple) for node in ast.walk(policy_tree) if isinstance(node, (ast.List, ast.Set, ast.Dict, ast.Tuple)))
+    assert all(
+        isinstance(node, ast.Tuple)
+        for node in ast.walk(policy_tree)
+        if isinstance(node, (ast.List, ast.Set, ast.Dict, ast.Tuple))
+    )
     allowed_node_types = {
         ast.Module,
         ast.Expr,
@@ -461,7 +455,8 @@ def _has_only_policy_contract_import(tree: ast.AST) -> bool:
         len(imports) == 1
         and imports[0].level == 0
         and imports[0].module == "flinttrade_core.service_providers"
-        and tuple((alias.name, alias.asname) for alias in imports[0].names) == tuple((name, None) for name in expected_names)
+        and tuple((alias.name, alias.asname) for alias in imports[0].names)
+        == tuple((name, None) for name in expected_names)
     )
 
 
@@ -476,11 +471,11 @@ def _assignment_targets(node: ast.stmt) -> tuple[ast.Name, ...]:
 def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
     guard_source = Path(__file__).read_text(encoding="utf-8")
     guard_tree = ast.parse(guard_source)
-    guard_direct_imports = [alias.name for node in ast.walk(guard_tree) if isinstance(node, ast.Import) for alias in node.names]
+    guard_direct_imports = [
+        alias.name for node in ast.walk(guard_tree) if isinstance(node, ast.Import) for alias in node.names
+    ]
     guard_from_imports = [
-        node.module
-        for node in ast.walk(guard_tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
+        node.module for node in ast.walk(guard_tree) if isinstance(node, ast.ImportFrom) and node.module is not None
     ]
     subprocess_attributes = [
         node
@@ -499,11 +494,18 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
     guard_top_level_functions = [node.name for node in guard_tree.body if isinstance(node, ast.FunctionDef)]
 
     assert guard_direct_imports == ["ast", "hashlib", "re", "subprocess"]
-    assert set(guard_from_imports) == {"pathlib", "flinttrade_core.model_rights_policies", "flinttrade_core.service_providers"}
+    assert set(guard_from_imports) == {
+        "pathlib",
+        "flinttrade_core.model_rights_policies",
+        "flinttrade_core.service_providers",
+    }
     assert all(node.attr == "run" for node in subprocess_attributes)
     assert len(subprocess_calls) == 1
     assert isinstance(subprocess_calls[0].args[0], ast.Tuple)
-    assert [item.value for item in subprocess_calls[0].args[0].elts if isinstance(item, ast.Constant)] == ["git", "ls-files"]
+    assert [item.value for item in subprocess_calls[0].args[0].elts if isinstance(item, ast.Constant)] == [
+        "git",
+        "ls-files",
+    ]
     assert guard_top_level_functions == [
         "_fact",
         "_contains_restricted_identifier",
@@ -543,19 +545,19 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
 def test_timesfm_guard_structure_rejects_runtime_mutations() -> None:
     guard_source = Path(__file__).read_text(encoding="utf-8")
     mutation_suffixes = (
-        "\nrunner = subprocess.run\nrunner((\"git\", \"status\"))\n",
-        "\nsubprocess.Popen((\"curl\", \"https://example.invalid\"))\n",
+        '\nrunner = subprocess.run\nrunner(("git", "status"))\n',
+        '\nsubprocess.Popen(("curl", "https://example.invalid"))\n',
         "\nclass DownloadWorker:\n    pass\n",
         "\nrunner = lambda: None\nrunner()\n",
-        "\n__import__(\"socket\")\n",
-        "\neval(\"1 + 1\")\n",
-        "\nexec(\"import socket\")\n",
-        "\ncompile(\"pass\", \"<guard>\", \"exec\")\n",
+        '\n__import__("socket")\n',
+        '\neval("1 + 1")\n',
+        '\nexec("import socket")\n',
+        '\ncompile("pass", "<guard>", "exec")\n',
     )
     mutated_sources = tuple(guard_source + suffix for suffix in mutation_suffixes) + (
         guard_source.replace(
             "    return LicenceFact(\n",
-            "    subprocess.Popen((\"curl\", \"https://example.invalid\"))\n    return LicenceFact(\n",
+            '    subprocess.Popen(("curl", "https://example.invalid"))\n    return LicenceFact(\n',
             1,
         ),
     )

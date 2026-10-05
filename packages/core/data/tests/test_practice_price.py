@@ -158,12 +158,14 @@ def test_stored_close_prefers_previous_close_and_requires_a_timestamp() -> None:
 
     class _Close:
         def get_ticks(self, symbol, exchange, start, end, limit=None):
-            return [{
-                "ts": _NOW - timedelta(days=2),
-                "prev_close": 812.40,
-                "close": 810.0,
-                "ltp": 799.0,
-            }]
+            return [
+                {
+                    "ts": _NOW - timedelta(days=2),
+                    "prev_close": 812.40,
+                    "close": 810.0,
+                    "ltp": 799.0,
+                }
+            ]
 
     preferred = lookup_stored_last_close("SBIN", "NSE", storage=_Close(), now=_NOW)
     assert preferred is not None

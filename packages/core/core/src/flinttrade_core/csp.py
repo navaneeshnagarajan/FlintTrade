@@ -60,7 +60,7 @@ CSP_POLICY: dict[str, list[str]] = {
     # emit inline <style> elements. Migrating those is tracked separately.
     "style-src": ["'self'", "'unsafe-inline'"],
     "img-src": ["'self'", "data:", "https:"],
-    # connect-src is intentionally permissive across protocols: the OpenAlgo host is
+    # connect-src is intentionally permissive across protocols: the native broker host is
     # user-configurable (localhost, VPN 10.x, or a remote server) so we cannot pin it.
     # This mirrors the policy the terminal previously shipped in its <meta> CSP (now
     # removed in favour of this per-request HTTP header). The XSS-containment value of
@@ -162,7 +162,7 @@ def apply_security_headers(response: Response) -> Response:
     - ``X-Content-Type-Options: nosniff``
     - ``Referrer-Policy: strict-origin-when-cross-origin``
     - ``Strict-Transport-Security: max-age=31536000; includeSubDomains``
-    - ``Permissions-Policy: geolocation=(), microphone=(), camera=()``
+    - ``Permissions-Policy: geolocation=(), microphone=(self), camera=()``
 
     Args:
         response: The outgoing Flask :class:`~flask.Response`.
@@ -173,21 +173,15 @@ def apply_security_headers(response: Response) -> Response:
     # Splice the per-request nonce (if any) into script-src so the nonce-tagged
     # bootstrap script is permitted. The base policy dict is never mutated.
     nonce = getattr(g, "csp_nonce", None) if g else None
-    response.headers.setdefault(
-        "Content-Security-Policy", build_csp_header(nonce)
-    )
+    response.headers.setdefault("Content-Security-Policy", build_csp_header(nonce))
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault(
-        "Referrer-Policy", "strict-origin-when-cross-origin"
-    )
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault(
         "Strict-Transport-Security",
         "max-age=31536000; includeSubDomains",
     )
-    response.headers.setdefault(
-        "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
-    )
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(self), camera=()")
     return response
 
 

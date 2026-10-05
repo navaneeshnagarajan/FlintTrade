@@ -28,7 +28,7 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-/** Raw position from OpenAlgo — may have additional fields beyond typed Position */
+/** Raw position from broker — may have additional fields beyond typed Position */
 interface RawPosition extends Position {
   tradingsymbol?: string;
   net_quantity?: number;

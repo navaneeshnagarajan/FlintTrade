@@ -58,7 +58,7 @@ def monkeypatch_module():
 @pytest.fixture()
 def flask_app(monkeypatch_module, backend_lease_factory):
     """Create a Flask app with operations blueprint registered."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     monkeypatch_module.setenv("FLINTTRADE_DEV", "1")
     from flinttrade_core.app import create_flask_app
 
@@ -342,7 +342,7 @@ class TestSafetyConfigUpdate:
             response = client.post(
                 "/api/v1/safety/config",
                 json={
-                    "broker": "openalgo",
+                    "broker": "dhan",
                     "account_id": "default",
                     "opening_risk_capital": 100_000,
                     "price_deviation_pct": "not-a-number",
@@ -351,7 +351,7 @@ class TestSafetyConfigUpdate:
             )
 
             assert response.status_code == 400
-            assert safety.l4_pnl.state("openalgo:default") is None
+            assert safety.l4_pnl.state("dhan:default") is None
         finally:
             flask_app.config["BROKER_ROUTER"] = original_router
 
@@ -362,23 +362,23 @@ class TestDailyPnLAccountState:
     @staticmethod
     def _authorised_router() -> MagicMock:
         router = MagicMock()
-        router.authorised_selectors.return_value = ("openalgo:default",)
+        router.authorised_selectors.return_value = ("dhan:default",)
         return router
 
     def test_get_returns_selected_account_capital_and_latch(self, flask_app, client):
         safety = flask_app.config["SAFETY"]
-        safety.l4_pnl.configure_opening_capital("openalgo:default", 100_000)
+        safety.l4_pnl.configure_opening_capital("dhan:default", 100_000)
         safety.l4_pnl.validate(
             daily_pnl=-4_000,
             starting_capital=0,
-            selector="openalgo:default",
+            selector="dhan:default",
         )
 
         original_router = flask_app.config.get("BROKER_ROUTER")
         flask_app.config["BROKER_ROUTER"] = self._authorised_router()
         try:
             response = client.get(
-                "/api/v1/safety/config?broker=openalgo&account_id=default",
+                "/api/v1/safety/config?broker=dhan&account_id=default",
                 headers=_live_headers(),
             )
         finally:
@@ -386,19 +386,19 @@ class TestDailyPnLAccountState:
 
         assert response.status_code == 200
         l4 = response.get_json()["data"]["l4_pnl"]
-        assert l4["selector"] == "openalgo:default"
+        assert l4["selector"] == "dhan:default"
         assert l4["opening_risk_capital"] == 100_000
         assert l4["is_paused"] is True
         assert l4["is_killed"] is False
 
-    def test_openalgo_capital_requires_unlock_and_is_immutable(self, flask_app, client):
+    def test_dhan_capital_requires_unlock_and_is_immutable(self, flask_app, client):
         original_router = flask_app.config.get("BROKER_ROUTER")
         flask_app.config["BROKER_ROUTER"] = self._authorised_router()
         try:
             locked = client.post(
                 "/api/v1/safety/config",
                 json={
-                    "broker": "openalgo",
+                    "broker": "dhan",
                     "account_id": "default",
                     "opening_risk_capital": 100_000,
                 },
@@ -409,7 +409,7 @@ class TestDailyPnLAccountState:
             configured = client.post(
                 "/api/v1/safety/config",
                 json={
-                    "broker": "openalgo",
+                    "broker": "dhan",
                     "account_id": "default",
                     "opening_risk_capital": 100_000,
                 },
@@ -420,42 +420,42 @@ class TestDailyPnLAccountState:
             diluted = client.post(
                 "/api/v1/safety/config",
                 json={
-                    "broker": "openalgo",
+                    "broker": "dhan",
                     "account_id": "default",
                     "opening_risk_capital": 200_000,
                 },
                 headers=_live_headers(),
             )
             assert diluted.status_code == 409
-            state = flask_app.config["SAFETY"].l4_pnl.state("openalgo:default")
+            state = flask_app.config["SAFETY"].l4_pnl.state("dhan:default")
             assert state is not None and state.opening_risk_capital == 100_000
         finally:
             flask_app.config["BROKER_ROUTER"] = original_router
 
     def test_reset_requires_unlock_and_clears_only_selected_latches(self, flask_app, client):
         safety = flask_app.config["SAFETY"]
-        safety.l4_pnl.configure_opening_capital("openalgo:default", 100_000)
+        safety.l4_pnl.configure_opening_capital("dhan:default", 100_000)
         safety.l4_pnl.validate(
             daily_pnl=-20_000,
             starting_capital=0,
-            selector="openalgo:default",
+            selector="dhan:default",
         )
         original_router = flask_app.config.get("BROKER_ROUTER")
         flask_app.config["BROKER_ROUTER"] = self._authorised_router()
         try:
             refused = client.delete(
-                "/api/v1/safety/l4?broker=openalgo&account_id=default",
+                "/api/v1/safety/l4?broker=dhan&account_id=default",
                 headers=_auth_headers(),
             )
             assert refused.status_code == 401
-            assert safety.l4_pnl.state("openalgo:default").killed is True
+            assert safety.l4_pnl.state("dhan:default").killed is True
 
             reset = client.delete(
-                "/api/v1/safety/l4?broker=openalgo&account_id=default",
+                "/api/v1/safety/l4?broker=dhan&account_id=default",
                 headers=_live_headers(),
             )
             assert reset.status_code == 200
-            state = safety.l4_pnl.state("openalgo:default")
+            state = safety.l4_pnl.state("dhan:default")
             assert state is not None
             assert state.killed is False and state.paused is False
             assert state.opening_risk_capital == 100_000
@@ -571,7 +571,8 @@ class TestKillSwitchGatedWrites:
             {"dhan": adapter},
             session_provider,
             consume_gate=gate.consume,
-            config=config, backend_lease_proof=backend_lease_factory()
+            config=config,
+            backend_lease_proof=backend_lease_factory(),
         )
 
     def test_routes_cancel_and_exit_through_gated_token_adapter(self, flask_app, client, backend_lease_factory):
@@ -618,7 +619,9 @@ class TestKillSwitchGatedWrites:
             safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_global_activation_latches_when_an_account_acl_refuses_dispatch(self, flask_app, client, backend_lease_factory):
+    def test_global_activation_latches_when_an_account_acl_refuses_dispatch(
+        self, flask_app, client, backend_lease_factory
+    ):
         from flinttrade_engine.safety import SafetySystem
 
         adapter = _EmergencyAdapter()
@@ -627,7 +630,9 @@ class TestKillSwitchGatedWrites:
         original_router = flask_app.config.get("BROKER_ROUTER")
         flask_app.config["SAFETY"] = safety
         flask_app.config["BROKER_ROUTER"] = self._router(
-            adapter, allowed_actor="someone-else", backend_lease_factory=backend_lease_factory,
+            adapter,
+            allowed_actor="someone-else",
+            backend_lease_factory=backend_lease_factory,
         )
         try:
             response = client.post(
@@ -641,10 +646,9 @@ class TestKillSwitchGatedWrites:
             assert adapter.calls == []
             payload = response.get_json()
             assert payload["status"] == "partial"
-            assert {
-                outcome["failure_code"]
-                for outcome in payload["data"]["emergency_actions"]["outcomes"]
-            } == {"safety_refused"}
+            assert {outcome["failure_code"] for outcome in payload["data"]["emergency_actions"]["outcomes"]} == {
+                "safety_refused"
+            }
         finally:
             safety.l5_kill.reset()
             flask_app.config["SAFETY"] = original_safety
@@ -660,7 +664,8 @@ class TestKillSwitchGatedWrites:
             "BROKER_ROUTER": flask_app.config.get("BROKER_ROUTER"),
         }
         flask_app.config.update(
-            SAFETY=safety, BROKER_ROUTER=self._router(adapter, backend_lease_factory=backend_lease_factory),
+            SAFETY=safety,
+            BROKER_ROUTER=self._router(adapter, backend_lease_factory=backend_lease_factory),
         )
         try:
             response = client.post(
@@ -757,7 +762,11 @@ class TestKillSwitchGatedWrites:
             flask_app.config.update(original)
 
     def test_generation_lease_timeout_latches_l5_and_defers_sweep(
-        self, flask_app, client, monkeypatch, backend_lease_factory,
+        self,
+        flask_app,
+        client,
+        monkeypatch,
+        backend_lease_factory,
     ):
         """A busy router rebuild must not prevent the L5 LATCH.
 
@@ -843,7 +852,9 @@ class TestKillSwitchGatedWrites:
             safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_omitted_target_sweeps_all_actor_authorised_registered_accounts(self, flask_app, client, *, backend_lease_factory):
+    def test_omitted_target_sweeps_all_actor_authorised_registered_accounts(
+        self, flask_app, client, *, backend_lease_factory
+    ):
         from datetime import datetime, timezone
 
         from flinttrade_engine.safety import SafetyGate, SafetySystem
@@ -885,7 +896,8 @@ class TestKillSwitchGatedWrites:
             {"dhan": dhan, "upstox": upstox},
             session_provider,
             consume_gate=SafetyGate().consume,
-            config=config, backend_lease_proof=backend_lease_factory()
+            config=config,
+            backend_lease_proof=backend_lease_factory(),
         )
         safety = SafetySystem()
         original = {
@@ -912,9 +924,7 @@ class TestKillSwitchGatedWrites:
             flask_app.config.update(original)
 
     def test_global_l5_keeps_configured_account_without_active_adapter_in_incomplete_scope(
-        self,
-        flask_app,
-        client, *, backend_lease_factory
+        self, flask_app, client, *, backend_lease_factory
     ):
         from datetime import datetime, timezone
 
@@ -956,7 +966,8 @@ class TestKillSwitchGatedWrites:
             {"dhan": dhan},
             session_provider,
             consume_gate=SafetyGate().consume,
-            config=config, backend_lease_proof=backend_lease_factory()
+            config=config,
+            backend_lease_proof=backend_lease_factory(),
         )
         safety = SafetySystem()
         original = {
@@ -992,9 +1003,7 @@ class TestKillSwitchGatedWrites:
             flask_app.config.update(original)
 
     def test_global_l5_cannot_reset_after_only_the_authorised_account_flattens(
-        self,
-        flask_app,
-        client, *, backend_lease_factory
+        self, flask_app, client, *, backend_lease_factory
     ):
         from datetime import datetime, timezone
 
@@ -1036,7 +1045,8 @@ class TestKillSwitchGatedWrites:
             {"dhan": dhan, "upstox": upstox},
             session_provider,
             consume_gate=SafetyGate().consume,
-            config=config, backend_lease_proof=backend_lease_factory()
+            config=config,
+            backend_lease_proof=backend_lease_factory(),
         )
         safety = SafetySystem()
         original = {
@@ -1420,8 +1430,7 @@ class TestKillSwitchGatedWrites:
                 return EmergencyDispatchResult(
                     policy=policy,
                     outcomes=tuple(
-                        EmergencyVerbOutcome(verb, succeeded=True, selector="dhan:acct-1")
-                        for verb in policy.verbs
+                        EmergencyVerbOutcome(verb, succeeded=True, selector="dhan:acct-1") for verb in policy.verbs
                     ),
                 )
 
@@ -1908,7 +1917,7 @@ class TestDittoAccountCrud:
             self,
             account_id: str,
             name: str = "Demo",
-            openalgo_host: str = "http://127.0.0.1:5001",
+            adapter_id: str = "dhan",
             api_key: str = "secret",
             enabled: bool = True,
             group: str = "default",
@@ -1918,7 +1927,7 @@ class TestDittoAccountCrud:
         ) -> None:
             self.account_id = account_id
             self.name = name
-            self.openalgo_host = openalgo_host
+            self.adapter_id = adapter_id
             self.api_key = api_key
             self.enabled = enabled
             self.group = group
@@ -1938,16 +1947,20 @@ class TestDittoAccountCrud:
         def add_account(self, account) -> None:
             self.accounts[account.account_id] = account
 
-        def get_account(self, account_id: str):
-            return self.accounts.get(account_id)
+        def get_account(self, account_id: str, *, adapter_id: str | None = None):
+            account = self.accounts.get(account_id)
+            return account if account is not None and adapter_id in {None, account.adapter_id} else None
 
-        def enable_account(self, account_id: str) -> None:
+        def enable_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+            assert self.get_account(account_id, adapter_id=adapter_id) is not None
             self.accounts[account_id].enabled = True
 
-        def disable_account(self, account_id: str) -> None:
+        def disable_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+            assert self.get_account(account_id, adapter_id=adapter_id) is not None
             self.accounts[account_id].enabled = False
 
-        def remove_account(self, account_id: str) -> None:
+        def remove_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+            assert self.get_account(account_id, adapter_id=adapter_id) is not None
             self.accounts.pop(account_id, None)
 
     def _patch_manager(self, monkeypatch, accounts=None):
@@ -1967,8 +1980,10 @@ class TestDittoAccountCrud:
         assert data["data"]["accounts"] == [
             {
                 "id": "acc_1",
+                "account_id": "acc_1",
+                "adapter_id": "dhan",
                 "name": "Primary",
-                "broker": "OpenAlgo",
+                "broker": "dhan",
                 "capital": None,
                 "pnl_today": None,
                 "status": "active",
@@ -2005,176 +2020,6 @@ class TestDittoAccountCrud:
         assert data["status"] == "error"
         assert data["message"] == "Account service unavailable"
 
-    def test_create_account_returns_sanitised_account(self, client, monkeypatch):
-        self._patch_manager(monkeypatch)
-        resp = client.post(
-            "/api/v1/ditto/accounts",
-            json={
-                "account_id": "family_01",
-                "name": "Family Account",
-                "openalgo_host": "http://127.0.0.1:5001",
-                "api_key": "secret-key",
-                "group": "Family",
-                "allocation_weight": 1.25,
-                "max_loss_daily": 25000,
-                "enabled": True,
-                "is_master": False,
-            },
-            headers=_session_headers(),
-        )
-
-        assert resp.status_code == 201
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["account"]["id"] == "family_01"
-        assert data["data"]["account"]["name"] == "Family Account"
-        assert "api_key" not in data["data"]["account"]
-
-    def test_create_account_validates_required_fields(self, client, monkeypatch):
-        self._patch_manager(monkeypatch)
-        resp = client.post(
-            "/api/v1/ditto/accounts",
-            json={
-                "account_id": "missing_host",
-                "api_key": "secret-key",
-            },
-            headers=_session_headers(),
-        )
-        assert resp.status_code == 400
-
-    @pytest.mark.parametrize(
-        ("field", "value"),
-        [
-            ("allocation_weight", "nan"),
-            ("allocation_weight", "inf"),
-            ("max_loss_daily", "nan"),
-            ("max_loss_daily", "inf"),
-        ],
-    )
-    def test_create_account_rejects_non_finite_risk_configuration(
-        self, client, monkeypatch, field, value
-    ):
-        self._patch_manager(monkeypatch)
-        payload = {
-            "account_id": "family_01",
-            "openalgo_host": "http://127.0.0.1:5001",
-            "api_key": "secret-key",
-            field: value,
-        }
-
-        response = client.post(
-            "/api/v1/ditto/accounts",
-            json=payload,
-            headers=_session_headers(),
-        )
-
-        assert response.status_code == 400
-
-    def test_updating_active_target_stops_runtime_before_replacing_store_row(
-        self, flask_app, client, monkeypatch
-    ):
-        events: list[str] = []
-        existing = self._FakeAccount("acc_2", name="Old name")
-        manager = self._FakeManager()
-        manager.accounts = {existing.account_id: existing}
-
-        def add_account(account) -> None:
-            events.append("manager.add")
-            manager.accounts[account.account_id] = account
-
-        manager.add_account = add_account
-        monkeypatch.setattr(
-            "flinttrade_ditto.account_manager.AccountManager",
-            lambda **_kwargs: manager,
-        )
-
-        class _Runtime:
-            state = {
-                "active": True,
-                "lifecycle": "active",
-                "source_account": "acc_1",
-                "target_accounts": ["acc_2"],
-            }
-
-            def status(self):
-                events.append("runtime.status")
-                return dict(self.state)
-
-            def stop(self, *, timeout: float):
-                events.append("runtime.stop")
-                assert timeout == 5.0
-                self.state.update(
-                    active=False,
-                    lifecycle="idle",
-                    source_account=None,
-                    target_accounts=[],
-                )
-                return dict(self.state)
-
-        original_runtime = flask_app.config.get("DITTO_RUNTIME")
-        flask_app.config["DITTO_RUNTIME"] = _Runtime()
-        try:
-            response = client.post(
-                "/api/v1/ditto/accounts",
-                json={
-                    "account_id": "acc_2",
-                    "name": "New name",
-                    "openalgo_host": "http://127.0.0.1:5002",
-                    "api_key": "replacement-key",
-                },
-                headers=_session_headers(),
-            )
-        finally:
-            flask_app.config["DITTO_RUNTIME"] = original_runtime
-
-        assert response.status_code == 201
-        assert manager.accounts["acc_2"].name == "New name"
-        assert events == [
-            "runtime.status",
-            "runtime.stop",
-            "runtime.status",
-            "manager.add",
-        ]
-
-    def test_updating_active_account_fails_closed_when_runtime_cannot_drain(
-        self, flask_app, client, monkeypatch
-    ):
-        existing = self._FakeAccount("acc_2", name="Old name")
-        manager = self._FakeManager()
-        manager.accounts = {existing.account_id: existing}
-        manager.add_account = MagicMock()
-        monkeypatch.setattr(
-            "flinttrade_ditto.account_manager.AccountManager",
-            lambda **_kwargs: manager,
-        )
-        runtime = _FakeDittoRuntime()
-        runtime._status.update(
-            active=True,
-            lifecycle="active",
-            source_account="acc_1",
-            target_accounts=["acc_2"],
-        )
-        runtime.stop = MagicMock(side_effect=RuntimeError("private broker response"))
-        original_runtime = flask_app.config.get("DITTO_RUNTIME")
-        flask_app.config["DITTO_RUNTIME"] = runtime
-        try:
-            response = client.post(
-                "/api/v1/ditto/accounts",
-                json={
-                    "account_id": "acc_2",
-                    "name": "New name",
-                    "openalgo_host": "http://127.0.0.1:5002",
-                    "api_key": "replacement-key",
-                },
-                headers=_session_headers(),
-            )
-        finally:
-            flask_app.config["DITTO_RUNTIME"] = original_runtime
-
-        assert response.status_code == 503
-        assert manager.accounts["acc_2"] is existing
-        manager.add_account.assert_not_called()
-
     def test_enable_disable_and_delete_account(self, client, monkeypatch):
         account = self._FakeAccount("acc_1", name="Primary", enabled=True)
         self._patch_manager(monkeypatch, [account])
@@ -2191,15 +2036,14 @@ class TestDittoAccountCrud:
         assert delete_resp.status_code == 200
         assert delete_resp.get_json()["data"]["removed"] is True
 
-    def test_disabling_active_source_stops_runtime_before_mutating_store(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_disabling_active_source_stops_runtime_before_mutating_store(self, flask_app, client, monkeypatch):
         events: list[str] = []
         account = self._FakeAccount("acc_1", enabled=True)
         manager = self._FakeManager()
         manager.accounts = {account.account_id: account}
 
-        def disable_account(account_id: str) -> None:
+        def disable_account(account_id: str, *, adapter_id: str) -> None:
+            assert adapter_id == account.adapter_id
             events.append("manager.disable")
             manager.accounts[account_id].enabled = False
 
@@ -2251,15 +2095,14 @@ class TestDittoAccountCrud:
             "manager.disable",
         ]
 
-    def test_deleting_active_target_stops_runtime_before_mutating_store(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_deleting_active_target_stops_runtime_before_mutating_store(self, flask_app, client, monkeypatch):
         events: list[str] = []
         account = self._FakeAccount("acc_2", enabled=True)
         manager = self._FakeManager()
         manager.accounts = {account.account_id: account}
 
-        def remove_account(account_id: str) -> None:
+        def remove_account(account_id: str, *, adapter_id: str) -> None:
+            assert adapter_id == account.adapter_id
             events.append("manager.remove")
             manager.accounts.pop(account_id)
 
@@ -2361,9 +2204,7 @@ class TestDittoAccountCrud:
         assert secret not in caplog.text
         assert "credential-value" not in caplog.text
 
-    def test_participating_account_delete_fails_closed_when_drain_fails(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_participating_account_delete_fails_closed_when_drain_fails(self, flask_app, client, monkeypatch):
         account = self._FakeAccount("acc_2", enabled=True)
         manager = self._FakeManager()
         manager.accounts = {account.account_id: account}
@@ -2394,9 +2235,7 @@ class TestDittoAccountCrud:
         assert manager.accounts == {"acc_2": account}
         manager.remove_account.assert_not_called()
 
-    def test_non_participating_account_mutation_does_not_stop_runtime(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_non_participating_account_mutation_does_not_stop_runtime(self, flask_app, client, monkeypatch):
         account = self._FakeAccount("acc_3", enabled=True)
         manager = self._FakeManager()
         manager.accounts = {account.account_id: account}
@@ -2430,94 +2269,27 @@ class TestDittoAccountCrud:
         [(True, 200), (False, 503)],
     )
     def test_retained_one_shot_owner_is_global_account_mutation_barrier(
-        self,
-        flask_app,
-        client,
-        monkeypatch,
-        cleanup_succeeds,
-        expected_status,
+        self, flask_app, client, monkeypatch, cleanup_succeeds, expected_status
     ):
-        from flinttrade_ditto.account_manager import BrokerAccount
-        from flinttrade_ditto.runtime import DittoCapabilityUnavailable, DittoRuntime
-
         account = self._FakeAccount("acc_3", enabled=True)
-        manager = self._FakeManager()
-        manager.accounts = {account.account_id: account}
-        manager.disable_account = MagicMock()
-        monkeypatch.setattr(
-            "flinttrade_ditto.account_manager.AccountManager",
-            lambda **_kwargs: manager,
-        )
+        self._patch_manager(monkeypatch, [account])
+        runtime = _FakeDittoRuntime()
+        runtime._status.update(lifecycle="retained-shutdown")
 
-        managed_account = BrokerAccount(
-            account_id="acc_3",
-            openalgo_host="http://127.0.0.1:5103",
-            api_key="retained-owner-key",
-            enabled=True,
-        )
+        def stop(*, timeout):
+            runtime.stop_calls.append(timeout)
+            if cleanup_succeeds:
+                runtime._status.update(lifecycle="idle")
+            return runtime.status()
 
-        class _RetainedOwner:
-            def __init__(self) -> None:
-                self.close_calls = 0
-
-            def risk_state(self, _account):
-                return {
-                    "available_balance": 100_000.0,
-                    "used_margin": 0.0,
-                    "total_balance": 100_000.0,
-                    "pnl_today": 0.0,
-                    "positions": 0,
-                }
-
-            def close(self, *, timeout: float) -> bool:
-                assert timeout >= 0
-                self.close_calls += 1
-                if self.close_calls == 1:
-                    return False
-                return cleanup_succeeds
-
-        retained_owner = _RetainedOwner()
-        runtime = DittoRuntime(
-            account_provider=lambda: [managed_account],
-            router_owner_factory=lambda _accounts, _actor_id: retained_owner,
-        )
-        with pytest.raises(DittoCapabilityUnavailable, match="snapshot cleanup"):
-            runtime.risk_snapshot()
-        assert runtime.status() == {
-            "active": False,
-            "lifecycle": "retained-shutdown",
-            "source_account": None,
-            "target_accounts": [],
-            "mode": "equal",
-            "mirrored_positions": 0,
-            "last_sync": None,
-            "errors": [],
-        }
-
-        original_runtime = flask_app.config.get("DITTO_RUNTIME")
-        flask_app.config["DITTO_RUNTIME"] = runtime
-        try:
-            response = client.post(
-                "/api/v1/ditto/accounts/acc_3/disable",
-                headers=_session_headers(),
-            )
-        finally:
-            flask_app.config["DITTO_RUNTIME"] = original_runtime
-
+        runtime.stop = stop
+        monkeypatch.setitem(flask_app.config, "DITTO_RUNTIME", runtime)
+        response = client.post("/api/v1/ditto/accounts/acc_3/disable", headers=_session_headers())
         assert response.status_code == expected_status
-        assert retained_owner.close_calls == 2
-        if cleanup_succeeds:
-            manager.disable_account.assert_called_once_with("acc_3")
-            assert account.enabled is False
-            assert runtime.status()["lifecycle"] == "idle"
-        else:
-            manager.disable_account.assert_not_called()
-            assert account.enabled is True
-            assert runtime.status()["lifecycle"] == "retained-shutdown"
+        assert runtime.stop_calls == [5.0]
+        assert account.enabled is (not cleanup_succeeds)
 
-    def test_account_drain_and_new_start_are_serialised(
-        self, flask_app, monkeypatch
-    ):
+    def test_account_drain_and_new_start_are_serialised(self, flask_app, monkeypatch):
         from threading import Event, Thread
 
         account = self._FakeAccount("acc_1", enabled=True)
@@ -2592,34 +2364,43 @@ class TestDittoAccountCrud:
         assert responses == {"disable": 200, "start": 200}
         assert start_entered.is_set()
 
-    def test_account_operation_exception_logs_only_exception_class(
-        self, client, monkeypatch, caplog
-    ):
-        secret = "acct-secret http://private-host.invalid/vault/path"
+    def test_account_operation_exception_logs_only_exception_class(self, client, monkeypatch, caplog):
+        secret = "acct-secret private-host.invalid vault/path"
 
-        class _FailingManager(self._FakeManager):
-            def add_account(self, account) -> None:
+        class FailingManager(self._FakeManager):
+            def list_accounts(self):
                 raise RuntimeError(secret)
 
-        monkeypatch.setattr(
-            "flinttrade_ditto.account_manager.AccountManager",
-            lambda **_kwargs: _FailingManager(),
-        )
+        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", FailingManager)
         with caplog.at_level("WARNING", logger="flinttrade"):
-            response = client.post(
-                "/api/v1/ditto/accounts",
-                json={
-                    "account_id": "family_01",
-                    "openalgo_host": "http://127.0.0.1:5001",
-                    "api_key": "secret-key",
-                },
-                headers=_session_headers(),
-            )
-
+            response = client.get("/api/v1/ditto/accounts", headers=_session_headers())
         assert response.status_code == 503
         assert secret not in response.get_data(as_text=True)
         assert secret not in caplog.text
         assert "RuntimeError" in caplog.text
+
+    @pytest.mark.parametrize(
+        "payload", [{}, {"account_id": "family", "adapter_id": "dhan"}, {"allocation_weight": "nan"}]
+    )
+    def test_native_account_linking_remains_unavailable(self, client, monkeypatch, payload):
+        self._patch_manager(monkeypatch)
+        response = client.post("/api/v1/ditto/accounts", json=payload, headers=_session_headers())
+        assert response.status_code == 501
+        assert response.get_json()["message"] == "Native copy trading is not available"
+        assert self._FakeManager.accounts == {}
+
+    def test_linking_never_replaces_existing_account_or_starts_runtime(self, flask_app, client, monkeypatch):
+        account = self._FakeAccount("selected", name="Original")
+        self._patch_manager(monkeypatch, [account])
+        runtime = MagicMock()
+        monkeypatch.setitem(flask_app.config, "DITTO_RUNTIME", runtime)
+        response = client.post(
+            "/api/v1/ditto/accounts", json={"account_id": "selected", "name": "New"}, headers=_session_headers()
+        )
+        assert response.status_code == 501
+        assert self._FakeManager.accounts["selected"] is account
+        runtime.start.assert_not_called()
+        runtime.stop.assert_not_called()
 
 
 class TestDittoMirrorStart:
@@ -2945,39 +2726,13 @@ class TestAccountsStatus:
         def snapshot_exact_state(self, selector):
             # Read-independent status projection fake; exact registry is tested separately.
             from types import SimpleNamespace
+
             session = self._sessions.get((selector.adapter_id, selector.account_id))
             if session is None:
                 return None
             return SimpleNamespace(status="connected", expires_at=session.expires_at, read_only=False)
 
-    def test_returns_summary_and_per_account_status(self, client, monkeypatch):
-        statuses = [
-            self._FakeStatus(connected=True, authenticated=True, needs_reauth=False),
-            self._FakeStatus(connected=True, authenticated=False, needs_reauth=True),
-            self._FakeStatus(connected=False, authenticated=False, needs_reauth=False),
-        ]
-        monkeypatch.setattr(
-            "flinttrade_ditto.account_manager.AccountManager",
-            lambda **_kw: self._FakeAM(statuses),
-        )
-
-        resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert len(data["data"]["accounts"]) == 3
-        assert data["data"]["summary"] == {
-            "total": 3,
-            "connected": 2,
-            "authenticated": 1,
-            "needs_reauth": 1,
-        }
-
     def test_merges_native_account_status(self, flask_app, client, monkeypatch):
-        monkeypatch.setattr(
-            "flinttrade_ditto.account_manager.AccountManager",
-            lambda **_kw: self._FakeAM([]),
-        )
         session = type("Session", (), {"expires_at": 4_102_444_800.0})()
         original_store = flask_app.config.get("CREDENTIAL_STORE")
         original_registry = flask_app.config.get("REGISTRY")
@@ -3018,11 +2773,10 @@ class TestAccountsStatus:
         assert row["authenticated"] is True
         assert row["expires_at"] == 4_102_444_800.0
 
-    def test_returns_native_status_when_ditto_unavailable(self, flask_app, client, monkeypatch):
+    def test_returns_native_status_without_copy_account_metadata(self, flask_app, client, monkeypatch):
         def _boom():
             raise RuntimeError("credential vault locked")
 
-        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
         original_store = flask_app.config.get("CREDENTIAL_STORE")
         original_registry = flask_app.config.get("REGISTRY")
         original_login_status = flask_app.config.get("NATIVE_SESSION_STATUS")
@@ -3065,7 +2819,6 @@ class TestAccountsStatus:
         def _boom():
             raise RuntimeError("credential vault locked")
 
-        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
         original_store = flask_app.config.get("CREDENTIAL_STORE")
         original_registry = flask_app.config.get("REGISTRY")
         original_login_status = flask_app.config.get("NATIVE_SESSION_STATUS")
@@ -3106,7 +2859,7 @@ class TestAccountsStatus:
         def _boom():
             raise RuntimeError("credential vault locked")
 
-        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
+        monkeypatch.setattr("flinttrade_core.operations_routes._native_account_statuses", _boom)
 
         resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
         assert resp.status_code == 503
@@ -3118,7 +2871,7 @@ class TestAccountsStatus:
         def _boom(**_kwargs):
             raise RuntimeError(secret)
 
-        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
+        monkeypatch.setattr("flinttrade_core.operations_routes._native_account_statuses", _boom)
         with caplog.at_level("WARNING", logger="flinttrade"):
             response = client.get("/api/v1/accounts/status", headers=_auth_headers())
 
@@ -3170,9 +2923,7 @@ class TestWebhooksManagement:
         signed_payload = build_webhook_signature_payload(body, nonce=nonce, timestamp=timestamp)
         return {
             "Content-Type": "application/json",
-            "X-Signature": "sha256=" + hmac.new(
-                secret.encode("utf-8"), signed_payload, hashlib.sha256
-            ).hexdigest(),
+            "X-Signature": "sha256=" + hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest(),
             "X-Webhook-Nonce": nonce,
             "X-Webhook-Timestamp": timestamp,
         }
@@ -3318,12 +3069,17 @@ class TestWebhooksManagement:
 
         path = "/v1/webhook/custom/legacy-secretless"
         flask_app.config["WEBHOOK_SECRET_STORE"].delete_secret(path)
-        Workspace().set("automation.webhooks", [{
-            "path": path,
-            "name": "Legacy Secretless",
-            "type": "custom",
-            "enabled": True,
-        }])
+        Workspace().set(
+            "automation.webhooks",
+            [
+                {
+                    "path": path,
+                    "name": "Legacy Secretless",
+                    "type": "custom",
+                    "enabled": True,
+                }
+            ],
+        )
 
         listed = client.get("/api/v1/webhooks", headers=_auth_headers())
         row = listed.get_json()["data"]["webhooks"][0]
@@ -3394,9 +3150,7 @@ class TestWebhooksManagement:
         rows = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
         assert all(row["name"] != "Atomic Create" for row in rows)
 
-    def test_create_removes_new_secret_when_registry_save_fails(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_create_removes_new_secret_when_registry_save_fails(self, flask_app, client, monkeypatch):
         def _fail_save(*_args, **_kwargs):
             raise OSError("workspace unavailable")
 
@@ -3414,9 +3168,7 @@ class TestWebhooksManagement:
         rows = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
         assert all(row["name"] != "Registry Save Failure" for row in rows)
 
-    def test_replace_restores_previous_secret_when_registry_save_fails(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_replace_restores_previous_secret_when_registry_save_fails(self, flask_app, client, monkeypatch):
         created = self._create(
             client,
             path="/webhook/custom/replace-failure",
@@ -3442,9 +3194,7 @@ class TestWebhooksManagement:
         rows = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
         assert next(row for row in rows if row["path"].endswith("/replace-failure"))["name"] == "Original Endpoint"
 
-    def test_delete_rolls_back_registry_when_secret_delete_fails(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_delete_rolls_back_registry_when_secret_delete_fails(self, flask_app, client, monkeypatch):
         from urllib.parse import quote
 
         created = self._create(
@@ -3468,9 +3218,7 @@ class TestWebhooksManagement:
         rows = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
         assert any(row["id"] == target["id"] for row in rows)
 
-    def test_delete_restores_secret_when_registry_save_fails(
-        self, flask_app, client, monkeypatch
-    ):
+    def test_delete_restores_secret_when_registry_save_fails(self, flask_app, client, monkeypatch):
         from urllib.parse import quote
 
         created = self._create(
@@ -3729,9 +3477,7 @@ def test_news_route_uses_canonical_profiles_and_preserves_its_payload(client, mo
         {
             "title": "Headline",
             "link": "https://example.com/article",
-            "pub_date": published_by_url[
-                "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
-            ],
+            "pub_date": published_by_url["https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"],
             "source": "ET Markets",
         },
         {

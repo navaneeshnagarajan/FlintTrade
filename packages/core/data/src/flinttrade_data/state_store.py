@@ -169,10 +169,7 @@ def _add_missing_columns(conn, table: str, columns: dict[str, str]) -> None:
 def ensure_schema(conn) -> None:
     """Idempotently create the §9.2 sandbox schema (tables, indexes, trigger)."""
     conn.executescript(_SCHEMA_DDL)
-    order_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(orders)").fetchall()
-    }
+    order_columns = {row[1] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
     migrations = {
         "trigger_price": "REAL NOT NULL DEFAULT 0.0",
         "stop_triggered": "INTEGER NOT NULL DEFAULT 0",
@@ -195,18 +192,10 @@ def ensure_schema(conn) -> None:
         "positions",
         {"price_source": "TEXT", "price_age_s": "INTEGER"},
     )
-    pnl_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(pnl)").fetchall()
-    }
+    pnl_columns = {row[1] for row in conn.execute("PRAGMA table_info(pnl)").fetchall()}
     if "total_trades" not in pnl_columns:
-        conn.execute(
-            "ALTER TABLE pnl ADD COLUMN total_trades INTEGER NOT NULL DEFAULT 0"
-        )
-    trade_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(trades)").fetchall()
-    }
+        conn.execute("ALTER TABLE pnl ADD COLUMN total_trades INTEGER NOT NULL DEFAULT 0")
+    trade_columns = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
     trade_migrations = {
         "charges": "REAL NOT NULL DEFAULT 0.0",
         "charges_json": "TEXT NOT NULL DEFAULT ''",
@@ -222,8 +211,7 @@ def init_capital(conn, initial_capital: float) -> None:
     if row is None:
         now = time.time()
         conn.execute(
-            "INSERT INTO capital (id, initial, current, used_margin, updated_at) "
-            "VALUES ('default', ?, ?, 0.0, ?)",
+            "INSERT INTO capital (id, initial, current, used_margin, updated_at) VALUES ('default', ?, ?, 0.0, ?)",
             (initial_capital, initial_capital, now),
         )
 
@@ -245,8 +233,7 @@ class StateStore:
 
     def get_capital(self) -> dict[str, Any]:
         row = self._conn.execute(
-            "SELECT id, initial, current, used_margin, updated_at "
-            "FROM capital WHERE id = 'default'"
+            "SELECT id, initial, current, used_margin, updated_at FROM capital WHERE id = 'default'"
         ).fetchone()
         keys = ("id", "initial", "current", "used_margin", "updated_at")
         return dict(zip(keys, row)) if row else {}
@@ -273,16 +260,13 @@ class StateStore:
             "INSERT INTO orders (order_id, symbol, exchange, action, quantity, price, "
             "product, status, filled_qty, avg_fill_px, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (order_id, symbol, exchange, action, quantity, price, product, status,
-             filled_qty, avg_fill_px, now, now),
+            (order_id, symbol, exchange, action, quantity, price, product, status, filled_qty, avg_fill_px, now, now),
         )
         return order_id
 
     def get_orders(self, limit: int = 200) -> list[dict[str, Any]]:
         cols = [c[1] for c in self._conn.execute("PRAGMA table_info(orders)").fetchall()]
-        rows = self._conn.execute(
-            "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?", (int(limit),)
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
         return [dict(zip(cols, r)) for r in rows]
 
     # -- positions -----------------------------------------------------------
@@ -295,15 +279,14 @@ class StateStore:
         rows = self._conn.execute(sql).fetchall()
         return [dict(zip(cols, r)) for r in rows]
 
-    def upsert_position(self, position_id: str, symbol: str, exchange: str, product: str = "MIS", **fields: Any) -> None:
+    def upsert_position(
+        self, position_id: str, symbol: str, exchange: str, product: str = "MIS", **fields: Any
+    ) -> None:
         now = time.time()
-        existing = self._conn.execute(
-            "SELECT 1 FROM positions WHERE position_id = ?", (position_id,)
-        ).fetchone()
+        existing = self._conn.execute("SELECT 1 FROM positions WHERE position_id = ?", (position_id,)).fetchone()
         if existing is None:
             self._conn.execute(
-                "INSERT INTO positions (position_id, symbol, exchange, product, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO positions (position_id, symbol, exchange, product, updated_at) VALUES (?, ?, ?, ?, ?)",
                 (position_id, symbol, exchange, product, now),
             )
         for key, value in fields.items():
@@ -380,16 +363,10 @@ def reset(workspace_dir: str | os.PathLike[str], initial_capital: float = 1_000_
             archived_records: list[dict[str, Any]] = []
             table_rows: dict[str, list[tuple[Any, ...]]] = {}
             for table in ("orders", "trades", "positions", "mtm"):
-                columns = [
-                    column[1]
-                    for column in conn.execute(f"PRAGMA table_info({table})").fetchall()
-                ]
+                columns = [column[1] for column in conn.execute(f"PRAGMA table_info({table})").fetchall()]
                 rows = conn.execute(f"SELECT * FROM {table}").fetchall()
                 table_rows[table] = rows
-                archived_records.extend(
-                    {"_table": table, **dict(zip(columns, row))}
-                    for row in rows
-                )
+                archived_records.extend({"_table": table, **dict(zip(columns, row))} for row in rows)
 
             def archive_key(record: dict[str, Any]) -> tuple[str, Any]:
                 table = str(record.get("_table") or "")
@@ -446,8 +423,7 @@ def reset(workspace_dir: str | os.PathLike[str], initial_capital: float = 1_000_
             conn.execute("BEGIN IMMEDIATE")
             try:
                 agg = conn.execute(
-                    "SELECT COALESCE(SUM(realised_pnl), 0), COALESCE(SUM(unrealised_pnl), 0) "
-                    "FROM positions"
+                    "SELECT COALESCE(SUM(realised_pnl), 0), COALESCE(SUM(unrealised_pnl), 0) FROM positions"
                 ).fetchone()
                 realised_total, unrealised_total = agg[0] or 0.0, agg[1] or 0.0
                 net_pnl = realised_total + unrealised_total
@@ -478,9 +454,7 @@ def reset(workspace_dir: str | os.PathLike[str], initial_capital: float = 1_000_
                 conn.execute("DELETE FROM trades")
                 conn.execute("DELETE FROM positions")
                 conn.execute("DELETE FROM orders")
-                config_row = conn.execute(
-                    "SELECT starting_capital FROM sandbox_config WHERE id = 'default'"
-                ).fetchone()
+                config_row = conn.execute("SELECT starting_capital FROM sandbox_config WHERE id = 'default'").fetchone()
                 reset_capital = float(config_row[0]) if config_row else float(initial_capital)
                 conn.execute(
                     "UPDATE capital SET initial = ?, current = ?, used_margin = 0.0, "

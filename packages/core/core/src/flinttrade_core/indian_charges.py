@@ -161,9 +161,7 @@ def lookup_rate(
         )
 
     in_force = [
-        row
-        for row in pool
-        if row.effective_from <= on and (row.effective_to is None or on <= row.effective_to)
+        row for row in pool if row.effective_from <= on and (row.effective_to is None or on <= row.effective_to)
     ]
     if in_force:
         return max(in_force, key=rank)
@@ -227,9 +225,7 @@ def calculate_leg(
     broker = _money(Decimal(brokerage))
     stt = _component_amount(exchange, segment, "stt", side, traded_on, value, contracts)
     stamp = _component_amount(exchange, segment, "stamp_duty", side, traded_on, value, contracts)
-    exchange_charges = _component_amount(
-        exchange, segment, "exchange_transaction", side, traded_on, value, contracts
-    )
+    exchange_charges = _component_amount(exchange, segment, "exchange_transaction", side, traded_on, value, contracts)
     sebi = _component_amount(exchange, segment, "sebi", side, traded_on, value, contracts)
     gst_row = lookup_rate("ANY", "any", "gst", side, traded_on)
     gst_rate = gst_row.rate if gst_row is not None else Decimal(0)

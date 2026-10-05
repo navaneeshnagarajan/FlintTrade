@@ -112,7 +112,7 @@ export function ConnectedAccounts() {
       )}
       {accounts.map((acct: BrokerAccount) => {
         // Shared rule with Settings › Brokers (BrokerConnect) — a stale or
-        // read-only gateway/OpenAlgo row must not offer "Set primary" here
+        // read-only account must not offer "Set primary" here
         // either, or setup can point the execution default at a dead account.
         const canSetPrimary = canPromotePrimaryAccount(acct);
         return (

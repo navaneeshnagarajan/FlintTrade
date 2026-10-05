@@ -91,14 +91,14 @@ describe("FeatureTeaser", () => {
 
   it("shows PreviewBanner with correct feature name", () => {
     render(
-      <FeatureTeaser featureName="Flow Builder" status="in_dev">
+      <FeatureTeaser featureName="Custom Scanner" status="in_dev">
         <div>content</div>
       </FeatureTeaser>,
     );
 
     // PreviewBanner renders aria-label with feature name
     expect(
-      screen.getByRole("status", { name: /Flow Builder/i }),
+      screen.getByRole("status", { name: /Custom Scanner/i }),
     ).toBeInTheDocument();
   });
 

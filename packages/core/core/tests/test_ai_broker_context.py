@@ -17,7 +17,7 @@ from flask import Flask
 from flinttrade_core.broker_identity import BrokerSelector, CredentialVersion
 from flinttrade_core.broker_read_port import BalanceEvidence, BalanceSnapshot
 from flinttrade_core.config import Settings
-from flinttrade_core.openalgo_client import OpenAlgoClient
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.workspace_migrations import broker_workspace_version, compare_and_swap_workspace
 from flinttrade_data.audit_logger import AuditLogger
 from flinttrade_gateway.broker_read_service import create_broker_read_owner
@@ -56,10 +56,18 @@ class _Adapter:
         await self._read(session, "historical")
         start = datetime.fromisoformat(request["start_date"]).replace(tzinfo=UTC)
         result = {
-            "symbol": request["symbol"], "exchange": request["exchange"], "interval": request["interval"],
+            "symbol": request["symbol"],
+            "exchange": request["exchange"],
+            "interval": request["interval"],
             "bars": [
-                {"timestamp": (start + timedelta(minutes=5 * i)).isoformat(),
-                 "open": 99.0, "high": 102.0, "low": 98.0, "close": 100.0, "volume": i}
+                {
+                    "timestamp": (start + timedelta(minutes=5 * i)).isoformat(),
+                    "open": 99.0,
+                    "high": 102.0,
+                    "low": 98.0,
+                    "close": 100.0,
+                    "volume": i,
+                }
                 for i in range(140)
             ],
         }
@@ -109,47 +117,94 @@ def runtime(tmp_path, monkeypatch):
     for raw in _SELECTORS:
         selector = BrokerSelector(*raw.split(":"))
         credentials[selector] = CredentialVersion(selector, uuid4(), 1)
-        authority = ManagedSessionAuthority(credentials[selector], workspace.version, broker_workspace_version(workspace))
+        authority = ManagedSessionAuthority(
+            credentials[selector], workspace.version, broker_workspace_version(workspace)
+        )
         session = Session("synthetic-test-session", time.time() + 3600, selector.account_id, selector.adapter_id)
         sessions[selector] = session
         receipt = publication_owner.prepare_session_candidate(
             selector,
             session,
-            expected_registry=registry.snapshot_selector(selector), authority=authority,
-            broker=selector.adapter_id, label=selector.account_id, client=object(),
+            expected_registry=registry.snapshot_selector(selector),
+            authority=authority,
+            broker=selector.adapter_id,
+            label=selector.account_id,
+            client=object(),
         )
         publication_owner.publish_prepared_candidate(receipt, current_authority=authority)
     provider = AuthenticatingSessionProvider(
-        registry, config.account_acls, workspace_snapshot=workspace, workspace_path=workspace_path,
+        registry,
+        config.account_acls,
+        workspace_snapshot=workspace,
+        workspace_path=workspace_path,
         credential_version_for=credentials.__getitem__,
     )
     adapter = _Adapter()
     adapters = {"dhan": adapter, "upstox": adapter}
-    client = OpenAlgoClient(Settings(openalgo_api_key=""))
+    client = BrokerClient(Settings())
     audit_path = tmp_path / "audit"
     audit = AuditLogger(str(audit_path))
     owner = create_broker_read_owner(
-        registry=registry, session_provider=provider, adapters=adapters, workspace_path=workspace_path,
-        rate_limiter=None, runtime_accepting_requests=lambda: app.config.get("RUNTIME_ACCEPTING_REQUESTS", True),
+        registry=registry,
+        session_provider=provider,
+        adapters=adapters,
+        workspace_path=workspace_path,
+        rate_limiter=None,
+        runtime_accepting_requests=lambda: app.config.get("RUNTIME_ACCEPTING_REQUESTS", True),
     )
     dependencies = _BrokerRuntimeDependencies(
-        registry, config, workspace.as_dict()["brokers"], provider, adapters, None, None, workspace,
-        workspace_path, client, adapters, publication_owner, owner,
+        registry,
+        config,
+        workspace.as_dict()["brokers"],
+        provider,
+        adapters,
+        None,
+        None,
+        workspace,
+        workspace_path,
+        client,
+        adapters,
+        publication_owner,
+        owner,
     )
     app.extensions["flinttrade_broker_dependencies"] = dependencies
     app.extensions["flinttrade.registry_publication_owner"] = publication_owner
-    app.config.update(CLIENT=client, OPENALGO_CLIENT=client, REGISTRY=registry,
-                      ACTIVE_BROKER_ADAPTERS=adapters, AUDIT=audit, RUNTIME_ACCEPTING_REQUESTS=True)
+    app.config.update(
+        CLIENT=client,
+        BROKER_CLIENT=client,
+        REGISTRY=registry,
+        ACTIVE_BROKER_ADAPTERS=adapters,
+        AUDIT=audit,
+        RUNTIME_ACCEPTING_REQUESTS=True,
+    )
 
     def token(**overrides):
-        claims = {"sub": "operator", "jti": "test-session", "type": "session", "mode": "practice",
-                  "iat": int(time.time()), "exp": int(time.time()) + 3600, "scopes": ["admin.accounts.read"]}
+        claims = {
+            "sub": "operator",
+            "jti": "test-session",
+            "type": "session",
+            "mode": "practice",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "scopes": ["admin.accounts.read"],
+        }
         claims.update(overrides)
         return jwt.encode(claims, _SIGNING_KEY, algorithm="HS256")
 
-    yield SimpleNamespace(app=app, adapter=adapter, dependencies=dependencies, owner=owner, client=client,
-                          audit=audit, audit_path=audit_path, token=token, revoked=revoked, credentials=credentials,
-                          workspace_path=workspace_path, sessions=sessions)
+    yield SimpleNamespace(
+        app=app,
+        adapter=adapter,
+        dependencies=dependencies,
+        owner=owner,
+        client=client,
+        audit=audit,
+        audit_path=audit_path,
+        token=token,
+        revoked=revoked,
+        credentials=credentials,
+        workspace_path=workspace_path,
+        sessions=sessions,
+    )
     owner.close(timeout=2.0)
     asyncio.run(client.shutdown())
     audit.close()
@@ -190,8 +245,11 @@ def test_context_uses_separate_data_and_execution_accounts_and_survives_audit_re
     runtime.audit.close()
     with AuditLogger(str(runtime.audit_path)) as reopened:
         assert reopened.verify_chain()["ok"]
-        events = [event for filename in reopened.list_audit_files()
-                  for event in reopened.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))]
+        events = [
+            event
+            for filename in reopened.list_audit_files()
+            for event in reopened.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))
+        ]
     assert len(events) == 1
     assert events[0]["event_id"] == result.receipt["event_id"]
     assert events[0]["market_data"] == context
@@ -199,11 +257,11 @@ def test_context_uses_separate_data_and_execution_accounts_and_survives_audit_re
     assert "test-session" not in json.dumps(events)
 
 
-def test_repeated_context_reads_use_the_same_owned_loop_without_openalgo_requests(runtime, monkeypatch):
+def test_repeated_context_reads_use_the_same_owned_loop_without_dhan_requests(runtime, monkeypatch):
     async def forbidden(*args, **kwargs):
-        pytest.fail("No OpenAlgo endpoint may be called by native context collection")
+        pytest.fail("No native broker endpoint may be called by native context collection")
 
-    monkeypatch.setattr(runtime.client, "_post", forbidden)
+    monkeypatch.setattr(runtime.client, "quotes", forbidden)
     _collect(runtime)
     _collect(runtime)
     assert len({id(loop) for _, _, loop in runtime.adapter.calls}) == 1
@@ -213,7 +271,8 @@ def test_supported_depth_is_bounded_and_has_real_read_provenance(runtime, monkey
     async def depth(session, request):
         await runtime.adapter._read(session, "depth")
         return {
-            "symbol": request.instrument.symbol, "exchange": request.instrument.exchange,
+            "symbol": request.instrument.symbol,
+            "exchange": request.instrument.exchange,
             "bids": [{"price": 99.0 - i, "quantity": i + 1} for i in range(7)],
             "asks": [{"price": 101.0 + i, "quantity": i + 1} for i in range(8)],
         }
@@ -238,8 +297,12 @@ def test_depth_errors_other_than_unsupported_still_block(runtime, monkeypatch, f
             runtime.revoked.add("test-session")
         if failure == "generation":
             runtime.app.extensions.pop("flinttrade_broker_dependencies")
-        return {"symbol": "WRONG" if failure == "malformed" else request.instrument.symbol,
-                "exchange": request.instrument.exchange, "bids": [], "asks": []}
+        return {
+            "symbol": "WRONG" if failure == "malformed" else request.instrument.symbol,
+            "exchange": request.instrument.exchange,
+            "bids": [],
+            "asks": [],
+        }
 
     monkeypatch.setattr(runtime.adapter, "depth", depth, raising=False)
     with pytest.raises(BrokerContextError):
@@ -258,10 +321,18 @@ def test_unsupported_required_read_still_blocks(runtime, monkeypatch, method):
     assert runtime.audit.list_audit_files() == []
 
 
-@pytest.mark.parametrize("claims", [
-    {"type": "reset"}, {"jti": ""}, {"sub": ""}, {"mode": "unknown"}, {"exp": 1}, {"scopes": []},
-    {"sub": "\ud800"},
-])
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"type": "reset"},
+        {"jti": ""},
+        {"sub": ""},
+        {"mode": "unknown"},
+        {"exp": 1},
+        {"scopes": []},
+        {"sub": "\ud800"},
+    ],
+)
 def test_invalid_or_narrowed_sessions_never_read_broker_data(runtime, claims):
     from flinttrade_core.ai_broker_context import BrokerContextError
 
@@ -288,7 +359,9 @@ def test_revocation_during_provider_read_prevents_receipted_context(runtime):
     assert runtime.audit.list_audit_files() == []
 
 
-@pytest.mark.parametrize("failure", ["malformed_quote", "missing_balance", "generation_change", "missing_loop", "shutdown"])
+@pytest.mark.parametrize(
+    "failure", ["malformed_quote", "missing_balance", "generation_change", "missing_loop", "shutdown"]
+)
 def test_unavailable_or_changed_inputs_never_receive_an_input_receipt(runtime, failure):
     from flinttrade_core.ai_broker_context import BrokerContextError
 
@@ -299,7 +372,7 @@ def test_unavailable_or_changed_inputs_never_receive_an_input_receipt(runtime, f
     elif failure == "generation_change":
         runtime.adapter.after_read = lambda: runtime.app.extensions.pop("flinttrade_broker_dependencies", None)
     elif failure == "missing_loop":
-        runtime.dependencies.openalgo_client = None
+        runtime.dependencies.broker_client = None
     else:
         runtime.app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
     with pytest.raises(BrokerContextError):
@@ -423,14 +496,19 @@ def test_http_analysis_receives_exact_durable_input_before_model_work(runtime, m
     observed = []
 
     async def analyse(symbol, exchange, market_data, **options):
-        events = [event for filename in runtime.audit.list_audit_files()
-                  for event in runtime.audit.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))]
+        events = [
+            event
+            for filename in runtime.audit.list_audit_files()
+            for event in runtime.audit.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))
+        ]
         assert len(events) == 1
         assert events[0]["market_data"] == market_data
         observed.append(events[0])
         return SimpleNamespace(to_dict=lambda: {"symbol": symbol, "exchange": exchange, "agent_analyses": []})
 
-    team = SimpleNamespace(analyse_async=analyse, get_recommendation=lambda _: SimpleNamespace(to_dict=lambda: {"action": "HOLD"}))
+    team = SimpleNamespace(
+        analyse_async=analyse, get_recommendation=lambda _: SimpleNamespace(to_dict=lambda: {"action": "HOLD"})
+    )
     monkeypatch.setattr(team_routes, "_get_team", lambda: team)
     runtime.app.register_blueprint(team_routes.team_bp)
     response = runtime.app.test_client().post(
@@ -440,12 +518,17 @@ def test_http_analysis_receives_exact_durable_input_before_model_work(runtime, m
     )
     assert response.status_code == 200
     if stream:
-        frames = [json.loads(line[6:]) for line in response.get_data(as_text=True).splitlines() if line.startswith("data: ")]
+        frames = [
+            json.loads(line[6:]) for line in response.get_data(as_text=True).splitlines() if line.startswith("data: ")
+        ]
         payload = next(frame["data"] for frame in frames if frame["type"] == "result")
     else:
         payload = response.get_json()["data"]
     assert len(observed) == 1
-    assert payload["input_receipt"] == {"event_id": observed[0]["event_id"], "input_digest": observed[0]["input_digest"]}
+    assert payload["input_receipt"] == {
+        "event_id": observed[0]["event_id"],
+        "input_digest": observed[0]["input_digest"],
+    }
     assert payload["recommendation"]["action"] == "HOLD"
 
 
@@ -464,11 +547,21 @@ def test_concrete_dhan_context_records_native_depth_and_exact_account_inputs(run
             sdk_calls.append(("quote", self.account_id, securities))
             return {
                 "status": "success",
-                "data": {"status": "success", "data": {"NSE_EQ": {"11536": {
-                    "last_price": 123.0, "volume": 17,
-                    "depth": {"buy": [{"price": 122.5, "quantity": 8, "orders": 2}],
-                              "sell": [{"price": 123.5, "quantity": 5, "orders": 1}]},
-                }}}},
+                "data": {
+                    "status": "success",
+                    "data": {
+                        "NSE_EQ": {
+                            "11536": {
+                                "last_price": 123.0,
+                                "volume": 17,
+                                "depth": {
+                                    "buy": [{"price": 122.5, "quantity": 8, "orders": 2}],
+                                    "sell": [{"price": 123.5, "quantity": 5, "orders": 1}],
+                                },
+                            }
+                        }
+                    },
+                },
             }
 
         def get_fund_limits(self):
@@ -478,22 +571,33 @@ def test_concrete_dhan_context_records_native_depth_and_exact_account_inputs(run
     clients = {account: DhanSDK(account) for account in ("Quotes", "Execution")}
     native = DhanAdapter(
         client_factory=lambda session: clients[session.account_id],
-        security_resolver=build_security_resolver([
-            {"SECURITY_ID": "11536", "EXCH_ID": "NSE", "SEGMENT": "E",
-             "TRADING_SYMBOL": "RELIANCE", "INSTRUMENT": "EQUITY", "INSTRUMENT_TYPE": "ES"},
-        ]),
+        security_resolver=build_security_resolver(
+            [
+                {
+                    "SECURITY_ID": "11536",
+                    "EXCH_ID": "NSE",
+                    "SEGMENT": "E",
+                    "TRADING_SYMBOL": "RELIANCE",
+                    "INSTRUMENT": "EQUITY",
+                    "INSTRUMENT_TYPE": "ES",
+                },
+            ]
+        ),
     )
     runtime.dependencies.adapters["dhan"] = native
 
-    async def no_openalgo(*args, **kwargs):
-        pytest.fail("Concrete native context must not call an OpenAlgo endpoint")
+    async def no_dhan(*args, **kwargs):
+        pytest.fail("Concrete native context must not call an native broker endpoint")
 
-    monkeypatch.setattr(runtime.client, "_post", no_openalgo)
+    monkeypatch.setattr(runtime.client, "quotes", no_dhan)
     result = _collect(runtime)
     context = result.market_data
 
-    assert sdk_calls == [("quote", "Quotes", {"NSE_EQ": [11536]}),
-                         ("quote", "Quotes", {"NSE_EQ": [11536]}), ("balance", "Execution")]
+    assert sdk_calls == [
+        ("quote", "Quotes", {"NSE_EQ": [11536]}),
+        ("quote", "Quotes", {"NSE_EQ": [11536]}),
+        ("balance", "Execution"),
+    ]
     assert [(operation, selector) for operation, selector, _ in runtime.adapter.calls] == [
         ("historical", BrokerSelector("upstox", "History")),
     ]
@@ -514,8 +618,11 @@ def test_concrete_dhan_context_records_native_depth_and_exact_account_inputs(run
     assert context["balance"]["provenance"]["selector"] == {"adapter_id": "dhan", "account_id": "Execution"}
     assert len(context["historical"]["value"]["bars"]) == 128
 
-    events = [event for filename in runtime.audit.list_audit_files()
-              for event in runtime.audit.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))]
+    events = [
+        event
+        for filename in runtime.audit.list_audit_files()
+        for event in runtime.audit.read_day(filename.removeprefix("audit_").removesuffix(".jsonl"))
+    ]
     assert len(events) == 1
     assert events[0]["market_data"] == context
     canonical = json.dumps(context, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)

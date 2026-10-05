@@ -19,7 +19,6 @@ const LIVE_ONLY_IDS = [
   "superorders",
   "conditionaltriggers",
   "reconciliation",
-  "indexstrip",
 ] as const;
 
 const SAMPLE_ONLY_IDS = [
@@ -29,6 +28,7 @@ const SAMPLE_ONLY_IDS = [
   "deliverydata",
   "news",
   "currencyconverter",
+  "fundingrate",
 ] as const;
 
 describe("widget taxonomy (Slice 3 contract)", () => {
@@ -75,6 +75,10 @@ describe("widget taxonomy (Slice 3 contract)", () => {
       expect(entry, `missing live-only id ${id}`).toBeDefined();
       expect(entry!.availability).toBe("live-only");
     }
+  });
+
+  it("IndexStrip admits native quotes or explicit Example prices", () => {
+    expect(widgetCatalog.find((entry) => entry.id === "indexstrip")?.availability).toBe("live-or-sample");
   });
 
   it("exact availability:sample-only set", () => {

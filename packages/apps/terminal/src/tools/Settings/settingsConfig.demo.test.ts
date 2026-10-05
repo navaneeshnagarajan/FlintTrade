@@ -19,10 +19,10 @@ describe("settings sections in the public demo build", () => {
     }
   });
 
-  it("keeps credential surfaces locally with the legacy API editor under Broker", () => {
+  it("keeps native credential surfaces locally under their canonical settings", () => {
     const ids = buildSections(false, false).map((section) => section.id);
     for (const hidden of DEMO_HIDDEN_SECTIONS) {
-      expect(ids).toContain(hidden === "api" ? "brokers" : hidden);
+      expect(ids).toContain(hidden);
     }
     expect(ids).not.toContain("api");
   });
@@ -31,7 +31,7 @@ describe("settings sections in the public demo build", () => {
     // A regression guard: adding a credential-bearing section without listing it
     // here is exactly how this gap reopens.
     expect([...DEMO_HIDDEN_SECTIONS].sort()).toEqual(
-      ["api", "brokers", "llm", "security", "telegram"].sort(),
+      ["brokers", "llm", "security", "telegram"].sort(),
     );
   });
 

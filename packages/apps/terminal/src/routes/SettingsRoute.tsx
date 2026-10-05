@@ -12,7 +12,6 @@
 import { useState, useCallback, useEffect, useMemo, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { useBrokerStore } from "@/stores/brokerStore";
-import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
@@ -24,7 +23,6 @@ import { InlineToast } from "@/tools/Settings/shared";
 import { ProfileSection }    from "@/tools/Settings/ProfileSection";
 import { GeneralSection }    from "@/tools/Settings/GeneralSection";
 import { AppearanceSection } from "@/tools/Settings/AppearanceSection";
-import { ConnectionSection } from "@/tools/Settings/ConnectionSection";
 import { BrokerConnect }     from "@/components/account/BrokerConnect";
 import { TradingSection }    from "@/tools/Settings/TradingSection";
 import { RiskSection }       from "@/tools/Settings/RiskSection";
@@ -55,15 +53,11 @@ export default function SettingsRoute() {
   const navigate = useNavigate();
   const mode = useModeStore((state) => state.mode);
   const hasConnectedAccount = useBrokerStore((state) =>
-    state.accounts.some((account) => account.status === "connected"),
-  );
-  const hasConnectedBridge = useConnectionStore((state) =>
-    state.openAlgoHydrated && Boolean(state.apiKey.trim()) && state.status === "connected",
+    state.accounts.some((account) => account.source === "native" && account.status === "connected"),
   );
   // Visibility only; execution keeps its existing independent readiness gates.
-  const showLeverage = mode !== "explore" && (hasConnectedAccount || hasConnectedBridge);
+  const showLeverage = mode !== "explore" && hasConnectedAccount;
   const [requestedSection, setRequestedSection] = useState(() => window.location.hash.slice(1));
-  const [advancedOpen, setAdvancedOpen] = useState(requestedSection === "api");
   const canonicalSection = requestedSection === "api" ? "brokers" : requestedSection;
   const activeSection: SectionId = canonicalSection === "leverage" && !showLeverage
     ? (SECTIONS.some((section) => section.id === "brokers") ? "brokers" : "general")
@@ -79,7 +73,6 @@ export default function SettingsRoute() {
     const syncSectionFromHash = () => {
       const hash = window.location.hash.slice(1);
       setRequestedSection(hash);
-      if (hash === "api") setAdvancedOpen(true);
     };
     window.addEventListener("hashchange", syncSectionFromHash);
     return () => window.removeEventListener("hashchange", syncSectionFromHash);
@@ -116,7 +109,7 @@ export default function SettingsRoute() {
     llmCredentialLast4,
     telegram,
     dataPaths,
-    connection,
+
     restarting,
     updateGeneral,
     updateTradingDefaults,
@@ -126,7 +119,7 @@ export default function SettingsRoute() {
     removeLLMCredential,
     updateTelegram,
     updateDataPaths,
-    acceptConnection,
+
     handleRestart,
     retryLlmHydration,
   } = useSettingsState();
@@ -166,18 +159,7 @@ export default function SettingsRoute() {
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;
-      case "api":
-      case "brokers":    return (
-        <div className="space-y-6">
-          <BrokerConnect pollAccounts={false} />
-          <details open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
-            <summary className="cursor-pointer text-sm font-medium text-text-secondary">Advanced · OpenAlgo bridge</summary>
-            <div className="pt-4">
-              <ConnectionSection settings={connection} onSaved={acceptConnection} />
-            </div>
-          </details>
-        </div>
-      );
+      case "brokers":    return <BrokerConnect pollAccounts={false} />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
       case "leverage":   return <LeverageSection />;

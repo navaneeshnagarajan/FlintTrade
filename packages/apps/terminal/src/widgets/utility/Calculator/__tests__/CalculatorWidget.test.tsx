@@ -308,21 +308,21 @@ describe("Sizing tab", () => {
   // ── Numeric characterisation (pins the sizing kernel) ─────────────────────
 
   describe("sizing arithmetic", () => {
-    it("pins the default Fixed % result — 1 lot, clamped above the risk budget", () => {
+    it("pins the default Fixed % result — no lot fits below the risk budget", () => {
       render(<CalculatorWidget {...defaultProps} />);
 
       // Capital ₹5,00,000 · risk 1% → budget ₹5,000. Stop 22,000 → 21,800 is
-      // 200 points, so one 50-unit lot risks ₹10,000: floor() lands on 0 and
-      // the max(1, …) clamp recommends a lot risking 2× the stated budget.
-      expect(resultValue("Position Size (lots)")).toBe("1");
-      expect(resultValue("Units (shares)")).toBe("50");
+      // 200 points, so one 50-unit lot risks ₹10,000: floor() lands on 0. The risk limit forbids rounding up to a whole lot.
+      expect(resultValue("Position Size (lots)")).toBe("0");
+      expect(resultValue("Units (shares)")).toBe("0");
       expect(resultValue("SL Points")).toBe("200.00");
       expect(resultValue("Risk Budget")).toBe("₹5,000");
-      expect(resultValue("Actual Risk")).toBe("₹10,000");
-      expect(resultValue("At Risk")).toBe("2.00%");
-      expect(resultValue("Available")).toBe("98.00%");
+      expect(resultValue("Actual Risk")).toBe("₹0");
+      expect(resultValue("Minimum Unit Risk")).toBe("₹10,000");
+      expect(resultValue("At Risk")).toBe("0.00%");
+      expect(resultValue("Available")).toBe("100.00%");
 
-      // …and the clamp is stated out loud instead of passing silently.
+      // The minimum unit explains why the within-budget size is zero.
       expect(screen.getByRole("status")).toHaveTextContent(
         /single lot risks ₹10,000 — more than the ₹5,000 you allowed/i,
       );
@@ -368,16 +368,16 @@ describe("Sizing tab", () => {
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
     });
 
-    it("pins the default ATR result — also clamped above the risk budget", () => {
+    it("pins the default ATR result — refuses to exceed the risk budget", () => {
       render(<CalculatorWidget {...defaultProps} />);
       selectMethod("ATR");
 
       // Stop distance = ATR 180 × 1.5 = 270 → ₹13,500 per lot vs a ₹5,000
-      // budget, so the clamp again recommends 1 over-risked lot.
-      expect(resultValue("Position Size (lots)")).toBe("1");
-      expect(resultValue("Units (shares)")).toBe("50");
-      expect(resultValue("Actual Risk")).toBe("₹13,500");
-      expect(resultValue("At Risk")).toBe("2.70%");
+      // budget, so no whole lot can fit below this risk limit.
+      expect(resultValue("Position Size (lots)")).toBe("0");
+      expect(resultValue("Units (shares)")).toBe("0");
+      expect(resultValue("Actual Risk")).toBe("₹0");
+      expect(resultValue("At Risk")).toBe("0.00%");
       // The derived stop is shown, because the operator never typed it.
       expect(resultValue("Stop Loss (from ATR)")).toBe("₹21,730");
       expect(screen.getByRole("status")).toHaveTextContent(
@@ -432,7 +432,7 @@ describe("Sizing tab", () => {
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
     });
 
-    it("warns rather than hiding results when one share breaches the risk budget", () => {
+    it("returns zero shares when the minimum unit breaches the risk budget", () => {
       render(<CalculatorWidget {...defaultProps} />);
       setField("Account Capital", "200000");
       setField("Risk per Trade %", "2");
@@ -443,10 +443,10 @@ describe("Sizing tab", () => {
       setField("Entry Price", "100000");
       setField("Stop Loss", "90000");
 
-      expect(resultValue("Position Size (lots)")).toBe("1");
-      expect(resultValue("Units (shares)")).toBe("1");
+      expect(resultValue("Position Size (lots)")).toBe("0");
+      expect(resultValue("Units (shares)")).toBe("0");
       expect(resultValue("Risk Budget")).toBe("₹4,000");
-      expect(resultValue("Actual Risk")).toBe("₹10,000");
+      expect(resultValue("Actual Risk")).toBe("₹0");
       expect(screen.getByRole("status")).toHaveTextContent(
         /single share risks ₹10,000 — more than the ₹4,000 you allowed/i,
       );
@@ -930,4 +930,45 @@ describe("Margin tab", () => {
     expect(fundsSignal?.aborted).toBe(true);
     expect(marginSignal?.aborted).toBe(true);
   });
+});
+
+
+describe("independent calculator boundaries", () => {
+  it("rejects a Kelly win probability above one", () => {
+    render(<CalculatorWidget {...defaultProps} />);
+    selectMethod("Kelly");
+    setField("Win Rate %", "110");
+    expect(screen.getByText(/fill in all fields/i)).toBeInTheDocument();
+    expect(screen.queryByText("Actual Risk")).not.toBeInTheDocument();
+  });
+
+  it("rejects fractional quantities in a whole-lot payoff", () => {
+    renderWithTab("target");
+    setField("Quantity (lots)", "1.5");
+    expect(screen.getByText(/enter entry, stop loss and target/i)).toBeInTheDocument();
+    expect(screen.queryByText("Potential Profit")).not.toBeInTheDocument();
+  });
+
+  it("hides broker observations and aborts when the same account loses read authority", async () => {
+    const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
+    const { rerender } = render(<CalculatorWidget {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
+    const signal = apiMocks.getMargin.mock.calls[0]?.[6] as AbortSignal;
+    act(() => { accountReadState.current = { ...CONNECTED_NATIVE_READ_CONTEXT, enabled: false }; });
+    rerender(<CalculatorWidget {...props} />);
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
+    expect(screen.queryByText("Available Funds")).not.toBeInTheDocument();
+    expect(signal.aborted).toBe(true);
+    expect(screen.getByRole("button", { name: /get live margin/i })).toBeDisabled();
+  });
+});
+
+
+it("labels a Practice margin observation as simulated account data", async () => {
+  accountReadState.current = PRACTICE_READ_CONTEXT;
+  renderWithTab("margin");
+  await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+  await waitFor(() => expect(screen.getByText("PRACTICE")).toBeInTheDocument());
+  expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
 });

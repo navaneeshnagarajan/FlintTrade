@@ -15,7 +15,7 @@ import pytest
 from flinttrade_core.models import Order
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import SafetyContext, set_safety_gate_secret
-from flinttrade_gateway.brokers import _base, dhan, kotakneo, openalgo, upstox
+from flinttrade_gateway.brokers import _base, dhan, kotakneo, upstox
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
 from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 from flinttrade_gateway.router import BrokerRouter
@@ -37,7 +37,6 @@ def test_all_adapters_and_router_share_one_token():
     assert dhan._ROUTER_TOKEN is tok
     assert upstox._ROUTER_TOKEN is tok
     assert kotakneo._ROUTER_TOKEN is tok
-    assert openalgo._ROUTER_TOKEN is tok
     assert router_mod._ROUTER_TOKEN is tok
 
 

@@ -20,7 +20,7 @@ describe("MiniChartCard", () => {
 
   it("badges the sparkline as SAMPLE (illustrative shape, not live data)", () => {
     render(<MiniChartCard />);
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 
   it("shows a dash, never a fabricated price, when there is no live NIFTY tick", () => {

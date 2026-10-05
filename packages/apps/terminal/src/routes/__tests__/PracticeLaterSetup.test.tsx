@@ -3,7 +3,7 @@
  *
  * The tray is a one-line reminder until Show. It must not count toward
  * Step N of M, must remember Later across reloads, and must keep
- * "Continue without a broker" ahead of the native and OpenAlgo controls.
+ * "Continue without a broker" ahead of the native and broker controls.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -65,7 +65,7 @@ describe("PracticeLaterSetup", () => {
     expect(screen.getByRole("button", { name: "Later Trading defaults" })).toHaveTextContent("Later");
     expect(screen.getByRole("button", { name: "Continue without a broker" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "FlintTrade Native" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "OpenAlgo Bridge" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "native broker Bridge" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Later Monitoring" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Later Risk" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /live/i })).not.toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("PracticeLaterSetup", () => {
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
   });
 
-  it("puts Continue without a broker ahead of native and OpenAlgo", () => {
+  it("puts brokerless Practice before the optional native connection", () => {
     markPracticeLaterPending();
     render(<PracticeLaterSetup />);
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
@@ -122,12 +122,9 @@ describe("PracticeLaterSetup", () => {
 
     const skipBroker = screen.getByRole("button", { name: "Continue without a broker" });
     const native = screen.getByRole("button", { name: "FlintTrade Native" });
-    const openAlgo = screen.getByRole("button", { name: "OpenAlgo Bridge" });
+    expect(screen.getAllByRole("button", { name: /flinttrade native/i })).toHaveLength(1);
     expect(
       skipBroker.compareDocumentPosition(native) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      skipBroker.compareDocumentPosition(openAlgo) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
     fireEvent.click(skipBroker);

@@ -6,7 +6,7 @@ the latest upstream commit and reports new features/APIs we're missing.
 
 Usage:
     python scripts/check_absorption_drift.py
-    python scripts/check_absorption_drift.py --repo openalgo
+    python scripts/check_absorption_drift.py --repo FinMem
 """
 
 from __future__ import annotations
@@ -19,50 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ─── Absorption registry ─────────────────────────────────────────────────
-# Each entry tracks: repo name, local path (.local/external/ for the
-# external test-deps, or .local/reference/ for pattern-absorbed repos), what
-# we absorbed, and what commit/date we last checked. The external repos
-# (openalgo, openclaw) used to be git submodules under infra/; they are
-# now plain reference clones under .local/external/ and only present
-# locally if the user ran scripts/setup-test-deps.sh. (OpenClaw was dropped in
-# the AI-backends rework — the `agent_backends` layer replaced its gateway
-# bridge.) AlgoMirror is
-# absent: its mirroring patterns are fully absorbed into packages/services/ditto/
-# and the repo is no longer pulled or tracked.
-
 ABSORBED_REPOS: list[dict] = [
-    {
-        "name": "openalgo",
-        "github": "marketcalls/openalgo",
-        "local_path": ".local/external/openalgo",
-        "type": "reference",
-        "absorbed": [
-            "REST API client (45+ endpoints) -> packages/core/core/src/openalgo_client.py",
-            "WebSocket protocol -> packages/apps/terminal/src/services/websocket.ts",
-            "Broker adapter pattern -> packages/integrations/gateway/",
-            "Option chain/Greeks -> packages/services/screener/",
-            "React dashboard patterns -> packages/apps/terminal/",
-        ],
-        "last_absorbed_commit": "ef1f6b9c",  # Verified 2026-08-29 — v2.0.2.2 REST sync
-        "missing_since": [
-            "Zebu OAuth migration (TOTP -> OAuth 2.0)",
-            "Flattrade V2 API endpoint migration",
-            "Telegram alert service refactor (sync HTTP, no asyncio)",
-        ],
-    },
-    {
-        "name": "openalgo-flow",
-        "github": "marketcalls/openalgo-flow",
-        "local_path": ".local/reference/repos/tier1-core/openalgo-flow",
-        "type": "reference",
-        "absorbed": [
-            "54 of 54 node types -> packages/integrations/webhooks/src/flow_builder.py",
-            "Visual canvas pattern -> /automate route FlowBuilder",
-            "Draggable node palette with 8 categories",
-        ],
-        "last_absorbed_commit": "2026-03-31",
-        "missing_since": [],
-    },
     # EquiCharts entry removed 2026-04-24: reference repo deleted
     # (chart patterns were absorbed into packages/apps/terminal/src/components/Chart.tsx;
     #  further drift checking against the upstream is no longer relevant since
@@ -158,10 +115,10 @@ def check_repo(repo: dict) -> dict:
         result["notes"] = "Directory not found"
         return result
 
-    # External test-deps under .local/external/ (openalgo) are
+    # External reference clones are
     # tracked specially: if a .git directory is present, we can compute
     # drift against origin/main. They no longer exist for end users — only
-    # for contributors who ran scripts/setup-test-deps.sh.
+    # for contributors with local reference clones.
     is_external_test_dep = repo["local_path"].startswith(".local/external/")
     if is_external_test_dep and (local_path / ".git").exists():
         result["current_commit"] = _run(["git", "rev-parse", "--short", "HEAD"], cwd=local_path)

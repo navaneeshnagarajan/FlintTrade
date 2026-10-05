@@ -278,7 +278,7 @@ describe("ScalperWidget", () => {
     mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
       selector({ mode: "explore" }),
     );
-    mockGetExpiry.mockRejectedValue(new Error("OpenAlgo unavailable"));
+    mockGetExpiry.mockRejectedValue(new Error("native broker unavailable"));
 
     render(<ScalperWidget {...defaultProps} />);
 

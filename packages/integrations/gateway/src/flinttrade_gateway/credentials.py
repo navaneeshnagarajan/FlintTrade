@@ -325,8 +325,8 @@ def _legacy_identity(row: dict[str, Any]) -> tuple[str | None, str | None]:
             return None, "legacy_role_unresolved"
         adapter = row["broker"]
     elif not (
-        (adapter in _LEGACY_BROKERS and adapter == row["broker"])
-        or (adapter == "openalgo" and row["broker"] in _LEGACY_BROKERS | {"openalgo"})
+        adapter in _LEGACY_BROKERS and adapter == row["broker"]
+
     ):
         return None, "legacy_role_unresolved"
     return adapter, None
@@ -394,7 +394,7 @@ def _selector(value: BrokerSelector, *, mutation: bool = False) -> BrokerSelecto
         value.__post_init__()
     except ValueError:
         raise CredentialValidationError from None
-    if mutation and value == BrokerSelector("openalgo", "default"):
+    if mutation and value.adapter_id == "openalgo":
         raise CredentialValidationError
     return value
 
@@ -422,7 +422,7 @@ def _metadata(selector: BrokerSelector, broker: str, label: str) -> None:
 
 
 def _normalise_setup(selector: BrokerSelector, setup: dict[str, Any]) -> str:
-    """Validate a bounded OpenAlgo origin without DNS or client invocation."""
+    """Validate inert historical origin metadata for quarantine byte preservation."""
     try:
         if (
             selector.adapter_id != "openalgo"
@@ -974,7 +974,7 @@ class CredentialStore:
 
     @staticmethod
     def _validate_account_row(row: dict[str, Any], adapter: str, *, reserved_source: bool = False) -> None:
-        selector = _selector(BrokerSelector(adapter, row["account_id"]), mutation=not reserved_source)
+        selector = _selector(BrokerSelector(adapter, row["account_id"]), mutation=False)
         _metadata(selector, row["broker"], row["label"])
         CredentialStore._validate_account_storage(row)
 
@@ -1057,7 +1057,7 @@ class CredentialStore:
             for row in conn.execute("SELECT * FROM broker_selector_setup"):
                 selector = _selector(
                     BrokerSelector(row["adapter_id"], row["account_id"]),
-                    mutation=bool(row["present"]) and not reserved_source,
+                    mutation=False,
                 )
                 if selector not in versions or type(row["present"]) is not int or row["present"] not in (0, 1):
                     raise ValueError
@@ -1302,6 +1302,8 @@ class CredentialStore:
         )
 
     def _available(self, conn: sqlite3.Connection, selector: BrokerSelector) -> None:
+        if selector.adapter_id == "openalgo":
+            raise CredentialConflictError
         if self._state(conn, selector).origin == "legacy_interim_candidate":
             raise CredentialConflictError
 
@@ -1350,6 +1352,8 @@ class CredentialStore:
             ).fetchone()[0])
 
     def account_for_selector(self, selector: BrokerSelector) -> CredentialAccount | None:
+        if selector.adapter_id == "openalgo":
+            return None
         _selector(selector)
         with self._transaction() as conn:
             state = self._state(conn, selector)
@@ -1365,6 +1369,8 @@ class CredentialStore:
             )
 
     def retrieve_credentials(self, selector: BrokerSelector) -> dict[str, Any]:
+        if selector.adapter_id == "openalgo":
+            raise CredentialNotFoundError
         _selector(selector)
         with self._transaction() as conn:
             if self._state(conn, selector).origin == "legacy_interim_candidate":
@@ -1372,6 +1378,8 @@ class CredentialStore:
             return self._decrypt(self._row(conn, selector))
 
     def retrieve_setup(self, selector: BrokerSelector) -> dict[str, Any]:
+        if selector.adapter_id == "openalgo":
+            raise CredentialNotFoundError
         _selector(selector)
         with self._transaction() as conn:
             if self._state(conn, selector).origin == "legacy_interim_candidate":
@@ -1439,19 +1447,7 @@ class CredentialStore:
     def put_setup(
         self, selector: BrokerSelector, setup: dict[str, Any], *, expected: CredentialVersion
     ) -> CredentialVersion:
-        _selector(selector, mutation=True)
-        with self._transaction(write=True) as conn:
-            self._expected(conn, selector, expected)
-            self._check_bump(conn, selector)
-            encoded = _normalise_setup(selector, setup)
-            if not self._state(conn, selector).setup_present:
-                self._admit_new_component(conn, selector)
-            conn.execute(
-                """INSERT INTO broker_selector_setup VALUES(?,?,1,?)
-                            ON CONFLICT(adapter_id,account_id) DO UPDATE SET present=1,setup_json=excluded.setup_json""",
-                (*_pair(selector), encoded),
-            )
-            return self._bump(conn, selector)
+        raise CredentialValidationError
 
     def _remove(
         self, conn: sqlite3.Connection, selector: BrokerSelector, *, credentials: bool, setup: bool
@@ -1671,7 +1667,7 @@ class CredentialStore:
     # Compatibility resolution and writes share one owned transaction.
     def _resolve_legacy(self, conn: sqlite3.Connection, account_id: str) -> BrokerSelector | None:
         BrokerSelector("legacy", account_id)
-        rows = conn.execute("SELECT adapter_id FROM accounts WHERE account_id=?", (account_id,)).fetchall()
+        rows = conn.execute("SELECT adapter_id FROM accounts WHERE account_id=? AND adapter_id!='openalgo'", (account_id,)).fetchall()
         if len(rows) > 1:
             raise CredentialAmbiguityError
         if not rows:
@@ -1699,7 +1695,7 @@ class CredentialStore:
             rows = conn.execute("""SELECT a.account_id,a.adapter_id,a.broker,a.label,a.is_primary,a.created_at
                                    FROM accounts a JOIN credential_selector_versions v
                                    ON a.adapter_id=v.adapter_id AND a.account_id=v.account_id
-                                   WHERE v.origin!='legacy_interim_candidate' ORDER BY a.created_at""").fetchall()
+                                   WHERE v.origin!='legacy_interim_candidate' AND a.adapter_id!='openalgo' ORDER BY a.created_at""").fetchall()
             return [dict(row) | {"is_primary": bool(row["is_primary"])} for row in rows]
 
     def store(

@@ -148,4 +148,49 @@ describe("skillStore", () => {
     const parsed = JSON.parse(raw as string) as { state: { globalLevel: string } };
     expect(parsed.state.globalLevel).toBe("intermediate");
   });
+
+  it.each([2, 3])("rehydrates version %s without retired counters while retaining declared activity and preferences", async (version) => {
+    localStorage.setItem("flinttrade:skill", JSON.stringify({
+      version,
+      state: {
+        globalLevel: "advanced",
+        routeOverrides: { lab: "intermediate" },
+        helpPrefs: { inlineHints: false, spotlightTours: true, aiTutor: false },
+        dismissedSuggestions: ["learn:intermediate"],
+        seenWidgetActions: ["widget_view_orderpad"],
+        metrics: {
+          trade: { ordersPlaced: 8, widgetsUsed: 4, daysActive: 2, lastActiveDate: "2026-10-05" },
+          automate: { flowsCreated: 27, alertsSet: 5, strategiesUploaded: 3 },
+          learn: { quizzesPassed: 2 },
+        },
+      },
+    }));
+    await useSkillStore.persist.rehydrate();
+    const restored = useSkillStore.getState();
+    expect(restored.metrics.automate).toEqual({ alertsSet: 5, strategiesUploaded: 3 });
+    expect(restored.metrics.trade).toEqual({ ordersPlaced: 8, widgetsUsed: 4, daysActive: 2, lastActiveDate: "2026-10-05" });
+    expect(restored.metrics.learn).toEqual({ lessonsCompleted: 0, quizzesPassed: 2, articlesRead: 0 });
+    expect(restored.globalLevel).toBe("advanced");
+    expect(restored.routeOverrides).toEqual({ lab: "intermediate" });
+    expect(restored.helpPrefs).toEqual({ inlineHints: false, spotlightTours: true, aiTutor: false });
+    expect(restored.dismissedSuggestions).toEqual(["learn:intermediate"]);
+    expect(restored.seenWidgetActions).toEqual(["widget_view_orderpad"]);
+
+    restored.trackAction("automate", "flowsCreated");
+    expect(useSkillStore.getState().metrics.automate).toEqual({ alertsSet: 5, strategiesUploaded: 3 });
+    restored.trackAction("automate", "alertsSet");
+    expect(useSkillStore.getState().metrics.automate).toEqual({ alertsSet: 6, strategiesUploaded: 3 });
+    const saved = JSON.parse(localStorage.getItem("flinttrade:skill") ?? "{}");
+    expect(saved.version).toBe(3);
+    expect(saved.state.metrics.automate).toEqual({ alertsSet: 6, strategiesUploaded: 3 });
+  });
+
+  it("keeps surviving Automate upgrade suggestions about schedules", () => {
+    useSkillStore.getState().trackAction("automate", "alertsSet");
+    useSkillStore.getState().trackAction("automate", "alertsSet");
+    useSkillStore.getState().trackAction("automate", "alertsSet");
+    expect(useSkillStore.getState().getSuggestions()).toContainEqual(expect.objectContaining({
+      domain: "automate", reason: "Your alerts are working. Ready to manage scheduled strategies?",
+    }));
+  });
 });

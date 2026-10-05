@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { createStore, Provider } from "jotai";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { SymbolRow } from "../SymbolRow";
 import type { WatchlistItem } from "../types";
+import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
+import { useModeStore } from "@/stores/modeStore";
+import type { BrokerAccount } from "@/types/broker";
 
 const ITEM: WatchlistItem = { symbol: "RELIANCE", exchange: "NSE" };
 
@@ -104,5 +107,45 @@ describe("SymbolRow LTP / % change columns (FT-TRADE-008)", () => {
 
     expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("…");
     expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("…");
+  });
+});
+
+
+describe("SymbolRow tick authority", () => {
+  function nativeAccount(id: string): BrokerAccount {
+    return { source: "native", broker: "dhan", account_id: id, label: id,
+      status: "connected", connected_at: null, error_message: null, is_primary: false };
+  }
+  const a = nativeAccount("A");
+  const b = nativeAccount("B");
+  const tickA = { symbol: "RELIANCE", exchange: "NSE", ltp: 2850, prevClose: 2840 };
+
+  function mountAccountARow() {
+    useModeStore.setState({ mode: "live" });
+    useBrokerStore.setState({ accounts: [a, b], activeAccountId: brokerAccountKey(a) });
+    const store = createStore();
+    store.set(tickAtomFamily("NSE:RELIANCE"), tickA);
+    const view = render(<Provider store={store}><SymbolRow item={ITEM} quote={null} sparkPrices={[]}
+      visibleColumns={["symbol", "price", "changePct"]} formula="rangePct" onSelect={vi.fn()} onRemove={vi.fn()} /></Provider>);
+    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("2,850.00");
+    return { store, view };
+  }
+
+  it("hides cached A ticker prices immediately under B and admits only B observations", () => {
+    const { store } = mountAccountARow();
+    act(() => useBrokerStore.getState().setActiveAccount(brokerAccountKey(b)));
+    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
+    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("—");
+    act(() => store.set(tickAtomFamily("NSE:RELIANCE"), { ...tickA, ltp: 4000, prevClose: 3900 }));
+    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("4,000.00");
+    act(() => useBrokerStore.getState().setActiveAccount(brokerAccountKey(a)));
+    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
+  });
+
+  it.each(["practice", "explore"] as const)("clears cached native ticker observations before the first %s row render", (mode) => {
+    mountAccountARow();
+    act(() => useModeStore.getState().setMode(mode));
+    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
+    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("—");
   });
 });

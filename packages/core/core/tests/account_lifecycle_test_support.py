@@ -19,7 +19,9 @@ from flinttrade_core.broker_identity import BrokerSelector
 from flinttrade_core.broker_read_port import BalanceEvidence, BalanceSnapshot, ExactReadTarget
 from flinttrade_core.secure_file import harden_directory
 from flinttrade_core.workspace_migrations import (
-    broker_workspace_version, default_workspace_config, write_workspace_config,
+    broker_workspace_version,
+    default_workspace_config,
+    write_workspace_config,
 )
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_gateway.account_transaction_store import AccountTransactionStore
@@ -56,8 +58,13 @@ class SyntheticAdapter:
         await asyncio.to_thread(self.auth_release.wait)
         if self.auth_error is not None:
             raise self.auth_error
-        session = Session("synthetic-output", time.time() + 3600, "synthetic", "dhan",
-                          read_only_until_at=time.time() + 1800 if self.read_only else None)
+        session = Session(
+            "synthetic-output",
+            time.time() + 3600,
+            "synthetic",
+            "dhan",
+            read_only_until_at=time.time() + 1800 if self.read_only else None,
+        )
         self.sessions.append(session)
         if self.after_auth is not None:
             self.after_auth()
@@ -77,8 +84,16 @@ class SyntheticAdapter:
 
     async def balance_snapshot(self, session):
         self.reads += 1
-        return BalanceSnapshot(100.0, BalanceEvidence.DIRECT, 20.0, BalanceEvidence.DIRECT,
-                               120.0, BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS, 125.0, BalanceEvidence.DIRECT)
+        return BalanceSnapshot(
+            100.0,
+            BalanceEvidence.DIRECT,
+            20.0,
+            BalanceEvidence.DIRECT,
+            120.0,
+            BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS,
+            125.0,
+            BalanceEvidence.DIRECT,
+        )
 
     def cleanup(self, payload):
         self.cleanup_release.wait()
@@ -87,7 +102,9 @@ class SyntheticAdapter:
             self.cleaned.append(session)
 
     def authenticate(self, request, credentials, prior_retirement):
-        return asyncio.run(prepare_native_session(self, dict(credentials), verify=True, mutation_admission=lambda: None))
+        return asyncio.run(
+            prepare_native_session(self, dict(credentials), verify=True, mutation_admission=lambda: None)
+        )
 
 
 class SyntheticAccountHarness:
@@ -116,16 +133,25 @@ class SyntheticAccountHarness:
         self.adapter = SyntheticAdapter()
         self.limiter = BrokerRateLimiter({"dhan": {"data": 10000.0, "quote": 10000.0}})
         self.runtime = api.BrokerAccountReadRuntime(
-            registry=self.registry, workspace_path=path,
+            registry=self.registry,
+            workspace_path=path,
             credential_version_for=lambda selector: self.credentials.selector_state(selector).version,
-            adapters={"dhan": self.adapter}, rate_limiter=self.limiter,
+            adapters={"dhan": self.adapter},
+            rate_limiter=self.limiter,
             runtime_accepting_requests=lambda: True,
         )
-        self.lifecycle = BrokerAccountLifecycleOwner(path, proof, retire_generations=self.runtime.retire,
-                                                     rebuild_lock=threading.RLock())
+        self.lifecycle = BrokerAccountLifecycleOwner(
+            path, proof, retire_generations=self.runtime.retire, rebuild_lock=threading.RLock()
+        )
         self.coordinator = api.BrokerAccountTransactionCoordinator(
-            self.store, self.workspace, self.lifecycle, self.registry_owner, self.adapter, self.runtime,
-            lambda: None, verify_current_actor=self.verify_actor,
+            self.store,
+            self.workspace,
+            self.lifecycle,
+            self.registry_owner,
+            self.adapter,
+            self.runtime,
+            lambda: None,
+            verify_current_actor=self.verify_actor,
         )
 
     def verify_actor(self):
@@ -137,21 +163,35 @@ class SyntheticAccountHarness:
         with self.app.app_context():
             auth_routes.verify_operator_session_token(self.token)
             payload = auth_routes.decode_token(self.token)
-        return RequestContext(jti=payload["jti"], actor_type="human", actor_id=payload["sub"],
-                              mode=payload["mode"], selector=f"{selector.adapter_id}:{selector.account_id}")
+        return RequestContext(
+            jti=payload["jti"],
+            actor_type="human",
+            actor_id=payload["sub"],
+            mode=payload["mode"],
+            selector=f"{selector.adapter_id}:{selector.account_id}",
+        )
 
     def request(self, kind=AccountMutationKind.CONNECT, *, account="Synthetic", credentials=None, roles=()):
         snapshot = self.workspace.assert_coherent()
         selector = BrokerSelector("dhan", account)
         return AccountMutationRequest(
-            uuid4(), kind, selector, self.actor, snapshot.version, broker_workspace_version(snapshot),
-            self.credentials.selector_state(selector).version, "dhan", account,
-            None if kind is AccountMutationKind.REMOVE else credentials or {"token": "synthetic-input"}, roles,
+            uuid4(),
+            kind,
+            selector,
+            self.actor,
+            snapshot.version,
+            broker_workspace_version(snapshot),
+            self.credentials.selector_state(selector).version,
+            "dhan",
+            account,
+            None if kind is AccountMutationKind.REMOVE else credentials or {"token": "synthetic-input"},
+            roles,
         )
 
     def bind(self, selector):
-        return self.runtime.read_owner.bind(target=ExactReadTarget(selector),
-                                            verify_current_authority=lambda: self.verify_read(selector))
+        return self.runtime.read_owner.bind(
+            target=ExactReadTarget(selector), verify_current_authority=lambda: self.verify_read(selector)
+        )
 
     def close(self):
         self.adapter.auth_release.set()

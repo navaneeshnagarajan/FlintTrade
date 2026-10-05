@@ -1837,13 +1837,15 @@ class LayaRuntime:
             parameters = inspect.signature(self._downloader).parameters
         except (TypeError, ValueError):
             parameters = {}
-        accepts_progress = any(
-            item.kind == inspect.Parameter.VAR_POSITIONAL for item in parameters.values()
-        ) or sum(
-            1
-            for item in parameters.values()
-            if item.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        ) >= 3
+        accepts_progress = (
+            any(item.kind == inspect.Parameter.VAR_POSITIONAL for item in parameters.values())
+            or sum(
+                1
+                for item in parameters.values()
+                if item.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            )
+            >= 3
+        )
         if accepts_progress:
             return int(self._downloader(argv, env, self._note_progress))
         return int(self._downloader(argv, env))
@@ -1859,6 +1861,7 @@ class LayaRuntime:
             stderr=subprocess.PIPE,
             text=True,
         )
+
         def _drain(pipe: Any) -> None:
             try:
                 pipe.read()
@@ -2047,9 +2050,7 @@ class LayaRuntime:
         from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
 
         policy = load_policy()
-        self._refuse_before_launch(
-            ArtifactCheck(ok=False, reason="key_missing", revision=policy.revision, sha256="")
-        )
+        self._refuse_before_launch(ArtifactCheck(ok=False, reason="key_missing", revision=policy.revision, sha256=""))
 
     def _stamp_weighed(self, weighed: ArtifactCheck, token: str) -> ArtifactCheck:
         """Bind a hash taken before launch to the process that just started."""

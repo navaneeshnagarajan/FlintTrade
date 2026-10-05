@@ -1,5 +1,5 @@
 /**
- * useVoiceInput — Web Speech API hook for voice order capture.
+ * useVoiceInput — Web Speech API hook for dictating AI conversation drafts.
  *
  * Wraps `webkitSpeechRecognition` / `SpeechRecognition` with a clean
  * React interface.  Falls back gracefully when the browser does not
@@ -8,7 +8,7 @@
  *
  * Usage:
  *   const { isListening, isSupported, transcript, startListening, stopListening } =
- *     useVoiceInput({ onResult: (text) => handleVoiceCommand(text) });
+ *     useVoiceInput({ onResult: (text) => setConversationDraft(text) });
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -122,6 +122,7 @@ export function useVoiceInput(
   const [transcript, setTranscript] = useState("");
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const activeRef = useRef(false);
   // Keep a stable ref to callbacks so we don't re-initialise recognition
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
@@ -150,10 +151,12 @@ export function useVoiceInput(
     rec.maxAlternatives = 1;
 
     rec.onstart = () => {
+      if (!activeRef.current || recognitionRef.current !== rec) return;
       setIsListening(true);
     };
 
     rec.onresult = (event: SpeechRecognitionEvent) => {
+      if (!activeRef.current || recognitionRef.current !== rec) return;
       let finalText = "";
       let interimText = "";
 
@@ -178,6 +181,8 @@ export function useVoiceInput(
     };
 
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (!activeRef.current || recognitionRef.current !== rec) return;
+      activeRef.current = false;
       // "no-speech" is a normal timeout — do not treat as error
       if (event.error !== "no-speech") {
         onErrorRef.current?.(event.error);
@@ -186,6 +191,8 @@ export function useVoiceInput(
     };
 
     rec.onend = () => {
+      if (recognitionRef.current !== rec) return;
+      activeRef.current = false;
       setIsListening(false);
     };
 
@@ -198,8 +205,11 @@ export function useVoiceInput(
   // ------------------------------------------------------------------
 
   useEffect(() => {
-    // Reset the cached instance so getRecognition() builds a fresh one
+    // Stop the old recogniser before replacing its language configuration.
+    activeRef.current = false;
+    const retired = recognitionRef.current;
     recognitionRef.current = null;
+    retired?.abort();
   }, [lang, interimResults]);
 
   // ------------------------------------------------------------------
@@ -208,8 +218,10 @@ export function useVoiceInput(
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.abort();
+      activeRef.current = false;
+      const retired = recognitionRef.current;
       recognitionRef.current = null;
+      retired?.abort();
     };
   }, []);
 
@@ -221,15 +233,19 @@ export function useVoiceInput(
     if (!isSupported) return;
     const rec = getRecognition();
     if (!rec) return;
-    if (isListening) return; // already running
+    if (activeRef.current) return; // already starting or running
 
     setTranscript("");
+    activeRef.current = true;
     try {
       rec.start();
-    } catch {
-      // InvalidStateError: recognition already started — safe to ignore
+    } catch (error) {
+      activeRef.current = false;
+      setIsListening(false);
+      onErrorRef.current?.(error instanceof DOMException && error.name === "NotAllowedError"
+        ? "not-allowed" : "start-failed");
     }
-  }, [isSupported, isListening, getRecognition]);
+  }, [isSupported, getRecognition]);
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
@@ -237,7 +253,10 @@ export function useVoiceInput(
   }, []);
 
   const abort = useCallback(() => {
-    recognitionRef.current?.abort();
+    activeRef.current = false;
+    const retired = recognitionRef.current;
+    recognitionRef.current = null;
+    retired?.abort();
     setIsListening(false);
     setTranscript("");
   }, []);

@@ -1,16 +1,17 @@
-"""Pydantic models for OpenAlgo API requests and responses."""
+"""FlintTrade order intentions and normalised native broker observations.
+
+The order fields form the safety-gate input. Each native adapter maps that
+intention to its broker protocol; these models do not define a transport.
+"""
 
 from __future__ import annotations
 
-import math
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
 
 class Action(StrEnum):
     BUY = "BUY"
@@ -26,18 +27,11 @@ class Exchange(StrEnum):
     CDS = "CDS"
     BCD = "BCD"
     NCDEX = "NCDEX"
-    # NCO (NSE Commodities) added upstream in v2.0.0.7 — Zerodha-only as of v2.0.1.1.
     NCO = "NCO"
     NSE_INDEX = "NSE_INDEX"
     BSE_INDEX = "BSE_INDEX"
-    # MCX_INDEX (commodity indices, e.g. MCXBULLDEX) added upstream in v2.0.0.7.
     MCX_INDEX = "MCX_INDEX"
-    # GLOBAL_INDEX (foreign + IFSC reference indices, e.g. US30, JAPAN225,
-    # GIFTNIFTY) added upstream in v2.0.0.7.
     GLOBAL_INDEX = "GLOBAL_INDEX"
-    # Delta Exchange crypto. Upstream's plugin.json declares the value as
-    # CRYPTO; FlintTrade-internal names sometimes alias it as DELTA for
-    # broker-side disambiguation — both forms are accepted at validation.
     CRYPTO = "CRYPTO"
 
 
@@ -71,181 +65,101 @@ class Interval(StrEnum):
     D = "D"
 
 
-# ---------------------------------------------------------------------------
-# Order models
-# ---------------------------------------------------------------------------
-
 class Order(BaseModel):
-    """Represents an order to place via OpenAlgo."""
+    """A gated trading intention; every execution-affecting field is signed."""
 
     symbol: str
     action: Action
     exchange: Exchange = Exchange.NSE
-    pricetype: PriceType = PriceType.MARKET
     product: Product = Product.MIS
+    pricetype: PriceType = PriceType.MARKET
     quantity: str = "1"
     price: str = "0"
     trigger_price: str = "0"
     disclosed_quantity: str = "0"
-    variety: str = "regular"
-    """Order variety. ``"regular"`` (default) is a plain order; ``"bracket"`` /
-    ``"cover"`` carry target/stop-loss legs (mapped to a broker's bracket/cover/
-    super-order endpoint); ``"iceberg"`` slices a large order into legs. Adapters
-    that do not support a variety raise ``BrokerError``. Because the variety and
-    its leg prices are part of the order, they are covered by the SafetyContext
-    HMAC — an advanced order traverses the SAME gated path as a regular one."""
-    target_price: str = "0"
-    """Target/take-profit leg price for ``bracket`` orders (0 = none)."""
-    stop_loss_price: str = "0"
-    """Stop-loss leg price for ``bracket`` / ``cover`` orders (0 = none)."""
-    trailing_jump: str = "0"
-    """Trailing stop-loss step for ``bracket`` orders (0 = no trailing)."""
-    iceberg_legs: str = "0"
-    """Number of legs to slice an ``iceberg`` order into (0 = broker default)."""
     strategy: str = "Flint"
     admission_note: str = ""
-    """Free-text plan admitted with this order.
-
-    Empty is a normal case: Practice clamps and Live denies. The field is part
-    of the SafetyContext HMAC. It is not a broker instruction.
-    """
-    market_protection: bool | None = None
-    """Enable Market Price Protection (MPP) for market orders.
-
-    When True, OpenAlgo converts MARKET orders to LIMIT orders with a
-    price buffer based on exchange-regulated protection slabs.  Currently
-    supported by Zerodha and selected brokers.  None means use the
-    broker's default behaviour.
-    """
+    variety: str = "regular"
     validity: str | None = None
-    """Order validity pass-through (for example ``DAY`` or ``IOC``).
-
-    ``None`` (default) keeps each adapter's default (usually ``DAY``). Each
-    native mapping enforces the broker-specific allowed set before a request can
-    reach the SDK. Because the field lives on the Order it is covered by the
-    SafetyContext HMAC: changing it after the gate is minted invalidates the gate.
-    """
+    market_protection: bool | None = None
+    # Native advanced-order controls participate in the same gate signature.
+    target_price: str = "0"
+    stop_loss_price: str = "0"
+    trailing_jump: str = "0"
+    iceberg_legs: str = "0"
     price1: str | None = None
-    """OCO second-leg limit price (Dhan forever ``price1``). ``None`` = no OCO.
-
-    When the OCO trio (``price1``/``trigger_price1``/``quantity1``) is set on a
-    ``gtt`` order, the Dhan adapter places an OCO forever order instead of a
-    SINGLE one. Hashed by the SafetyContext like every other order field."""
     trigger_price1: str | None = None
-    """OCO second-leg trigger price (Dhan forever ``triggerPrice1``)."""
     quantity1: str | None = None
-    """OCO second-leg quantity (Dhan forever ``quantity1``)."""
     entry_trigger_type: str | None = None
-    """Broker-specific GTT entry condition (for example Upstox ABOVE/BELOW/IMMEDIATE).
-
-    ``None`` lets each adapter choose its documented default. When set, the value
-    is part of the SafetyContext HMAC just like trigger_price and the leg fields.
-    """
     stop_loss_trigger_type: str | None = None
-    """Broker-specific stop-loss trigger-type override for GTT-capable adapters."""
     target_trigger_type: str | None = None
-    """Broker-specific target trigger-type override for GTT-capable adapters."""
+
+
+class ModifyOrder(BaseModel):
+    """Replacement fields supplied to native order modification admission."""
+
+    orderid: str
+    symbol: str
+    action: Action = Action.BUY
+    exchange: Exchange = Exchange.NSE
+    product: Product = Product.MIS
+    pricetype: PriceType = PriceType.LIMIT
+    quantity: str = "1"
+    price: str = "0"
+    trigger_price: str = "0"
+    disclosed_quantity: str = "0"
+    strategy: str = "Flint"
 
 
 class SmartOrder(Order):
-    """Order with automatic position sizing."""
-
     position_size: str = "0"
 
 
-class OptionsOrder(BaseModel):
-    """Options order using offset-based strike selection."""
+class SplitOrder(Order):
+    splitsize: str = "25"
 
-    underlying: str
-    exchange: Exchange = Exchange.NFO
-    expiry_date: str  # YYMMDD
+
+class OptionsLeg(BaseModel):
     offset: str = "0"
     option_type: OptionType = OptionType.CE
     action: Action = Action.BUY
     quantity: str = "75"
+
+
+class OptionsOrder(OptionsLeg):
+    """An option-selection intention; execution requires a native resolved instrument."""
+
+    underlying: str
+    expiry_date: str
+    exchange: Exchange = Exchange.NFO
     pricetype: PriceType = PriceType.MARKET
     product: Product = Product.MIS
     splitsize: str = "75"
     strategy: str = "Flint"
 
 
-class OptionsLeg(BaseModel):
-    """Single leg of a multi-leg options order."""
-
-    offset: str = "0"
-    option_type: OptionType = OptionType.CE
-    action: Action = Action.BUY
-    quantity: str = "75"
-
-
 class OptionsMultiOrder(BaseModel):
-    """Multi-leg options order (straddle, strangle, spread, etc.)."""
-
     underlying: str
-    exchange: Exchange = Exchange.NFO
     expiry_date: str
     legs: list[OptionsLeg]
-    pricetype: PriceType = PriceType.MARKET
+    exchange: Exchange = Exchange.NFO
     product: Product = Product.NRML
+    pricetype: PriceType = PriceType.MARKET
     strategy: str = "Flint"
 
 
 class BasketOrderItem(BaseModel):
-    """Single order within a basket."""
-
     symbol: str
-    exchange: Exchange = Exchange.NSE
     action: Action = Action.BUY
-    quantity: str = "1"
-    pricetype: PriceType = PriceType.MARKET
+    exchange: Exchange = Exchange.NSE
     product: Product = Product.MIS
+    pricetype: PriceType = PriceType.MARKET
+    quantity: str = "1"
 
 
 class BasketOrder(BaseModel):
-    """Multiple orders submitted as a batch."""
-
     orders: list[BasketOrderItem]
     strategy: str = "Flint"
-
-
-class SplitOrder(Order):
-    """Large order split into smaller chunks."""
-
-    splitsize: str = "25"
-
-
-class ModifyOrder(BaseModel):
-    """Modify an existing order."""
-
-    orderid: str
-    symbol: str
-    exchange: Exchange = Exchange.NSE
-    action: Action = Action.BUY
-    pricetype: PriceType = PriceType.LIMIT
-    product: Product = Product.MIS
-    quantity: str = "1"
-    price: str = "0"
-    trigger_price: str = "0"
-    disclosed_quantity: str = "0"
-    strategy: str = "Flint"
-
-
-# ---------------------------------------------------------------------------
-# GTT (Good Till Triggered) — added to mirror OpenAlgo v2.0.0.9
-# ---------------------------------------------------------------------------
-#
-# GTTs sit on the broker as a trigger condition; when LTP crosses the
-# trigger, the broker emits a real order. They live for days/weeks, so
-# the schema rejects MIS (intraday) — only CNC / NRML pass validation.
-#
-# Two trigger types:
-#   * SINGLE — exactly one of triggerprice_sl / triggerprice_tg is set
-#   * OCO    — both triggers + both limit prices (stoploss / target)
-#
-# Upstream live support: Dhan + Zerodha. Other brokers return a clean
-# 501 — FlintTrade does not gate on broker; we forward the request and
-# surface whatever OpenAlgo replies. See restx_api/place_gtt_order.py
-# in .local/external/openalgo/ for the canonical schema.
 
 
 class GttTriggerType(StrEnum):
@@ -254,55 +168,35 @@ class GttTriggerType(StrEnum):
 
 
 class GttProduct(StrEnum):
-    """Products accepted on GTTs. MIS is intentionally absent —
-    upstream rejects intraday product on triggers that can sit for days."""
-
     CNC = "CNC"
     NRML = "NRML"
 
 
 class GttOrder(BaseModel):
-    """Place a GTT (Good Till Triggered) — single or two-leg OCO.
+    """A durable native trigger intention with optional stop and target legs."""
 
-    Required fields mirror OpenAlgo's flat ``PlaceGTTOrderSchema``. Field
-    naming follows the upstream wire format exactly (snake_case JSON
-    tokens) so the wrapper does not need to remap.
-    """
-
+    symbol: str
     strategy: str = "Flint"
     trigger_type: GttTriggerType = GttTriggerType.SINGLE
     exchange: Exchange = Exchange.NSE
-    symbol: str
     action: Action = Action.BUY
     product: GttProduct = GttProduct.CNC
     quantity: str = "1"
     pricetype: PriceType = PriceType.LIMIT
     price: str = "0"
     triggerprice_sl: str = "0"
-    """Stoploss leg trigger price. Required for SINGLE-SL and OCO."""
     triggerprice_tg: str = "0"
-    """Target leg trigger price. Required for SINGLE-TG and OCO."""
     stoploss: str | None = None
-    """Stoploss leg limit price (OCO only)."""
     target: str | None = None
-    """Target leg limit price (OCO only)."""
     expires_at: str | None = None
-    """Optional ISO timestamp at which the trigger auto-expires."""
 
 
 class ModifyGttOrder(BaseModel):
-    """Modify an active GTT. Same fields as :class:`GttOrder` plus
-    ``trigger_id`` (the broker-returned identifier of the live trigger).
-
-    Modify is a full replacement: trigger prices, last price, and order
-    params are replaced atomically by the broker's PUT semantics.
-    """
-
-    strategy: str = "Flint"
     trigger_id: str
+    symbol: str
+    strategy: str = "Flint"
     trigger_type: GttTriggerType = GttTriggerType.SINGLE
     exchange: Exchange = Exchange.NSE
-    symbol: str
     action: Action = Action.BUY
     product: GttProduct = GttProduct.CNC
     quantity: str = "1"
@@ -315,24 +209,18 @@ class ModifyGttOrder(BaseModel):
 
 
 class CancelGttOrder(BaseModel):
-    """Cancel an active GTT by its trigger identifier."""
-
-    strategy: str = "Flint"
     trigger_id: str
+    strategy: str = "Flint"
 
 
 class GttTrigger(BaseModel):
-    """Single row returned by GTT orderbook listings.
-
-    Field names follow OpenAlgo's response; unknown brokers may add
-    extras which are silently dropped at the Pydantic boundary.
-    """
+    """Normalised durable trigger state read from a native adapter."""
 
     trigger_id: str = ""
-    status: str = ""
-    trigger_type: str = ""
     symbol: str = ""
     exchange: str = ""
+    status: str = ""
+    trigger_type: str = ""
     action: str = ""
     quantity: str = ""
     product: str = ""
@@ -345,46 +233,32 @@ class GttTrigger(BaseModel):
     expires_at: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
-
 class OrderResponse(BaseModel):
-    """Response from place/modify/cancel order."""
-
     status: str
-    orderid: str = ""
     message: str = ""
+    orderid: str = ""
 
 
 class OrderStatus(BaseModel):
-    """Status of a single order."""
+    """Omitted broker evidence stays blank so reconciliation can detect it."""
 
     orderid: str = ""
-    status: str = ""
     symbol: str = ""
+    exchange: str = ""
+    product: str = ""
+    status: str = ""
     action: str = ""
     quantity: str = ""
     price: str = ""
     pricetype: str = ""
-    product: str = ""
-    exchange: str = ""
     filled_quantity: str = ""
     average_price: str = ""
-    timestamp: str = ""
-    # Blank means the broker omitted the field. Do not invent ``"0"`` here —
-    # reconciliation treats a missing trigger as critical omitted evidence.
     trigger_price: str = ""
     disclosed_quantity: str = ""
+    timestamp: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Position / Holding / Trade
-# ---------------------------------------------------------------------------
-
-class Position(BaseModel):
-    """Open position from positionbook."""
-
+class _InventoryEvidence(BaseModel):
     symbol: str = ""
     instrument_id: str = ""
     exchange: str = ""
@@ -393,73 +267,52 @@ class Position(BaseModel):
     average_price: str = "0"
     ltp: str = "0"
     pnl: str = "0"
-    buy_quantity: str = "0"
-    sell_quantity: str = "0"
-    buy_avg: str = "0"
-    sell_avg: str = "0"
     multiplier: float | None = None
     fx_rate: float | None = None
     close_price: float | None = None
     previous_close_trusted: bool = False
     cross_currency: bool | None = None
+    accounting_complete: bool = False
+
+
+class Position(_InventoryEvidence):
+    buy_quantity: str = "0"
+    sell_quantity: str = "0"
+    buy_avg: str = "0"
+    sell_avg: str = "0"
     overnight_quantity: str = "0"
     day_buy_quantity: str = "0"
     day_sell_quantity: str = "0"
     carry_forward_buy_quantity: str = "0"
     carry_forward_sell_quantity: str = "0"
-    accounting_complete: bool = False
     option_type: str = ""
     expiry: str = ""
     strike_price: float = 0.0
     underlying: str = ""
 
 
-class Holding(BaseModel):
-    """Delivery holding from holdings endpoint."""
-
-    symbol: str = ""
-    instrument_id: str = ""
-    exchange: str = ""
-    product: str = ""
-    quantity: str = "0"
-    average_price: str = "0"
-    ltp: str = "0"
-    pnl: str = "0"
+class Holding(_InventoryEvidence):
     pnl_percent: str = "0"
-    multiplier: float | None = None
-    fx_rate: float | None = None
-    close_price: float | None = None
-    previous_close_trusted: bool = False
-    cross_currency: bool | None = None
     settled_quantity: str = "0"
     t1_quantity: str = "0"
-    accounting_complete: bool = False
 
 
 class Trade(BaseModel):
-    """Executed trade from tradebook."""
-
     orderid: str = ""
     symbol: str = ""
     instrument_id: str = ""
     exchange: str = ""
+    product: str = ""
     action: str = ""
     quantity: str = "0"
     price: str = "0"
-    product: str = ""
     timestamp: str = ""
     multiplier: float | None = None
     fx_rate: float | None = None
     cross_currency: bool | None = None
 
 
-# ---------------------------------------------------------------------------
-# Market data models
-# ---------------------------------------------------------------------------
-
 class Quote(BaseModel):
-    """Quote data from /quotes or /multiquotes."""
-
     symbol: str = ""
     exchange: str = ""
     ltp: float = 0.0
@@ -477,16 +330,12 @@ class Quote(BaseModel):
 
 
 class DepthLevel(BaseModel):
-    """Single bid/ask level in market depth."""
-
     price: float = 0.0
     quantity: int = 0
     orders: int = 0
 
 
 class Depth(BaseModel):
-    """Market depth (top 5 bid/ask levels)."""
-
     symbol: str = ""
     exchange: str = ""
     bids: list[DepthLevel] = Field(default_factory=list)
@@ -494,8 +343,6 @@ class Depth(BaseModel):
 
 
 class OHLCV(BaseModel):
-    """Single OHLCV bar from history endpoint."""
-
     timestamp: str = ""
     open: float = 0.0
     high: float = 0.0
@@ -505,12 +352,6 @@ class OHLCV(BaseModel):
 
 
 class Candles(BaseModel):
-    """Historical OHLCV series for one instrument/interval.
-
-    The canonical return type of ``BrokerAdapter.historical`` — a thin envelope
-    around a list of :class:`OHLCV` bars plus the instrument context.
-    """
-
     symbol: str = ""
     exchange: str = ""
     interval: str = ""
@@ -518,40 +359,25 @@ class Candles(BaseModel):
 
 
 class TickEvent(BaseModel):
-    """A single streamed market tick (the unit yielded by ``BrokerAdapter.stream``)."""
-
     symbol: str = ""
     exchange: str = ""
+    timestamp: str = ""
     ltp: float = 0.0
     volume: int = 0
     bid: float = 0.0
     ask: float = 0.0
     oi: int = 0
-    timestamp: str = ""
 
-
-# ---------------------------------------------------------------------------
-# Account models
-# ---------------------------------------------------------------------------
 
 class Fund(BaseModel):
-    """Fund/margin info from /funds endpoint."""
-
     available_balance: str = "0"
     used_margin: str = "0"
     total_balance: str = "0"
     opening_risk_capital: str = "0"
-    # OpenAlgo may return additional broker-specific fields
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Options analytics
-# ---------------------------------------------------------------------------
-
 class OptionGreek(BaseModel):
-    """Greeks for a single option contract."""
-
     symbol: str = ""
     exchange: str = ""
     delta: float = 0.0
@@ -562,9 +388,21 @@ class OptionGreek(BaseModel):
     rho: float = 0.0
 
 
-class OptionChainStrike(BaseModel):
-    """Single strike in an option chain."""
+def _validate_numeric(value: Any, *, positive: bool = False, integer: bool = False) -> Any:
+    if isinstance(value, bool):
+        raise ValueError("boolean values cannot be numeric evidence")
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError("numeric evidence required") from exc
+    if not number.is_finite() or (number <= 0 if positive else number < 0):
+        raise ValueError("finite positive evidence required" if positive else "finite non-negative evidence required")
+    if integer and number != number.to_integral_value():
+        raise ValueError("integer evidence required")
+    return value
 
+
+class OptionChainStrike(BaseModel):
     strike_price: float = 0.0
     ce_instrument_id: str = ""
     ce_ltp: float = 0.0
@@ -594,37 +432,26 @@ class OptionChainStrike(BaseModel):
     @field_validator("strike_price", mode="before")
     @classmethod
     def validate_strike_price(cls, value: Any) -> Any:
-        """Reject identities that numeric coercion would make look usable."""
-        if isinstance(value, bool):
-            raise ValueError("strike_price must be numeric, not boolean")
         try:
-            number = float(value)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("strike_price must be numeric") from exc
-        if not math.isfinite(number) or number <= 0:
-            raise ValueError("strike_price must be a finite positive number")
-        return value
+            return _validate_numeric(value, positive=True)
+        except ValueError as exc:
+            message = (
+                "strike_price must be numeric"
+                if isinstance(value, bool)
+                else "strike_price must be a finite positive number"
+            )
+            raise ValueError(message) from exc
 
     @field_validator("ce_oi", "pe_oi", mode="before")
     @classmethod
     def validate_open_interest(cls, value: Any) -> Any:
-        """Preserve missing OI and reject values that cannot be authoritative."""
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            raise ValueError("OI must be a finite non-negative number")
         try:
-            number = float(value)
-        except (TypeError, ValueError, OverflowError) as exc:
+            return None if value is None else _validate_numeric(value, integer=True)
+        except ValueError as exc:
             raise ValueError("OI must be a finite non-negative number") from exc
-        if not math.isfinite(number) or number < 0 or not number.is_integer():
-            raise ValueError("OI must be a finite non-negative number")
-        return value
 
 
 class OptionChain(BaseModel):
-    """Full option chain for an underlying."""
-
     underlying: str = ""
     underlying_key: str = ""
     exchange: str = ""
@@ -636,7 +463,6 @@ class OptionChain(BaseModel):
     @field_validator("underlying_key", "expiry", "expiry_date", mode="before")
     @classmethod
     def reject_non_string_identity(cls, value: Any) -> Any:
-        """Keep structured or boolean values from becoming market identities."""
         if not isinstance(value, str):
             raise ValueError("option-chain identity fields must be strings")
         return value
@@ -644,7 +470,6 @@ class OptionChain(BaseModel):
     @field_validator("spot_price", mode="before")
     @classmethod
     def reject_boolean_spot_price(cls, value: Any) -> Any:
-        """Keep JSON booleans from masquerading as numeric market provenance."""
         if isinstance(value, bool):
             raise ValueError("spot_price must be numeric, not boolean")
         return value

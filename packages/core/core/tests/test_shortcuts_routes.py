@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_shortcuts_routes.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,6 +33,7 @@ def _auth(extra: dict | None = None) -> dict:
 def reset_module_state():
     """Reset module-level _conn before each test."""
     import flinttrade_core.shortcuts_routes as sr
+
     sr._reset_conn()
     yield
     sr._reset_conn()
@@ -59,6 +61,7 @@ def in_memory_conn():
 @pytest.fixture(scope="module")
 def monkeypatch_module():
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -67,8 +70,9 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def flask_app(monkeypatch_module):
     """Flask app with shortcuts blueprint registered."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     from flinttrade_core.app import create_flask_app
+
     app = create_flask_app()
     app.config["TESTING"] = True
     return app
@@ -78,6 +82,7 @@ def flask_app(monkeypatch_module):
 def client(flask_app, in_memory_conn):
     """Test client with in-memory DuckDB connection injected."""
     import flinttrade_core.shortcuts_routes as sr
+
     sr._conn = in_memory_conn
     with flask_app.test_client() as c:
         yield c
@@ -103,6 +108,7 @@ class TestGetShortcuts:
     def test_returns_saved_overrides(self, client, in_memory_conn):
         """GET returns overrides previously saved via the DB helper."""
         from flinttrade_core.shortcuts_routes import _save_overrides
+
         _save_overrides("user-2", {"cancel-orders": ["Ctrl", "C"]}, in_memory_conn)
 
         resp = client.get(
@@ -179,6 +185,7 @@ class TestResetShortcuts:
     def test_reset_deletes_overrides(self, client, in_memory_conn):
         """POST /v1/shortcuts/reset removes all overrides for user."""
         from flinttrade_core.shortcuts_routes import _save_overrides
+
         _save_overrides(
             "user-6",
             {"cancel-orders": ["C"], "quick-buy": ["B"]},

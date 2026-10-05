@@ -1,6 +1,6 @@
 # Webhooks
 
-> Generic (custom JSON) webhooks, flow builder, alerter, voice orders, and Excel bridge.
+> HMAC-validated custom webhook intake rail for generic inbound alerts.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -9,8 +9,6 @@
 ## Public surface
 
 - `src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake`
-- `src/flinttrade_webhooks/webhook_routes.py — mounted signed-relay endpoints`
-- `src/flinttrade_webhooks/flow_builder.py — 54-node automation flow builder`
 
 (See the source for the full surface.)
 
@@ -31,6 +29,10 @@ root workspace.
 ```bash
 python -m pytest packages/integrations/webhooks/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

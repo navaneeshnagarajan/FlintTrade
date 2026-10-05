@@ -31,14 +31,14 @@ def test_opening_capital_is_frozen_and_survives_restart(tmp_path):
 def test_operator_configuration_cannot_dilute_a_frozen_session(tmp_path):
     store = DailyPnLStateStore(tmp_path / "daily-pnl.sqlite")
     store.configure(
-        selector="openalgo:default",
+        selector="broker:default",
         session_key="2026-07-13",
         opening_risk_capital=80_000,
     )
 
     with pytest.raises(DailyPnLStateError, match="already frozen"):
         store.configure(
-            selector="openalgo:default",
+            selector="broker:default",
             session_key="2026-07-13",
             opening_risk_capital=160_000,
         )

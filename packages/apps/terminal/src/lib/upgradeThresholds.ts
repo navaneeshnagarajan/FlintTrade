@@ -70,7 +70,7 @@ export const UPGRADE_THRESHOLDS: Threshold[] = [
     to: "intermediate",
     conditions: { alertsSet: 3 },
     message:
-      "Your alerts are working. Ready to build automation flows?",
+      "Your alerts are working. Ready to manage scheduled strategies?",
   },
   {
     domain: "ai",

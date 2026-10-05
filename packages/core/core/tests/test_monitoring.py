@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_monitoring.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -16,9 +17,9 @@ import pytest
 
 
 class TestHealthAggregator:
-
     def _make(self):
         from flinttrade_core.monitoring import HealthAggregator
+
         return HealthAggregator()
 
     def test_check_memory_returns_dict(self):
@@ -46,6 +47,7 @@ class TestHealthAggregator:
     def test_check_duckdb_readable(self, tmp_path):
         """Creates a valid DuckDB file and verifies check passes."""
         import duckdb
+
         db_path = tmp_path / "test.duckdb"
         conn = duckdb.connect(str(db_path))
         conn.execute("CREATE TABLE t (x INT)")
@@ -110,6 +112,7 @@ class TestHostResourceReadings:
 
     def _make(self):
         from flinttrade_core.monitoring import HealthAggregator
+
         return HealthAggregator()
 
     def _psutil(self, monkeypatch):
@@ -123,13 +126,13 @@ class TestHostResourceReadings:
     def test_memory_reports_host_totals_and_nests_process(self, monkeypatch):
         monitoring_mod, mock = self._psutil(monkeypatch)
         mock.virtual_memory.return_value = MagicMock(
-            total=16 * 1024 ** 3,
-            available=12 * 1024 ** 3,
+            total=16 * 1024**3,
+            available=12 * 1024**3,
             percent=25.0,
         )
         mock.Process.return_value.memory_info.return_value = MagicMock(
-            rss=200 * 1024 ** 2,
-            vms=800 * 1024 ** 2,
+            rss=200 * 1024**2,
+            vms=800 * 1024**2,
         )
         mock.Process.return_value.memory_percent.return_value = 1.25
 
@@ -149,8 +152,8 @@ class TestHostResourceReadings:
         monitoring_mod, mock = self._psutil(monkeypatch)
         mock.virtual_memory.side_effect = OSError("host ram unreadable")
         mock.Process.return_value.memory_info.return_value = MagicMock(
-            rss=180 * 1024 ** 2,
-            vms=900 * 1024 ** 2,
+            rss=180 * 1024**2,
+            vms=900 * 1024**2,
         )
         mock.Process.return_value.memory_percent.return_value = 1.1
 
@@ -323,9 +326,9 @@ class TestHostResourceReadings:
 
 
 class TestTrafficCounter:
-
     def _make(self):
         from flinttrade_core.monitoring import TrafficCounter
+
         return TrafficCounter(buffer_size=1000)
 
     def test_empty_stats(self):
@@ -377,6 +380,7 @@ class TestTrafficCounter:
 
     def test_circular_buffer_cap(self):
         from flinttrade_core.monitoring import TrafficCounter
+
         tc = TrafficCounter(buffer_size=3)
         for i in range(5):
             tc.record("GET", f"/path/{i}", 200, 1.0)
@@ -390,9 +394,9 @@ class TestTrafficCounter:
 
 
 class TestLatencyTracker:
-
     def _make(self):
         from flinttrade_core.monitoring import LatencyTracker
+
         return LatencyTracker()
 
     def test_empty_stats(self):
