@@ -1947,16 +1947,20 @@ class TestDittoAccountCrud:
         def add_account(self, account) -> None:
             self.accounts[account.account_id] = account
 
-        def get_account(self, account_id: str):
-            return self.accounts.get(account_id)
+        def get_account(self, account_id: str, *, adapter_id: str | None = None):
+            account = self.accounts.get(account_id)
+            return account if account is not None and adapter_id in {None, account.adapter_id} else None
 
-        def enable_account(self, account_id: str) -> None:
+        def enable_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+            assert self.get_account(account_id, adapter_id=adapter_id) is not None
             self.accounts[account_id].enabled = True
 
-        def disable_account(self, account_id: str) -> None:
+        def disable_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+            assert self.get_account(account_id, adapter_id=adapter_id) is not None
             self.accounts[account_id].enabled = False
 
-        def remove_account(self, account_id: str) -> None:
+        def remove_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+            assert self.get_account(account_id, adapter_id=adapter_id) is not None
             self.accounts.pop(account_id, None)
 
     def _patch_manager(self, monkeypatch, accounts=None):
@@ -1976,6 +1980,8 @@ class TestDittoAccountCrud:
         assert data["data"]["accounts"] == [
             {
                 "id": "acc_1",
+                "account_id": "acc_1",
+                "adapter_id": "dhan",
                 "name": "Primary",
                 "broker": "dhan",
                 "capital": None,
@@ -2036,7 +2042,8 @@ class TestDittoAccountCrud:
         manager = self._FakeManager()
         manager.accounts = {account.account_id: account}
 
-        def disable_account(account_id: str) -> None:
+        def disable_account(account_id: str, *, adapter_id: str) -> None:
+            assert adapter_id == account.adapter_id
             events.append("manager.disable")
             manager.accounts[account_id].enabled = False
 
@@ -2094,7 +2101,8 @@ class TestDittoAccountCrud:
         manager = self._FakeManager()
         manager.accounts = {account.account_id: account}
 
-        def remove_account(account_id: str) -> None:
+        def remove_account(account_id: str, *, adapter_id: str) -> None:
+            assert adapter_id == account.adapter_id
             events.append("manager.remove")
             manager.accounts.pop(account_id)
 

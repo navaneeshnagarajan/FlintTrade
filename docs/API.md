@@ -342,13 +342,21 @@ not enable a broker bridge or Live mirroring.
 
 | Endpoint | Contract |
 |---|---|
-| `ditto/accounts` (**GET**) | Read non-secret native copy-account references. |
+| `ditto/accounts` (**GET**) | Read non-secret native copy-account references, including both `adapter_id` and `account_id`. |
 | `ditto/accounts` (**POST**) | Account linking unavailable (501). |
+| `ditto/accounts/<adapter_id>/<account_id>/enable` · `…/disable` (**POST**) | Session-authenticated account metadata only. Select the exact native broker/account pair. Disable drains any participating runtime generation before changing metadata; a failed drain returns 503. These routes do not start copying or place orders. |
+| `ditto/accounts/<adapter_id>/<account_id>` (**DELETE**) | Requires a session; native account HTTP mutations remain unavailable (503) by default. |
 | `ditto/mirror/status` (**GET**) | Runtime unavailable (503). |
 | `ditto/mirror/start` (**POST**) | Requires a complete body, Live session and PIN; runtime unavailable (503). Example is refused (403). |
 | `ditto/mirror/stop` (**POST**) | Requires a session; runtime unavailable (503). |
 | `ditto/risk` (**GET**) | Runtime unavailable (503). |
 | `ditto/kill-all` (**POST**) | Requires a Live session; runtime unavailable (503). Example is refused (403). |
+
+Legacy account-only metadata routes accept only an unambiguous account ID.
+If two native brokers share that ID, they return HTTP 400
+`account_selector_required` and change neither account. An explicit adapter never
+falls back to an account at another broker; malformed selectors return HTTP 400
+`account_selector_invalid`.
 
 ### Auth (`/ft-api/v1/auth/*`)
 

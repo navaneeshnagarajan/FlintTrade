@@ -31,6 +31,7 @@ from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
 from .broker_account_cutover import guard_broker_account_http
+from .broker_identity import BrokerSelector
 from .news_provider_profiles import OPERATIONS_NEWS_FEEDS
 
 logger = logging.getLogger("flinttrade")
@@ -1703,6 +1704,8 @@ def _ditto_account_response(acct: Any) -> dict[str, Any]:
     """Return a frontend-safe Ditto account payload without credentials."""
     return {
         "id": acct.account_id,
+        "account_id": acct.account_id,
+        "adapter_id": acct.adapter_id,
         "name": acct.name or acct.account_id,
         "broker": acct.adapter_id,
         "capital": None,
@@ -1717,6 +1720,26 @@ def _ditto_account_response(acct: Any) -> dict[str, Any]:
 
 
 def _ditto_manager_error(exc: Exception) -> tuple[Any, int]:
+    from flinttrade_ditto.account_manager import AmbiguousCopyAccountError  # noqa: PLC0415
+
+    from .broker_identity import BrokerSelectorValidationError  # noqa: PLC0415
+
+    if isinstance(exc, AmbiguousCopyAccountError):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Select both adapter_id and account_id",
+                "code": "account_selector_required",
+            }
+        ), 400
+    if isinstance(exc, BrokerSelectorValidationError):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Invalid native account selector",
+                "code": "account_selector_invalid",
+            }
+        ), 400
     logger.warning("Ditto account operation failed (%s)", type(exc).__name__)
     return jsonify(
         {
@@ -1774,8 +1797,12 @@ def _validated_ditto_runtime_status(runtime: Any) -> dict[str, Any]:
     }
 
 
-def _quiesce_ditto_account_generation(account_id: str) -> tuple[Any, int] | None:
-    """Drain a generation containing ``account_id`` before its store row changes.
+def _quiesce_ditto_account_generation(
+    selector: BrokerSelector,
+    *,
+    managed_accounts: list[Any],
+) -> tuple[Any, int] | None:
+    """Drain only when legacy runtime identity can name the selected native pair.
 
     The caller must retain ``_DITTO_CONTROL_LOCK`` through the subsequent store
     mutation so a new route-owned generation cannot claim the account in between.
@@ -1785,10 +1812,18 @@ def _quiesce_ditto_account_generation(account_id: str) -> tuple[Any, int] | None
         return None
     try:
         status = _validated_ditto_runtime_status(runtime)
-        participates = account_id == status["source_account"] or account_id in status["target_accounts"]
+        participates = (
+            selector.account_id == status["source_account"] or selector.account_id in status["target_accounts"]
+        )
         retained_cleanup = status["lifecycle"] == "retained-shutdown"
         if not participates and not retained_cleanup:
             return None
+        if participates:
+            adapters = {account.adapter_id for account in managed_accounts if account.account_id == selector.account_id}
+            # Retained runtime status predates composite selectors. It cannot
+            # authorise stopping either sibling when the same ID spans brokers.
+            if adapters != {selector.adapter_id}:
+                raise RuntimeError("Copy runtime cannot identify the selected native account")
 
         # One-shot risk/emergency owners are built over a snapshot of the whole
         # managed-account set. Their account ids are deliberately not exposed in
@@ -1927,18 +1962,20 @@ def ditto_account_create() -> tuple[Any, int]:
 
 
 @operations_bp.route("/ditto/accounts/<account_id>/enable", methods=["POST"])
-def ditto_account_enable(account_id: str) -> tuple[Any, int]:
+@operations_bp.route("/ditto/accounts/<adapter_id>/<account_id>/enable", methods=["POST"])
+def ditto_account_enable(account_id: str, adapter_id: str | None = None) -> tuple[Any, int]:
     """Enable a Ditto managed account."""
-    return _ditto_account_set_enabled(account_id, True)
+    return _ditto_account_set_enabled(account_id, True, adapter_id=adapter_id)
 
 
 @operations_bp.route("/ditto/accounts/<account_id>/disable", methods=["POST"])
-def ditto_account_disable(account_id: str) -> tuple[Any, int]:
+@operations_bp.route("/ditto/accounts/<adapter_id>/<account_id>/disable", methods=["POST"])
+def ditto_account_disable(account_id: str, adapter_id: str | None = None) -> tuple[Any, int]:
     """Disable a Ditto managed account."""
-    return _ditto_account_set_enabled(account_id, False)
+    return _ditto_account_set_enabled(account_id, False, adapter_id=adapter_id)
 
 
-def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int]:
+def _ditto_account_set_enabled(account_id: str, enabled: bool, *, adapter_id: str | None = None) -> tuple[Any, int]:
     _jwt_payload, auth_error = _authenticated_operator_identity()
     if auth_error is not None:
         return auth_error
@@ -1947,7 +1984,7 @@ def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int
             mgr = _ditto_manager()
             if mgr is None:
                 return jsonify({"status": "error", "message": "Account service unavailable"}), 503
-            account = mgr.get_account(account_id)
+            account = mgr.get_account(account_id, adapter_id=adapter_id)
             if account is None:
                 return jsonify(
                     {
@@ -1956,13 +1993,16 @@ def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int
                     }
                 ), 404
             if not enabled:
-                runtime_error = _quiesce_ditto_account_generation(account_id)
+                runtime_error = _quiesce_ditto_account_generation(
+                    BrokerSelector(account.adapter_id, account.account_id),
+                    managed_accounts=mgr.list_accounts(),
+                )
                 if runtime_error is not None:
                     return runtime_error
             if enabled:
-                mgr.enable_account(account_id)
+                mgr.enable_account(account_id, adapter_id=account.adapter_id)
             else:
-                mgr.disable_account(account_id)
+                mgr.disable_account(account_id, adapter_id=account.adapter_id)
             account.enabled = enabled
         return jsonify(
             {
@@ -1975,7 +2015,8 @@ def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int
 
 
 @operations_bp.route("/ditto/accounts/<account_id>", methods=["DELETE"])
-def ditto_account_delete(account_id: str) -> tuple[Any, int]:
+@operations_bp.route("/ditto/accounts/<adapter_id>/<account_id>", methods=["DELETE"])
+def ditto_account_delete(account_id: str, adapter_id: str | None = None) -> tuple[Any, int]:
     """Remove a Ditto managed account (G9: requires the operator's session JWT)."""
     _jwt_payload, auth_error = _authenticated_operator_identity()
     if auth_error is not None:
@@ -1988,7 +2029,7 @@ def ditto_account_delete(account_id: str) -> tuple[Any, int]:
             mgr = _ditto_manager()
             if mgr is None:
                 return jsonify({"status": "error", "message": "Account service unavailable"}), 503
-            account = mgr.get_account(account_id)
+            account = mgr.get_account(account_id, adapter_id=adapter_id)
             if account is None:
                 return jsonify(
                     {
@@ -1996,14 +2037,17 @@ def ditto_account_delete(account_id: str) -> tuple[Any, int]:
                         "message": f"Account '{account_id}' not found",
                     }
                 ), 404
-            runtime_error = _quiesce_ditto_account_generation(account_id)
+            runtime_error = _quiesce_ditto_account_generation(
+                BrokerSelector(account.adapter_id, account.account_id),
+                managed_accounts=mgr.list_accounts(),
+            )
             if runtime_error is not None:
                 return runtime_error
-            mgr.remove_account(account_id)
+            mgr.remove_account(account_id, adapter_id=account.adapter_id)
         return jsonify(
             {
                 "status": "success",
-                "data": {"id": account_id, "removed": True},
+                "data": {"id": account_id, "account_id": account_id, "adapter_id": account.adapter_id, "removed": True},
             }
         ), 200
     except Exception as exc:

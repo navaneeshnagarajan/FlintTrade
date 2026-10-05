@@ -51,17 +51,22 @@ test("Schedules uses human names and keeps Explore controls disabled", async ({ 
   await page.screenshot({ path: "test-results/schedules.png", fullPage: true });
 });
 
-test("Flows shows each creation action once in its empty state", async ({ page, syntheticApi }) => {
+test("a retired automation deep link preserves schedules and monitors without flow traffic", async ({ page, syntheticApi }) => {
   syntheticApi.register({
-    name: "empty saved flows", method: "GET", path: "/ft-api/api/v1/flows",
-    expectedCalls: { minimum: 1, maximum: 4 },
-    handler: () => ({ json: { status: "success", data: [] } }),
+    name: "deny retired flow reads", method: "GET", path: "/ft-api/api/v1/flows",
+    expectedCalls: { minimum: 0, maximum: 1 },
+    handler: () => { throw new Error("Retired flow APIs must never be requested"); },
   });
   await page.goto("/automate#flows");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Automate");
-  await expect(page.getByText("No flows yet", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New Flow", exact: true })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "From Template", exact: true })).toHaveCount(1);
-  await page.getByRole("button", { name: "From Template", exact: true }).click();
-  await expect(page.getByRole("tab", { name: "Templates", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Schedules", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Pre-market screener", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Flows", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New Flow", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "From Template", exact: true })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Monitors", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Live Strategy Monitors", exact: true })).toBeVisible();
+  await expect(page.getByText("No strategies running", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Strategy Builder", exact: true })).toHaveAttribute("href", "/lab");
+  expect(syntheticApi.callCount("GET", "/ft-api/api/v1/flows")).toBe(0);
 });

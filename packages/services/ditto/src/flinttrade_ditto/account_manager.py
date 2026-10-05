@@ -11,7 +11,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from flinttrade_core.broker_identity import BrokerSelector
 from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_SPECS
+
+
+class AmbiguousCopyAccountError(ValueError):
+    """A legacy account-only lookup cannot identify one native account."""
+
+    def __init__(self) -> None:
+        super().__init__("Select both adapter_id and account_id")
 
 
 def _default_db() -> str:
@@ -62,9 +70,9 @@ class AccountStatus:
     account_id: str
     name: str
     enabled: bool
-    connected: bool = False       # broker reachable (any HTTP response)
-    authenticated: bool = False   # broker session valid today (ping 200)
-    needs_reauth: bool = True     # daily re-auth required
+    connected: bool = False  # broker reachable (any HTTP response)
+    authenticated: bool = False  # broker session valid today (ping 200)
+    needs_reauth: bool = True  # daily re-auth required
     latency_ms: float = 0.0
     error: str = ""
     checked_at: str = ""
@@ -101,35 +109,66 @@ class AccountManager:
         self.close()
 
     def add_account(self, account: BrokerAccount) -> None:
+        BrokerSelector(account.adapter_id, account.account_id)
         if account.adapter_id not in NATIVE_ADAPTER_SPECS or not account.account_id:
             raise ValueError("A built-in native broker account is required")
         self._conn.execute(
             "INSERT OR REPLACE INTO native_copy_accounts VALUES(?,?,?,?,?,?,?,?)",
-            (account.account_id, account.adapter_id, account.name, int(account.enabled),
-             account.allocation_weight, account.group, account.max_loss_daily, int(account.is_master)),
+            (
+                account.account_id,
+                account.adapter_id,
+                account.name,
+                int(account.enabled),
+                account.allocation_weight,
+                account.group,
+                account.max_loss_daily,
+                int(account.is_master),
+            ),
         )
         self._conn.commit()
 
-    def remove_account(self, account_id: str) -> None:
-        account = self.get_account(account_id)
+    def remove_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+        account = self.get_account(account_id, adapter_id=adapter_id)
         if account is not None:
-            self._conn.execute("DELETE FROM native_copy_accounts WHERE account_id=? AND adapter_id=?",
-                               (account_id, account.adapter_id))
+            self._conn.execute(
+                "DELETE FROM native_copy_accounts WHERE account_id=? AND adapter_id=?", (account_id, account.adapter_id)
+            )
             self._conn.commit()
 
-    def get_account(self, account_id: str) -> BrokerAccount | None:
-        rows = [account for account in self.list_accounts() if account.account_id == account_id]
+    def get_account(self, account_id: str, *, adapter_id: str | None = None) -> BrokerAccount | None:
+        """Resolve an exact native pair or an unambiguous legacy account ID.
+
+        Supplying an adapter never falls back to a matching account at another
+        broker. Account-only compatibility refuses duplicate IDs.
+        """
+        BrokerSelector(adapter_id if adapter_id is not None else "dhan", account_id)
+        if adapter_id is not None and adapter_id not in NATIVE_ADAPTER_SPECS:
+            return None
+        rows = [
+            account
+            for account in self.list_accounts()
+            if account.account_id == account_id
+            and account.adapter_id in NATIVE_ADAPTER_SPECS
+            and (adapter_id is None or account.adapter_id == adapter_id)
+        ]
         if len(rows) > 1:
-            raise ValueError("Copy account identity is ambiguous; select a composite native account")
+            raise AmbiguousCopyAccountError
         return rows[0] if rows else None
 
     def list_accounts(self) -> list[BrokerAccount]:
-        return [BrokerAccount(
-            account_id=row["account_id"], adapter_id=row["adapter_id"], name=row["name"],
-            enabled=bool(row["enabled"]), allocation_weight=row["allocation_weight"],
-            group=row["account_group"], max_loss_daily=row["max_loss_daily"],
-            is_master=bool(row["is_master"]),
-        ) for row in self._conn.execute("SELECT * FROM native_copy_accounts ORDER BY adapter_id,account_id")]
+        return [
+            BrokerAccount(
+                account_id=row["account_id"],
+                adapter_id=row["adapter_id"],
+                name=row["name"],
+                enabled=bool(row["enabled"]),
+                allocation_weight=row["allocation_weight"],
+                group=row["account_group"],
+                max_loss_daily=row["max_loss_daily"],
+                is_master=bool(row["is_master"]),
+            )
+            for row in self._conn.execute("SELECT * FROM native_copy_accounts ORDER BY adapter_id,account_id")
+        ]
 
     def get_enabled_accounts(self) -> list[BrokerAccount]:
         return [account for account in self.list_accounts() if account.enabled]
@@ -140,28 +179,33 @@ class AccountManager:
     def get_master_account(self) -> BrokerAccount | None:
         return next((account for account in self.list_accounts() if account.is_master), None)
 
-    def enable_account(self, account_id: str) -> None:
-        account = self.get_account(account_id)
+    def enable_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+        account = self.get_account(account_id, adapter_id=adapter_id)
         if account is not None:
             account.enabled = True
             self.add_account(account)
 
-    def disable_account(self, account_id: str) -> None:
-        account = self.get_account(account_id)
+    def disable_account(self, account_id: str, *, adapter_id: str | None = None) -> None:
+        account = self.get_account(account_id, adapter_id=adapter_id)
         if account is not None:
             account.enabled = False
             self.add_account(account)
 
     def health_check(self, account: BrokerAccount) -> AccountHealth:
-        return AccountHealth(account_id=account.account_id,
-                             error="Native copy-trading session ownership is unavailable")
+        return AccountHealth(
+            account_id=account.account_id, error="Native copy-trading session ownership is unavailable"
+        )
 
     def health_check_all(self) -> list[AccountHealth]:
         return [self.health_check(account) for account in self.list_accounts()]
 
     def connection_status(self, account: BrokerAccount) -> AccountStatus:
-        return AccountStatus(account_id=account.account_id, name=account.name, enabled=account.enabled,
-                             error="Native copy-trading session ownership is unavailable")
+        return AccountStatus(
+            account_id=account.account_id,
+            name=account.name,
+            enabled=account.enabled,
+            error="Native copy-trading session ownership is unavailable",
+        )
 
     def account_status_all(self) -> list[AccountStatus]:
         return [self.connection_status(account) for account in self.list_accounts()]

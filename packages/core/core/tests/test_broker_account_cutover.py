@@ -469,7 +469,10 @@ def test_published_native_read_refuses_until_verified_read_port_cutover(tmp_path
     app.config.update(REGISTRY=fixture.registry, NATIVE_ADAPTERS={"upstox": Adapter()}, CREDENTIAL_STORE=forbidden)
     response = app.test_client().get("/api/v1/native/accounts/upstox/synthetic/profile")
     assert response.status_code == 409
-    assert response.json == {"status": "error", "message": "Native broker HTTP reads are unavailable until the read cutover"}
+    assert response.json == {
+        "status": "error",
+        "message": "Native broker HTTP reads are unavailable until the read cutover",
+    }
     assert fixture.registry.list_exact_states() == before
     assert forbidden.calls == calls == []
     fixture.close()
@@ -502,7 +505,7 @@ def test_ditto_default_manager_retains_reads_and_fenced_metadata_only_changes(tm
         app = Flask(__name__)
         app.register_blueprint(operations_routes.operations_bp)
         monkeypatch.setattr(operations_routes, "_ditto_manager", lambda: manager)
-        monkeypatch.setattr(operations_routes, "_quiesce_ditto_account_generation", lambda _account: None)
+        monkeypatch.setattr(operations_routes, "_quiesce_ditto_account_generation", lambda _account, **_selector: None)
         with app.app_context():
             headers = {"Authorization": f"Bearer {auth_routes._create_token('synthetic', mode='explore')}"}
         client = app.test_client()

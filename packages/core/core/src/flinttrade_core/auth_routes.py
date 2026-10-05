@@ -504,6 +504,8 @@ def verify_operator_session_token(token: str) -> VerifiedOperatorSession:
     from .auth_scopes import resolve_session_scopes  # noqa: PLC0415 - avoid import cycle
 
     signing_key = signing_key_text.encode("utf-8")
+    # These MACs bind an already verified JWT to opaque actor/session references.
+    # They are not password verifiers; AuthService hashes passwords with Argon2id.
     actor_ref = "operator:" + hmac.new(signing_key, _ACTOR_REFERENCE_DOMAIN + subject_bytes, hashlib.sha256).hexdigest()
     session_binding = (
         "session:" + hmac.new(signing_key, _SESSION_BINDING_DOMAIN + token_bytes, hashlib.sha256).hexdigest()

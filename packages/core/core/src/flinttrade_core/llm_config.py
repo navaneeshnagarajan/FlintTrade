@@ -621,6 +621,9 @@ def _prepare_transaction_journal(
         old_sha256 = ""
     else:
         had_secret = True
+    # Digests prove which credential file a crash journal may restore or remove.
+    # They are not password verifiers. The journal and API-key file share hardened
+    # owner-only permissions; snapshot revisions also use these file checksums.
     return {
         "version": _LLM_TRANSACTION_VERSION,
         "phase": "prepared",

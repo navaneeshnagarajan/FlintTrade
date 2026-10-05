@@ -3,6 +3,8 @@ import { useStore } from "jotai";
 import { channelInstrumentAtoms, USER_CHANNELS, type UserChannelId } from "@/services/fdc3/channels";
 import { getWsService } from "@/services/websocket";
 import { getExpiry } from "@/services/api";
+import { requireCurrentMarketDataScope, useMarketDataScope } from "@/hooks/useDataScope";
+import { useMarketObservationEpoch } from "@/hooks/useMarketObservationEpoch";
 import type { WsInstrument, WsMode } from "@/types/api";
 
 const INDEX_INSTRUMENTS: WsInstrument[] = [
@@ -30,11 +32,11 @@ function expiryToSuffix(expiry: string): string {
  * Resolve each MCX commodity to its nearest futures contract symbol.
  * Returns a map: display name → full symbol (e.g. "GOLD" → "GOLD02APR26FUT")
  */
-async function resolveMcxFutures(): Promise<Map<string, string>> {
+async function resolveMcxFutures(signal: AbortSignal, scope: string): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   const results = await Promise.allSettled(
     MCX_COMMODITIES.map(async (name) => {
-      const resp = await getExpiry(name, "MCX", "futures");
+      const resp = await getExpiry(name, "MCX", "futures", signal, scope);
       const expiries = Array.isArray(resp) ? resp : (resp as { expiry: string[] }).expiry ?? [];
       if (expiries.length > 0) {
         map.set(name, name + expiryToSuffix(expiries[0]));
@@ -43,7 +45,7 @@ async function resolveMcxFutures(): Promise<Map<string, string>> {
   );
   // Log failures but don't block
   results.forEach((r, i) => {
-    if (r.status === "rejected") {
+    if (r.status === "rejected" && !signal.aborted) {
       console.warn(`MCX expiry lookup failed for ${MCX_COMMODITIES[i]}:`, r.reason);
     }
   });
@@ -92,12 +94,27 @@ export function useTickSubscription(
 /** Registers global and channel interests for the native polling feed. */
 export function useWsBridge(enabled = true): void {
   const store = useStore();
+  const scope = useMarketDataScope();
+  const { epoch, currentEpoch } = useMarketObservationEpoch();
   useEffect(() => {
     if (!enabled) return;
+    const controller = new AbortController();
+    let retired = false;
+    const isCurrent = () => {
+      if (retired || currentEpoch.current !== epoch) return false;
+      try {
+        requireCurrentMarketDataScope(scope);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!isCurrent()) return;
     const feed = getWsService();
     feed.subscribe(INDEX_INSTRUMENTS, "ltp");
     const current = new Map<UserChannelId, WsInstrument>();
     const applyChannel = (channelId: UserChannelId) => {
+      if (!isCurrent()) return;
       const next = store.get(channelInstrumentAtoms[channelId]);
       const previous = current.get(channelId);
       if (previous?.symbol === next?.symbol && previous?.exchange === next?.exchange) return;
@@ -109,19 +126,19 @@ export function useWsBridge(enabled = true): void {
       applyChannel(channel.id);
       return store.sub(channelInstrumentAtoms[channel.id], () => applyChannel(channel.id));
     });
-    let retired = false;
     let futures: WsInstrument[] = [];
-    void resolveMcxFutures().then((map) => {
-      if (retired) return;
+    void resolveMcxFutures(controller.signal, scope).then((map) => {
+      if (!isCurrent()) return;
       futures = [...map.values()].map((symbol) => ({ symbol, exchange: "MCX" }));
       feed.subscribe(futures, "ltp");
     });
     return () => {
       retired = true;
+      controller.abort();
       unsubs.forEach((unsub) => unsub());
       current.forEach((instrument) => feed.unsubscribe([instrument], "ltp"));
       feed.unsubscribe(INDEX_INSTRUMENTS, "ltp");
       feed.unsubscribe(futures, "ltp");
     };
-  }, [enabled, store]);
+  }, [enabled, store, scope, epoch, currentEpoch]);
 }

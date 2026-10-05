@@ -17,7 +17,7 @@ from .exceptions import APIError
 
 
 class BrokerClient:
-    """Share one event loop for native read calls and routed operations."""
+    """Own the worker loop used by package calls and routed operations."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
@@ -40,10 +40,38 @@ class BrokerClient:
             if self._loop is None:
                 loop = asyncio.new_event_loop()
                 self._loop = loop
-                self._thread = threading.Thread(target=loop.run_forever, name="broker-read-loop", daemon=True)
+                self._thread = threading.Thread(
+                    target=self._run_loop, args=(loop,), name="broker-read-loop", daemon=True
+                )
                 self._thread.start()
             loop = self._loop
-        return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
+            # Submission and retirement share admission ownership: close must
+            # never stop the loop between accepting a coroutine and queuing it.
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            return future.result(timeout)
+        except TimeoutError:
+            future.cancel()
+            raise
+
+    @staticmethod
+    def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
+        """Dispose loop-owned work on its thread; registry sessions stay external."""
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_forever()
+        finally:
+            try:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
 
     async def _read_port(self, operation: str, read_request: Any = None, *, role: str = "quote") -> Any:
         """Preserve the native HTTP read cutover; internal readers use BrokerReadOwner."""
@@ -187,21 +215,28 @@ class BrokerClient:
         return unavailable
 
     async def close(self) -> None:
-        """Native sessions are disposed by their registry owner, never this facade."""
+        """Retire our loop without disposing registry-owned native sessions."""
+        if threading.current_thread() is self._thread:
+            # A coroutine on our loop cannot join its own thread. It returns
+            # before the queued stop; the loop owner then drains and disposes it.
+            self.close_sync()
+        else:
+            await asyncio.to_thread(self.close_sync)
 
     async def shutdown(self) -> None:
-        self.close_sync()
+        await self.close()
 
     def close_sync(self) -> None:
         with self._lock:
+            first_close = not self._closed
             self._closed = True
             loop, thread = self._loop, self._thread
-        if loop is not None:
-            loop.call_soon_threadsafe(loop.stop)
-            if thread is not None and thread is not threading.current_thread():
-                thread.join(timeout=5)
-            if not loop.is_running():
-                loop.close()
+            if first_close and loop is not None:
+                loop.call_soon_threadsafe(loop.stop)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=5)
+            if thread.is_alive():
+                raise TimeoutError("Broker read loop did not stop")
 
 
 def resolve_broker_client(app: Any | None = None) -> tuple[Any, bool]:
