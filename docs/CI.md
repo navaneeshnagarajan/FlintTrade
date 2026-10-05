@@ -72,7 +72,7 @@ Main/dev pushes, weekly Test runs and manual Test dispatches run the exhaustive 
 | `refresh-vuln-snapshot.yml` | Weekly/manual offline vulnerability-snapshot refresh |
 | `status-report.yml` | Weekly/manual repository-health report |
 | `key-freshness.yml` | Scheduled upstream signing-key assurance and relevant pin changes; the offline expired/revoked-key guard also runs in Test |
-| `toolchain-freshness.yml` | Scheduled/manual and relevant toolchain-version checks |
+| `toolchain-freshness.yml` | Scheduled/manual and relevant toolchain-version checks. The managed Ollama pin is advisory: it warns, and does not fail, once it trails the latest stable release by more than two minor versions. |
 | `broker-sdk-freshness.yml` | Scheduled/manual broker SDK drift checks |
 
 Supply Chain retains Python/Rust/Node audits, licence/provenance checks, NOTICE and lock drift, frozen/hashed-install enforcement and external-contributor CLA binding. Changes to installation/build support files select assurance even if the lockfiles are unchanged. Mutable upstream advisory state is still checked on protected-branch pushes and scheduled runs.

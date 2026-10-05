@@ -8,8 +8,8 @@ name: Toolchain freshness
 #
 # scripts/check-toolchain-freshness.py closes that gap against real upstream
 # release data (nodejs.org/dist, the Node LTS/EOL schedule, the pnpm registry
-# tags, uv's GitHub releases and the CPython EOL calendar), reading flint.toml
-# [requirements] as the source of truth.
+# tags, the uv and Ollama GitHub releases and the CPython EOL calendar), reading
+# flint.toml [requirements] as the source of truth.
 #
 # It is offline-tolerant by construction: every source is fetched independently
 # and an unreachable one is reported as skipped, so an upstream blip cannot
@@ -33,6 +33,7 @@ on:
       - 'package.json'
       - 'pnpm-workspace.yaml'
       - 'packages/apps/desktop/resources/bootstrap/tool-manifest.json'
+      - 'packages/core/core/src/flinttrade_core/ollama_runtime.py'
       - 'scripts/check-toolchain-freshness.py'
       - 'tests/test_toolchain_freshness.py'
       - '.github/workflows/toolchain-freshness.yml'
@@ -46,6 +47,7 @@ on:
       - 'package.json'
       - 'pnpm-workspace.yaml'
       - 'packages/apps/desktop/resources/bootstrap/tool-manifest.json'
+      - 'packages/core/core/src/flinttrade_core/ollama_runtime.py'
       - 'scripts/check-toolchain-freshness.py'
       - 'tests/test_toolchain_freshness.py'
       - '.github/workflows/toolchain-freshness.yml'
