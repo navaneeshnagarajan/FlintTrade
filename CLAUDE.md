@@ -140,3 +140,17 @@ OpenAlgo is an external service (formerly a submodule). For local testing, `scri
 - **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `changelog.md` is for **shipped** code only.
 - After any build/commit wave, run a full multi-agent audit before declaring done. Fix everything, then re-audit.
 - `AGENTS.md` carries the full agent/tooling workflow; `PLAN.md` is the curated public roadmap (the detailed working plan lives in the maintainer's private workspace at `.local/agent-context/PLAN.md`).
+
+## Agent skills
+
+### Issue tracker
+
+Issues, tickets and publishable specs use GitHub Issues in `navaneeshnagarajan/FlintTrade`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` and `docs/adr/`, created lazily. See `docs/agents/domain.md`.
