@@ -65,6 +65,15 @@ class AuthenticatingSessionProvider:
         self._credential_version_for = credential_version_for
         self._compatibility_authority_for = compatibility_authority_for
         self._coherence_verifier = coherence_verifier
+        self._enrolled = (
+            workspace_snapshot is not None
+            and "_broker_account_store" in workspace_snapshot.config
+        )
+        self._pinned_instance_id = (
+            workspace_snapshot.version.instance_id
+            if workspace_snapshot is not None and workspace_snapshot.version is not None
+            else None
+        )
         if (workspace_snapshot is None) != (workspace_path is None):
             raise ValueError("workspace binding requires both snapshot and path")
         if workspace_snapshot is not None and workspace_snapshot.version is None:
@@ -94,8 +103,7 @@ class AuthenticatingSessionProvider:
         return ManagedLookupAuthority(version, current)
 
     def _current_snapshot(self) -> WorkspaceSnapshot:
-        snapshot = read_workspace_snapshot(self._workspace_path)
-        if "_broker_account_store" in snapshot.config:
+        if self._enrolled:
             if self._coherence_verifier is None:
                 raise RegistrySessionUnavailable
             try:
@@ -103,18 +111,19 @@ class AuthenticatingSessionProvider:
             except Exception:
                 raise RegistrySessionUnavailable from None
             if (type(verified) is not WorkspaceSnapshot or verified.version is None
-                    or verified.version.instance_id != snapshot.version.instance_id):
+                    or verified.version.instance_id != self._pinned_instance_id):
                 raise RegistrySessionUnavailable
-            snapshot = verified
-        return snapshot
+            return verified
+        if self._workspace_path is None:
+            raise RegistrySessionUnavailable
+        return read_workspace_snapshot(self._workspace_path)
 
     def __call__(self, request_ctx: RequestContext, adapter_id: str, account_id: str) -> ConnectedRegistrySession:
         selector = BrokerSelector(adapter_id, account_id)
-        acls = self._acls
-        if self._workspace_path is not None:
-            snapshot = self._current_snapshot()
-            if "_broker_account_store" in snapshot.config:
-                acls = snapshot.config["brokers"]["account_acls"]
+        if self._enrolled:
+            acls = self._current_snapshot().config["brokers"]["account_acls"]
+        else:
+            acls = self._acls
         allowed_actors = acls.get(adapter_id, {}).get(account_id, [])
         if request_ctx.actor_id not in allowed_actors:
             raise SafetyBypassError(
@@ -171,7 +180,7 @@ class ConnectedSessionClientResolver:
         if selector == BrokerSelector("openalgo", "default"):
             from flinttrade_core.openalgo_client import OpenAlgoClient
 
-            current = read_workspace_snapshot(self._provider._workspace_path)
+            current = self._provider._current_snapshot()
             if not isinstance(client, OpenAlgoClient) or not client.matches_workspace_openalgo(current):
                 raise RegistrySessionUnavailable
         return client

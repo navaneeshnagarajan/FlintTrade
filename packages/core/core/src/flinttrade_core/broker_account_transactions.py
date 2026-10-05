@@ -235,6 +235,14 @@ class BrokerAccountTransactionCoordinator:
                 return
             await asyncio.sleep(min(0.01, remaining))
 
+    def _drop_preadmission(self, request: AccountMutationRequest, attempt: _Attempt) -> None:
+        """Settle and forget a lease that never admitted a durable claim."""
+        if not self.lifecycle.settle(attempt.lease, durable_disposition=True):
+            return
+        attempt.settled = True
+        self.lifecycle.forget_settled(attempt.lease)
+        self._attempts.pop(request.operation_id, None)
+
     def _disposition(self, request: AccountMutationRequest, attempt: _Attempt, reason: str) -> AccountMutationReceipt:
         self.lifecycle.abandon(attempt.lease)
         return self.lifecycle.with_disposition_fence(
@@ -337,6 +345,9 @@ class BrokerAccountTransactionCoordinator:
         self._admission()
         self._principal(request)
         attempt = self._attempts.get(request.operation_id)
+        if attempt is not None and attempt.settled:
+            self._attempts.pop(request.operation_id, None)
+            attempt = None
         if existing is not None and existing.receipt is not None:
             if attempt is not None and not attempt.borrowing:
                 await self._settle(existing.receipt, attempt, deadline)
@@ -422,15 +433,13 @@ class BrokerAccountTransactionCoordinator:
             if admitted:
                 self._disposition(request, attempt, "caller_cancelled")
             else:
-                self.lifecycle.settle(attempt.lease, durable_disposition=True)
-                attempt.settled = True
+                self._drop_preadmission(request, attempt)
             raise
         except Exception:
             if not admitted:
                 admitted = self.store.existing_request(request) is not None
             if not admitted:
-                self.lifecycle.settle(attempt.lease, durable_disposition=True)
-                attempt.settled = True
+                self._drop_preadmission(request, attempt)
                 raise
             receipt = self._disposition(request, attempt, "operation_failed")
             await self._settle(receipt, attempt, deadline)

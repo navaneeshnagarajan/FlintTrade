@@ -526,6 +526,59 @@ async def test_enrolled_session_provider_requires_explicit_coherence_verifier(ha
 
 
 @pytest.mark.asyncio
+async def test_preadmission_failure_retry_borrows_a_fresh_lease(harness, monkeypatch):
+    request = harness.request()
+    original = harness.store.admit
+    calls = []
+
+    def fail_once(candidate):
+        calls.append(candidate)
+        if len(calls) == 1:
+            raise RuntimeError("preadmission")
+        return original(candidate)
+
+    monkeypatch.setattr(harness.store, "admit", fail_once)
+    with pytest.raises(RuntimeError, match="preadmission"):
+        await harness.coordinator.mutate(request, timeout=2.0)
+    assert request.operation_id not in harness.coordinator._attempts
+    assert harness.store.existing_request(request) is None
+    result = await harness.coordinator.mutate(request, timeout=2.0)
+    assert result.runtime_status == "ready"
+    assert harness.lifecycle.snapshot().active is False
+
+
+@pytest.mark.asyncio
+async def test_enrolled_read_stays_on_the_composed_verifier_when_the_document_looks_legacy(harness, monkeypatch):
+    from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
+    from flinttrade_core.workspace_migrations import WorkspaceSnapshot, read_workspace_snapshot
+
+    request = harness.request()
+    await harness.coordinator.mutate(request, timeout=2.0)
+    snapshot = harness.workspace.assert_coherent()
+    seen = []
+
+    def verifier():
+        seen.append(True)
+        return snapshot
+
+    provider = AuthenticatingSessionProvider(
+        harness.registry, {"dhan": {"Synthetic": []}}, workspace_snapshot=snapshot,
+        workspace_path=harness.path,
+        credential_version_for=lambda selector: harness.credentials.selector_state(selector).version,
+        coherence_verifier=verifier,
+    )
+    legacy = read_workspace_snapshot(harness.path)
+    stripped = legacy.as_dict()
+    stripped.pop("_broker_account_store", None)
+    monkeypatch.setattr(
+        "flinttrade_gateway.session_provider.read_workspace_snapshot",
+        lambda _path: WorkspaceSnapshot(stripped, legacy.version),
+    )
+    provider(harness.verify_read(request.selector), "dhan", "Synthetic")
+    assert seen
+
+
+@pytest.mark.asyncio
 async def test_unreadable_workspace_after_attempt_preserves_uncertainty_and_one_cas(harness, monkeypatch):
     from flinttrade_core import workspace_migrations
     from flinttrade_core.broker_account_workspace import BrokerAccountWorkspaceUnavailable

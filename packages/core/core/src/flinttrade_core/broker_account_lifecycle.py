@@ -792,6 +792,20 @@ class BrokerAccountLifecycleOwner:
                 self._condition.notify_all()
                 return True
 
+    def forget_settled(self, lease: AccountMutationLease) -> None:
+        """Drop a settled pre-admission lease so the same operation can begin again.
+
+        A durable claim must already have been released. This does not grant a
+        new lane; the caller has to ``begin`` one.
+        """
+        self._require_process()
+        with self._condition:
+            operation = self._operations.get(lease)
+            if (operation is None or not operation.settled or self._active is lease
+                    or operation.durable_claim_release is not None):
+                raise RuntimeError("account_mutation_lease_unforgettable")
+            del self._operations[lease]
+
     def _retire_live_candidates(self, deadline: float) -> None:
         """Recover only exact registry custody; an unclaimable payload stays owned."""
         self._require_process()
