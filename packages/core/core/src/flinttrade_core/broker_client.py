@@ -1,7 +1,9 @@
-"""Read-only facade for configured native broker sessions.
+"""Frozen read facade retained for package consumer interfaces.
 
-All writes remain owned by the safety gate and BrokerRouter. This facade never
-contains broker credentials, network endpoints, or an order dispatch method.
+HTTP reads return 409 and background consumers return 503 until an authorised
+native read integration is available. Internal native readers use BrokerReadOwner.
+Writes remain owned by the safety gate and BrokerRouter; this facade contains no
+broker credentials, network endpoints, or order dispatch method.
 """
 
 from __future__ import annotations

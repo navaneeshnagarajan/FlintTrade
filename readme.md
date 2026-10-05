@@ -314,12 +314,12 @@ and 1 Rust/PyO3 tick engine.
 | `packages/core/historical` | Python | OHLCV downloader, free-data sources, DuckDB/Parquet pipeline, expiry manager |
 | `packages/core/indicators` | Python | Pure-NumPy batch indicators (110 exports), streaming classes, Pine conversion |
 | `packages/core/ticks` | Rust + PyO3 | High-performance tick processing for tick-level backtests |
-| `packages/integrations/gateway` | Python | Native broker gateway, adapter pattern, credential vault, WebSocket bridge |
+| `packages/integrations/gateway` | Python | Five native broker adapters, safety-gated router, credential vault and local TickDispatcher; native HTTP and network capture unavailable |
 | `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
 | `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis |
 | `packages/services/backtest` | Python | Event-driven simulator, 94 strategy template modules, walk-forward optimiser |
-| `packages/services/ditto` | Python | Multi-account mirroring, margin calculator, trailing stop-loss |
+| `packages/services/ditto` | Python | Native account metadata, margin/risk analytics and position/stop monitors; broker execution unavailable under the native runtime freeze |
 | `packages/services/engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |
 | `packages/services/journal` | Python | Trade journal, execution-quality analytics, realised P&L tracking |
 | `packages/services/screener` | Python | Option chain, OI analysis, PCR, max-pain, portfolio Greeks, IV smile |
@@ -352,7 +352,7 @@ each dependency does, exact-version sources, and the terminal's About screen.
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Repo layout, dev setup, adding widgets and strategies |
 | [Architecture](docs/ARCHITECTURE.md) | Diagrams, data flow, mode system, auth, WSGI |
 | [Technology stack](docs/TECH_STACK.md) | Dependency purposes, version sources, and app build information |
-| [API Reference](docs/API.md) | FlintTrade `/ft-api/v1/` endpoints plus native brokers-compatible bridge routes |
+| [API Reference](docs/API.md) | First-party HTTP routes, authentication, Practice trading and native HTTP freeze |
 | [Disclaimer](disclaimer.md) | Beta-stage, no-advice, trading-risk, and user-responsibility notice |
 | [Changelog](changelog.md) | Release notes by version |
 | [Security](security.md) | Disclosure policy, supported versions, threat model |

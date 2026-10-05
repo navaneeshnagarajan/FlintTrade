@@ -1,6 +1,6 @@
 # Ditto
 
-> Multi-account orchestration: position mirror, margin calculator, trailing stop-loss, and risk manager (AlgoMirror patterns absorbed in-process).
+> Native account metadata, analytics and position/stop monitors (AlgoMirror patterns absorbed in-process). Broker execution remains unavailable under the native runtime freeze.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -8,10 +8,11 @@
 
 ## Public surface
 
-- `src/flinttrade_ditto/mirror.py — copy trades across accounts with size scaling`
-- `src/flinttrade_ditto/margin_calculator.py — pre-trade margin checks`
-- `src/flinttrade_ditto/trailing_sl.py — dynamic trailing stop-loss`
-- `src/flinttrade_ditto/risk_manager.py — per-account exposure + drawdown limits`
+- `src/flinttrade_ditto/account_manager.py — non-secret native account metadata; sessions remain gateway-owned`
+- `src/flinttrade_ditto/mirror.py — allocation and position-monitor primitives; native copy execution unavailable`
+- `src/flinttrade_ditto/margin_calculator.py — margin calculations and estimates`
+- `src/flinttrade_ditto/trailing_sl.py — trailing-stop calculations and monitor state`
+- `src/flinttrade_ditto/risk_manager.py — exposure and drawdown checks`
 
 (See the source for the full surface.)
 

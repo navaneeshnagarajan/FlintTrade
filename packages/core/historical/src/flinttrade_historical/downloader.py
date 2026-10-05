@@ -1,10 +1,9 @@
-"""Historical OHLCV downloader via native broker /api/v1/history endpoint.
+"""Synchronous helpers for chunking and combining provider-supplied OHLCV history.
 
-Supports all exchanges (NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX) and all
-intervals (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, D).
-
-Brokers typically limit intraday history to ~30 days per request, so this
-module automatically chunks large date ranges and stitches the results.
+The retained BrokerClient facade refuses history reads until the native read
+cutover; it provides no working broker download path today. Exchange and interval
+support depend on the supplied provider. Recognised storage labels do not grant
+provider support. Independent free-data downloads live in free_data.py.
 """
 
 from __future__ import annotations

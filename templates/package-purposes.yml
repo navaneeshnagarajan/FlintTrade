@@ -22,13 +22,13 @@ apps/terminal:
     - "src/main.tsx — entry point and route registration"
     - "src/routes/HomeRoute.tsx — dashboard and home widget orchestration"
     - "src/layout/workspacePresets.ts — named workspace presets"
-    - "src/services/api.ts — REST + WebSocket client"
+    - "src/services/api.ts — first-party REST client with account-scoped native data selection"
 core/core:
   language: Python
-  purpose: "Flask application, native broker read client, config and workspace management, authentication service, and the WSGI prefix-stripper."
+  purpose: "Flask backend, authentication and workspace management with a frozen native broker read facade. Native broker HTTP reads remain unavailable."
   entry_points:
     - "src/flinttrade_core/app.py — Flask app factory + blueprint registration"
-    - "src/flinttrade_core/broker_client.py — read-only native broker client"
+    - "src/flinttrade_core/broker_client.py — frozen read facade: HTTP reads return 409; background consumers return 503"
     - "src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance"
     - "src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders"
 core/data:
@@ -48,10 +48,11 @@ core/design-system:
     - "src/tokens.css — Tailwind v4 design tokens"
 core/historical:
   language: Python
-  purpose: "OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, and expiry-tracker for derivatives."
+  purpose: "Synchronous OHLCV helpers, local DuckDB storage and independent OpenChart/yfinance downloads. Native broker history remains unavailable under the read freeze."
   entry_points:
-    - "src/flinttrade_historical/downloader.py — async OHLCV puller with rate-limit aware backoff"
-    - "src/flinttrade_historical/free_data.py — OpenChart + yfinance free-data integration"
+    - "src/flinttrade_historical/downloader.py — synchronous date chunking; default native broker history unavailable"
+    - "src/flinttrade_historical/free_data.py — independent OpenChart + yfinance free-data downloads"
+    - "src/flinttrade_historical/pipeline.py — local DuckDB storage for supplied and free-data bars"
     - "src/flinttrade_historical/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX"
 core/indicators:
   language: Python + Numba
@@ -70,14 +71,14 @@ core/ticks:
     - "Cargo.toml — crate metadata and dependencies"
 integrations/gateway:
   language: Python
-  purpose: "FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, BROKER_CATALOG (5 brokers), an encrypted credential vault, and the WebSocket bridge."
+  purpose: "Native gateway with five broker adapters, a safety-gated router, encrypted credentials and local tick dispatch. Native broker HTTP and network capture remain unavailable."
   entry_points:
     - "src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG"
     - "src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification"
-    - "src/flinttrade_gateway/registry.py — BrokerRegistry over the 35-broker catalogue"
+    - "src/flinttrade_gateway/registry.py — native account and session registry over the 5-broker catalogue"
     - "src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww) against the BrokerAdapter ABC"
     - "src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault"
-    - "src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
+    - "src/flinttrade_gateway/ws_bridge.py — local TickDispatcher queues and latest-tick cache; no network server"
 integrations/webhooks:
   language: Python
   purpose: "HMAC-validated custom webhook intake rail for generic inbound alerts."
@@ -107,12 +108,13 @@ services/backtest:
     - "src/flinttrade_backtest/strategies/ — 94 ready-to-run templates"
 services/ditto:
   language: Python
-  purpose: "Multi-account orchestration: position mirror, margin calculator, trailing stop-loss, and risk manager (AlgoMirror patterns absorbed in-process)."
+  purpose: "Native account metadata, analytics and position/stop monitors (AlgoMirror patterns absorbed in-process). Broker execution remains unavailable under the native runtime freeze."
   entry_points:
-    - "src/flinttrade_ditto/mirror.py — copy trades across accounts with size scaling"
-    - "src/flinttrade_ditto/margin_calculator.py — pre-trade margin checks"
-    - "src/flinttrade_ditto/trailing_sl.py — dynamic trailing stop-loss"
-    - "src/flinttrade_ditto/risk_manager.py — per-account exposure + drawdown limits"
+    - "src/flinttrade_ditto/account_manager.py — non-secret native account metadata; sessions remain gateway-owned"
+    - "src/flinttrade_ditto/mirror.py — allocation and position-monitor primitives; native copy execution unavailable"
+    - "src/flinttrade_ditto/margin_calculator.py — margin calculations and estimates"
+    - "src/flinttrade_ditto/trailing_sl.py — trailing-stop calculations and monitor state"
+    - "src/flinttrade_ditto/risk_manager.py — exposure and drawdown checks"
 services/engine:
   language: Python
   purpose: "Five-layer order-admission safety, gated scheduled-strategy execution, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation."

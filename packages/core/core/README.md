@@ -1,6 +1,6 @@
 # Core
 
-> Flask application, native broker read client, config and workspace management, authentication service, and the WSGI prefix-stripper.
+> Flask backend, authentication and workspace management with a frozen native broker read facade. Native broker HTTP reads remain unavailable.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -9,7 +9,7 @@
 ## Public surface
 
 - `src/flinttrade_core/app.py — Flask app factory + blueprint registration`
-- `src/flinttrade_core/broker_client.py — read-only native broker client`
+- `src/flinttrade_core/broker_client.py — frozen read facade: HTTP reads return 409; background consumers return 503`
 - `src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance`
 - `src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders`
 

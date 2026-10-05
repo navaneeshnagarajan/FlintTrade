@@ -11,7 +11,7 @@
 - `src/main.tsx — entry point and route registration`
 - `src/routes/HomeRoute.tsx — dashboard and home widget orchestration`
 - `src/layout/workspacePresets.ts — named workspace presets`
-- `src/services/api.ts — REST + WebSocket client`
+- `src/services/api.ts — first-party REST client with account-scoped native data selection`
 
 (See the source for the full surface.)
 
