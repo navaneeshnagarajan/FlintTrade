@@ -23,7 +23,9 @@ Safety model (do not weaken):
 
         "ai": {"autonomous_agent": {"enabled": true}}
 
-    Live mode only; one session at a time.
+    Live retains operator-approved entry intents. Practice delegates to the
+    app-owned durable supervisor and canonical Laya/sandbox admission; it
+    never constructs a Live executor or borrows Live broker write authority.
 """
 
 from __future__ import annotations
@@ -190,6 +192,9 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     """
     deadline = monotonic() + max(0.0, float(timeout))
     _shutdown_event(app).set()
+    from .practice_agent_runtime import shutdown_practice_agent  # noqa: PLC0415
+
+    practice_stopped = shutdown_practice_agent(app, timeout=max(0.0, deadline - monotonic()))
     with _RUNNER_LOCK:
         trader = _RUNNER.get("trader")
         thread = _RUNNER.get("thread")
@@ -198,7 +203,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         if not _join_learning_cleanup_owners(deadline=deadline):
             logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
             return False
-        return True
+        return practice_stopped
     if trader is None or thread is None:
         logger.error("Autonomous agent ownership is incomplete during shutdown")
         return False
@@ -237,7 +242,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     if not _join_learning_cleanup_owners(deadline=deadline):
         logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
         return False
-    return True
+    return practice_stopped
 
 
 def _agent_flag_enabled() -> bool:
@@ -614,6 +619,12 @@ def start_agent() -> tuple[Any, int]:
             "message": "The application is shutting down; no new agent session can start.",
         }), 503
 
+    initial_payload = _decode_request_payload()
+    if initial_payload and initial_payload.get("mode") == "practice":
+        from .practice_agent_runtime import start_practice_agent  # noqa: PLC0415
+
+        return start_practice_agent()
+
     if not _agent_flag_enabled():
         return jsonify({
             "status": "error",
@@ -817,41 +828,102 @@ def start_agent() -> tuple[Any, int]:
             portfolio_state_provider=_agent_safety_state_provider,
         )
 
+        # One generation per symbol, allocated before I/O so a lost response
+        # keeps its identity. The lock lives in the worker, not across an await:
+        # cancellation or callers on different event loops cannot split it.
+        entry_intents: dict[str, tuple[str, str]] = {}
+        entry_intent_lock = threading.Lock()
+
         async def _entry_intent_sink(order: Any, intent_context: dict[str, Any]) -> dict[str, str]:
-            """Persist an entry intent without retaining auth or gate material."""
+            """Persist a retry-safe intention without retaining auth or gate material."""
+            import hashlib  # noqa: PLC0415
+            import json  # noqa: PLC0415
+
             from flinttrade_engine.action_center import ActionCenterError  # noqa: PLC0415
 
             model_dump = getattr(order, "model_dump", None)
             if not callable(model_dump):
                 raise TypeError("Autonomous-agent entry order is not serialisable")
-            order_params = model_dump(mode="json")
-            signal = str(intent_context.get("signal") or "ENTRY").upper()
-            request_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"flinttrade:agent-entry:{producer_ref}:{getattr(order, 'symbol', '')}",
-                )
-            )
-            try:
-                approval = await asyncio.to_thread(
-                    approval_queue.enqueue,
-                    order_params=order_params,
-                    reason=f"Autonomous-agent {signal} entry requires operator approval",
-                    request_id=request_id,
-                    adapter_id=adapter_id,
-                    account_id=account_id,
-                    source="autonomous-agent",
-                    intent_type="entry",
-                    producer_ref=producer_ref,
-                    intent_context=intent_context,
-                )
-            except ActionCenterError:
-                approval = await asyncio.to_thread(approval_queue.get, request_id)
+            # Snapshot both the full order semantics and its risk/rationale context.
+            # A caller mutating a dictionary after submission cannot change identity.
+            serialised = json.dumps([model_dump(mode="json"), intent_context], sort_keys=True, allow_nan=False)
+            order_params, context = json.loads(serialised)
+            fingerprint = hashlib.sha256(serialised.encode()).hexdigest()
+            symbol = str(order_params.get("symbol") or "").strip().upper()
+            signal = str(context.get("signal") or "ENTRY").upper()
+
+            def _validate_existing(approval: Any, request_id: str, expected: str) -> None:
                 if (
-                    str(getattr(approval, "producer_ref", "")) != producer_ref
-                    or str(getattr(approval, "status", "")) not in {"pending", "dispatching"}
+                    str(getattr(approval, "id", "")) != request_id
+                    or str(getattr(approval, "producer_ref", "")) != producer_ref
+                    or str(getattr(approval, "adapter_id", "")) != adapter_id
+                    or str(getattr(approval, "account_id", "")) != account_id
+                    or str(getattr(approval, "source", "")) != "autonomous-agent"
+                    or str(getattr(approval, "intent_type", "")) != "entry"
+                    or hashlib.sha256(json.dumps(
+                        [getattr(approval, "order_params", None), getattr(approval, "intent_context", None)],
+                        sort_keys=True,
+                        allow_nan=False,
+                    ).encode()).hexdigest() != expected
                 ):
-                    raise
+                    raise ActionCenterError("Existing autonomous-agent intention conflicts with its persisted payload")
+
+            def _persist() -> Any:
+                with entry_intent_lock:
+                    previous = entry_intents.get(symbol)
+                    if previous is not None:
+                        request_id, expected = previous
+                        try:
+                            approval = approval_queue.get(request_id)
+                        except ActionCenterError:
+                            # A failed first insert/read cannot justify a new UUID.
+                            # Retry the same insert, whose primary key prevents duplicates.
+                            approval = None
+                        if approval is not None:
+                            _validate_existing(approval, request_id, expected)
+                            status = str(approval.status)
+                            if status not in {"pending", "dispatching"}:
+                                if getattr(approval, "outcome_uncertain", False):
+                                    raise ActionCenterError("Entry outcome is uncertain; reconciliation is required")
+                                if status == "approved":
+                                    # Live responses acknowledge submission only. Tracking
+                                    # removal and learning records do not prove a filled exit
+                                    # correlated to this generation; never risk a second entry.
+                                    raise ActionCenterError(
+                                        "Approved Live entry requires fill reconciliation before another intention"
+                                    )
+                                if status not in {"rejected", "expired", "failed"}:
+                                    raise ActionCenterError("Entry status is unknown; reconciliation is required")
+                                previous = None
+                        if previous is not None:
+                            if fingerprint != expected:
+                                raise ActionCenterError("A different entry intention is already pending for this symbol")
+                            if approval is not None:
+                                return approval
+
+                    if previous is None:
+                        request_id = str(uuid.uuid4())
+                        entry_intents[symbol] = (request_id, fingerprint)
+                    try:
+                        return approval_queue.enqueue(
+                            order_params=order_params,
+                            reason=f"Autonomous-agent {signal} entry requires operator approval",
+                            request_id=request_id,
+                            adapter_id=adapter_id,
+                            account_id=account_id,
+                            source="autonomous-agent",
+                            intent_type="entry",
+                            producer_ref=producer_ref,
+                            intent_context=context,
+                        )
+                    except ActionCenterError:
+                        approval = approval_queue.get(request_id)
+                        _validate_existing(approval, request_id, fingerprint)
+                        if str(approval.status) not in {"pending", "dispatching"}:
+                            raise
+                        return approval
+
+            approval = await asyncio.to_thread(_persist)
             return {
                 "id": str(getattr(approval, "id", "") or ""),
                 "status": str(getattr(approval, "status", "pending") or "pending"),
@@ -996,6 +1068,12 @@ def stop_agent() -> tuple[Any, int]:
     denied = _require_auth()
     if denied is not None:
         return denied
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    if (_decode_request_payload() or {}).get("mode") == "practice":
+        from .practice_agent_runtime import stop_practice_agent  # noqa: PLC0415
+
+        return stop_practice_agent()
     body: dict[str, Any] = request.get_json(silent=True) or {}
     square_off = bool(body.get("square_off", True))
 
@@ -1016,4 +1094,33 @@ def agent_status() -> tuple[Any, int]:
     denied = _require_auth()
     if denied is not None:
         return denied
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    if (_decode_request_payload() or {}).get("mode") == "practice":
+        from .practice_agent_runtime import practice_agent_status  # noqa: PLC0415
+
+        return practice_agent_status()
     return jsonify({"status": "success", "data": _snapshot()}), 200
+
+
+@agent_bp.route("/practice/runs", methods=["GET"])
+def practice_runs() -> tuple[Any, int]:
+    """Read durable Practice evidence under a full Practice session."""
+    from .practice_agent_runtime import list_practice_runs  # noqa: PLC0415
+
+    return list_practice_runs()
+
+
+@agent_bp.route("/practice/runs/<run_id>/events", methods=["GET"])
+def practice_events(run_id: str) -> tuple[Any, int]:
+    from .practice_agent_runtime import practice_run_events  # noqa: PLC0415
+
+    return practice_run_events(run_id)
+
+
+@agent_bp.route("/practice/runs/<run_id>/resolve", methods=["POST"])
+def practice_resolve(run_id: str) -> tuple[Any, int]:
+    """Acknowledge interruption only after the runtime proves a flat sandbox."""
+    from .practice_agent_runtime import resolve_practice_run  # noqa: PLC0415
+
+    return resolve_practice_run(run_id)

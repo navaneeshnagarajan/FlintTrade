@@ -4457,28 +4457,70 @@ def test_connect_rejects_coming_soon_native(client, adapter_id):
     assert payload["data"]["native_connect_blockers"]
 
 
-def test_neo_connect_is_not_rejected_as_coming_soon(client):
-    """Setup must allow native Neo connect for Connected (read) / API smoke."""
-    c, _app, _tmp = client
+def test_neo_connect_is_not_rejected_as_coming_soon(client, monkeypatch):
+    """Setup allows Neo read-connect without invoking its production-only SDK."""
+    from flinttrade_core import native_account_routes
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_gateway.brokers._base import Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+
+    c, app, _tmp = client
+    credentials = {
+        "access_token": "x",
+        "mobile_number": "1",
+        "ucc": "U",
+        "totp": "123456",
+        "mpin": "1234",
+    }
+
+    async def _login(_self, supplied_credentials):
+        assert supplied_credentials == credentials
+        return Session(
+            access_token="synthetic-neo-session",
+            expires_at=9e9,
+            account_id="U",
+            adapter_id="kotakneo",
+            read_only_until_at=9e9,
+        )
+
+    async def _liveness(_self, _session):
+        return None
+
+    async def _quotes(_self, _session, _symbols):
+        return []
+
+    async def _market_depth(_self, _session, _symbols):
+        return {}
+
+    # Neo login authenticates immediately, then activation probes liveness and
+    # Monday read-smoke. Stub every provider boundary; the synthetic session has
+    # no SDK client, so an unmocked provider read also fails closed locally.
+    monkeypatch.setattr(KotakNeoAdapter, "login", _login)
+    monkeypatch.setattr(KotakNeoAdapter, "liveness", _liveness)
+    monkeypatch.setattr(KotakNeoAdapter, "quotes", _quotes)
+    monkeypatch.setattr(KotakNeoAdapter, "market_depth", _market_depth)
+    monkeypatch.setattr(
+        native_account_routes,
+        "_sdk_attestations_by_pin",
+        lambda: {"kotakneoapi": {"pin": "kotakneoapi", "status": "ok"}},
+    )
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
         json={
             "adapter_id": "kotakneo",
             "account_id": "NEOREAD1",
-            "credentials": {
-                "access_token": "x",
-                "mobile_number": "1",
-                "ucc": "U",
-                "totp": "123456",
-                "mpin": "1234",
-            },
+            "credentials": credentials,
         },
     )
     payload = resp.get_json() or {}
     message = str(payload.get("message") or payload.get("error") or "").lower()
     assert "coming soon" not in message
-    assert resp.status_code != 400 or "coming soon" not in message
+    assert resp.status_code == 200, payload
+    state = app.config["REGISTRY"].snapshot_exact_state(BrokerSelector("kotakneo", "NEOREAD1"))
+    assert state is not None
+    assert state.read_only is True
+    assert state.read_smoke_ok is True
 
 
 @pytest.mark.parametrize("adapter_id", ["groww", "indmoney"])

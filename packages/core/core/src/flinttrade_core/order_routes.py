@@ -34,7 +34,7 @@ import logging
 import math
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from types import SimpleNamespace
 from typing import Any
 
@@ -2522,6 +2522,8 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
 
 def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     """Place one Practice order while the contract lock is held."""
+    from .practice_agent_adapter import PracticeAgentError  # noqa: PLC0415
+
     sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
     positions, orders = _practice_books(sandbox)
     if _own_exit_pending(body, positions, orders):
@@ -2536,6 +2538,31 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     )
     if laya_block is not None:
         return laya_block
+
+    # A background Practice agent may lose authority or receive a stop while
+    # Laya is deciding. Recheck at the final write boundary under this same
+    # contract lock. Only an in-process caller can install this callable; an
+    # HTTP header or JSON field cannot grant or replace it.
+    agent_guard = request.environ.get("flinttrade.practice_agent_guard")
+    write_admission = nullcontext()
+    if agent_guard is not None:
+        try:
+            if not callable(agent_guard):
+                raise TypeError("invalid Practice agent guard")
+            refused = agent_guard(body, positions, orders)
+        except Exception:
+            logger.exception("Practice agent authority recheck failed")
+            return jsonify({
+                "status": "error", "code": "practice_agent_guard_unavailable",
+                "message": "Practice agent authority could not be verified",
+            }), 503
+        if isinstance(refused, AbstractContextManager):
+            # Only the in-process guard can return this capability. Enter it
+            # after Laya and hold it solely across the synchronous sandbox
+            # write, so neither decision nor evidence I/O delays an L5 drain.
+            write_admission = refused
+        elif refused is not None:
+            return refused
 
     sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
     if sandbox is None:
@@ -2577,22 +2604,25 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         if fill.price_age_s is not None:
             provenance["price_age_s"] = fill.price_age_s
 
+    sandbox_write_started = False
     try:
-        result = sandbox.place_order(
-            symbol=str(body.get("symbol", "")).strip().upper(),
-            exchange=str(body.get("exchange", "")).strip().upper(),
-            action=str(body.get("action", "BUY")).strip().upper(),
-            quantity=quantity,
-            price=place_price,
-            product=str(body.get("product", "MIS")).strip().upper(),
-            order_type=order_type,
-            trigger_price=trigger_price,
-            strategy=str(body.get("strategy") or "").strip(),
-            instrument_token=str(
-                body.get("instrument_token") or body.get("security_id") or ""
-            ).strip(),
-            **provenance,
-        )
+        with write_admission:
+            sandbox_write_started = True
+            result = sandbox.place_order(
+                symbol=str(body.get("symbol", "")).strip().upper(),
+                exchange=str(body.get("exchange", "")).strip().upper(),
+                action=str(body.get("action", "BUY")).strip().upper(),
+                quantity=quantity,
+                price=place_price,
+                product=str(body.get("product", "MIS")).strip().upper(),
+                order_type=order_type,
+                trigger_price=trigger_price,
+                strategy=str(body.get("strategy") or "").strip(),
+                instrument_token=str(
+                    body.get("instrument_token") or body.get("security_id") or ""
+                ).strip(),
+                **provenance,
+            )
         if not _subscribe_pending_practice_order(result, body):
             order_id = str(result.get("order_id") or "")
             if order_id:
@@ -2602,6 +2632,8 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                 "message": "Practice order was cancelled because its tick subscription failed",
             }), 503
     except Exception as exc:
+        if isinstance(exc, PracticeAgentError) and not sandbox_write_started:
+            return jsonify({"status": "error", "code": exc.code, "message": exc.code}), 409
         logger.exception(
             "SandboxEngine error for action=place symbol=%s: %s",
             body.get("symbol", "?"),
