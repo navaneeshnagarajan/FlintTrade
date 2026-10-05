@@ -128,7 +128,12 @@ export function explainRepoPath(repoPath: string): string {
   }
 
   if (cleanPath.startsWith('packages/apps/site')) {
-    return 'packages/apps/site is the public Next.js + Fumadocs website and docs/contribution MCP app. Run its checks with cd packages/apps/site && npm run typecheck && npm run test && npm run build.';
+    return [
+      'packages/apps/site is the public Next.js + Fumadocs website and docs/contribution MCP app. Run these checks from the repository root, one command per line:',
+      'pnpm --filter @flinttrade/site typecheck',
+      'pnpm --filter @flinttrade/site test',
+      'pnpm --filter @flinttrade/site build',
+    ].join('\n');
   }
 
   if (cleanPath.startsWith('docs/')) {
@@ -140,7 +145,7 @@ export function explainRepoPath(repoPath: string): string {
   }
 
   if (cleanPath === 'Makefile' || cleanPath.startsWith('infra/') || cleanPath.startsWith('scripts/')) {
-    return `${cleanPath} is operational repo infrastructure. Prefer existing Makefile targets and scripts over one-off commands.`;
+    return `${cleanPath} is operational repo infrastructure. Prefer existing python scripts/ft.py targets and repository scripts over one-off commands.`;
   }
 
   return `${cleanPath} is not in a known FlintTrade package boundary. Start with docs/DEVELOPER_GUIDE.md and readme.md for orientation.`;
@@ -154,30 +159,34 @@ export function recommendTests(changedPaths: string[]): TestRecommendation {
   for (const changedPath of paths) {
     if (changedPath.startsWith('packages/apps/site/')) {
       reasons.add('Public website, generated docs, or docs MCP changed.');
-      commands.add('cd packages/apps/site && npm run typecheck');
-      commands.add('cd packages/apps/site && npm run test');
-      commands.add('cd packages/apps/site && npm run build');
+      commands.add('pnpm --filter @flinttrade/site typecheck');
+      commands.add('pnpm --filter @flinttrade/site test');
+      commands.add('pnpm --filter @flinttrade/site build');
     } else if (changedPath.startsWith('packages/apps/terminal/')) {
       reasons.add('React terminal code or tests changed.');
-      commands.add('cd packages/apps/terminal && npm run typecheck');
-      commands.add('cd packages/apps/terminal && npm run test');
-      commands.add('cd packages/apps/terminal && npm run build');
+      commands.add('pnpm --filter @flinttrade/terminal typecheck');
+      commands.add('pnpm --filter @flinttrade/terminal exec vitest run');
+      commands.add('pnpm --filter @flinttrade/terminal build');
+    } else if (changedPath.startsWith('packages/apps/desktop/')) {
+      reasons.add('Electron desktop shell code or tests changed.');
+      commands.add('pnpm --filter @flinttrade/desktop typecheck');
+      commands.add('pnpm --filter @flinttrade/desktop test');
     } else if (changedPath.startsWith('packages/core/design-system/')) {
       reasons.add('Shared design-system package changed.');
-      commands.add('cd packages/apps/terminal && npm run typecheck');
-      commands.add('cd packages/apps/site && npm run typecheck');
+      commands.add('pnpm --filter @flinttrade/terminal typecheck');
+      commands.add('pnpm --filter @flinttrade/site typecheck');
     } else if (changedPath.startsWith('packages/core/ticks/')) {
       reasons.add('Rust/PyO3 tick processing changed.');
-      commands.add('cd packages/core/ticks && cargo test');
+      commands.add('cargo test --manifest-path packages/core/ticks/Cargo.toml');
     } else if (changedPath.startsWith('packages/')) {
       const changedPackage = findPackageForPath(changedPath);
       const packagePath = changedPackage ? packageRoot(changedPackage) : changedPath.split('/').slice(0, 3).join('/');
       reasons.add(`Python package ${packagePath.replace(/^packages\//, '')} changed.`);
-      commands.add(`python -m pytest ${packagePath}/tests/ -v --import-mode=importlib`);
-      commands.add('make lint');
+      commands.add(`python scripts/ft.py test-fast ${packagePath}/tests/ -v`);
+      commands.add('python scripts/ft.py lint');
     } else if (changedPath.startsWith('docs/') || changedPath.endsWith('.md')) {
       reasons.add('Documentation changed and should be reflected in the public site.');
-      commands.add('cd packages/apps/site && npm run build');
+      commands.add('pnpm --filter @flinttrade/site build');
     } else if (changedPath.startsWith('.github/')) {
       reasons.add('GitHub workflow or repository template changed.');
       commands.add('git diff --check');
@@ -186,7 +195,7 @@ export function recommendTests(changedPaths: string[]): TestRecommendation {
 
   if (commands.size === 0) {
     reasons.add('General repository change.');
-    commands.add('make full-check');
+    commands.add('python scripts/ft.py check --full');
   }
 
   return {

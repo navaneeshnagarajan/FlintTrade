@@ -154,14 +154,30 @@ describe('MCP capabilities', () => {
   it('recommends terminal checks for terminal source changes', () => {
     const recommendation = recommendTests(['packages/apps/terminal/src/foo.tsx']);
 
-    expect(recommendation.commands).toContain('cd packages/apps/terminal && npm run typecheck');
-    expect(recommendation.commands).toContain('cd packages/apps/terminal && npm run test');
+    expect(recommendation.commands).toEqual([
+      'pnpm --filter @flinttrade/terminal typecheck',
+      'pnpm --filter @flinttrade/terminal exec vitest run',
+      'pnpm --filter @flinttrade/terminal build',
+    ]);
+  });
+
+  it('recommends Electron checks instead of a nonexistent Python suite for desktop changes', () => {
+    const recommendation = recommendTests(['packages/apps/desktop/electron/source-updater.ts']);
+
+    expect(recommendation.commands).toEqual([
+      'pnpm --filter @flinttrade/desktop typecheck',
+      'pnpm --filter @flinttrade/desktop test',
+    ]);
+    expect(recommendation.reason).toContain('Electron desktop shell');
   });
 
   it('recommends nested package checks for Python source changes', () => {
     const recommendation = recommendTests(['packages/services/journal/src/entries.py']);
 
-    expect(recommendation.commands).toContain('python -m pytest packages/services/journal/tests/ -v --import-mode=importlib');
+    expect(recommendation.commands).toEqual([
+      'python scripts/ft.py test-fast packages/services/journal/tests/ -v',
+      'python scripts/ft.py lint',
+    ]);
     expect(recommendation.reason).toContain('services/journal');
   });
 

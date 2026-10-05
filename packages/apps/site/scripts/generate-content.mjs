@@ -639,12 +639,14 @@ async function main() {
   await writePackageMetaFiles(packages);
 
   const commands = [
-    { label: 'Install project dependencies', command: 'make setup' },
-    { label: 'Start terminal and FlintTrade backend', command: 'make dev' },
-    { label: 'Run all Python tests', command: 'make test' },
-    { label: 'Run focused terminal build', command: 'cd packages/apps/terminal && npm run build' },
-    { label: 'Run terminal unit tests', command: 'cd packages/apps/terminal && npm run test' },
-    { label: 'Run site checks', command: 'cd packages/apps/site && npm run typecheck && npm run test && npm run build' },
+    { label: 'Install project dependencies', command: 'python scripts/ft.py setup' },
+    { label: 'Start terminal and FlintTrade backend', command: 'python scripts/ft.py dev' },
+    { label: 'Run all Python tests', command: 'python scripts/ft.py test' },
+    { label: 'Run focused terminal build', command: 'pnpm --filter @flinttrade/terminal build' },
+    { label: 'Run terminal unit tests', command: 'pnpm --filter @flinttrade/terminal exec vitest run' },
+    { label: 'Typecheck the site', command: 'pnpm --filter @flinttrade/site typecheck' },
+    { label: 'Run site unit tests', command: 'pnpm --filter @flinttrade/site test' },
+    { label: 'Build the site', command: 'pnpm --filter @flinttrade/site build' },
   ];
 
   const docsIndex = {
