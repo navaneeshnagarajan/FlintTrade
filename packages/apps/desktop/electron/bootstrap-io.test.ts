@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, renameSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, symlinkSync, truncateSync, WriteStream, writeFileSync } from "node:fs";
 import { access, appendFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import https from "node:https";
 import { EventEmitter, once } from "node:events";
@@ -2977,10 +2977,13 @@ describe("bootstrap system boundaries", () => {
       roots.push(root);
       const archive = path.join(root, "large.zip");
       const destination = path.join(root, "extract");
+      const extractedFile = path.join(destination, "root", "large.bin");
+      const entrySize = 1024 * 1024;
       execFileSync("python3", [
         "-c",
-        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w',compression=zipfile.ZIP_STORED); z.writestr('root/large.bin',b'x'*(96*1024*1024)); z.close()",
+        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w',compression=zipfile.ZIP_STORED); z.writestr('root/large.bin',b'x'*int(sys.argv[2])); z.close()",
         archive,
+        String(entrySize),
       ]);
       const abort = new AbortController();
       const events: string[] = [];
@@ -2994,21 +2997,42 @@ describe("bootstrap system boundaries", () => {
           },
         },
       });
-      const extraction = dependencies.extractArchive({
-        archive,
-        destination,
-        expectedSha256: await sha256File(archive),
-        expectedRoot: "root",
-        kind: "zip",
-        signal: abort.signal,
+      const expectedSha256 = await sha256File(archive);
+      const originalWrite = WriteStream.prototype._write;
+      let abortedAfterWrite = false;
+      // Abort after a real write completes, before acknowledging it to the stream.
+      // Polling for file existence can miss the entire extraction on a fast host.
+      const write = vi.spyOn(WriteStream.prototype, "_write").mockImplementation(function (
+        this: WriteStream,
+        chunk,
+        encoding,
+        callback,
+      ) {
+        originalWrite.call(this, chunk, encoding, (error) => {
+          if (!error && this.path === extractedFile && !abortedAfterWrite) {
+            abortedAfterWrite = true;
+            abort.abort();
+          }
+          callback(error);
+        });
       });
-      await vi.waitFor(() => expect(access(path.join(destination, "root", "large.bin"))).resolves.toBeUndefined(), {
-        timeout: 15_000,
-      });
-      abort.abort();
-
-      await expect(extraction).rejects.toMatchObject({ name: "AbortError" });
+      try {
+        await expect(dependencies.extractArchive({
+          archive,
+          destination,
+          expectedSha256,
+          expectedRoot: "root",
+          kind: "zip",
+          signal: abort.signal,
+        })).rejects.toMatchObject({ name: "AbortError" });
+      } finally {
+        write.mockRestore();
+      }
+      expect(abortedAfterWrite).toBe(true);
       await expect(access(path.join(destination, "root"))).resolves.toBeUndefined();
+      const partial = await stat(extractedFile);
+      expect(partial.size).toBeGreaterThan(0);
+      expect(partial.size).toBeLessThan(entrySize);
       expect(events.at(-1)).toBe("removing");
       expect(events.slice(0, -1).at(-1)).toBe("closed");
     },

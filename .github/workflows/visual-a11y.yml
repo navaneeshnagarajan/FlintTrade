@@ -1,6 +1,6 @@
 name: Visual and accessibility
 
-# Advisory lane. It is not one of the ten Test jobs and it is not a required
+# Advisory lane. It is separate from Test and it is not a required
 # check. VISUAL_AXE_GATE is the one-line switch: "0" always finishes green,
 # "1" fails the job when Playwright fails. Leave it at "0" until the lane
 # has stayed quiet, then flip it. Do not add the job to branch protection
@@ -16,8 +16,26 @@ on:
   pull_request:
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
+    paths:
+      - 'packages/apps/terminal/**'
+      - 'packages/core/design-system/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - '.github/workflows/visual-a11y.yml'
+      - '.github/actions/**'
   push:
     branches: [main, dev]
+    paths:
+      - 'packages/apps/terminal/**'
+      - 'packages/core/design-system/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - '.github/workflows/visual-a11y.yml'
+      - '.github/actions/**'
 
 concurrency:
   group: visual-a11y-${{ github.ref }}
@@ -28,6 +46,7 @@ permissions:
 
 jobs:
   terminal-visual-a11y:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
