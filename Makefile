@@ -10,8 +10,8 @@
 # GNU Make defaults to /bin/sh, which is dash on Debian/Ubuntu. dash has no
 # `set -o pipefail` (the shell errors and aborts the recipe) and its `echo` has
 # no `-e` (the escape prefix is printed literally). The retained POSIX recipes
-# below — full-check, sync-check, logs-clear, ticks-test — use both, so bash is
-# pinned here. Removing this line silently breaks `make full-check` on the
+# below — sync-check, logs-clear, ticks-test — use both, so bash is
+# pinned here. Removing this line silently breaks retained shell recipes on the
 # primary CI/dev platform.
 SHELL := /usr/bin/env bash
 
@@ -22,7 +22,7 @@ SHELL := /usr/bin/env bash
 # that behaves identically on every OS. If you have no make (or no bash), call
 # it directly and get the same behaviour:
 #
-#   python scripts/ft.py <start|stop|restart|status|dev|setup|test|test-fast|
+#   python scripts/ft.py <start|stop|restart|status|dev|setup|test|test-fast|check|
 #                         lint|clean|version|help|desktop-test|desktop-build|
 #                         desktop-package|desktop-dev>
 #
@@ -35,14 +35,14 @@ SHELL := /usr/bin/env bash
 # 1. Works everywhere (Windows 10/11, macOS, Linux)
 #    Via scripts/ft.py:
 #      setup, start, start-gateway, stop, restart, status, dev, test, test-fast,
-#      lint, clean, version, help, desktop-test, desktop-build, desktop-package,
+#      check, lint, clean, version, help, desktop-test, desktop-build, desktop-package,
 #      desktop-dev
 #    Plain Python/uv recipes (no shell builtins):
-#      check-python, desktop-icons, update, version-check, audit,
+#      check-python, full-check, desktop-icons, update, version-check, audit,
 #      broker-sdk-sync, broker-reference-check
 #
 # 2. POSIX only (the recipe body itself needs bash and GNU coreutils)
-#      start-openalgo, start-legacy, health, ticks-test, full-check, sync-check,
+#      start-openalgo, start-legacy, health, ticks-test, sync-check,
 #      logs-clear, install-docker, install-server-native, install-native,
 #      backup, restore
 #
@@ -83,7 +83,7 @@ OPENALGO_PORT ?= 5000
 FLINTTRADE_BACKEND_PORT ?= 5100
 FLINTTRADE_BACKEND_HOST ?= 127.0.0.1
 
-.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check site-url-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
+.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast check ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check site-url-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
 
 # ======================================================================
 # Setup
@@ -224,23 +224,11 @@ docker-build: ## Rebuild Docker images
 # Management
 # ======================================================================
 
-full-check: ## Run full health check (tests + lint + typecheck)
-	@echo -e "$(CYAN)=== FlintTrade Health Check ===$(RESET)"
-	@echo -e "$(YELLOW)--- Version Consistency ---$(RESET)"
-	@"$(PYTHON)" scripts/check-version-consistency.py
-	@echo -e "$(YELLOW)--- Site URL Consistency ---$(RESET)"
-	@"$(PYTHON)" scripts/check-site-url-consistency.py
-	@echo -e "$(YELLOW)--- Python Tests ---$(RESET)"
-	@set -o pipefail; "$(PYTHON)" -m pytest packages/integrations/gateway/tests/ packages/core/core/tests/ packages/services/screener/tests/ packages/services/engine/tests/ -q --no-header --import-mode=importlib 2>&1 | tail -3
-	@echo -e "$(YELLOW)--- Ruff Lint ---$(RESET)"
-	@set -o pipefail; "$(PYTHON)" -m ruff check packages/*/*/src/ --statistics 2>&1 | tail -5
-	@echo -e "$(YELLOW)--- Terminal ---$(RESET)"
-	@cd packages/apps/terminal && set -o pipefail; npm run typecheck 2>&1 | tail -2
-	@# Match CI's vitest form: fork-per-file isolation caps peak memory at the
-	@# heaviest single file (an unbounded whole-suite run OOMs on TradeIdea).
-	@# 8192 MB is the heap even TradeIdea passes at locally (CI has to shard).
-	@cd packages/apps/terminal && set -o pipefail; NODE_OPTIONS=--max-old-space-size=8192 npx vitest run --pool=forks --maxWorkers=1 --no-file-parallelism 2>&1 | tail -3
-	@echo -e "$(GREEN)=== Done ===$(RESET)"
+check: ## Run checks for committed and working-tree changes
+	@"$(PYTHON)" scripts/ft.py check
+
+full-check: ## Run the exhaustive local pre-push gate
+	@"$(PYTHON)" scripts/ft.py check --full
 
 audit: ## Check repo absorption status
 	@"$(PYTHON)" scripts/audit_repos.py

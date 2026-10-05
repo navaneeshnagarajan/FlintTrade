@@ -11,9 +11,10 @@ FlintTrade is a monorepo for an Indian trading platform. Python packages live un
 - `python scripts/ft.py setup` installs project dependencies.
 - `python scripts/ft.py dev` starts the terminal dev server plus the FlintTrade backend; run `make start-openalgo` (POSIX only) separately for the optional OpenAlgo integration path.
 - `python scripts/ft.py test` runs all pytest suites with the required import mode.
-- `python scripts/ft.py test-fast` stops pytest on the first failure.
+- `python scripts/ft.py test-fast [paths/flags]` runs focused pytest and stops on the first failure; both test commands use at most four workers by default (`--workers 0` selects serial execution).
+- `python scripts/ft.py check` runs affected checks, including staged/unstaged/untracked changes; `check --full` runs the exhaustive local gate and `check --dry-run` prints the plan.
 - `python scripts/ft.py lint` runs Ruff over Python packages and tests.
-- `make full-check` (POSIX only — it needs bash) runs a compact tests, lint, and terminal typecheck pass.
+- `make full-check` is the POSIX alias for `python scripts/ft.py check --full`; it runs the same exhaustive local gate.
 - `pnpm --filter @flinttrade/terminal build` runs `tsc --noEmit` plus Vite.
 - `pnpm --filter @flinttrade/terminal test` runs Vitest; `pnpm --filter @flinttrade/terminal e2e` runs Playwright.
 
@@ -102,7 +103,7 @@ maintainer permission.
 - Frontend live-order entrypoints stay fail-closed (`assertNativeWriteTargetReadyOrThrow`); broker store selectors use composite `source:broker:account_id` keys.
 - Widget/broker/package count pins move in lockstep: `widgetFactory.test.ts` (catalogue), `test_adapter.py` (BROKER_CATALOG), `capabilities.test.ts` (site), `test_project_structure.py` (packages).
 - Lockfile changes require `python scripts/generate-notice.py` + commit, or the Supply Chain workflow fails on NOTICE drift.
-- Full local gate before any push (and push only with explicit maintainer permission): whole pytest tree, ruff, `tsc --noEmit`, full terminal vitest (CI shards under-cover; run everything), terminal build, site vitest, secrets scan.
+- Full local gate before any push (and push only with explicit maintainer permission): whole pytest tree, ruff, `tsc --noEmit`, full terminal vitest (run everything; CI shard coverage is guarded separately), terminal build, site vitest, secrets scan.
 
 ## Security & Configuration
 

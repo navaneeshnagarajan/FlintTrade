@@ -754,7 +754,7 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
         assert isinstance(document, dict), path
         workflows[path.name] = document
 
-    # The two verification lanes pin ubuntu-24.04, matching flint.toml
+    # The authoritative verification lane pins ubuntu-24.04, matching flint.toml
     # [requirements].os_requires. They package `--dir` and verify the security
     # contract; they publish nothing, so the build host's glibc never reaches a
     # user. desktop-release.yml's Linux build legs stay on ubuntu-22.04/-arm on
@@ -762,7 +762,6 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
     # AppImage, which makes the build host's glibc the installer's real floor.
     required_posix = {
         ("test.yml", "electron-desktop-tests"): (None, "ubuntu-24.04"),
-        ("supply-chain.yml", "electron-package-verification"): (None, "ubuntu-24.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,
@@ -971,7 +970,7 @@ def test_current_beta_release_note_exists() -> None:
 
 
 def test_supply_chain_audits_ticks_and_verifies_electron_package() -> None:
-    """Supply-chain CI retains tick Cargo audit and verifies the Electron directory."""
+    """Cargo auditing and the authoritative Electron package gate retain their union."""
     workflow = (ROOT / ".github" / "workflows" / "supply-chain.yml").read_text(encoding="utf-8")
     cargo_allowlist = (ROOT / "supply-chain" / "cargo-audit-allowlist.yml").read_text(encoding="utf-8")
     cargo_script = (ROOT / "scripts" / "cargo-audit-with-allowlist.py").read_text(encoding="utf-8")
@@ -980,9 +979,15 @@ def test_supply_chain_audits_ticks_and_verifies_electron_package() -> None:
     assert "--manifest-dir packages/core/ticks" in workflow
     assert "packages/core/ticks/cargo-audit-report.json" in workflow
     assert "packages/apps/desktop/src-tauri" not in workflow
-    assert "electron-package-verification:" in workflow
-    assert "electron-builder --dir --linux --x64" in workflow
-    assert "verify:package" in workflow
+    package_workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
+    assert "electron-desktop-tests:" in package_workflow
+    assert "electron-builder --dir --linux --x64" in package_workflow
+    assert "verify:package" in package_workflow
+    assert "verify:bootstrap-manifest" in package_workflow
+    assert "electron-builder --dir --linux --x64" not in workflow
+    package_document = yaml.safe_load(package_workflow)
+    triggers = package_document.get("on", package_document.get(True))
+    assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "allowlist: []" in cargo_allowlist
     assert "Tauri" not in cargo_allowlist
     assert "Vulnerabilities are never suppressed" in cargo_script

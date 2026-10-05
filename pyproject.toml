@@ -78,6 +78,9 @@ flinttrade-webhooks = { workspace = true }
 # ----------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Keep package-local tests.* namespaces distinct from shared tests.mocks,
+# including when a focused or sharded run does not collect the root tests.
+consider_namespace_packages = true
 asyncio_mode = "auto"
 addopts = [
     "--import-mode=importlib",
