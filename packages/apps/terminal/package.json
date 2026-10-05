@@ -88,7 +88,7 @@
     "@types/three": "0.186.0",
     "@vitejs/plugin-react": "^6.1.1",
     "eslint": "9.39.5",
-    "eslint-plugin-react-hooks": "5.2.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "jsdom": "^30.0.1",
     "mapbox-gl": "^1.13.3",
     "marked": "^18.0.13",
