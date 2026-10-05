@@ -49,7 +49,7 @@ from flinttrade_core.workspace_migrations import (
     broker_workspace_version,
 )
 
-from .credentials import CredentialError, CredentialStore
+from .credentials import CredentialError, CredentialSelectorState, CredentialStore
 
 
 class AccountTransactionError(CredentialError):
@@ -566,6 +566,40 @@ class AccountTransactionStore:
     def operation(self, operation_id: UUID) -> AccountOperationSnapshot:
         with self._transaction() as conn:
             return self._snapshot(parse_account_json(self._row(conn, operation_id)["body"]))
+
+    def existing_request(self, request: AccountMutationRequest) -> AccountOperationSnapshot | None:
+        """Compare a retained keyed identity without admission or coherence writes."""
+        if type(request) is not AccountMutationRequest:
+            raise AccountTransactionError
+        request.__post_init__()
+        request_mac = self._mac("request", canonical_account_json(_request_dict(request)))
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM account_operations WHERE operation_id=?", (str(request.operation_id),)
+            ).fetchone()
+            if row is None:
+                return None
+            if not hmac.compare_digest(row["request_mac"], request_mac):
+                raise AccountOperationConflict
+            return self._snapshot(parse_account_json(row["body"]))
+
+    def native_state(self, selector: BrokerSelector) -> CredentialSelectorState:
+        """Read exact provenance under this store's live backend authority."""
+        self._require_owner()
+        return self._credentials.selector_state(selector)
+
+    def native_credentials(self, selector: BrokerSelector, expected: CredentialVersion) -> dict[str, object]:
+        """Replay only recognised managed native material at its captured version."""
+        self._require_owner()
+        before = self._credentials.selector_state(selector)
+        if (selector.adapter_id == "openalgo" or not before.credential_present
+                or before.origin != "managed" or before.version != expected):
+            raise AccountOperationConflict
+        value = self._credentials.retrieve_for(selector.adapter_id, selector.account_id)
+        if self._credentials.selector_state(selector) != before:
+            raise AccountOperationConflict
+        self._require_owner()
+        return value
 
     def _active(self, conn: sqlite3.Connection, operation_id: UUID) -> tuple[dict, dict, dict]:
         row = self._row(conn, operation_id)
