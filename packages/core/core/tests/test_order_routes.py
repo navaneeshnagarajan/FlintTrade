@@ -76,9 +76,12 @@ def monkeypatch_module():
 
 
 @pytest.fixture(scope="module")
-def flask_app(monkeypatch_module):
+def flask_app(monkeypatch_module, tmp_path_factory):
     """Create a Flask app with OPENALGO_API_KEY set for auth."""
     monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    # This API-only suite must not inherit a local build's GET-only SPA fallback.
+    frontend = tmp_path_factory.mktemp("order_routes_frontend") / "absent"
+    monkeypatch_module.setenv("FLINTTRADE_FRONTEND_DIST", str(frontend))
     from flinttrade_core.app import create_flask_app
     app = create_flask_app()
     app.config["TESTING"] = True

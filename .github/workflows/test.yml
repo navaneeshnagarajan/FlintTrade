@@ -6,17 +6,9 @@ on:
     types: [opened, synchronize, ready_for_review, reopened]
   push:
     branches: [main, dev]
-    paths-ignore:
-      # (documentation, the site and flinttrade-design/ are not ignored — see
-      # the pull_request note above.)
-      - '.local/**'
-      - 'notice'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.gitattributes'
-      - '.editorconfig'
-      - '.github/workflows/status-report.yml'
-      - '.github/ISSUE_TEMPLATE/**'
+  schedule:
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
 
 # Cancel earlier in-flight runs when a new commit lands on the same ref.
 # Back-to-back pushes only need the newest matrix; earlier runs are superseded.
@@ -71,25 +63,21 @@ permissions:
 # iteratively without CI cost, then marks ready-for-review when they
 # want CI to run.
 jobs:
-  # ----------------------------------------------------------------------
-  # Change classifier
-  #
-  # Documentation and marketing-site edits still have to run the jobs that
-  # guard them (python-tests carries tests/test_windows_command_docs.py), but
-  # they cannot break the widget shards, the Rust crate or the Electron
-  # package. This job answers one question — "did anything outside
-  # documentation and the site change?" — and the expensive lanes gate on it.
-  #
-  # Deliberately fails OPEN: an unresolvable diff range (first push to a new
-  # branch, force push, shallow history) reports code=true so the full matrix
-  # runs. Plain git, so no extra third-party action enters the supply chain.
-  # ----------------------------------------------------------------------
+  # One conservative surface plan shared with local checks. Unknown changes
+  # select everything; protected-branch pushes and weekly/manual runs are full.
   changed-surfaces:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
+      python: ${{ steps.classify.outputs.python }}
+      terminal: ${{ steps.classify.outputs.terminal }}
+      desktop: ${{ steps.classify.outputs.desktop }}
+      rust: ${{ steps.classify.outputs.rust }}
+      site: ${{ steps.classify.outputs.site }}
+      docs: ${{ steps.classify.outputs.docs }}
+      dependencies: ${{ steps.classify.outputs.dependencies }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,34 +86,18 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FULL_CHECK: ${{ github.event_name != 'pull_request' }}
         run: |
-          set -uo pipefail
-          resolvable=1
-          for sha in "${BASE_SHA:-}" "${HEAD_SHA:-}"; do
-            if [ -z "$sha" ] || ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
-              resolvable=0
-            fi
-          done
-          if [ "$resolvable" -ne 1 ]; then
-            echo "Diff range not resolvable — running the full matrix."
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
-          echo "Changed files:"
-          echo "$changed"
-          # Anything that is not Markdown/docs/site or one of the former ignored
-          # surfaces (LICENSE, .local/**, notice, .git*, .editorconfig,
-          # status-report, ISSUE_TEMPLATE) is code. Former ignored
-          # surfaces alone now classify non-code so they do not run the
-          # widget/Rust/Electron lanes. Mixed with ordinary code -> code=true.
-          # Unresolvable ranges already fail open above.
-          if printf '%s\n' "$changed" | grep -qvE '(\.md$|^docs/|^packages/apps/site/|^\.local/|^notice$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^\.editorconfig$|^\.github/workflows/status-report\.yml$|^\.github/ISSUE_TEMPLATE/)'; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
+          if [ "$FULL_CHECK" = "true" ]; then
+            python scripts/check_changes.py --full --github-output
           else
-            echo "Documentation/site-only or former-ignored-only change — expensive lanes skipped."
-            echo "code=false" >> "$GITHUB_OUTPUT"
+            python scripts/check_changes.py --base "$BASE_SHA" --head "$HEAD_SHA" --github-output
           fi
+
+  site:
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.site == 'true'
+    uses: ./.github/workflows/site.yml
 
   # ----------------------------------------------------------------------
   # Python tests
@@ -138,19 +110,21 @@ jobs:
   # catches hangs; pytest-randomly randomises order to surface
   # order-dependent flakes early.
   # ----------------------------------------------------------------------
-  python-tests:
-    # Skip the matrix on draft PRs — open as draft, push iteratively without
-    # CI cost, then mark ready-for-review when you want CI to run.
-    #
-    # Deliberately NOT gated on `changed-surfaces`: this is the only job that
-    # runs tests/test_windows_command_docs.py, so it has to run on exactly the
-    # doc-only change it guards.
+  python-invariants:
+    # Repository and documentation contracts run even on docs-only PRs.
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     # Runaway guard. The whole suite finishes well inside this; the cap stops
     # a hung job from idling up to the 6-hour runner default (the over-usage
     # signal that tripped Actions in the first place).
     timeout-minutes: 30
+    # Numerical libraries otherwise create a second pool in every xdist worker.
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      VECLIB_MAXIMUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -158,8 +132,7 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
-      # Exercise the optional Optuna optimiser compatibility tests in this lane.
-      - run: uv sync --frozen --extra ml
+      - run: uv sync --frozen
       - name: Verify pre-restructure baseline artefacts
         run: |
           uv run python - <<'PY'
@@ -208,7 +181,7 @@ jobs:
       # hang vector.
       # scripts/__tests__ is listed explicitly: it matches neither glob, so its
       # 114 tests ran in no lane at all and one of them had been failing at head.
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ scripts/__tests__/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
+      - run: uv run python -m pytest tests/ scripts/__tests__/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20
       # Lint path: this used to be `packages/*/*/src/` only, which was NARROWER
       # than the documented gate - `scripts/ft.py lint` and docs/CI.md both run
       # `ruff check packages/ tests/` - so the one job that carries the lint gate
@@ -237,8 +210,73 @@ jobs:
       # patterns keyed off. Both checks are now AST rules in
       # packages/apps/terminal/eslint-local-rules.mjs, enforced by the "Terminal
       # lint gate" step in node-core-tests, which is ungated exactly like this
-      # job, so the gate runs on the same set of pushes it always did.
+      # job. Terminal changes select that lane; full runs select every lane.
       # tests/test_terminal_lint_gate_wiring.py fails if that step goes away.
+
+  # All package tests are retained. Stable node IDs partition the collected
+  # suite once across four runners; xdist still isolates each runner's workers.
+  python-shards:
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      VECLIB_MAXIMUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: '3.12' }
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - run: uv sync --frozen --extra ml
+      - name: Run Python package shard
+        run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=4 -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
+      - name: Upload Python timing and failure evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-shard-${{ matrix.shard }}
+          path: test-results/python-${{ matrix.shard }}.xml
+          if-no-files-found: error
+
+  # Branch protection requires this exact name. A failed, missing, cancelled
+  # or unexpectedly skipped shard must never turn into a green summary.
+  python-tests:
+    needs: [changed-surfaces, python-invariants, python-shards]
+    if: always() && github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected Python check
+        env:
+          CLASSIFIER_RESULT: ${{ needs.changed-surfaces.result }}
+          INVARIANTS_RESULT: ${{ needs.python-invariants.result }}
+          PYTHON_REQUIRED: ${{ needs.changed-surfaces.outputs.python }}
+          SHARDS_RESULT: ${{ needs.python-shards.result }}
+        run: |
+          python - <<'PYTHON'
+          import os
+          import sys
+          selected = os.environ["PYTHON_REQUIRED"]
+          expected = "success" if selected == "true" else "skipped"
+          valid = (
+              selected in {"true", "false"}
+              and os.environ["CLASSIFIER_RESULT"] == "success"
+              and os.environ["INVARIANTS_RESULT"] == "success"
+              and os.environ["SHARDS_RESULT"] == expected
+          )
+          if not valid:
+              print("A required Python check failed, was cancelled or did not run.")
+              sys.exit(1)
+          print("All selected Python checks passed.")
+          PYTHON
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
   # PR with `continue-on-error: true` (cosmetic — never gated anything). On
@@ -250,13 +288,10 @@ jobs:
   # surfaces in the weekly run, fix-it-then commit; per-push doesn't need
   # the matrix.
 
-  # Ungated like python-tests: cheap, and it is the lane that would catch a
-  # documentation or copy change that broke the terminal's own snapshots.
-  # (The site's own suite — including desktop-copy.test.ts, which pins the
-  # canonical one-liners — runs in site.yml, which triggers on docs/** and
-  # packages/apps/site/**.)
+  # Terminal changes keep their complete core, widget and browser contracts.
   node-core-tests:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -282,12 +317,12 @@ jobs:
         run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
-      - name: Build check
-        run: pnpm --dir packages/apps/terminal run build
+      - name: Build check (strict TypeScript check already passed)
+        run: pnpm --dir packages/apps/terminal exec vite build
 
   node-widget-tests-1:
     needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -299,14 +334,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Run trading + utility A-H widget tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/trading/ src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/IndexStrip/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/
+      # Reuse the lighter trading lane for analysis; keep one jsdom worker.
+      - name: Run trading + analysis + utility A-H widget tests
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/trading/ src/widgets/analysis/ src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/IndexStrip/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2a:
     needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -318,14 +354,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Run utility widget tests (M-S)
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/utility/MarketClock/ src/widgets/utility/News/
+      # Routes previously dominated shard 3 while this lane held two files.
+      - name: Run routes + utility widget tests (M-N)
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/routes/ src/widgets/utility/MarketClock/ src/widgets/utility/News/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2b:
     needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -341,8 +378,6 @@ jobs:
         run: |
           cd packages/apps/terminal
           FAIL=0
-          # TradeIdea excluded: OOMs at 4GB+ heap (vitest module resolution overhead).
-          # Passes locally with --max-old-space-size=8192. CI runner limited to 7GB total.
           for d in StrategyTemplates TickSpeed Ticker Watchlist AIBackends AITeam Obsidian TradeJournal; do
             echo "::group::Testing $d"
             npx vitest run --pool=forks --maxWorkers=1 --no-file-parallelism "src/widgets/utility/$d/" || FAIL=1
@@ -352,9 +387,22 @@ jobs:
         env:
           NODE_OPTIONS: '--max-old-space-size=6144'
 
+      # CI-style Vitest 5 measurement: 14 tests, 3.60s wall, 316 MiB peak RSS
+      # with a 4 GiB heap; the former OOM exclusion no longer applies.
+      - name: Run isolated TradeIdea widget tests
+        timeout-minutes: 5
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/utility/TradeIdea/
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
+      - name: Run component tests
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/components/
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
   node-widget-tests-3:
     needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -366,24 +414,19 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Run analysis + routes + tools + components + chrome + orders/account tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/
+      - name: Run tools + chrome + orders/account tests
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/tools/ src/chrome/ src/widgets/orders/ src/widgets/account/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   secrets-check:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    # Lightweight grep scan — far quicker than this, but the cap is the guard.
+    # Scan only tracked/unignored sources and never print matched values.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: |
-          FOUND=0
-          for p in 'BROKER_API_KEY\s*=\s*['"'"'"][^'"'"'"]+['"'"'"]' 'sk-[a-zA-Z0-9]{20,}'; do
-            grep -rn "$p" --include="*.py" --include="*.js" --include="*.toml" . 2>/dev/null | grep -v ".env.example" && FOUND=1
-          done
-          [ "$FOUND" -eq 1 ] && exit 1 || echo "✅ No secrets"
+      - run: python scripts/check_local.py --secrets
 
   # The Rust ticks crate (tick-level backtest simulator) carries real unit tests
   # that no other job runs — cargo audit (supply-chain.yml) checks advisories,
@@ -392,7 +435,7 @@ jobs:
   # compile, kept cheap by the cargo cache.
   rust-ticks-tests:
     needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -409,7 +452,7 @@ jobs:
   # covers platform-specific packaging.
   electron-desktop-tests:
     needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.desktop == 'true'
     # ubuntu-24.04, not 22.04. The 22.04 pin was inherited from the retired Tauri
     # lane, where it was a stated choice: that job compiled the same crate the
     # release matrix built, on the 22.04 glibc/webkit support floor. The Electron
@@ -442,6 +485,8 @@ jobs:
         run: pnpm --filter @flinttrade/desktop test:electron
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
+      - name: Verify bootstrap resource manifest
+        run: pnpm --filter @flinttrade/desktop verify:bootstrap-manifest
       - name: Bundle Electron main and preload
         run: pnpm --filter @flinttrade/desktop bundle
       - name: Exercise native POSIX no-replace promotion
@@ -452,7 +497,8 @@ jobs:
         run: pnpm --filter @flinttrade/desktop verify:package
 
   terminal-e2e-infra-self-tests:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

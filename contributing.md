@@ -106,6 +106,8 @@ and no bash, and behaves identically on Windows, macOS and Linux.
 `make <target>` is the POSIX alias for the same targets.
 
 ```bash
+python scripts/ft.py check       # affected checks while editing
+python scripts/ft.py check --full   # exhaustive local gate before pushing
 python scripts/ft.py test        # all pytest tests
 python scripts/ft.py test-fast   # stop on first failure
 python -m pytest packages/core/core/tests/ -v --import-mode=importlib   # single package
@@ -126,6 +128,10 @@ npx vitest run -t "places a market order"
 flat-package layout needs it). The `scripts/ft.py` and `make` targets set it for
 you, so prefer `python scripts/ft.py test` unless you're iterating on a single
 file.
+
+Both test commands accept paths and pytest flags, with at most four workers by
+default. Use `--workers 0` for serial debugging or `check --dry-run` to inspect
+the affected plan. See [`docs/CI.md`](docs/CI.md) for selection and required checks.
 
 Lint and type-checks are part of CI too — run them locally before pushing:
 
