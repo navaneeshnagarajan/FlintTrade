@@ -112,9 +112,15 @@ def _reconcile_laya_for_desk() -> None:
     """Apply a command-line stop or start before the desk reads the gate.
 
     This is the same watch the order gate runs. The chip's ping and an
-    order then publish one status.
+    order then publish one status. An Ollama backend publishes that runtime
+    instead of the sidecar watch.
     """
     try:
+        from flinttrade_engine.laya_ollama import laya_backend, publish_ollama_gate_status  # noqa: PLC0415
+
+        if laya_backend() != "sidecar":
+            publish_ollama_gate_status()
+            return
         from flinttrade_core.laya_runtime import process_runtime  # noqa: PLC0415
 
         runtime = process_runtime()
@@ -256,42 +262,84 @@ def ping() -> tuple[Any, int]:
     practice, live, qualified = engine.desk_heartbeat()
     reason, port = engine.runtime_reason()
     progress = engine.download_progress()
-    return (
-        jsonify(
-            {
-                "status": "ok",
-                "timestamp": datetime.now(_IST).isoformat(),
-                "laya": live.value,
-                "laya_practice": practice.value,
-                "laya_live_qualified": qualified,
-                "laya_reason": reason,
-                "laya_port": port,
-                "laya_download_bytes": None if progress is None else progress[0],
-                "laya_download_total": None if progress is None else progress[1],
-            }
-        ),
-        200,
-    )
+    body = {
+        "status": "ok",
+        "timestamp": datetime.now(_IST).isoformat(),
+        "laya": live.value,
+        "laya_practice": practice.value,
+        "laya_live_qualified": qualified,
+        "laya_reason": reason,
+        "laya_port": port,
+        "laya_download_bytes": None if progress is None else progress[0],
+        "laya_download_total": None if progress is None else progress[1],
+    }
+    from flinttrade_engine.laya_ollama import laya_backend  # noqa: PLC0415
+
+    if laya_backend() == "ollama":
+        body["laya_checking"] = engine.gate_checking()
+        body["laya_route"] = "ollama"
+        body["laya_managed"] = _ollama_install_is_managed()
+    return jsonify(body), 200
+
+
+def _ollama_install_is_managed() -> bool:
+    """True when this process can start a FlintTrade-managed Ollama install."""
+    try:
+        from flask import current_app, has_app_context  # noqa: PLC0415
+
+        if not has_app_context():
+            return False
+        runtime = current_app.config.get("OLLAMA_RUNTIME")
+        present = getattr(runtime, "install_present", None)
+        return bool(callable(present) and present())
+    except Exception:  # noqa: BLE001 - an unreadable install is unmanaged
+        return False
+
+
+def _start_managed_ollama_for_gate() -> None:
+    """Start the FlintTrade-managed Ollama install. Unmanaged installs raise."""
+    from flask import current_app, has_app_context  # noqa: PLC0415
+
+    if not has_app_context():
+        raise RuntimeError("managed Ollama is unavailable")
+    runtime = current_app.config.get("OLLAMA_RUNTIME")
+    present = getattr(runtime, "install_present", None)
+    if runtime is None or not callable(present) or not present():
+        raise RuntimeError("managed Ollama is not installed")
+    runtime.start_async()
 
 
 @health_bp.route("/api/v1/laya/start", methods=["POST"])
 def start_laya() -> tuple[Any, int]:
-    """Start or restart the managed Laya sidecar.
+    """Start the runtime behind the current Laya route.
 
-    Operator session only. A missing sidecar environment is a generic 503.
-    The response does not include paths or the API key.
+    The sidecar route starts the managed sidecar. The Ollama route starts a
+    FlintTrade-managed Ollama install and leaves an unmanaged Ollama alone.
+    Operator session only. A failure is a generic 503. The response does not
+    include paths or the API key.
     """
     from flinttrade_core.auth_routes import require_operator_session  # noqa: PLC0415
+    from flinttrade_engine.laya_ollama import laya_backend  # noqa: PLC0415
 
     denied = require_operator_session()
     if denied is not None:
         return denied
+    backend = laya_backend()
+    if backend == "closed":
+        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+    ollama = backend == "ollama"
     try:
-        from flinttrade_core.laya_runtime import start_managed_sidecar  # noqa: PLC0415
+        if ollama:
+            _start_managed_ollama_for_gate()
+        else:
+            from flinttrade_core.laya_runtime import start_managed_sidecar  # noqa: PLC0415
 
-        start_managed_sidecar()
+            start_managed_sidecar()
     except Exception:
-        logger.warning("Laya sidecar could not be started", exc_info=True)
+        if ollama:
+            logger.warning("Managed Ollama could not be started", exc_info=True)
+        else:
+            logger.warning("Laya sidecar could not be started", exc_info=True)
         return jsonify({"status": "error", "message": "Laya could not be started."}), 503
     return jsonify({"status": "ok"}), 200
 
