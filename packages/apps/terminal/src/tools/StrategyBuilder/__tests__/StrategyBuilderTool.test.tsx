@@ -65,7 +65,8 @@ describe("StrategyBuilderTool", () => {
 
   it("shows the Strategy Builder heading", () => {
     render(<StrategyBuilderTool />);
-    expect(screen.getByText("Strategy Builder")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Strategy Builder" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
   it("has Strategy Legs, Payoff, Margin, and Pine Script tabs", () => {

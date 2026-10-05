@@ -222,6 +222,13 @@ describe("AppLayout", () => {
     mockLocation.pathname = "/trade";
   });
 
+  it("keeps the narrow-screen warning below the route's page heading level", () => {
+    Object.defineProperty(window, "innerWidth", { value: 390, writable: true });
+    renderApp();
+    expect(screen.getByRole("heading", { level: 2, name: "FlintTrade is designed for desktop" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  });
+
   it("renders header with TopBar and one ticker strip, and a main landmark", () => {
     renderApp();
 

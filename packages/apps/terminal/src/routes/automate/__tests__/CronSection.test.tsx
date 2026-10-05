@@ -76,7 +76,7 @@ const SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE =
   "Example schedule — control unavailable";
 
 const ACTIVE_JOB = {
-  name: "health_check_job",
+  name: "post_market_analysis",
   description: "Verify OpenAlgo session at 9:10 AM IST",
   trigger_type: "cron",
   status: "ACTIVE",
@@ -128,14 +128,51 @@ describe("CronSection", () => {
 
   it("renders without crashing and shows heading", () => {
     render(<CronSection />, { wrapper: createWrapper() });
-    expect(screen.getByText("Cron Scheduler")).toBeInTheDocument();
+    expect(screen.getByText("Schedules")).toBeInTheDocument();
   });
 
   it("shows the description text", () => {
     render(<CronSection />, { wrapper: createWrapper() });
     expect(
-      screen.getByText(/All registered automation schedules/),
+      screen.getByText(/Your automation schedules/),
     ).toBeInTheDocument();
+  });
+
+  it("shows human names and reveals system jobs only on request without changing them", async () => {
+    mockMode.mode = "practice";
+    mockGetCronJobs.mockResolvedValue({ jobs: [
+      ACTIVE_JOB,
+      { ...ACTIVE_JOB, name: "health_check_job" },
+      { ...ACTIVE_JOB, name: "my_custom_alert_job" },
+    ] });
+    render(<CronSection />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Post-market analysis")).toBeInTheDocument();
+    expect(screen.getByText("My custom alert")).toBeInTheDocument();
+    expect(screen.queryByText("Broker session check")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show system jobs" }));
+    expect(screen.getByText("Broker session check")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show system jobs" }));
+    expect(screen.queryByText("Broker session check")).not.toBeInTheDocument();
+    expect(mockPauseCronJob).not.toHaveBeenCalled();
+    expect(mockResumeCronJob).not.toHaveBeenCalled();
+  });
+
+  it("treats unknown job names as text, including inherited object keys", async () => {
+    mockMode.mode = "practice";
+    mockGetCronJobs.mockResolvedValue({ jobs: [{ ...ACTIVE_JOB, name: "constructor" }] });
+    render(<CronSection />, { wrapper: createWrapper() });
+    expect(await screen.findByText("Constructor")).toBeInTheDocument();
+  });
+
+  it("explains when only hidden system jobs are registered", async () => {
+    mockMode.mode = "practice";
+    mockGetCronJobs.mockResolvedValue({ jobs: [{ ...ACTIVE_JOB, name: "backup" }] });
+    render(<CronSection />, { wrapper: createWrapper() });
+    expect(await screen.findByText(/Only system jobs are registered/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show system jobs" }));
+    expect(screen.getByText("Workspace backup")).toBeInTheDocument();
+    expect(screen.queryByText(/Only system jobs are registered/)).not.toBeInTheDocument();
   });
 
   it("shows Sample status and a gated Pause on seeded Explore jobs", async () => {
@@ -158,7 +195,7 @@ describe("CronSection", () => {
 
     render(<CronSection />, { wrapper: createWrapper() });
 
-    expect(await screen.findByText("health_check_job")).toBeInTheDocument();
+    expect(await screen.findByText("Post-market analysis")).toBeInTheDocument();
     const pause = await findPauseControl();
     expect(pause).toBeDisabled();
     expect(pause).toHaveAttribute("title", SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE);
@@ -184,7 +221,7 @@ describe("CronSection", () => {
 
     await userEvent.click(pause);
     await waitFor(() => {
-      expect(mockPauseCronJob).toHaveBeenCalledWith("health_check_job");
+      expect(mockPauseCronJob).toHaveBeenCalledWith("post_market_analysis");
     });
   });
 
@@ -201,7 +238,7 @@ describe("CronSection", () => {
 
     await userEvent.click(pause);
     await waitFor(() => {
-      expect(mockPauseCronJob).toHaveBeenCalledWith("health_check_job");
+      expect(mockPauseCronJob).toHaveBeenCalledWith("post_market_analysis");
     });
   });
 
@@ -210,7 +247,7 @@ describe("CronSection", () => {
 
     render(<CronSection />, { wrapper: createWrapper() });
 
-    expect(await screen.findByText("square_off_warning_job")).toBeInTheDocument();
+    expect(await screen.findByText("Square-off warning")).toBeInTheDocument();
     const resume = await screen.findByRole("button", { name: /resume/i });
     expect(resume).toBeDisabled();
     expect(resume).toHaveAttribute("title", SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE);

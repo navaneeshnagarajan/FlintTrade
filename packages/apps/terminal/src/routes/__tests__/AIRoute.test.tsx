@@ -250,6 +250,7 @@ describe("AIRoute", () => {
     renderAI();
 
     expect(screen.getByRole("heading", { level: 1, name: "AI Centre" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("restores one normalised validated symbol context from a direct reload URL and passes it to chat", () => {

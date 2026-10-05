@@ -123,6 +123,7 @@ describe("AutomateRoute", () => {
   it("renders the Automate heading, matching its sidebar label", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
     expect(screen.getByRole("heading", { level: 1, name: "Automate" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("has section tabs for all sections at advanced level", () => {

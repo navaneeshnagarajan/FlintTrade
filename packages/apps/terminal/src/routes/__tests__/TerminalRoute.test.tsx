@@ -294,6 +294,7 @@ describe("TerminalRoute", () => {
     renderTerminalRoute();
 
     expect(screen.getByRole("heading", { level: 1, name: "Trade" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     const toolbar = screen.getByTestId("desk-toolbar");
     expect(toolbar).toContainElement(screen.getByTestId("add-widget-button"));
     expect(screen.getAllByTestId("add-widget-button")).toHaveLength(1);
