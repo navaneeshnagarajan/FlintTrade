@@ -88,19 +88,29 @@ function createWrapper() {
   };
 }
 
+async function renderInvestRoute(
+  loadTab: () => Promise<unknown> = () => import("../invest/tabs/DashboardTab"),
+) {
+  // Keep the real lazy tab, but finish its import before React cleanup and worker teardown.
+  await act(async () => {
+    render(<InvestRoute />, { wrapper: createWrapper() });
+    await loadTab();
+  });
+}
+
 describe("InvestRoute", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/invest");
   });
 
-  it("renders the Invest heading, matching its sidebar label", () => {
-    render(<InvestRoute />, { wrapper: createWrapper() });
+  it("renders the Invest heading, matching its sidebar label", async () => {
+    await renderInvestRoute();
     expect(screen.getByRole("heading", { level: 1, name: "Invest" })).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
-  it("shows five Invest groups instead of the flat tab row", () => {
-    render(<InvestRoute />, { wrapper: createWrapper() });
+  it("shows five Invest groups instead of the flat tab row", async () => {
+    await renderInvestRoute();
     const groups = screen.getByRole("tablist", { name: "Invest sections" });
     const tabs = within(groups).getAllByRole("tab");
     expect(tabs.map((tab) => tab.textContent)).toEqual([
@@ -124,8 +134,8 @@ describe("InvestRoute", () => {
     expect(within(views).queryByRole("tab", { name: "SIPs" })).not.toBeInTheDocument();
   });
 
-  it("shows Dashboard as the selected Overview view by default", () => {
-    render(<InvestRoute />, { wrapper: createWrapper() });
+  it("shows Dashboard as the selected Overview view by default", async () => {
+    await renderInvestRoute();
     const views = screen.getByRole("tablist", { name: "Overview views" });
     expect(within(views).getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
       "aria-selected",
@@ -135,11 +145,17 @@ describe("InvestRoute", () => {
 
   it("opens Shareholding under Analyse", async () => {
     const user = userEvent.setup();
-    render(<InvestRoute />, { wrapper: createWrapper() });
+    await renderInvestRoute();
 
     await user.click(screen.getByRole("tab", { name: "Analyse" }));
+    await act(async () => {
+      await import("../invest/tabs/SectorTab");
+    });
     const views = screen.getByRole("tablist", { name: "Analyse views" });
     await user.click(within(views).getByRole("tab", { name: "Shareholding" }));
+    await act(async () => {
+      await import("../invest/tabs/ShareholdingTab");
+    });
 
     expect(within(views).getByRole("tab", { name: "Shareholding" })).toHaveAttribute(
       "aria-selected",
@@ -152,17 +168,17 @@ describe("InvestRoute", () => {
   });
 
   it.each([
-    ["#holdings", "Holdings", "Holdings"],
-    ["#sip", "Holdings", "SIPs"],
-    ["#networth", "Overview", "Net Worth"],
-    ["#mf-optimizer", "Discover", "MF Optimizer"],
-    ["#sector-rotation", "Analyse", "Sector Rotation"],
-    ["#overview", "Overview", "Dashboard"],
-    ["#tax", "Tax", "Tax"],
-  ] as const)("redirects %s to the %s group and %s view", (hash, groupName, viewName) => {
+    ["#holdings", "Holdings", "Holdings", () => import("../invest/tabs/HoldingsTab")],
+    ["#sip", "Holdings", "SIPs", () => import("../invest/tabs/SipTab")],
+    ["#networth", "Overview", "Net Worth", () => import("../invest/tabs/NetWorthTab")],
+    ["#mf-optimizer", "Discover", "MF Optimizer", () => import("../invest/tabs/MfOptimizerTab")],
+    ["#sector-rotation", "Analyse", "Sector Rotation", () => import("../invest/tabs/SectorRotationTab")],
+    ["#overview", "Overview", "Dashboard", () => import("../invest/tabs/DashboardTab")],
+    ["#tax", "Tax", "Tax", () => import("../invest/tabs/TaxTab")],
+  ] as const)("redirects %s to the %s group and %s view", async (hash, groupName, viewName, loadTab) => {
     window.history.replaceState(null, "", `/invest${hash}`);
 
-    render(<InvestRoute />, { wrapper: createWrapper() });
+    await renderInvestRoute(loadTab);
 
     const groups = screen.getByRole("tablist", { name: "Invest sections" });
     expect(within(groups).getByRole("tab", { name: groupName })).toHaveAttribute(
@@ -178,10 +194,10 @@ describe("InvestRoute", () => {
     }
   });
 
-  it("keeps Dashboard selected for an unknown Invest hash", () => {
+  it("keeps Dashboard selected for an unknown Invest hash", async () => {
     window.history.replaceState(null, "", "/invest#not-a-tab");
 
-    render(<InvestRoute />, { wrapper: createWrapper() });
+    await renderInvestRoute();
 
     const views = screen.getByRole("tablist", { name: "Overview views" });
     expect(within(views).getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
@@ -190,19 +206,20 @@ describe("InvestRoute", () => {
     );
   });
 
-  it("syncs the active group when the Invest hash changes", () => {
+  it("syncs the active group when the Invest hash changes", async () => {
     window.history.replaceState(null, "", "/invest#sip");
 
-    render(<InvestRoute />, { wrapper: createWrapper() });
+    await renderInvestRoute(() => import("../invest/tabs/SipTab"));
 
     expect(within(screen.getByRole("tablist", { name: "Holdings views" })).getByRole("tab", { name: "SIPs" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
 
-    act(() => {
+    await act(async () => {
       window.location.hash = "#holdings";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
+      await import("../invest/tabs/HoldingsTab");
     });
 
     const groups = screen.getByRole("tablist", { name: "Invest sections" });
