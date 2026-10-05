@@ -455,6 +455,37 @@ Live **writes** still mint a `SafetyContext` through `gate_order` /
 `gate_broker_write` and dispatch through `BrokerRouter`. Read operations do
 not go through the write router.
 
+### Broker account transaction foundation
+
+The native account foundation provides immutable transaction contracts, an
+encrypted vault participant, a workspace commit witness and one app-lifetime
+runtime owner. Its coordinator is exercised with synthetic drivers. Production
+native account mutations still return `503` and native HTTP reads still return
+`409`; this foundation does not install a provider driver or complete the
+Task 9D / Task 7C.2 cutovers.
+
+Vault schema 4 retains credential incarnation and operation evidence while
+anchoring the current ledger and audit outbox in an authenticated head digest.
+Replaying an older individually valid operation row cannot reopen a settled
+unknown authentication outcome. Workspace recovery checks both participants;
+unknown or conflicting outcomes retain their claim and require a later explicit
+resolution policy. Recovery does not authenticate or recreate provider sessions.
+
+Read generations pin enrolment from validated vault state and consult the
+workspace coherence verifier. Removing the document marker cannot select a
+legacy read path, and an older legacy generation loses authority when durable
+enrolment begins. Shutdown stops rotation admission and drains its workers
+before retiring account-owned broker dependencies.
+
+Each terminal receipt and its pending audit event are persisted atomically.
+The event uses stable, vault-keyed references for the operation, selector,
+actor and session, and exports only terminal state and version counters.
+Credentials, labels, raw account IDs and exception messages are excluded.
+Audit export uses bounded batches outside vault and publication locks. Delivery
+is acknowledged only after the sink verifies the exact stable event ID and full
+evidence in an intact audit chain. Failed or lost acknowledgements remain
+pending and retry the same event without repeating the account mutation.
+
 ### Mode-system state machine
 
 ```mermaid
