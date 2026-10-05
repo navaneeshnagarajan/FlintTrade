@@ -117,7 +117,7 @@
     },
     {
       "name": "cryptography",
-      "version": "50.0.1",
+      "version": "50.0.2",
       "vulns": []
     },
     {
@@ -142,12 +142,12 @@
     },
     {
       "name": "duckdb",
-      "version": "1.5.5",
+      "version": "1.5.6",
       "vulns": []
     },
     {
       "name": "filelock",
-      "version": "4.0.0",
+      "version": "4.0.9",
       "vulns": []
     },
     {
@@ -242,7 +242,7 @@
     },
     {
       "name": "jugaad-data",
-      "version": "0.35.5",
+      "version": "0.35.9",
       "vulns": []
     },
     {
@@ -427,7 +427,7 @@
     },
     {
       "name": "python-dotenv",
-      "version": "1.2.3",
+      "version": "1.2.4",
       "vulns": []
     },
     {
@@ -447,7 +447,7 @@
     },
     {
       "name": "quantstats",
-      "version": "0.0.81",
+      "version": "0.0.86",
       "vulns": []
     },
     {
@@ -595,9 +595,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-10-05T08:48:23.538909Z",
-    "audited_at": "2026-10-05T08:48:23.538909Z",
-    "requirements_lock_sha256": "27e8ac501ff9a8013623f0afb1745c2bfeba5dbde7e50b12b234383fdc277490",
+    "generated_at": "2026-10-05T11:14:50.611741Z",
+    "audited_at": "2026-10-05T11:14:50.611741Z",
+    "requirements_lock_sha256": "2744cf232e0b56218a23a56b16359690fcf508e8f2169bd66d8e6d582f4baef7",
     "pip_audit_exit_code": 0
   }
 }
