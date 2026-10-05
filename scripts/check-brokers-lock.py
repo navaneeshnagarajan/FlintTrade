@@ -22,8 +22,15 @@ HASH_RE = re.compile(r"--hash=sha256:([a-f0-9]{64})")
 STALE_PLACEHOLDER_RE = re.compile(r"PLACEHOLDER|hash pending|pending hash", re.IGNORECASE)
 KOTAK_GIT = "https://github.com/Kotak-Neo/kotak-neo-python.git"
 KOTAK_FIELDS = (
-    "source_commit", "source_tree", "release_tag", "release_commit", "release_tree",
-    "release_wheel_sha256", "release_sdist_sha256", "licence_sha256",
+    "source_commit",
+    "source_tree",
+    "release_version",
+    "release_tag",
+    "release_commit",
+    "release_tree",
+    "release_wheel_sha256",
+    "release_sdist_sha256",
+    "licence_sha256",
 )
 
 
@@ -80,11 +87,14 @@ def main() -> int:
                     failures.append(f"{name}: invalid {field}")
                 elif field.endswith(("_commit", "_tree")) and not re.fullmatch(r"[a-f0-9]{40}", value):
                     failures.append(f"{name}: invalid {field}")
-            if entry.get("release_tag") != f"v{entry.get('version')}":
-                failures.append(f"{name}: release_tag does not match version")
+            release_version = entry.get("release_version")
+            if not isinstance(release_version, str) or re.fullmatch(r"\d+\.\d+\.\d+", release_version) is None:
+                failures.append(f"{name}: invalid release_version")
+            if entry.get("release_tag") != f"v{release_version}":
+                failures.append(f"{name}: release_tag does not match release_version")
             if entry.get("sha256") != entry.get("release_wheel_sha256"):
                 failures.append(f"{name}: sha256 differs from release_wheel_sha256")
-            if entry.get("licence_source") != "kotakneoapi-3.0.7.dist-info/licenses/LICENSE":
+            if entry.get("licence_source") != f"kotakneoapi-{entry.get('version')}.dist-info/licenses/LICENSE":
                 failures.append(f"{name}: invalid licence_source")
             try:
                 distribution = metadata.distribution(name)

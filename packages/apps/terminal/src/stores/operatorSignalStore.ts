@@ -38,6 +38,10 @@ export interface OperatorSignalSnapshot {
   layaDownloadTotal: number | null;
   /** True after a stop or start until the next ping confirms the gate. */
   layaChecking: boolean;
+  /** `ollama` when the gate is on that route. Null keeps the sidecar copy. */
+  layaRoute: "ollama" | null;
+  /** True when FlintTrade installed Ollama and can start it. */
+  layaManaged: boolean;
   /** Bumps when a place updates the chip, so an older ping cannot overwrite it. */
   layaEpoch: number;
 }
@@ -62,6 +66,8 @@ const INITIAL: OperatorSignalSnapshot = {
   layaDownloadBytes: null,
   layaDownloadTotal: null,
   layaChecking: false,
+  layaRoute: null,
+  layaManaged: false,
   layaEpoch: 0,
 };
 
@@ -87,6 +93,8 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   noteLayaUnconfirmed: () => void;
   /** Clear or set Checking without moving the epoch. A confirmed ping clears it. */
   setLayaChecking: (layaChecking: boolean) => void;
+  setLayaRoute: (layaRoute: "ollama" | null) => void;
+  setLayaManaged: (layaManaged: boolean) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -124,6 +132,8 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
     layaEpoch: state.layaEpoch + 1,
   })),
   setLayaChecking: (layaChecking) => set({ layaChecking }),
+  setLayaRoute: (layaRoute) => set({ layaRoute }),
+  setLayaManaged: (layaManaged) => set({ layaManaged }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

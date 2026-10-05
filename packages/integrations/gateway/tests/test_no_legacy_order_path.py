@@ -3534,11 +3534,12 @@ def _safety_context_mint_references(tree: ast.Module) -> list[ast.Call]:
     return references
 
 
-def _safety_context_mint_offenders(tree: ast.Module, relative: str) -> list[ast.AST]:
-    """Return SafetyContext mint calls outside canonical ``gate_order``."""
+def _safety_context_mint_analysis(tree: ast.Module, relative: str) -> tuple[list[ast.Call], list[ast.AST]]:
+    """Classify all mint references in one source analysis."""
     parents = _parent_nodes(tree)
+    references = _safety_context_mint_references(tree)
     offenders: list[ast.AST] = []
-    for node in _safety_context_mint_references(tree):
+    for node in references:
         parent = parents.get(id(node))
         while parent is not None and not isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             parent = parents.get(id(parent))
@@ -3549,7 +3550,12 @@ def _safety_context_mint_offenders(tree: ast.Module, relative: str) -> list[ast.
         )
         if not canonical:
             offenders.append(node)
-    return offenders
+    return references, offenders
+
+
+def _safety_context_mint_offenders(tree: ast.Module, relative: str) -> list[ast.AST]:
+    """Return SafetyContext mint calls outside canonical ``gate_order``."""
+    return _safety_context_mint_analysis(tree, relative)[1]
 
 
 _GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "flinttrade_gateway"
@@ -4904,8 +4910,8 @@ def test_only_gate_order_mints_safety_context():
     for path in _python_sources(_PRODUCTION_PYTHON_ROOTS):
         relative = path.relative_to(_REPO_ROOT).as_posix()
         tree = _parse_source(path)
-        references = _safety_context_mint_references(tree)
-        offender_ids = {id(node) for node in _safety_context_mint_offenders(tree, relative)}
+        references, mint_offenders = _safety_context_mint_analysis(tree, relative)
+        offender_ids = {id(node) for node in mint_offenders}
         for node in references:
             rendered = _format_ast_offender(relative, node)
             if id(node) in offender_ids:

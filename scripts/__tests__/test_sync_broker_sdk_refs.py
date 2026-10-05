@@ -14,13 +14,23 @@ def test_active_sdk_entries_ignores_placeholders_and_unknowns() -> None:
         {"name": "dhanhq", "version": "2.2.0"},
         {"name": "future-sdk", "version": "PLACEHOLDER"},
         {"name": "unknown-sdk", "version": "1.0.0"},
-        {"name": "kotakneoapi", "version": "3.0.7"},
+        {"name": "kotakneoapi", "version": "3.0.7", "release_version": "3.0.7"},
     ]
 
     assert syncer.active_sdk_entries(entries) == [
         {"name": "dhanhq", "version": "2.2.0", "source_commit": ""},
-        {"name": "kotakneoapi", "version": "3.0.7", "source_commit": ""},
+        {"name": "kotakneoapi", "version": "3.0.7", "release_version": "3.0.7", "source_commit": ""},
     ]
+
+
+@pytest.mark.parametrize("release_version", [None, "", "v3.0.7", "3.0.7rc1"])
+def test_kotak_reference_sync_requires_an_explicit_stable_release_version(release_version):
+    entry = {"name": "kotakneoapi", "version": "3.0.8"}
+    if release_version is not None:
+        entry["release_version"] = release_version
+
+    with pytest.raises(ValueError, match="release_version"):
+        syncer.active_sdk_entries([entry])
 
 
 def test_select_pypi_artifact_prefers_universal_py3_wheel() -> None:
@@ -131,14 +141,13 @@ def test_sync_records_pypi_drift(tmp_path, monkeypatch) -> None:
     assert "uv run python scripts/sync_broker_sdk_refs.py" in (tmp_path / "audit" / "README.md").read_text(
         encoding="utf-8"
     )
-    assert manifest["drift"] == [
-        {"package": "dhanhq", "source": "pypi", "locked": "2.2.0", "upstream": "2.3.0"}
-    ]
+    assert manifest["drift"] == [{"package": "dhanhq", "source": "pypi", "locked": "2.2.0", "upstream": "2.3.0"}]
 
 
 @pytest.mark.parametrize(
     ("git_change", "pypi_version", "expected_source"),
     [
+        ({}, "3.0.7", None),
         ({"head": "b" * 40}, "3.0.7", "git"),
         ({"latest_stable_tag": "v3.0.8"}, "3.0.8", "release-tag"),
         ({"release_commit": "c" * 40}, "3.0.7", "release-commit"),
@@ -146,7 +155,11 @@ def test_sync_records_pypi_drift(tmp_path, monkeypatch) -> None:
     ],
 )
 def test_kotak_dual_track_drift_is_independent(
-    tmp_path, monkeypatch, git_change: dict[str, str], pypi_version: str, expected_source: str,
+    tmp_path,
+    monkeypatch,
+    git_change: dict[str, str],
+    pypi_version: str,
+    expected_source: str | None,
 ) -> None:
     wheel = b"release wheel"
     sdist = b"release sdist"
@@ -154,7 +167,8 @@ def test_kotak_dual_track_drift_is_independent(
     sdist_hash = hashlib.sha256(sdist).hexdigest()
     locked = {
         "name": "kotakneoapi",
-        "version": "3.0.7",
+        "version": "3.0.8",
+        "release_version": "3.0.7",
         "source_commit": "a" * 40,
         "source_tree": "d" * 40,
         "release_tag": "v3.0.7",
@@ -165,8 +179,11 @@ def test_kotak_dual_track_drift_is_independent(
         "sha256": wheel_hash,
     }
     git = {
-        "path": "mirror", "remote": "origin", "head": locked["source_commit"],
-        "head_tree": locked["source_tree"], "describe": "v3.0.7",
+        "path": "mirror",
+        "remote": "origin",
+        "head": locked["source_commit"],
+        "head_tree": locked["source_tree"],
+        "describe": "v3.0.7",
         "latest_stable_tag": locked["release_tag"],
         "release_commit": locked["release_commit"],
         "release_tree": locked["release_tree"],
@@ -179,14 +196,24 @@ def test_kotak_dual_track_drift_is_independent(
         if url == "https://pypi.org/pypi/kotakneoapi/json":
             data = {
                 "info": {"version": pypi_version},
-                "releases": {"3.0.7": [
-                    {"filename": "kotakneoapi-3.0.7-py3-none-any.whl", "packagetype": "bdist_wheel",
-                     "python_version": "py3", "url": "https://files.example/wheel",
-                     "digests": {"sha256": wheel_hash}},
-                    {"filename": "kotakneoapi-3.0.7.tar.gz", "packagetype": "sdist",
-                     "python_version": "source", "url": "https://files.example/sdist",
-                     "digests": {"sha256": sdist_hash}},
-                ]},
+                "releases": {
+                    "3.0.7": [
+                        {
+                            "filename": "kotakneoapi-3.0.7-py3-none-any.whl",
+                            "packagetype": "bdist_wheel",
+                            "python_version": "py3",
+                            "url": "https://files.example/wheel",
+                            "digests": {"sha256": wheel_hash},
+                        },
+                        {
+                            "filename": "kotakneoapi-3.0.7.tar.gz",
+                            "packagetype": "sdist",
+                            "python_version": "source",
+                            "url": "https://files.example/sdist",
+                            "digests": {"sha256": sdist_hash},
+                        },
+                    ]
+                },
             }
             return 200, json.dumps(data).encode()
         if url == "https://files.example/wheel":
@@ -197,4 +224,10 @@ def test_kotak_dual_track_drift_is_independent(
 
     manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
 
-    assert any(d["package"] == "kotakneoapi" and d["source"] == expected_source for d in manifest["drift"])
+    if expected_source is None:
+        assert manifest["drift"] == []
+    else:
+        assert any(d["package"] == "kotakneoapi" and d["source"] == expected_source for d in manifest["drift"])
+    assert manifest["sdks"][0]["version"] == "3.0.8"
+    assert manifest["sdks"][0]["release_version"] == "3.0.7"
+    assert manifest["sdks"][0]["pypi"]["filename"] == "kotakneoapi-3.0.7-py3-none-any.whl"

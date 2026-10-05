@@ -326,6 +326,15 @@ def evaluate_free_text(
                     evidence=(("policy_version", active.version), ("failure", "identity_absent")),
                 )
             )
+        if exc.code == "prompt_over_cap":
+            return _logged(
+                TextDecision(
+                    effect="deny",
+                    reason="The note is too long to admit.",
+                    applied_quantity=0,
+                    evidence=(("policy_version", active.version), ("failure", "note_too_long")),
+                )
+            )
         return _logged(_down_decision(active, exc.code))
     except Exception:
         return _logged(_down_decision(active, "malformed"))

@@ -43,6 +43,20 @@ Before opening or merging any PR, fetch `origin`, verify `origin/main` against t
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
 - **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + OpenAlgo-parity observability apply.
 
+## Agent skills
+
+### Issue tracker
+
+Issues, tickets and publishable specs use GitHub Issues in `navaneeshnagarajan/FlintTrade`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` and `docs/adr/`, created lazily. See `docs/agents/domain.md`.
+
 ## Current handoff (2026-07-29)
 
 State at handoff: Phase 3 and the deferred-ledger clearance remain landed. The

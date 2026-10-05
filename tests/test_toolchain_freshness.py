@@ -10,9 +10,12 @@ Every test drives the module with synthetic release data - no network.
 
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import importlib.util
+import json
 import pathlib
+import re
 import sys
 from types import ModuleType
 from typing import Any
@@ -144,6 +147,128 @@ def test_a_packagemanager_mismatch_fails(module: ModuleType) -> None:
 
 
 @pytest.mark.unit
+def test_the_ollama_pin_is_read_as_it_is_on_the_checkout(module: ModuleType) -> None:
+    """The pin is parsed from ollama_runtime.py, never hard-coded in the gate."""
+    report = module.Report()
+    pin = module._ollama_pin(report)
+    assert not report.failed, [finding.message for finding in report.findings]
+    assert pin is not None
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", pin)
+    assignments = []
+    for statement in ast.parse(module._OLLAMA_RUNTIME.read_text(encoding="utf-8")).body:
+        match statement:
+            case ast.Assign(targets=[ast.Name(id="_OLLAMA_VERSION")], value=ast.Constant(value=value)):
+                assignments.append(value)
+            case ast.AnnAssign(target=ast.Name(id="_OLLAMA_VERSION"), value=ast.Constant(value=value)):
+                assignments.append(value)
+    assert assignments == [pin]
+
+
+@pytest.mark.unit
+def test_an_unreadable_ollama_pin_fails_loudly(module: ModuleType, tmp_path: pathlib.Path) -> None:
+    """A refactor that hides the constant must not silently blind the gate and Renovate."""
+    runtime = tmp_path / "ollama_runtime.py"
+    runtime.write_text("_OLLAMA_VERSION = compute_version()\n", encoding="utf-8")
+    module._OLLAMA_RUNTIME = runtime
+    report = module.Report()
+    assert module._ollama_pin(report) is None
+    assert report.failed
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("pinned", "latest", "warns"),
+    [
+        ("v0.35.0", "v0.35.0", False),
+        ("v0.33.0", "v0.35.1", False),  # exactly two minor versions back is still fine
+        ("v0.32.0", "v0.35.0", True),
+        ("v0.32.0", "v0.40.2", True),
+        ("v0.35.0", "v0.32.0", False),  # a pin ahead of "latest" is not stale
+        ("v0.32.0", "v1.0.0", True),  # a major move is always out of range
+    ],
+)
+def test_an_ollama_pin_warns_only_beyond_two_minor_versions(
+    module: ModuleType, pinned: str, latest: str, warns: bool
+) -> None:
+    """The managed Ollama pin is advisory: it warns when stale and never fails."""
+    _stub_fetch(module, {module._OLLAMA_LATEST_RELEASE_URL: {"tag_name": latest, "prerelease": False}})
+    report = module.Report()
+    module._check_ollama(report, pinned)
+    assert not report.failed
+    assert [f.level for f in report.findings] == (["warn"] if warns else [])
+    if warns:
+        assert pinned in report.findings[0].message
+        assert latest in report.findings[0].message
+
+
+@pytest.mark.unit
+def test_an_ollama_prerelease_is_never_the_comparison_target(module: ModuleType) -> None:
+    """Only a stable release can make the pin look stale."""
+    _stub_fetch(module, {module._OLLAMA_LATEST_RELEASE_URL: {"tag_name": "v0.40.0-rc1", "prerelease": True}})
+    report = module.Report()
+    module._check_ollama(report, "v0.32.0")
+    assert not report.findings
+
+
+@pytest.mark.unit
+def test_renovate_tracks_the_ollama_pin_for_hand_regeneration() -> None:
+    """Renovate must see the real constant, only on stable releases, and never automerge it."""
+    config = json.loads((_REPO / "renovate.json").read_text(encoding="utf-8"))
+    managers = [m for m in config["customManagers"] if m.get("depNameTemplate") == "ollama/ollama"]
+    assert len(managers) == 1
+    manager = managers[0]
+    assert manager["datasourceTemplate"] == "github-releases"
+    assert manager["versioningTemplate"] == "semver"
+
+    target = _REPO / "packages/core/core/src/flinttrade_core/ollama_runtime.py"
+    patterns = [re.compile(p.strip("/")) for p in manager["managerFilePatterns"]]
+    assert any(p.search(target.relative_to(_REPO).as_posix()) for p in patterns)
+    (match_string,) = manager["matchStrings"]
+    # Renovate spells named groups `(?<name>...)`; Python wants `(?P<name>...)`.
+    match = re.search(match_string.replace("(?<", "(?P<"), target.read_text(encoding="utf-8"))
+    assert match is not None
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", match.group("currentValue"))
+
+    rules = [r for r in config["packageRules"] if "ollama/ollama" in r.get("matchDepNames", [])]
+    assert len(rules) == 1
+    assert rules[0]["automerge"] is False
+    assert rules[0]["ignoreUnstable"] is True
+    assert "needs-hash-regeneration" in rules[0]["labels"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("assignment", "expected_pin"),
+    [
+        ('_OLLAMA_VERSION = "v0.35.0"', "v0.35.0"),
+        ('_OLLAMA_VERSION: str = "v0.35.0"', "v0.35.0"),
+        ('_OLLAMA_VERSION: Final[str] = "v0.35.0"', "v0.35.0"),
+        ("_OLLAMA_VERSION = compute_version()", None),
+        ("_OLLAMA_VERSION: str = compute_version()", None),
+        ('_OLLAMA_VERSION = "v0.35.0" + suffix', None),
+    ],
+    ids=["plain", "typed", "typed-final", "computed", "typed-computed", "concatenated"],
+)
+def test_ollama_freshness_and_renovate_accept_the_same_pin_syntax(
+    module: ModuleType, tmp_path: pathlib.Path, assignment: str, expected_pin: str | None
+) -> None:
+    """A supported literal must remain discoverable; computed values must fail loudly."""
+    runtime = tmp_path / "ollama_runtime.py"
+    text = f"# Managed runtime version\n{assignment}\n"
+    runtime.write_text(text, encoding="utf-8")
+    module._OLLAMA_RUNTIME = runtime
+    report = module.Report()
+    assert module._ollama_pin(report) == expected_pin
+    assert report.failed is (expected_pin is None)
+
+    config = json.loads((_REPO / "renovate.json").read_text(encoding="utf-8"))
+    manager = next(m for m in config["customManagers"] if m.get("depNameTemplate") == "ollama/ollama")
+    (match_string,) = manager["matchStrings"]
+    match = re.search(match_string.replace("(?<", "(?P<"), text)
+    assert (match.group("currentValue") if match else None) == expected_pin
+
+
+@pytest.mark.unit
 def test_an_unreachable_source_is_skipped_not_failed(module: ModuleType) -> None:
     """A network blip must never redden an unrelated pull request."""
     _stub_fetch(module, {})
@@ -151,6 +276,7 @@ def test_an_unreachable_source_is_skipped_not_failed(module: ModuleType) -> None
     module._check_node(report, {"node_requires": ">=22.22.0", "node_target": "24"}, "22.23.2")
     module._check_pnpm(report, "9.15.0", "pnpm@9.15.0+sha512.x")
     module._check_uv(report, "0.11.16")
+    module._check_ollama(report, "v0.32.0")
     module._check_python(report, {"python_requires": ">=3.12", "python_target": "3.14"})
     assert not report.failed
     assert report.skipped
