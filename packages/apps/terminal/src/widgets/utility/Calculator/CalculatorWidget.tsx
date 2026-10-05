@@ -72,7 +72,7 @@ import {
   statutoryLeg,
   type StatutoryLeg,
 } from "@/lib/indianCharges";
-import { lotSizeFromMaster } from "@/lib/instrumentLots";
+import { lotSizeFromMaster, useInstrumentLotRows } from "@/lib/instrumentLots";
 import {
   breakevenWinRate,
   deriveTarget,
@@ -1024,6 +1024,7 @@ const brokerageSchema = z.object({
 type BrokerageFormValues = z.infer<typeof brokerageSchema>;
 
 function BrokerageCalcTab() {
+  const lotRows = useInstrumentLotRows();
   const {
     register,
     control,
@@ -1035,7 +1036,7 @@ function BrokerageCalcTab() {
     resolver: zodResolver(brokerageSchema) as unknown as Resolver<BrokerageFormValues>,
     defaultValues: {
       underlying: "NIFTY",
-      lotSize: lotSizeFromMaster("NIFTY") ?? 1,
+      lotSize: lotSizeFromMaster("NIFTY", lotRows) ?? 1,
       lots: 1,
       price: 100,
       type: "options",
@@ -1048,11 +1049,11 @@ function BrokerageCalcTab() {
 
   const values = watch();
   const underlying = values.underlying;
+  const masterLotSize = lotSizeFromMaster(underlying, lotRows);
 
   useEffect(() => {
-    const lot = lotSizeFromMaster(underlying);
-    if (lot !== null) setValue("lotSize", lot, { shouldValidate: true });
-  }, [underlying, setValue]);
+    if (masterLotSize !== null) setValue("lotSize", masterLotSize, { shouldValidate: true });
+  }, [underlying, masterLotSize, setValue]);
 
   const result = useMemo<BrokerageResult>(() => {
     return calculateBrokerage(

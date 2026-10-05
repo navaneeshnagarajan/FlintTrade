@@ -17,7 +17,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { statutoryLeg } from "@/lib/indianCharges";
-import { lotSizeFromMaster } from "@/lib/instrumentLots";
+import { instrumentLotRows, lotSizeFromMaster, setInstrumentLotRows } from "@/lib/instrumentLots";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
@@ -586,6 +586,54 @@ function inr(amount: number): string {
 }
 
 describe("Brokerage tab", () => {
+  it("updates the lot size when instrument rows arrive after mounting", async () => {
+    const previousRows = instrumentLotRows();
+    setInstrumentLotRows([]);
+    const { unmount } = renderWithTab("brokerage");
+    try {
+      expect(screen.getByLabelText("Lot Size")).toHaveValue(1);
+      act(() => setInstrumentLotRows([
+        { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "65" },
+      ]));
+      await waitFor(() => expect(screen.getByLabelText("Lot Size")).toHaveValue(65));
+
+      const charges = screen.getByText("Charges Breakdown").closest("div") as HTMLElement;
+      const sell = statutoryLeg({
+        exchange: "NSE", segment: "equity_options", turnover: 65 * 100,
+        isBuy: false, on: chargesAsOfToday(), brokerage: 20,
+      });
+      expect(resultValueIn(charges, "STT")).toBe(inr(sell.stt));
+
+      act(() => setInstrumentLotRows([
+        { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "75" },
+      ]));
+      await waitFor(() => expect(screen.getByLabelText("Lot Size")).toHaveValue(75));
+    } finally {
+      unmount();
+      setInstrumentLotRows(previousRows);
+    }
+  });
+
+  it("preserves an edited lot size when only another underlying changes", async () => {
+    const previousRows = instrumentLotRows();
+    setInstrumentLotRows([
+      { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "65" },
+    ]);
+    const { unmount } = renderWithTab("brokerage");
+    try {
+      setField("Lot Size", "40");
+      await waitFor(() => expect(screen.getByLabelText("Lot Size")).toHaveValue(40));
+      act(() => setInstrumentLotRows([
+        { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "65" },
+        { UNDERLYING_SYMBOL: "BANKNIFTY", SEM_LOT_UNITS: "30" },
+      ]));
+      expect(screen.getByLabelText("Lot Size")).toHaveValue(40);
+    } finally {
+      unmount();
+      setInstrumentLotRows(previousRows);
+    }
+  });
+
   it("pins the default round-trip charges breakdown", async () => {
     render(<CalculatorWidget {...defaultProps} />);
     await openTab(/brokerage/i);
