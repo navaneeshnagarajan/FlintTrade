@@ -154,6 +154,10 @@ vi.mock("@/hooks/useSettingsState", () => ({
 // ---------------------------------------------------------------------------
 
 import SettingsRoute from "../SettingsRoute";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { SECTIONS } from "@/tools/Settings/settingsConfig";
 
 function mockSettingsBreakpoint(initialDesktop: boolean) {
@@ -200,7 +204,75 @@ describe("SettingsRoute", () => {
     llmRouteMocks.setupPending = false;
     llmRouteMocks.retryLlmHydration.mockClear();
     brokerRouteMocks.props = null;
+    useBrokerStore.setState({ accounts: [] });
+    useConnectionStore.setState({ status: "disconnected", apiKey: "", openAlgoHydrated: false });
+    useModeStore.setState({ mode: "practice" });
+    useLayoutStore.getState().setPresetPickerOpen(false);
+    mockNavigate.mockClear();
     window.history.replaceState(null, "", "/settings");
+  });
+
+
+  it("shows model persistence only on the AI tab", () => {
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("status", { name: "Settings save status" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
+    expect(screen.getByRole("status", { name: "Settings save status" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "General" }));
+    expect(screen.queryByRole("status", { name: "Settings save status" })).not.toBeInTheDocument();
+  });
+
+  it("opens the single Broker page and Advanced from the legacy gateway hash", () => {
+    window.history.replaceState(null, "", "/settings#api");
+    render(<SettingsRoute />);
+    expect(screen.getByRole("tab", { name: "Broker", selected: true })).toBeVisible();
+    expect(screen.queryByRole("tab", { name: "Broker Gateway" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("connection-section")).toBeVisible();
+    expect(screen.getByTestId("brokers-section")).toBeVisible();
+  });
+
+  it("routes legacy presets to desk management without a duplicate Settings tab", () => {
+    window.history.replaceState(null, "", "/settings#presets");
+    render(<SettingsRoute />);
+    expect(mockNavigate).toHaveBeenCalledWith("/trade", { replace: true });
+    expect(useLayoutStore.getState().presetPickerOpen).toBe(true);
+    expect(screen.queryByRole("tab", { name: "Workspace Presets" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Risk & Safety" })).toBeVisible();
+  });
+
+  it("retains a cold Leverage deep link while waiting for account discovery", () => {
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe("#leverage");
+    act(() => useBrokerStore.setState({ accounts: [{ account_id: "synthetic", broker: "dhan", source: "native", label: "Synthetic account", status: "connected", connected_at: null, error_message: null, is_primary: false }] }));
+    expect(screen.getByTestId("leverage-section")).toBeVisible();
+    act(() => useBrokerStore.setState({ accounts: [] }));
+    expect(screen.queryByTestId("leverage-section")).not.toBeInTheDocument();
+  });
+
+  it("lets explicit navigation cancel a pending Leverage link", () => {
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole("tab", { name: "Broker", selected: true }));
+    expect(window.location.hash).toBe("#brokers");
+    act(() => useConnectionStore.setState({ status: "connected", apiKey: "synthetic-key", openAlgoHydrated: true }));
+    expect(screen.getByRole("tab", { name: "Broker", selected: true })).toBeVisible();
+  });
+
+  it("retains Leverage for a hydrated OpenAlgo-only session", () => {
+    useConnectionStore.setState({ status: "connected", apiKey: "synthetic-key", openAlgoHydrated: true });
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    expect(screen.getByTestId("leverage-section")).toBeVisible();
+    act(() => useModeStore.setState({ mode: "explore" }));
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
+  });
+
+  it("does not treat backend liveness as a configured broker", () => {
+    useConnectionStore.setState({ status: "connected", apiKey: "", openAlgoHydrated: true });
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
   });
 
   it("delegates broker-account polling to the surrounding AppLayout", () => {
@@ -357,6 +429,7 @@ describe("SettingsRoute", () => {
     ["saving", "Saving LLM changes"],
     ["error", "LLM changes not saved"],
   ] as const)("reports the truthful %s persistence state", (saveState, copy) => {
+    window.history.replaceState(null, "", "/settings#llm");
     llmRouteMocks.saveState = saveState;
     render(<SettingsRoute />);
 
@@ -368,6 +441,7 @@ describe("SettingsRoute", () => {
     ["error", "LLM settings unavailable"],
     ["empty", "LLM is not configured"],
   ] as const)("reports the truthful %s hydration state", (hydrationState, copy) => {
+    window.history.replaceState(null, "", "/settings#llm");
     llmRouteMocks.hydrationState = hydrationState;
     render(<SettingsRoute />);
 
@@ -410,6 +484,7 @@ describe("SettingsRoute", () => {
   it.each(SECTIONS.map((s) => [s.id, s.label] as const))(
     "deep-links #%s to its tab and renders that section's panel",
     (id, label) => {
+      useConnectionStore.setState({ status: "connected", apiKey: "synthetic-key", openAlgoHydrated: true });
       window.history.replaceState(null, "", `/settings#${id}`);
       render(<SettingsRoute />);
 
@@ -429,6 +504,7 @@ describe("SettingsRoute", () => {
     // A dropped renderContent() case returns undefined → an empty panel. With
     // every section mocked to emit text, an empty panel can only mean the
     // switch lost a case.
+    useConnectionStore.setState({ status: "connected", apiKey: "synthetic-key", openAlgoHydrated: true });
     for (const { id } of SECTIONS) {
       window.history.replaceState(null, "", `/settings#${id}`);
       const { unmount } = render(<SettingsRoute />);

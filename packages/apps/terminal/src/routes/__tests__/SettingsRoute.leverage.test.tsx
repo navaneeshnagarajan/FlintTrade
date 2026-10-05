@@ -147,6 +147,8 @@ vi.mock("@/services/api", () => ({
 }));
 
 import SettingsRoute from "../SettingsRoute";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
 
 function renderSettings() {
   const client = new QueryClient({
@@ -160,6 +162,13 @@ function renderSettings() {
 
 describe("Settings #leverage blank-pane lock (FT-SET-004)", () => {
   beforeEach(() => {
+    // Visibility requires a connected UI snapshot; the capability query below
+    // still exercises the real unsupported/empty LeverageSection.
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({
+      ...useConnectionStore.getInitialState(),
+      status: "connected", openAlgoHydrated: true, apiKey: "synthetic-invalid-openalgo-key",
+    });
     caps.data = {
       broker_name: "Zerodha",
       broker_type: "equity",

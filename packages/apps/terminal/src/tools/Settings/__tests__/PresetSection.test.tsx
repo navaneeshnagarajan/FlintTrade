@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -413,6 +413,66 @@ describe("PresetSection", () => {
       expect(screen.getByLabelText("Edit Preset form")).toBeInTheDocument();
       const nameInput = screen.getByLabelText("Name *") as HTMLInputElement;
       expect(nameInput.value).toBe("My Layout");
+    });
+
+    it("keeps edits and submitted identity with the selected preset", () => {
+      const second = { ...CUSTOM_PRESET, id: "second-layout", name: "Second Layout" };
+      setupQuery([CUSTOM_PRESET, second]);
+      const mutate = vi.fn();
+      mockUseMutation.mockReturnValue(makeMutation({ mutate }));
+      render(<PresetSection />, { wrapper: makeWrapper() });
+      fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+      fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "First draft" } });
+      fireEvent.click(screen.getByRole("button", { name: "Edit Second Layout" }));
+      expect(screen.getByLabelText("Name *")).toHaveValue("Second Layout");
+      fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "Second draft" } });
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+      expect(mutate).toHaveBeenCalledWith(expect.objectContaining({ id: "second-layout", name: "Second draft" }));
+    });
+
+    it("retains each preset draft until that draft is cancelled", () => {
+      const second = { ...CUSTOM_PRESET, id: "second-layout", name: "Second Layout" };
+      setupQuery([CUSTOM_PRESET, second]);
+      render(<PresetSection />, { wrapper: makeWrapper() });
+      fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+      fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "First draft" } });
+      fireEvent.click(screen.getByRole("button", { name: "Edit Second Layout" }));
+      fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "Second draft" } });
+      fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+      fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+      expect(screen.getByLabelText("Name *")).toHaveValue("First draft");
+      fireEvent.click(screen.getByRole("button", { name: "Edit Second Layout" }));
+      expect(screen.getByLabelText("Name *")).toHaveValue("Second Layout");
+    });
+
+    it("does not close a newer edit when another preset save completes", () => {
+      const second = { ...CUSTOM_PRESET, id: "second-layout", name: "Second Layout" };
+      setupQuery([CUSTOM_PRESET, second]);
+      render(<PresetSection />, { wrapper: makeWrapper() });
+      const finishUpdate = mockUseMutation.mock.calls[1]![0].onSuccess;
+      fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+      fireEvent.click(screen.getByRole("button", { name: "Edit Second Layout" }));
+      act(() => finishUpdate({}, { id: "my-layout", name: "My Layout", description: "", widgets: [] }));
+      expect(screen.getByLabelText("Name *")).toHaveValue("Second Layout");
+    });
+
+    it("does not close an unfinished edit when an import completes", () => {
+      render(<PresetSection />, { wrapper: makeWrapper() });
+      const finishCreate = mockUseMutation.mock.calls[0]![0].onSuccess;
+      fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+      fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "Unfinished edit" } });
+      act(() => finishCreate({}, { name: "Imported", description: "", widgets: [] }));
+      expect(screen.getByLabelText("Name *")).toHaveValue("Unfinished edit");
+    });
+
+    it("freezes the submitted draft while its save is pending", () => {
+      const { rerender } = render(<PresetSection />, { wrapper: makeWrapper() });
+      fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+      mockUseMutation.mockReturnValue(makeMutation({ isPending: true }));
+      rerender(<PresetSection />);
+      expect(screen.getByLabelText("Name *")).toBeDisabled();
+      expect(screen.getByLabelText("Description")).toBeDisabled();
     });
 
     it("Save button calls updatePreset mutation", async () => {
