@@ -6231,6 +6231,39 @@ class OllamaRuntime:
         self._error = ""
         return result
 
+    def version_snapshot(self) -> dict[str, str | None]:
+        """Observe the configured tag and loopback server version without mutation.
+
+        This About-only snapshot does not reconcile operation journals, verify
+        installation receipts, inspect process ownership or call an injected
+        probe. A reply is a version observation, not managed-runtime readiness.
+        The existing raw HTTP probe never redirects and shares one absolute
+        deadline across connection, headers and response body.
+        """
+        from flinttrade_core.version_inventory import sanitise_version
+
+        deadline = time.monotonic() + 0.75
+        configured = sanitise_version(getattr(self, "target_version", None))
+        port = getattr(self, "_port", 0)
+        reported = None
+        status = "unavailable"
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
+            try:
+                payload = _read_loopback_http_json(f"http://127.0.0.1:{port}", "/api/version", deadline=deadline)
+            except OSError:
+                status = "not_responding"
+            except (ValueError, OllamaRuntimeError):
+                pass  # A malformed response cannot supply an observed version.
+            else:
+                reported = sanitise_version(payload.get("version")) if isinstance(payload, dict) else None
+                if reported is not None:
+                    status = "reported"
+        return {
+            "configured": configured,
+            "reported": reported,
+            "status": status,
+        }
+
     def status(self) -> dict[str, Any]:
         deadline = time.monotonic() + _SYNC_LIFECYCLE_WAIT_SECONDS
         self._refresh_operation_status(deadline=deadline)
