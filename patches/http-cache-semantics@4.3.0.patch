@@ -1,0 +1,150 @@
+diff --git a/index.js b/index.js
+--- a/index.js
++++ b/index.js
+@@ -132,7 +132,7 @@
+     const parts = header.trim().split(/,/);
+     for (const part of parts) {
+         const [k, v] = part.split(/=/, 2);
+-        cc[k.trim()] = v === undefined ? true : v.trim().replace(/^"|"$/g, '');
++        cc[k.trim().toLowerCase()] = v === undefined ? true : v.trim().replace(/^"|"$/g, '');
+     }
+ 
+     return cc;
+@@ -266,7 +266,7 @@
+     storable() {
+         // The "no-store" request directive indicates that a cache MUST NOT store any part of either this request or any response to it.
+         return !!(
+-            !this._reqcc['no-store'] &&
++            !('no-store' in this._reqcc) &&
+             // A cache MUST NOT store a response to any request, unless:
+             // The request method is understood by the cache and defined as being cacheable, and
+             ('GET' === this._method ||
+@@ -275,9 +275,9 @@
+             // the response status code is understood by the cache, and
+             understoodStatuses.has(this._status) &&
+             // the "no-store" cache directive does not appear in request or response header fields, and
+-            !this._rescc['no-store'] &&
++            !('no-store' in this._rescc) &&
+             // the "private" response directive does not appear in the response, if the cache is shared, and
+-            (!this._isShared || !this._rescc.private) &&
++            (!this._isShared || !('private' in this._rescc)) &&
+             // the Authorization header field does not appear in the request, if the cache is shared,
+             (!this._isShared ||
+                 this._noAuthorization ||
+@@ -396,7 +396,7 @@
+         this._assertRequestHasHeaders(req);
+ 
+         // In all circumstances, a cache MUST NOT ignore the must-revalidate directive
+-        if (this._rescc['must-revalidate']) {
++        if (!this._allowsUnvalidatedReuse() || 'must-revalidate' in this._rescc) {
+             return this._evaluateRequestMissResult(req);
+         }
+ 
+@@ -424,6 +424,9 @@
+         // the stored response is either:
+         // fresh, or allowed to be served stale
+         if (this.stale()) {
++            if (!this._allowsStale()) {
++                return this._evaluateRequestMissResult(req);
++            }
+             // If a value is present, then the client is willing to accept a response that has
+             // exceeded its freshness lifetime by no more than the specified number of seconds
+             const allowsStaleWithoutRevalidation = 'max-stale' in requestCC &&
+@@ -620,18 +623,7 @@
+      * @returns {number} The max-age value in seconds.
+      */
+     maxAge() {
+-        if (!this.storable() || this._rescc['no-cache']) {
+-            return 0;
+-        }
+-
+-        // Shared responses with cookies are cacheable according to the RFC, but IMHO it'd be unwise to do so by default
+-        // so this implementation requires explicit opt-in via public header
+-        if (
+-            this._isShared &&
+-            (this._resHeaders['set-cookie'] &&
+-                !this._rescc.public &&
+-                !this._rescc.immutable)
+-        ) {
++        if (!this._allowsUnvalidatedReuse()) {
+             return 0;
+         }
+ 
+@@ -680,6 +672,30 @@
+     }
+ 
+     /**
++     * Storage restrictions and no-cache are independent of freshness. Preserve
++     * this library's existing shared-cookie opt-in safeguard as well.
++     * @returns {boolean}
++     */
++    _allowsUnvalidatedReuse() {
++        return this.storable() && !('no-cache' in this._rescc) && !(
++            this._isShared && this._resHeaders['set-cookie'] &&
++            !this._rescc.public && !this._rescc.immutable
++        );
++    }
++    /**
++     * RFC 9111 sections 4.2.4 and 5.2.2: stale extensions cannot override
++     * mandatory validation, including s-maxage's proxy-revalidate semantics.
++     * Do not infer a prohibition from maxAge() === 0: ordinary expiry is valid.
++     * @returns {boolean}
++     */
++    _allowsStale() {
++        return this._allowsUnvalidatedReuse() &&
++            !('must-revalidate' in this._rescc) &&
++            !(this._isShared && (
++                'proxy-revalidate' in this._rescc || 's-maxage' in this._rescc
++            ));
++    }
++    /**
+      * Remaining time this cache entry may be useful for, in *milliseconds*.
+      * You can use this as an expiration time for your cache storage.
+      *
+@@ -706,7 +722,9 @@
+      * @returns {boolean} `true` if `stale-if-error` condition allows use of a stale response.
+      */
+     _useStaleIfError() {
+-        return this.maxAge() + toNumberOrZero(this._rescc['stale-if-error']) > this.age();
++        return this._allowsUnvalidatedReuse() &&
++            (!this.stale() || this._allowsStale()) &&
++            this.maxAge() + toNumberOrZero(this._rescc['stale-if-error']) > this.age();
+     }
+ 
+     /** See `evaluateRequest()` for a more complete solution
+@@ -714,7 +732,9 @@
+      */
+     useStaleWhileRevalidate() {
+         const swr = toNumberOrZero(this._rescc['stale-while-revalidate']);
+-        return swr > 0 && this.maxAge() + swr > this.age();
++        return this._allowsUnvalidatedReuse() &&
++            (!this.stale() || this._allowsStale()) &&
++            swr > 0 && this.maxAge() + swr > this.age();
+     }
+ 
+     /**
+@@ -742,13 +762,13 @@
+         this._ignoreCargoCult = !!obj.icc;
+         this._status = obj.st;
+         this._resHeaders = obj.resh;
+-        this._rescc = obj.rescc;
++        this._rescc = Object.fromEntries(Object.entries(obj.rescc).map(([k, v]) => [k.toLowerCase(), v]));
+         this._method = obj.m;
+         this._url = obj.u;
+         this._host = obj.h;
+         this._noAuthorization = obj.a;
+         this._reqHeaders = obj.reqh;
+-        this._reqcc = obj.reqcc;
++        this._reqcc = Object.fromEntries(Object.entries(obj.reqcc).map(([k, v]) => [k.toLowerCase(), v]));
+     }
+ 
+     /**
+@@ -855,7 +875,7 @@
+     revalidatedPolicy(request, response) {
+         this._assertRequestHasHeaders(request);
+ 
+-        if (this._useStaleIfError() && isErrorResponse(response)) {
++        if (this._requestMatches(request, true) && this._useStaleIfError() && isErrorResponse(response)) {
+           return {
+               policy: this,
+               modified: false,
