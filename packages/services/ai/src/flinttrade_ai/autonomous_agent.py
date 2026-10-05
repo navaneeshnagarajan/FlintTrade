@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -39,6 +40,31 @@ logger = logging.getLogger("flinttrade.ai.autonomous_agent")
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 _SQUARE_OFF_LEAD = timedelta(minutes=15)
+
+
+def _confirmed_fill_price(decision: Any) -> float | None:
+    """Read an explicit confirmed fill, never a requested order price."""
+    value = getattr(getattr(decision, "order_response", None), "fill_price", None)
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        return None
+    return float(value)
+
+
+def _rebase_protection_price(level: float, entry_price: float, fill_price: float) -> float:
+    """Preserve an assessed protection percentage around a confirmed fill.
+
+    Legacy callers may omit the decision quote or a protection level. Keep
+    those absolute values rather than inventing percentages from config.
+    These are monitoring thresholds, so retain precision instead of rounding
+    a stop farther away from entry and widening its assessed percentage.
+    """
+    if any(
+        type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+        for value in (level, entry_price)
+    ):
+        return level
+    rebased = fill_price * (level / entry_price)
+    return rebased if math.isfinite(rebased) and rebased > 0 else level
 
 
 # ---------------------------------------------------------------------------
@@ -226,12 +252,13 @@ class AgentConfig:
         symbols:            Instruments to trade (e.g. ["NIFTY25JULFUT"]).
         exchange:           Exchange code (NSE, NFO, MCX, etc.).
         product:            Product type: MIS (intraday), CNC, NRML.
-        max_position_size:  Maximum number of lots per symbol at any time.
+        max_position_size:  Maximum number of instrument units per symbol.
         stop_loss_pct:      Stop-loss as a percentage of entry price.
         take_profit_pct:    Take-profit as a percentage of entry price.
-        daily_stop_loss:    Aggregate daily P&L limit — agent halts if breached.
+        daily_stop_loss:    Aggregate daily P&L limit — new entries halt if breached.
         max_trades_per_symbol: Maximum trades per symbol per session.
         cycle_interval_sec: Seconds between analysis cycles.
+        entry_rationale:    Optional operator-authored session plan for admission.
     """
 
     symbols: list[str] = field(default_factory=list)
@@ -243,6 +270,7 @@ class AgentConfig:
     daily_stop_loss: float = -10_000.0
     max_trades_per_symbol: int = 5
     cycle_interval_sec: int = 60
+    entry_rationale: str = ""
 
 
 @dataclass
@@ -697,11 +725,11 @@ class AutonomousTrader:
             word = raw.split()[0] if raw else "HOLD"
             if word in (TradeSignal.BUY, TradeSignal.SELL, TradeSignal.HOLD):
                 return word
-            logger.debug("LLM returned unexpected signal '%s' for %s, using HOLD", raw, market_data.symbol)
+            logger.debug("LLM returned an unexpected signal for %s, using HOLD", market_data.symbol)
             return TradeSignal.HOLD
 
-        except Exception as exc:
-            logger.error("LLM decision failed for %s: %s", market_data.symbol, exc)
+        except Exception:
+            logger.error("LLM decision failed for %s, using HOLD", market_data.symbol)
             return TradeSignal.HOLD
 
     # ------------------------------------------------------------------
@@ -861,6 +889,7 @@ class AutonomousTrader:
             quantity=str(quantity),
             product=self.config.product,  # type: ignore[arg-type]
             strategy="AutonomousAgent",
+            admission_note=self.config.entry_rationale,
         )
 
     async def execute(
@@ -940,12 +969,18 @@ class AutonomousTrader:
 
             if getattr(decision, "passed", False):
                 orderid = str(getattr(decision.order_response, "orderid", "") or "")
+                fill_price = _confirmed_fill_price(decision)
+                stop_loss, take_profit = risk.stop_loss, risk.take_profit
+                if fill_price is not None:
+                    stop_loss = _rebase_protection_price(stop_loss, entry_price, fill_price)
+                    take_profit = _rebase_protection_price(take_profit, entry_price, fill_price)
+                    entry_price = fill_price
                 async with self._state_lock:
                     self.state.active_positions[symbol] = entry_price
                     self.state.position_details[symbol] = {
                         "entry_price": entry_price,
-                        "stop_loss": risk.stop_loss,
-                        "take_profit": risk.take_profit,
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
                         "action": action,
                         "quantity": risk.position_qty,
                     }
@@ -1290,6 +1325,9 @@ class AutonomousTrader:
                     )
                     return
 
+                fill_price = _confirmed_fill_price(decision)
+                exit_price = fill_price if fill_price is not None else ltp
+                pnl = (exit_price - entry) * qty * (1 if action == "BUY" else -1)
                 async with self._state_lock:
                     self.state.active_positions.pop(symbol, None)
                     self.state.position_details.pop(symbol, None)
@@ -1299,13 +1337,13 @@ class AutonomousTrader:
                             symbol=symbol,
                             action=action,
                             entry_price=entry,
-                            exit_price=ltp,
+                            exit_price=exit_price,
                             quantity=qty,
                             pnl=pnl,
                             exit_reason="sl_tp",
                             # The triggering LTP predicts but does not equal
                             # the MARKET fill — flag it like other estimates.
-                            exit_price_estimated=True,
+                            exit_price_estimated=fill_price is None,
                         )
                     )
 
@@ -1338,6 +1376,7 @@ class AutonomousTrader:
 
         if self.state.stop_loss_hit:
             logger.warning("Daily stop-loss hit — no new trades this cycle")
+            await self._monitor_open_positions()
             return {"skipped": True, "reason": "stop_loss_hit"}
 
         self._status = AgentStatus.RUNNING
@@ -1383,9 +1422,11 @@ class AutonomousTrader:
             }
             self._journal_decision(symbol, signal, risk, exec_result)
 
-        # SL/TP monitoring — previously defined but never invoked, so open
-        # positions went unmanaged until end-of-day square-off. Check every
-        # tracked position once per cycle against its stop/target.
+        await self._monitor_open_positions()
+        return cycle_result
+
+    async def _monitor_open_positions(self) -> None:
+        """Keep existing SL/TP protection running even when new entries halt."""
         async with self._state_lock:
             monitored = [
                 {"symbol": symbol, **details}
@@ -1393,8 +1434,6 @@ class AutonomousTrader:
             ]
         for position in monitored:
             await self.monitor(position)
-
-        return cycle_result
 
     def request_stop(self, square_off: bool = True) -> None:
         """Ask a running session to stop after the current cycle.
@@ -1568,10 +1607,22 @@ class AutonomousTrader:
                     exit_reason="square_off",
                     exit_price_estimated=True,
                 )
+                fill_price = _confirmed_fill_price(decision)
+                if fill_price is not None:
+                    entry = float(details.get("entry_price", 0) or 0)
+                    direction = 1 if str(details.get("action", "BUY")) == "BUY" else -1
+                    record["exit_price"] = fill_price
+                    record["pnl"] = (fill_price - entry) * qty * direction
+                    record["pnl_pct"] = record["pnl"] / (entry * qty) * 100 if entry > 0 and qty > 0 else 0.0
+                    record["exit_price_estimated"] = False
                 async with self._state_lock:
                     self.state.active_positions.pop(symbol, None)
                     self.state.position_details.pop(symbol, None)
                     self.state.closed_trades.append(record)
+                    if fill_price is not None:
+                        self.state.daily_pnl += record["pnl"]
+                        if self.state.daily_pnl <= self.config.daily_stop_loss:
+                            self.state.stop_loss_hit = True
                 exited.append((symbol, details, record))
                 logger.info("Squared off position in %s", symbol)
             except Exception as exc:
@@ -1591,6 +1642,8 @@ class AutonomousTrader:
         # Every exit is dispatched — NOW refine the learning records with a
         # best-effort LTP estimate (pure learning I/O, after the order path).
         for symbol, details, record in exited:
+            if not record["exit_price_estimated"]:
+                continue
             try:
                 exit_price, _ = await self._best_effort_exit_price(symbol, details)
                 entry_price = float(record.get("entry_price", 0) or 0)

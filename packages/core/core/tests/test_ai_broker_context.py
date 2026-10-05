@@ -449,9 +449,10 @@ def test_http_analysis_receives_exact_durable_input_before_model_work(runtime, m
     assert payload["recommendation"]["action"] == "HOLD"
 
 
-def test_concrete_dhan_context_records_unsupported_depth_and_exact_account_inputs(runtime, monkeypatch):
+def test_concrete_dhan_context_records_native_depth_and_exact_account_inputs(runtime, monkeypatch):
     """Exercise the native adapter contract while replacing external SDK I/O only."""
     from flinttrade_gateway.brokers.dhan import DhanAdapter
+    from flinttrade_gateway.brokers.dhan_mapping import build_security_resolver
 
     sdk_calls = []
 
@@ -463,7 +464,11 @@ def test_concrete_dhan_context_records_unsupported_depth_and_exact_account_input
             sdk_calls.append(("quote", self.account_id, securities))
             return {
                 "status": "success",
-                "data": {"data": {"NSE_EQ": {"11536": {"last_price": 123.0, "volume": 17}}}},
+                "data": {"status": "success", "data": {"NSE_EQ": {"11536": {
+                    "last_price": 123.0, "volume": 17,
+                    "depth": {"buy": [{"price": 122.5, "quantity": 8, "orders": 2}],
+                              "sell": [{"price": 123.5, "quantity": 5, "orders": 1}]},
+                }}}},
             }
 
         def get_fund_limits(self):
@@ -471,15 +476,12 @@ def test_concrete_dhan_context_records_unsupported_depth_and_exact_account_input
             return {"status": "success", "data": {"availabelBalance": 700.0}}
 
     clients = {account: DhanSDK(account) for account in ("Quotes", "Execution")}
-    resolved = []
-
-    def resolve_security(symbol, exchange):
-        resolved.append((symbol, exchange))
-        return "11536"
-
     native = DhanAdapter(
         client_factory=lambda session: clients[session.account_id],
-        security_resolver=resolve_security,
+        security_resolver=build_security_resolver([
+            {"SECURITY_ID": "11536", "EXCH_ID": "NSE", "SEGMENT": "E",
+             "TRADING_SYMBOL": "RELIANCE", "INSTRUMENT": "EQUITY", "INSTRUMENT_TYPE": "ES"},
+        ]),
     )
     runtime.dependencies.adapters["dhan"] = native
 
@@ -490,17 +492,23 @@ def test_concrete_dhan_context_records_unsupported_depth_and_exact_account_input
     result = _collect(runtime)
     context = result.market_data
 
-    assert sdk_calls == [("quote", "Quotes", {"NSE_EQ": [11536]}), ("balance", "Execution")]
-    assert resolved == [("RELIANCE", "NSE")]
+    assert sdk_calls == [("quote", "Quotes", {"NSE_EQ": [11536]}),
+                         ("quote", "Quotes", {"NSE_EQ": [11536]}), ("balance", "Execution")]
     assert [(operation, selector) for operation, selector, _ in runtime.adapter.calls] == [
         ("historical", BrokerSelector("upstox", "History")),
     ]
     assert context["quote"]["value"]["ltp"] == 123.0
     assert context["quote"]["value"]["volume"] == 17
     assert context["quote"]["provenance"]["selector"] == {"adapter_id": "dhan", "account_id": "Quotes"}
-    assert context["depth"]["value"] is None
-    assert context["depth"]["provenance"] is None
-    assert context["depth"]["error_code"] == "unsupported"
+    assert context["depth"]["value"] == {
+        "instrument": {"symbol": "RELIANCE", "exchange": "NSE", "instrument_id": None},
+        "bids": [{"price": 122.5, "quantity": 8, "orders": 2}],
+        "asks": [{"price": 123.5, "quantity": 5, "orders": 1}],
+    }
+    assert context["depth"]["provenance"] == context["quote"]["provenance"]
+    assert "error_code" not in context["depth"]
+    assert context["depth"]["source_as_of"] is None
+    assert context["depth"]["observed_at"]
     assert context["balance"]["value"]["available_balance"] == 700.0
     assert context["balance"]["value"]["used_margin"] is None
     assert context["balance"]["provenance"]["selector"] == {"adapter_id": "dhan", "account_id": "Execution"}

@@ -14,6 +14,7 @@ States older than 10 minutes are pruned on every OAuth start request.
 from __future__ import annotations
 
 import logging
+import math
 import secrets
 import threading
 import time
@@ -655,14 +656,15 @@ def _live_rate_limiter() -> Any | None:
 
 
 def _parse_rate(value: Any) -> tuple[bool, float | None]:
-    """Validate an optional non-negative rate. Returns (ok, value_or_None)."""
+    """Validate an optional finite non-negative rate. Returns (ok, value_or_None)."""
     if value is None:
         return True, None
     try:
         rate = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False, None
-    return (rate >= 0, rate if rate >= 0 else None)
+    valid = math.isfinite(rate) and rate >= 0
+    return valid, rate if valid else None
 
 
 @gateway_bp.route("/rate-limits", methods=["GET"])
