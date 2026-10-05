@@ -139,16 +139,19 @@ def _broker_dependency_chain_violations(source: str) -> list[str]:
         node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
     }
     public = functions.get("configure_broker_router")
-    locked = functions.get("_configure_broker_router_locked")
-    if public is None or locked is None:
+    if public is None:
         return ["configure_broker_router count"]
-    if not any(
-        _call_name(call) == "_configure_broker_router_locked"
-        for call in ast.walk(public)
-        if isinstance(call, ast.Call)
-    ):
-        return ["locked composer call"]
-    composers = [locked]
+    locked = functions.get("_configure_broker_router_locked")
+    if locked is None:
+        composers = [public]
+    else:
+        if not any(
+            _call_name(call) == "_configure_broker_router_locked"
+            for call in ast.walk(public)
+            if isinstance(call, ast.Call)
+        ):
+            return ["locked composer call"]
+        composers = [locked]
 
     calls = [node for node in ast.walk(composers[0]) if isinstance(node, ast.Call)]
     violations: list[str] = []
