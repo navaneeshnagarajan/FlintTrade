@@ -172,9 +172,9 @@ class TestGenerateTearsheetWithQS:
         mock_qs.reports.html.return_value = None
 
         returns = _make_returns()
-        # qs.reports.html writes to the buffer (output kwarg); simulate that.
+        # qs.reports.html writes to the output path; simulate that boundary.
         def fake_html(ret, benchmark, title, output):
-            output.write("<html><body><p>tearsheet content</p></body></html>")
+            Path(output).write_text("<html><body><p>tearsheet content</p></body></html>", encoding="utf-8")
 
         mock_qs.reports.html.side_effect = fake_html
         html = generate_tearsheet(returns, title="Test Strategy")
@@ -185,7 +185,7 @@ class TestGenerateTearsheetWithQS:
     @patch("flinttrade_backtest.tearsheet.qs")
     def test_branding_injected_into_output(self, mock_qs):
         def fake_html(ret, benchmark, title, output):
-            output.write("<html><body><p>content</p></body></html>")
+            Path(output).write_text("<html><body><p>content</p></body></html>", encoding="utf-8")
 
         mock_qs.reports.html.side_effect = fake_html
         from flinttrade_backtest.tearsheet import generate_tearsheet
@@ -211,7 +211,7 @@ class TestGenerateTearsheetWithQS:
 
         def fake_html(ret, benchmark, title, output):
             captured["benchmark"] = benchmark
-            output.write("<html><body></body></html>")
+            Path(output).write_text("<html><body></body></html>", encoding="utf-8")
 
         mock_qs.reports.html.side_effect = fake_html
         from flinttrade_backtest.tearsheet import generate_tearsheet
