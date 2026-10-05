@@ -246,16 +246,21 @@ class TestMirrorAllocation:
             _make_account("a1", weight=1.0),
             _make_account("a2", weight=1.0),
         ]
-        # NIFTY lot = 75
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
+        lot = lot_size_from_master("NIFTY")
+        assert lot is not None
         alloc = compute_allocation(150, accounts, AllocationMode.LOT_BASED, symbol="NIFTY")
         for qty in alloc.values():
-            assert qty % 75 == 0  # Must be multiple of lot size
+            assert qty % lot == 0  # Must be multiple of the instrument-master lot size
 
     def test_lot_based_rounds_to_lot(self):
         from flinttrade_ditto.mirror import AllocationMode, compute_allocation
         accounts = [_make_account("a1", weight=1.0)]
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
         alloc = compute_allocation(80, accounts, AllocationMode.LOT_BASED, symbol="NIFTY")
-        assert alloc["a1"] == 75  # Rounded to nearest lot
+        assert alloc["a1"] == lot_size_from_master("NIFTY")  # Rounded to nearest lot
 
     def test_empty_accounts(self):
         from flinttrade_ditto.mirror import AllocationMode, compute_allocation

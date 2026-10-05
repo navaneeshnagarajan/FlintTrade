@@ -1,3 +1,4 @@
+import { lotSizeFromMaster } from "@/lib/instrumentLots";
 import { get, getV1, isDemoAuthSession, postV1 } from "./ftApi.helpers";
 
 export interface FiiDiiSnapshot {
@@ -255,6 +256,31 @@ export interface LotSizeResponse {
    * never silently prefer it over an audited local config.
    */
   is_sample_data?: boolean;
+  /**
+   * Set on demo-session rows. The number follows the near month in the
+   * instrument master, is labelled Example, and does not name a contract month.
+   */
+  example_label?: "Example";
+}
+
+// Bank Nifty before Nifty so a Bank Nifty contract is not read as Nifty.
+const DEMO_MASTER_UNDERLYINGS = ["BANKNIFTY", "SENSEX", "NIFTY"] as const;
+
+/** True when `key` is the underlying or a contract that starts with it. */
+function isMasterUnderlying(key: string, name: string): boolean {
+  if (key === name) return true;
+  if (!key.startsWith(name)) return false;
+  const next = key.charAt(name.length);
+  return /\d/.test(next);
+}
+
+/** Demo lot size from the instrument master, or null when that master has no row. */
+function demoLotSize(symbol: string): number | null {
+  const key = symbol.trim().toUpperCase().replace(/\s+/g, "");
+  const direct = lotSizeFromMaster(key);
+  if (direct != null) return direct;
+  const match = DEMO_MASTER_UNDERLYINGS.find((name) => isMasterUnderlying(key, name));
+  return match == null ? null : lotSizeFromMaster(match);
 }
 
 /**
@@ -387,21 +413,24 @@ export const getLotSize = (
   exchange: string = "NFO",
 ): Promise<LotSizeResponse> => {
   if (isDemoAuthSession()) {
-    // Mirrors the current NSE contract sizes (unified backend table); always
-    // sample-flagged, so never used for real order sizing.
-    const fallbackLotSize = symbol.toUpperCase().includes("BANK")
-      ? 30
-      : symbol.toUpperCase().includes("FIN")
-        ? 65
-        : 75;
+    // Example rows only. The number follows the near month in the instrument
+    // master, is labelled Example, and does not name a contract month. A
+    // symbol the master does not carry returns 0 so callers fail closed.
+    const exampleLot = demoLotSize(symbol);
+    if (exampleLot == null) {
+      return Promise.resolve({
+        symbol,
+        exchange,
+        lot_size: 0,
+        is_sample_data: true,
+      });
+    }
     return Promise.resolve({
       symbol,
       exchange,
-      lot_size: fallbackLotSize,
-      // Fabricated on the client for demo sessions — flag it like the
-      // backend stub does, so no consumer can mistake it for the symbol
-      // master.
+      lot_size: exampleLot,
       is_sample_data: true,
+      example_label: "Example",
     });
   }
 

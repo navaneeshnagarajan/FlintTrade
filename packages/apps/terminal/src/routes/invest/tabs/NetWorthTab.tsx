@@ -24,6 +24,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { cn } from "@/lib/utils";
 import { ExampleChip } from "@/components/ui/ExampleChip";
+import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
 import {
@@ -70,6 +71,7 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 export function NetWorthTab() {
   const { holdings, summary, isLoading, isError, isSampleData, positionBookReady } = useInvest();
   const isExample = Boolean(isSampleData);
+  const isPracticeAccount = useModeStore((s) => s.mode === "practice") && !isExample;
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
   const ledgerCash = summary.ledgerCash ?? availableCash;
   const positionValue = summary.positionValue ?? 0;
@@ -177,7 +179,9 @@ export function NetWorthTab() {
         <p className="text-xs text-text-muted mt-0.5">
           {isExample
             ? "Example equity and cash. Connect a broker to see yours."
-            : "Live equity and cash from your connected broker. Other asset classes require additional data sources."}
+            : isPracticeAccount
+              ? "Practice account, after estimated charges"
+              : "Live equity and cash from your connected broker. Other asset classes require additional data sources."}
         </p>
       </div>
 

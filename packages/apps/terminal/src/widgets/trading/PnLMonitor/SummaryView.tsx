@@ -113,9 +113,10 @@ export interface SummaryViewProps {
   funds: Funds | undefined;
   /** The parent's corrected net day P&L — the same figure the Live headline shows. */
   netPnL: number;
+  estimatedCharges?: number;
 }
 
-export function SummaryView({ positions, funds, netPnL }: SummaryViewProps) {
+export function SummaryView({ positions, funds, netPnL, estimatedCharges = 0 }: SummaryViewProps) {
   const openCount = positions.filter((p) => quantityOf(p) !== 0).length;
   const positiveCount = positions.filter((p) => positionMtm(p) > 0).length;
   const negativeCount = positions.filter((p) => positionMtm(p) < 0).length;
@@ -127,7 +128,16 @@ export function SummaryView({ positions, funds, netPnL }: SummaryViewProps) {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Day P&amp;L</div>
-            <div className={`text-xl font-bold font-mono tabular-nums ${pnlColor(netPnL)}`}>{formatCompactINR(netPnL)}</div>
+            <div
+              className={`text-xl font-bold font-mono tabular-nums ${pnlColor(netPnL)}`}
+              title={
+                estimatedCharges > 0
+                  ? `Gross ${formatCompactINR(netPnL + estimatedCharges)} · Charges ${formatCompactINR(estimatedCharges)} (estimated)`
+                  : undefined
+              }
+            >
+              {formatCompactINR(netPnL)}
+            </div>
             <div className="text-xs text-text-muted mt-0.5">{openCount} open positions</div>
           </CardContent>
         </Card>

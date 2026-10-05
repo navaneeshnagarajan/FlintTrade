@@ -1,7 +1,12 @@
 import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import fixture from "@flinttrade/instrument-lots";
+import { setInstrumentLotRows, type ScripRow } from "@/lib/instrumentLots";
 import { resetOperatorSignals } from "@/stores/operatorSignalStore";
+
+const shippedLotRows = (fixture as { rows: ScripRow[] }).rows;
+setInstrumentLotRows(shippedLotRows);
 
 // ---------------------------------------------------------------------------
 // 1. React test environment flag.
@@ -22,6 +27,7 @@ Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
 // previous file stay in the DOM and cause "Found multiple elements" failures.
 // ---------------------------------------------------------------------------
 afterEach(() => {
+  setInstrumentLotRows(shippedLotRows);
   resetOperatorSignals();
   cleanup();
   if (typeof globalThis.localStorage?.clear === "function") {

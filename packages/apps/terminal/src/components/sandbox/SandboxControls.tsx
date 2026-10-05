@@ -45,6 +45,8 @@ interface SandboxStatus {
   capital: number;
   initial_capital: number;
   pnl: number;
+  gross_pnl?: number;
+  charges?: number;
   trades_count: number;
 }
 
@@ -333,6 +335,11 @@ export default function SandboxControls() {
               <span
                 className={`flex items-center gap-0.5 font-medium ${pnlPositive ? "text-profit" : "text-loss"}`}
                 aria-label={`P&L: ${pnlPositive ? "+" : ""}₹${formatInr(pnl)}`}
+                title={
+                  (status?.charges ?? 0) > 0
+                    ? `Gross ₹${formatInr(status?.gross_pnl ?? pnl)} · Charges ₹${formatInr(status?.charges ?? 0)} (estimated)`
+                    : undefined
+                }
               >
                 {pnlPositive
                   ? <TrendingUp size={11} aria-hidden="true" />

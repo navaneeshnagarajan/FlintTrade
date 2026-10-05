@@ -361,14 +361,14 @@ class EnhancedPortfolioGreeks(PortfolioGreeks):
     - :meth:`attribute_pnl` for post-hoc P&L decomposition
     - :meth:`pcr` property for quick Put-Call ratio
 
-    Usage::
+    Example::
 
         epg = EnhancedPortfolioGreeks(client)
         positions = [
             OptionPosition(symbol="NIFTY26MAR2524000CE", action="SELL",
-                           lots=2, lot_size=75, option_type="CE"),
+                           lots=2, lot_size=65, option_type="CE"),
             OptionPosition(symbol="NIFTY26MAR2524000PE", action="SELL",
-                           lots=2, lot_size=75, option_type="PE"),
+                           lots=2, lot_size=65, option_type="PE"),
         ]
         result = epg.calculate_enhanced(positions, spot=24000, time_to_expiry=7/365)
         print(f"Net delta: {result.net_delta}")

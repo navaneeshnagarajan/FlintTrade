@@ -21,11 +21,11 @@ Hedging becomes valuable when:
 **Sizing:**
 ```
 Puts needed = Portfolio value / (Nifty spot × lot size)
-For a ₹10L portfolio with Nifty at 22,000 and lot size 75:
-Puts needed = 10,00,000 / (22,000 × 75) = 0.61 → buy 1 lot
+Example: a ₹10L portfolio with Nifty at 22,000 and quantity 65 (an example size, not a live lot):
+Puts needed = 10,00,000 / (22,000 × 65) = 0.70 → buy 1 lot
 ```
 
-This provides partial protection (1 lot covers ₹16.5L notional — over-hedges this portfolio, which is fine).
+This provides partial protection (1 lot covers ₹14.3L notional — over-hedges this portfolio, which is fine).
 
 **Strike selection:**
 - 5% OTM put: Cheap but provides protection only on large moves (5%+ fall)

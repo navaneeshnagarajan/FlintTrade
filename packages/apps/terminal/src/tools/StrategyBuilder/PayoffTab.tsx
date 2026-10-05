@@ -46,7 +46,7 @@ function BasisNote({
   positionRupees,
 }: {
   legs: Leg[];
-  lotSize: number;
+  lotSize: number | null;
   positionRupees: number | null;
 }) {
   const sublabel = formatPositionSublabel(legs, lotSize, positionRupees);
@@ -81,7 +81,8 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
   const minPnl = summary?.maxLoss ?? null;
   const bepPoints = summary?.breakevens ?? [];
 
-  const positionNet = calculatePositionNetPremium(legs, underlying.lotSize);
+  const lotSize = underlying.lotSize;
+  const positionNet = calculatePositionNetPremium(legs, lotSize);
 
   if (!valid || legs.length === 0) {
     return (
@@ -114,13 +115,13 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Profit</div>
             <div className={`text-base font-bold font-mono tabular-nums ${(maxPnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {maxPnl === Infinity ? "Unlimited" : formatINR((maxPnl ?? 0) * underlying.lotSize)}
+              {maxPnl === Infinity ? "Unlimited" : maxPnl == null || lotSize == null ? "—" : formatINR(maxPnl * lotSize)}
             </div>
             {maxPnl !== Infinity && (
               <BasisNote
                 legs={legs}
-                lotSize={underlying.lotSize}
-                positionRupees={maxPnl == null ? null : maxPnl * underlying.lotSize}
+                lotSize={lotSize}
+                positionRupees={maxPnl == null || lotSize == null ? null : maxPnl * lotSize}
               />
             )}
           </CardContent>
@@ -129,13 +130,13 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Loss</div>
             <div className={`text-base font-bold font-mono tabular-nums ${(minPnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {minPnl === -Infinity ? "Unlimited" : formatINR((minPnl ?? 0) * underlying.lotSize)}
+              {minPnl === -Infinity ? "Unlimited" : minPnl == null || lotSize == null ? "—" : formatINR(minPnl * lotSize)}
             </div>
             {minPnl !== -Infinity && (
               <BasisNote
                 legs={legs}
-                lotSize={underlying.lotSize}
-                positionRupees={minPnl == null ? null : minPnl * underlying.lotSize}
+                lotSize={lotSize}
+                positionRupees={minPnl == null || lotSize == null ? null : minPnl * lotSize}
               />
             )}
           </CardContent>
@@ -144,10 +145,10 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Net Premium</div>
             <div className={`text-base font-bold font-mono tabular-nums ${(positionNet ?? 0) <= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {formatINR(positionNet ?? 0)}
+              {positionNet == null ? "—" : formatINR(positionNet)}
             </div>
-            <div className="text-xxs text-text-muted">{(positionNet ?? 0) <= 0 ? "Credit" : "Debit"}</div>
-            <BasisNote legs={legs} lotSize={underlying.lotSize} positionRupees={positionNet} />
+            <div className="text-xxs text-text-muted">{positionNet == null ? "—" : positionNet <= 0 ? "Credit" : "Debit"}</div>
+            <BasisNote legs={legs} lotSize={lotSize} positionRupees={positionNet} />
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
@@ -207,7 +208,7 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
                         <div
                           className={`w-full ${isAtm ? "bg-blue-500/80" : "bg-emerald-600/70"} rounded-sm`}
                           style={{ height: `${Math.max(2, h)}px` }}
-                          title={`${pt.price.toFixed(0)}: ${formatINR(pt.pnl * underlying.lotSize)}`}
+                          title={`${pt.price.toFixed(0)}: ${lotSize == null ? "—" : formatINR(pt.pnl * lotSize)}`}
                         />
                       </div>
                     ) : (
@@ -215,7 +216,7 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
                         <div
                           className={`w-full ${isAtm ? "bg-blue-500/80" : "bg-red-600/70"} rounded-sm`}
                           style={{ height: `${Math.max(2, h)}px` }}
-                          title={`${pt.price.toFixed(0)}: ${formatINR(pt.pnl * underlying.lotSize)}`}
+                          title={`${pt.price.toFixed(0)}: ${lotSize == null ? "—" : formatINR(pt.pnl * lotSize)}`}
                         />
                       </div>
                     )}
@@ -252,9 +253,9 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
               </TableHeader>
               <TableBody>
                 {points.filter((_, i) => i % 4 === 0).map((pt, i) => {
-                  const pnlLot = pt.pnl * underlying.lotSize;
+                  const pnlLot = lotSize == null ? null : pt.pnl * lotSize;
                   const margin = estimateMargin(legs, underlying);
-                  const pct = margin > 0 ? (pnlLot / margin) * 100 : 0;
+                  const pct = pnlLot != null && margin != null && margin > 0 ? (pnlLot / margin) * 100 : 0;
                   const isAtm =
                     Math.abs(pt.price - spotPrice) < (points[4]?.price - points[0]?.price) / 2;
                   return (
@@ -266,8 +267,8 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
                         {pt.price.toFixed(0)}
                         {isAtm && <span className="text-xxs ml-1 text-primary">ATM</span>}
                       </TableCell>
-                      <TableCell className={`py-1 text-xs font-mono text-right ${pnlLot >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {pnlLot >= 0 ? "+" : ""}{formatINR(pnlLot)}
+                      <TableCell className={`py-1 text-xs font-mono text-right ${pnlLot != null && pnlLot >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {pnlLot == null ? "—" : `${pnlLot >= 0 ? "+" : ""}${formatINR(pnlLot)}`}
                       </TableCell>
                       <TableCell className={`py-1 text-xs font-mono text-right pr-3 ${pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                         {pct >= 0 ? "+" : ""}{pct.toFixed(1)}%

@@ -28,10 +28,10 @@ Typical usage::
     result = simulate_short_straddle(
         spot=24050.0, strike=24000.0,
         call_premium=180.0, put_premium=175.0,
-        lot_size=75,
+        lot_size=65,  # Example quantity, not a live lot.
         adjustment_points=100,
     )
-    print(result["max_profit"])       # ₹ 26,625
+    print(result["max_profit"])       # Example: (180 + 175) × 65 = ₹ 23,075
 
     spot_range = np.linspace(22000, 26000, 500)
     legs = [
@@ -103,14 +103,14 @@ def simulate_short_straddle(
         - ``"lot_size"``              (int)
         - ``"is_atm"``                (bool)  — True if spot ≈ strike (±2%)
 
-    Examples:
+    Example (quantity 65 below is an example size, not a live lot):
         >>> r = simulate_short_straddle(
         ...     spot=24000.0, strike=24000.0,
         ...     call_premium=180.0, put_premium=175.0,
-        ...     lot_size=75,
+        ...     lot_size=65,
         ... )
         >>> r["max_profit"]
-        26625.0
+        23075.0
         >>> r["breakeven_low"]
         23645.0
         >>> r["breakeven_high"]
@@ -203,18 +203,18 @@ def simulate_iron_condor(
         - ``"profit_zone_high"`` (float) — sell_call_strike
         - ``"lot_size"``         (int)
 
-    Examples:
+    Example (quantity 65 below is an example size, not a live lot):
         >>> r = simulate_iron_condor(
         ...     spot=24000, sell_call_strike=24500, buy_call_strike=24700,
         ...     sell_put_strike=23500, buy_put_strike=23300,
         ...     sell_call_premium=80, buy_call_premium=40,
         ...     sell_put_premium=75, buy_put_premium=35,
-        ...     lot_size=75,
+        ...     lot_size=65,
         ... )
         >>> r["net_premium"]
-        80.0
+        80
         >>> r["max_profit"]
-        6000.0
+        5200
     """
     net_premium = (sell_call_premium - buy_call_premium) + (sell_put_premium - buy_put_premium)
 

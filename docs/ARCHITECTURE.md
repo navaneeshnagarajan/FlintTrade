@@ -399,9 +399,12 @@ by Laya admission and then SafetySystem L1–L5, `gate_order`, and
 `gtt_unsupported` before that admission, on place, routed place,
 exit-all, and a bracket. A refusal or a quantity clamp stops before SafetySystem.
 Practice place is admitted before the Practice fill path and does not enter
-those Live layers. Practice square-off is place. That book
-cancels and modifies; it does not place. `cancel-all` only cancels.
-Other Live write verbs still reach SafetySystem without this admission. See
+those Live layers. A named contract must be a positive multiple of its lot
+from the broker instrument master; a missing lot is refused before the fill.
+Practice square-off is place. That book cancels and modifies; it does not
+place. `cancel-all` only cancels. Explore remains `mode_blocked` and does
+not enter `Laya.admit`. Other Live write verbs still reach SafetySystem
+without this admission. See
 [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 `_check_order_locked` fail-fasts in this runtime order (not L1–L5

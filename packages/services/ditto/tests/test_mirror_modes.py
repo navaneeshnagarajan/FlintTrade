@@ -561,14 +561,6 @@ class TestBrokerCostMetadata:
             display_name="Kotak Neo",
             brokerage_frac=0.0,
             brokerage_flat_per_order=0.0,
-            stt_futures_sell=0.0005,
-            stt_options_sell=0.0015,
-            exchange_charge_futures=1.73e-5,
-            exchange_charge_options=3.503e-4,
-            gst_rate=0.18,
-            sebi_charge_per_crore=10.0,
-            stamp_duty_buy_futures=2e-5,
-            stamp_duty_buy_options=3e-5,
             demat_amc_annual=600.0,
             notes="Zero brokerage from Nov 2025",
         )
@@ -578,7 +570,6 @@ class TestBrokerCostMetadata:
         return BrokerCostMetadata(
             broker_key="other",
             brokerage_frac=0.0002,
-            stt_options_sell=0.0015,
         )
 
     def test_broker_key_stored(self) -> None:

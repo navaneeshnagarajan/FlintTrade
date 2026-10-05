@@ -148,8 +148,8 @@ describe("analyseSpread", () => {
 // Builder bridge — the capability the Lab Strategy Builder gained
 // ---------------------------------------------------------------------------
 
-/** NIFTY's post-Nov-2024 contract lot size, matching StrategyBuilder types.ts. */
-const NIFTY_LOT = 75;
+/** Example NIFTY quantity for the builder bridge. Not a live master read. */
+const NIFTY_LOT = 65;
 
 function leg(partial: Partial<VerticalSpreadLeg> = {}): VerticalSpreadLeg {
   return { action: "BUY", optionType: "CE", strike: 24000, lots: 1, premium: 50, ...partial };
@@ -180,7 +180,7 @@ describe("asVerticalSpread — classification", () => {
       ],
       NIFTY_LOT,
     );
-    expect(spread?.inputs.lotSize).toBe(150);
+    expect(spread?.inputs.lotSize).toBe(130);
   });
 
   it("nets the two per-leg premiums into one signed spread premium", () => {

@@ -56,7 +56,9 @@ function realAllocation(equity: number, positions: number, cash: number): Alloca
 }
 
 export function PortfolioCard() {
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const mode = useModeStore((s) => s.mode);
+  const isExplore = mode === "explore";
+  const isPractice = mode === "practice";
   const accountReadsEnabled = useAccountReadsEnabled();
   const fundsQuery = useFunds({ enabled: accountReadsEnabled });
   const holdingsQuery = useHoldings({ enabled: accountReadsEnabled });
@@ -135,6 +137,11 @@ export function PortfolioCard() {
                 ? formatAccountNetWorth(netWorth, approximate)
                 : "—"}
           </p>
+          {isPractice && netWorthPublished && (
+            <p className="text-[10px] text-text-muted mt-0.5" data-testid="portfolio-charges-source">
+              Practice account, after estimated charges
+            </p>
+          )}
         </div>
 
         <div>

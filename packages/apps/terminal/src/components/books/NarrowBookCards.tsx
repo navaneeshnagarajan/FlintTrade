@@ -16,6 +16,10 @@ export interface NarrowBookCardRow {
   pnlPercent: string;
   pnlPositive: boolean;
   actions?: ReactNode;
+  /** Broker-row key, so a heat-map "+N more" chip can scroll this card into view. */
+  positionKey?: string;
+  /** Set when a heat-map chip has asked the list to show this row. */
+  highlighted?: boolean;
 }
 
 export function NarrowBookCards({
@@ -32,7 +36,15 @@ export function NarrowBookCards({
       className="min-h-0 flex-1 divide-y divide-border-subtle overflow-y-auto"
     >
       {rows.map((row) => (
-        <li key={row.id} className="flex items-start justify-between gap-3 px-3 py-2">
+        <li
+          key={row.id}
+          data-position-key={row.positionKey}
+          data-highlighted={row.highlighted ? "true" : undefined}
+          className={cn(
+            "flex items-start justify-between gap-3 px-3 py-2",
+            row.highlighted && "bg-accent/20",
+          )}
+        >
           <div className="min-w-0">
             <div className="truncate font-mono font-medium text-text-primary">{row.symbol}</div>
             <div className="font-mono text-xxs tabular-nums text-text-muted">{row.detail}</div>
