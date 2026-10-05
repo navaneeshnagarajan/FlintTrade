@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
+import { useIndexLotLine } from "@/lib/instrumentLots";
 import { motionConfig } from "@/lib/motion";
 import { Page, PageHeader } from "@/components/layout/Page";
 import { SectionNav } from "@/components/layout/SectionNav";
@@ -137,8 +138,9 @@ const BASICS_SECTIONS: BasicsSection[] = [
 ];
 
 /**
- * Learn Glossary entries. Any figure an exchange revises must ship with an
- * “as of” date and a verify link — stale undated lots are a bug (FT-LEARN-002).
+ * Learn Glossary entries. Lot Size is filled in at render from the shared
+ * instrument-master line (the same wording as the risk skill). A missing
+ * underlying is an em dash. The verify link stays.
  */
 const LEARN_INDEX_LOT_VERIFY_HREF =
   "https://nsearchives.nseindia.com/content/circulars/FAOP70616.pdf";
@@ -155,8 +157,7 @@ const GLOSSARY: GlossaryEntry[] = [
   { term: "IV",         definition: "Implied Volatility — market's expectation of future price movement" },
   {
     term: "Lot Size",
-    definition:
-      "Minimum quantity for F&O trading. NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 · MIDCPNIFTY 120 (as of Jan 2026 NSE cycle).",
+    definition: "Minimum quantity for F&O trading.",
     verifyHref: LEARN_INDEX_LOT_VERIFY_HREF,
     verifyLabel: "Verify on NSE",
   },
@@ -469,8 +470,17 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
 }
 
 function GlossaryTab() {
+  const lotLine = useIndexLotLine();
+  const glossary = useMemo(
+    () => GLOSSARY.map((entry) => (
+      entry.term === "Lot Size"
+        ? { ...entry, definition: `Minimum quantity for F&O trading. ${lotLine}.` }
+        : entry
+    )),
+    [lotLine],
+  );
   const [search, setSearch] = useState("");
-  const filtered = GLOSSARY.filter(
+  const filtered = glossary.filter(
     (e) =>
       e.term.toLowerCase().includes(search.toLowerCase()) ||
       e.definition.toLowerCase().includes(search.toLowerCase()),

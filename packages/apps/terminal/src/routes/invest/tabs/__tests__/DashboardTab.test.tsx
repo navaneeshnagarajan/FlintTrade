@@ -284,7 +284,7 @@ describe("DashboardTab", () => {
       "Equity + Cash from your connected broker. Debt / MF requires NAV data source.",
     )).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to see movers.")).toBeInTheDocument();
-    expect(screen.queryByText(/Practice account/)).not.toBeInTheDocument();
+    expect(screen.getByText("Practice account, after estimated charges")).toBeInTheDocument();
   });
 
   it("marks the total row approximate and leaves allocation unmarked", () => {
@@ -305,6 +305,8 @@ describe("DashboardTab", () => {
     expect(screen.getByTestId("invest-net-worth").textContent).toBe(formatAccountNetWorth(452_300, true));
     expect(screen.getByTestId("invest-net-worth")).toHaveAccessibleName(accountNetWorthAccessibleName(452_300));
     expect(screen.getByRole("list", { name: "Portfolio allocation values" })).not.toHaveTextContent("≈");
+    expect(screen.getByTestId("invest-available-funds").textContent).toBe(formatAccountNetWorth(50_000));
+    expect(screen.getByTestId("invest-available-funds")).not.toHaveTextContent("≈");
   });
 
   it("labels the sample XIRR with one Example chip and no sample banner in Explore", () => {
@@ -357,7 +359,7 @@ describe("DashboardTab", () => {
   });
 
   it("keeps live broker wording when the figures are not sample data", () => {
-    useModeStore.setState({ mode: "practice" });
+    useModeStore.setState({ mode: "live" });
     investState.isSampleData = false;
     investState.holdings = LIVE_ROWS;
     render(

@@ -167,7 +167,7 @@ def calculate_gex(
     Args:
         snapshot: Full option chain snapshot with gamma and OI per strike.
         spot: Current spot/futures price of the underlying.
-        lot_size: Contract lot size (e.g. 75 for NIFTY, 30 for BANKNIFTY).
+        lot_size: Contract lot size. Example: 65 for a NIFTY contract, 30 for a BANKNIFTY contract.
 
     Returns:
         GEXResult with per-strike breakdown, totals, and key levels.

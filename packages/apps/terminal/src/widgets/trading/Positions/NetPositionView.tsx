@@ -10,12 +10,14 @@
 
 import { useState, memo } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   fmtExposure,
   fmtPnl,
   fmtPrice,
   groupByUnderlying,
+  offsetLegTooltip,
   type NetPositionRow,
 } from "./positionBook";
 
@@ -62,17 +64,32 @@ function UnderlyingGroup({ underlying, rows }: UnderlyingGroupProps) {
       </tr>
 
       {/* Position rows */}
-      {expanded && rows.map((row) => (
+      {expanded && rows.map((row, index) => (
         <tr
-          key={row.symbol}
+          key={`${row.symbol}:${row.product ?? ""}:${index}`}
           className="border-t border-border-subtle hover:bg-surface-hover transition-colors"
-          aria-label={`${row.symbol}: net qty ${row.netQty}`}
+          aria-label={
+            row.offset && row.product
+              ? `${row.symbol} ${row.product}: net qty ${row.netQty}`
+              : `${row.symbol}: net qty ${row.netQty}`
+          }
         >
           <td
-            className="py-1.5 pl-6 pr-2 text-xs text-text-secondary truncate max-w-32"
+            className="py-1.5 pl-6 pr-2 text-xs text-text-secondary max-w-40"
             title={row.legs > 1 ? `${row.symbol} — netted from ${row.legs} rows` : row.symbol}
           >
-            {row.symbol}
+            <span className="inline-flex items-center gap-1 min-w-0">
+              <span className="truncate">{row.symbol}</span>
+              {row.offset && (
+                <Badge
+                  variant="outline"
+                  title={offsetLegTooltip(row.offsetProducts ?? [])}
+                  className="h-4 px-1 text-xxs font-medium text-text-secondary"
+                >
+                  Offset
+                </Badge>
+              )}
+            </span>
           </td>
 
           <td
@@ -113,17 +130,25 @@ function UnderlyingGroup({ underlying, rows }: UnderlyingGroupProps) {
 export interface NetPositionViewProps {
   rows: NetPositionRow[];
   /**
-   * Mark-to-market of the WHOLE book, including the legs netted out of the
+   * Mark-to-market of the WHOLE book, including symbols netted out of the
    * table below. Same figure the header shows in every view.
    */
   totalPnl: number;
   /** Σ exposure of the net rows shown. */
   totalExposure: number;
-  /** Broker rows excluded because their symbol netted flat (or closed). */
-  flatLegs: number;
+  /** Symbols whose legs are all at quantity 0. Hidden in the footer at 0. */
+  flatSymbols: number;
+  /** Symbols whose legs net to 0 but still have an open leg. Hidden at 0. */
+  offsetSymbols: number;
 }
 
-function NetPositionView({ rows, totalPnl, totalExposure, flatLegs }: NetPositionViewProps) {
+function NetPositionView({
+  rows,
+  totalPnl,
+  totalExposure,
+  flatSymbols,
+  offsetSymbols,
+}: NetPositionViewProps) {
   const underlyings = groupByUnderlying(rows);
 
   return (
@@ -144,17 +169,21 @@ function NetPositionView({ rows, totalPnl, totalExposure, flatLegs }: NetPositio
           <UnderlyingGroup key={underlying} underlying={underlying} rows={groupRows} />
         ))}
 
-        {/* Totals. The P&L column carries the WHOLE book's mark-to-market, so
-            this widget reports one number in every view; when legs have netted
-            flat the column visibly will not add up, and the label says why
-            rather than letting the figure quietly disagree with the header. */}
+        {/* Totals. The P&L column carries the WHOLE book's mark-to-market.
+            Flat symbols are absent from the rows; offset symbols stay, one
+            row per open leg, so their margin is in the exposure column. */}
         <tfoot>
           <tr className="bg-surface-card border-t-2 border-border-default">
             <td className="py-2 px-2 text-xs font-bold text-text-primary" colSpan={4}>
               Total
-              {flatLegs > 0 && (
+              {offsetSymbols > 0 && (
                 <span className="ml-1 text-xxs font-normal text-text-muted">
-                  incl. {flatLegs} flat leg{flatLegs === 1 ? "" : "s"}
+                  incl. {offsetSymbols} offset symbol{offsetSymbols === 1 ? "" : "s"} (legs still open)
+                </span>
+              )}
+              {flatSymbols > 0 && (
+                <span className="ml-1 text-xxs font-normal text-text-muted">
+                  incl. {flatSymbols} flat symbol{flatSymbols === 1 ? "" : "s"}
                 </span>
               )}
             </td>

@@ -68,6 +68,10 @@ import {
 import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
+import {
+  deskContractName,
+  missingLotRefusal,
+} from "@/lib/instrumentLots";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
 import {
   SESSION_OPEN_LABEL,
@@ -627,10 +631,11 @@ function OrderPadWidget(props: WidgetProps) {
   }, [isPinned, channelInstrument, setValue, prefill.exchange]);
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
-  // On match, qty is set to the instrument's lotsize so the first order is valid.
-  // The lot constraint is reset BEFORE the lookup so a failed fetch never leaves
-  // a stale lot size from the previous instrument — derivative submissions fail
-  // closed on an unknown lot size.
+  // A lot belongs to this exact contract: different expiries can have different
+  // sizes. Reset BEFORE the lookup so a failed fetch cannot leave a stale lot
+  // from the previous instrument or accept a nearby underlying's contract.
+  // Re-read on selection changes; an underlying-cache refresh is not evidence
+  // of a change to this selected contract's metadata.
   useEffect(() => {
     if (!symbol || !exchange) return;
     let cancelled = false;
@@ -640,6 +645,8 @@ function OrderPadWidget(props: WidgetProps) {
     if (!result || typeof result.then !== "function") return;
     result.then((info) => {
         if (cancelled) return;
+        if (contractToken(info.symbol) !== contractToken(symbol)
+          || contractToken(info.exchange) !== contractToken(exchange)) return;
         // Coerce defensively — some adapters send numerics as strings.
         const ls = Number(info.lotsize ?? 0);
         if (Number.isFinite(ls) && ls > 0) {
@@ -1009,7 +1016,7 @@ function OrderPadWidget(props: WidgetProps) {
     );
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
-        ? `Lot size unknown for ${values.symbol} (${values.exchange}) — cannot validate the F&O quantity. Reselect the symbol and try again.`
+        ? missingLotRefusal(deskContractName(values.symbol))
         : lotRefusal;
       setError("qty", { type: "validate", message: msg });
       showToast("error", msg, 6000);

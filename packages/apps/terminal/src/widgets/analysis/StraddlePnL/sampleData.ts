@@ -1,9 +1,10 @@
 /**
- * Realistic NIFTY 24000 ATM straddle P&L sample data.
+ * Example NIFTY 24000 ATM straddle. The quantity 65 is an example size,
+ * not a live instrument-master lot.
  * ATM straddle = BUY 24000 CE + BUY 24000 PE.
  * Call premium: 185, Put premium: 178 (total debit: 363 points).
  * Break-even: 23637 (low) and 24363 (high).
- * Max loss: -363 × 75 = -27,225 (if NIFTY expires exactly at 24000).
+ * Example max loss: -363 × 65 = -23,595 (if NIFTY expires exactly at 24000).
  * P&L curve spans spot from 23000 to 25000, step 50.
  *
  * The curve shape is classic V (long straddle):
@@ -17,7 +18,7 @@ const ATM_STRIKE = 24000;
 const CALL_PREMIUM = 185;
 const PUT_PREMIUM = 178;
 const TOTAL_PREMIUM = CALL_PREMIUM + PUT_PREMIUM; // 363
-const LOT_SIZE = 75;
+const LOT_SIZE = 65; // Example quantity. Not a live master read.
 
 // Break-even points
 const BE_LOW = ATM_STRIKE - TOTAL_PREMIUM;   // 23637
@@ -55,7 +56,7 @@ export const SAMPLE_STRADDLE_PNL_DATA: StraddlePnLData = {
   put_premium: PUT_PREMIUM,
   break_even_low: BE_LOW,
   break_even_high: BE_HIGH,
-  max_loss: -(TOTAL_PREMIUM * LOT_SIZE),   // -27225
+  max_loss: -(TOTAL_PREMIUM * LOT_SIZE),   // -23595
   curve,
   legs,
 };

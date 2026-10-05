@@ -6,6 +6,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { UNDERLYINGS } from "../types";
+import { formatINR } from "../utils";
+
+const niftyLot = UNDERLYINGS[0].lotSize ?? 0;
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -141,7 +145,7 @@ describe("StrategyBuilderTool", () => {
   it("seeds a labelled sample premium on Explore Long Call so payoff is not zero-risk", async () => {
     // Tester FT-LAB-003: Explore → /lab → Options Builder → Long Call → Payoff
     // must not read as Premium ₹0 / max loss ₹0. Sample-chain ATM CE LTP
-    // (NIFTY 22500, gap 50) is 45 → max loss 45 × 75 = ₹3,375.
+    // (NIFTY 22500, gap 50) is 45 → max loss 45 × the instrument-master lot.
     render(<StrategyBuilderTool />);
     await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
 
@@ -151,11 +155,11 @@ describe("StrategyBuilderTool", () => {
     await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
-    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
-    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹3,375.00");
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent(`-${formatINR(45 * niftyLot)}`);
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent(formatINR(45 * niftyLot));
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22545");
     expect(screen.getByText("Example premium — edit to model")).toBeInTheDocument();
-    expect(screen.getAllByText("₹3,375.00 per lot · 1 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(`${formatINR(45 * niftyLot)} per lot · 1 lot · lot size ${niftyLot}`).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Premium is ₹0 — payoff treats cost as free")).not.toBeInTheDocument();
   });
 
@@ -163,13 +167,14 @@ describe("StrategyBuilderTool", () => {
     render(<StrategyBuilderTool />);
     await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
 
-    const chips = screen.getAllByText(/Debit ₹3,375.00/);
+    const debit = formatINR(45 * niftyLot);
+    const chips = screen.getAllByText(new RegExp(`Debit ${debit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     expect(chips.length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/Debit ₹45.00/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
-    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
-    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹3,375.00");
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent(`-${debit}`);
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent(debit);
   });
 
   it("shows em-dash payoff cards for an unset Add-Leg premium, not ₹0", async () => {

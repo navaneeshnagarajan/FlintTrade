@@ -175,7 +175,7 @@ describe("accountNetWorth", () => {
     );
   });
 
-  it("uses the practice charges source, which is 0 today, and keeps blocked margin in cash", () => {
+  it("uses the practice charges source, which is 0 until a fill estimates one, and keeps blocked margin in cash", () => {
     const practiceBook = {
       availableCash: 999_200,
       usedMargin: 800,
@@ -200,6 +200,27 @@ describe("accountNetWorth", () => {
     expect(total).toBe(1_000_000);
     expect(total).not.toBe(practiceBook.availableCash);
     expect(netWorthApproximation(positions, practiceBook.futuresMtmInLedger).approximate).toBe(false);
+  });
+
+  it("subtracts Practice estimated charges from ledger cash plus the futures mark", () => {
+    const practiceBook = {
+      availableCash: 999_200,
+      usedMargin: 800,
+      ledgerBalance: 1_000_000,
+      futuresMtmInLedger: false as const,
+      estimatedCharges: 40,
+    };
+    const positions: PositionLine[] = [{
+      symbol: "NIFTY24APRFUT",
+      exchange: "NFO",
+      ltp: 22_100,
+      quantity: 1,
+      averagePrice: 22_000,
+    }];
+
+    expect(accountCharges(practiceBook)).toBe(40);
+    // Ledger 1_000_000 plus the ₹100 futures mark, minus the ₹40 estimate.
+    expect(accountNetWorth([], accountLedgerCash(practiceBook), positions, 40, false)).toBe(1_000_060);
   });
 });
 

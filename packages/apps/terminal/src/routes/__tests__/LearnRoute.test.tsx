@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 // Mock framer-motion to avoid animation issues in tests
@@ -46,6 +46,7 @@ vi.mock("@/lib/tourDefinitions", () => ({
 }));
 
 import LearnRoute from "../LearnRoute";
+import { indexLotLine, setInstrumentLotRows } from "@/lib/instrumentLots";
 
 function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["initialEntries"] = ["/learn"]) {
   return render(
@@ -188,22 +189,41 @@ describe("LearnRoute", () => {
     expect(nowrapLeftovers).toEqual([]);
   });
 
-  it("teaches dated Jan 2026 NSE-cycle index lots, not retired NIFTY=25 / BANKNIFTY=15", () => {
+  it("teaches the master index lot line, with an em dash for a missing underlying", () => {
     renderLearnRoute();
     fireEvent.click(screen.getByRole("tab", { name: "Glossary" }));
 
     const lotSize = screen.getByText("Lot Size");
     fireEvent.click(lotSize);
 
-    expect(screen.getAllByText(/NIFTY 65/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/BANKNIFTY 30/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/FINNIFTY 60/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/MIDCPNIFTY 120/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/as of Jan 2026 NSE cycle/i).length).toBeGreaterThan(0);
+    const line = indexLotLine();
+    expect(line).toMatch(/NIFTY \d+/);
+    expect(line).toMatch(/BANKNIFTY \d+/);
+    expect(line).toMatch(/SENSEX \d+/);
+    expect(screen.getAllByText(new RegExp(line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/as of Jan 2026 NSE cycle/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/FINNIFTY 60/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/MIDCPNIFTY 120/)).not.toBeInTheDocument();
     expect(screen.queryAllByText(/NIFTY\s*=\s*25/)).toHaveLength(0);
     expect(screen.queryAllByText(/BANKNIFTY\s*=\s*15/)).toHaveLength(0);
     expect(screen.queryAllByText(/\bNIFTY\s+25\b/)).toHaveLength(0);
     expect(screen.queryAllByText(/\bBANKNIFTY\s+15\b/)).toHaveLength(0);
+
+    act(() => {
+      setInstrumentLotRows([
+        {
+          SEM_SMST_SECURITY_ID: "CACHE-NIFTY",
+          SEM_CUSTOM_SYMBOL: "NIFTY",
+          SEM_INSTRUMENT_NAME: "FUTIDX",
+          SEM_TRADING_SYMBOL: "NIFTY-Dec2099-FUT",
+          SEM_EXPIRY_DATE: "2099-12-31",
+          SEM_LOT_UNITS: "50",
+        },
+      ]);
+    });
+    expect(screen.getAllByText(/NIFTY 50/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/BANKNIFTY —/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/SENSEX —/).length).toBeGreaterThan(0);
 
     const verify = screen.getByRole("link", { name: /verify on nse/i });
     expect(verify).toHaveAttribute(
@@ -226,17 +246,16 @@ describe("LearnRoute", () => {
     expect(card!.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
   });
 
-  it("keeps Lot Size source dated so NIFTY=25 / BANKNIFTY=15 cannot regress", () => {
+  it("builds Lot Size from the master line so a dated cycle cannot regress", () => {
     const src = readFileSync(join(process.cwd(), "src/routes/LearnRoute.tsx"), "utf8");
     expect(src).not.toMatch(/NIFTY\s*=\s*25/);
     expect(src).not.toMatch(/BANKNIFTY\s*=\s*15/);
     expect(src).not.toMatch(/\bNIFTY\s+25\b/);
     expect(src).not.toMatch(/\bBANKNIFTY\s+15\b/);
-    expect(src).toMatch(/NIFTY 65/);
-    expect(src).toMatch(/BANKNIFTY 30/);
-    expect(src).toMatch(/FINNIFTY 60/);
-    expect(src).toMatch(/MIDCPNIFTY 120/);
-    expect(src).toMatch(/as of Jan 2026 NSE cycle/);
+    expect(src).not.toMatch(/FINNIFTY 60/);
+    expect(src).not.toMatch(/MIDCPNIFTY 120/);
+    expect(src).not.toMatch(/as of Jan 2026 NSE cycle/);
+    expect(src).toMatch(/useIndexLotLine/);
     expect(src).toMatch(/Verify on NSE/);
     expect(src).toMatch(/nsearchives\.nseindia\.com\/content\/circulars\/FAOP70616\.pdf/);
   });

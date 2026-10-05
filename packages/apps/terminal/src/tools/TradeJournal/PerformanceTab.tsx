@@ -252,7 +252,9 @@ export interface PerformanceTabProps {
 }
 
 export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: PerformanceTabProps) {
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const mode = useModeStore((s) => s.mode);
+  const isExplore = mode === "explore";
+  const isPractice = mode === "practice";
   const [scope, setScope] = useState<PerformanceScope>("range");
 
   const { start, end } = useMemo(() => ytdIstRange(), []);
@@ -317,6 +319,10 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
   }));
 
   const hasData = closed.length > 0;
+  const grossPnl = analytics.netPnl;
+  const chargeTotal = closed.reduce((sum, trade) => sum + (Number.isFinite(trade.fees) ? trade.fees : 0), 0);
+  const netHeadline = grossPnl - chargeTotal;
+  const chargeNote = isPractice ? " (estimated)" : "";
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Performance metrics">
@@ -391,8 +397,9 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
             <div className="grid grid-cols-5 gap-2">
               <StatCard
                 label="Net P&L"
-                value={formatCurrencyCompact(analytics.netPnl)}
-                positive={analytics.netPnl >= 0}
+                value={formatCurrencyCompact(netHeadline)}
+                positive={netHeadline >= 0}
+                title={`Gross ${formatCurrencyCompact(grossPnl)} · Charges ${formatCurrencyCompact(chargeTotal)}${chargeNote}`}
               />
               <StatCard
                 label="Trades"

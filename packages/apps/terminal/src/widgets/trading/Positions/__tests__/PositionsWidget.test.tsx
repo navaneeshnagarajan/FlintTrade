@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -75,6 +75,10 @@ vi.mock("@/hooks/usePositions", () => ({
 const mockUseOrders = vi.fn();
 vi.mock("@/hooks/useOrders", () => ({
   useOrders: (...args: unknown[]) => mockUseOrders(...args),
+}));
+
+vi.mock("@/hooks/useFunds", () => ({
+  useFunds: () => ({ data: undefined }),
 }));
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
@@ -221,10 +225,12 @@ import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import {
   netPositions,
   normalisePositions,
+  offsetLegTooltip,
   positionExposure,
   underlyingOf,
 } from "../positionBook";
 import { SAMPLE_POSITION_BOOK } from "../sampleBook";
+import { totalPositionMtm } from "@/lib/pnl";
 
 function mockBrokerAccountMatch(
   account: { account_id: string; broker: string; source?: string },
@@ -264,12 +270,36 @@ function queryResult(overrides = {}) {
   };
 }
 
-/** JSDOM reports 0×0 for every rect, which culls every treemap cell. */
-function withMeasuredContainer(run: () => void) {
+/** Heat tiles are the only buttons whose accessible name carries a rupee P&L. */
+function heatTiles() {
+  return screen.getAllByRole("button", { name: /: [+\-]₹/ });
+}
+
+/**
+ * JSDOM reports 0×0 for every rect, which culls every treemap cell.
+ *
+ * `heatOnly` sizes the heat canvas and leaves the widget root wide, so a
+ * "+N more" click still lands on the table rather than the narrow cards.
+ */
+function withMeasuredContainer(
+  run: () => void,
+  size: { width: number; height: number } = { width: 800, height: 400 },
+  options: { heatOnly?: boolean } = {},
+) {
   const original = Element.prototype.getBoundingClientRect;
-  Element.prototype.getBoundingClientRect = function () {
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const measured = !options.heatOnly || this.getAttribute("data-testid") === "heat-map";
+    const width = measured ? size.width : 900;
+    const height = measured ? size.height : 700;
     return {
-      width: 800, height: 400, top: 0, left: 0, right: 800, bottom: 400, x: 0, y: 0,
+      width,
+      height,
+      top: 0,
+      left: 0,
+      right: width,
+      bottom: height,
+      x: 0,
+      y: 0,
       toJSON() {},
     } as DOMRect;
   };
@@ -1634,7 +1664,7 @@ describe("PositionsWidget", () => {
       expect(screen.queryByLabelText("TATAMOTORS: net qty 3")).not.toBeInTheDocument();
     });
 
-    it("drops symbols that net flat and says so in the total", () => {
+    it("keeps offset legs that net to zero, each with its own row", () => {
       mockUsePositions.mockReturnValue(
         queryResult({
           data: [
@@ -1646,10 +1676,73 @@ describe("PositionsWidget", () => {
       );
       render(<PositionsWidget {...viewProps("net")} />);
 
-      expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
-      // The whole book's P&L still counts the flat legs — the label says so
-      // rather than letting the footer disagree with the header.
-      expect(screen.getByText(/incl. 2 flat legs/i)).toBeInTheDocument();
+      const cnc = screen.getByLabelText("RELIANCE CNC: net qty 80");
+      const mis = screen.getByLabelText("RELIANCE MIS: net qty -80");
+      const tooltip = "CNC and MIS legs don't cancel at your broker. At intraday square-off the MIS leg closes and the CNC leg stays open.";
+      expect(within(cnc).getByText("Offset")).toHaveAttribute("title", tooltip);
+      expect(within(mis).getByText("Offset")).toHaveAttribute("title", tooltip);
+      expect(screen.getByText("incl. 1 offset symbol (legs still open)")).toBeInTheDocument();
+      expect(screen.queryByText(/flat symbol/)).not.toBeInTheDocument();
+      expect(screen.getByLabelText("SBIN: net qty 2")).toBeInTheDocument();
+    });
+
+    it("counts a symbol as flat only when every leg is at quantity 0", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 0, averagePrice: 3900, ltp: 3820, pnl: 0 },
+            { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
+          ],
+        }),
+      );
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("incl. 1 flat symbol")).toBeInTheDocument();
+      expect(screen.queryByText(/offset symbol/)).not.toBeInTheDocument();
+      expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("SBIN: net qty 2")).toBeInTheDocument();
+    });
+
+    it("shows the flat and offset notes alongside each other", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 0, averagePrice: 3900, ltp: 3820, pnl: 0 },
+            { symbol: "RELIANCE", exchange: "NSE", product: "CNC", quantity: 80, averagePrice: 2950, ltp: 2870, pnl: -6400 },
+            { symbol: "RELIANCE", exchange: "NSE", product: "MIS", quantity: -80, averagePrice: 2960, ltp: 2870, pnl: 7200 },
+          ],
+        }),
+      );
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("incl. 1 offset symbol (legs still open)")).toBeInTheDocument();
+      expect(screen.getByText("incl. 1 flat symbol")).toBeInTheDocument();
+    });
+
+    it("counts RELIANCE and NIFTY as two offset symbols on the sample book", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("incl. 2 offset symbols (legs still open)")).toBeInTheDocument();
+      expect(screen.queryByText(/flat symbol/)).not.toBeInTheDocument();
+      expect(screen.getByText("P&L: +₹16,575")).toBeInTheDocument();
+      expect(screen.getByText("+₹1,625")).toBeInTheDocument();
+      expect(screen.getAllByText("NIFTY24APR22500CE")).toHaveLength(2);
+      expect(screen.getByLabelText("RELIANCE CNC: net qty 80")).toBeInTheDocument();
+      expect(screen.getByLabelText("RELIANCE MIS: net qty -80")).toBeInTheDocument();
+      expect(screen.getByLabelText("BANKNIFTY24APR49000PE: net qty -30")).toBeInTheDocument();
+      const niftyMis = screen.getByLabelText("NIFTY24APR22500CE MIS: net qty 65");
+      const niftyNrml = screen.getByLabelText("NIFTY24APR22500CE NRML: net qty -65");
+      const niftyTip = "MIS and NRML legs don't cancel at your broker. At intraday square-off the MIS leg closes and the NRML leg stays open.";
+      expect(within(niftyMis).getByText("Offset")).toHaveAttribute("title", niftyTip);
+      expect(within(niftyNrml).getByText("Offset")).toHaveAttribute("title", niftyTip);
+      const relianceCnc = screen.getByLabelText("RELIANCE CNC: net qty 80");
+      expect(within(relianceCnc).getByText("Offset")).toHaveAttribute(
+        "title",
+        "CNC and MIS legs don't cancel at your broker. At intraday square-off the MIS leg closes and the CNC leg stays open.",
+      );
     });
 
     it("renders live positions, never the Explore sample, when a broker is connected", () => {
@@ -1727,6 +1820,18 @@ describe("PositionsWidget", () => {
       expect(screen.getByText("P&L: -₹1,000")).toBeInTheDocument();
     });
 
+    it("prices the sample NIFTY short at one lot of 65", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "flat" })} />);
+        expect(screen.getByRole("button", { name: "NIFTY24APR22500CE: -₹1,950 (-14.60%)" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "NIFTY24APR22500CE: +₹3,575 (+30.60%)" })).toBeInTheDocument();
+      });
+      expect(screen.getByText("P&L: +₹16,575")).toBeInTheDocument();
+    });
+
     it("shows the Explore sample and its watermark without a broker", () => {
       mockModeState.mode = "explore";
       mockUseBrokerConnected.mockReturnValue(false);
@@ -1746,7 +1851,7 @@ describe("PositionsWidget", () => {
         queryResult({
           data: [
             { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
-            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 75, averagePrice: 180, ltp: 235, pnl: 4125, pnlPercent: 30.6 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 65, averagePrice: 180, ltp: 235, pnl: 3575, pnlPercent: 30.6 },
           ],
         }),
       );
@@ -1758,7 +1863,65 @@ describe("PositionsWidget", () => {
         expect(screen.getByTestId("heat-group-chip-NFO")).toHaveTextContent("NFO");
         expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /^NIFTY24APR22500CE:/ })).toBeInTheDocument();
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
       });
+    });
+
+    it("keeps a small exchange group on its own band when the canvas is short", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 65, averagePrice: 180, ltp: 235, pnl: 3575, pnlPercent: 30.6 },
+          ],
+        }),
+      );
+      // The stack is taller than the canvas; NFO still gets a band and a tile.
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "NFO group" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^NIFTY24APR22500CE:/ })).toBeInTheDocument();
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+        expect(screen.queryByTestId("heat-more-overflow")).not.toBeInTheDocument();
+      }, { width: 800, height: 60 });
+    });
+
+    it("names tiles that do not fit inside their own band and opens them in the list", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 50, averagePrice: 3900, ltp: 3820, pnl: -4000, pnlPercent: -2.1 },
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "WIPRO", exchange: "NSE", product: "CNC", quantity: 10, averagePrice: 400, ltp: 410, pnl: 100, pnlPercent: 2.5 },
+          ],
+        }),
+      );
+      const scrollIntoView = vi.fn();
+      const originalScroll = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = scrollIntoView;
+      try {
+        withMeasuredContainer(() => {
+          render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+          expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+          expect(screen.queryByTestId("heat-more-overflow")).not.toBeInTheDocument();
+          const more = screen.getByRole("button", { name: "+3 more: TCS, INFY, WIPRO" });
+          expect(more).toHaveAttribute("title", "TCS, INFY, WIPRO");
+          expect(screen.getByRole("list", { name: "Positions without a heat map tile" })).toBeInTheDocument();
+          expect(screen.getByText("TCS: -₹4,000 (-2.10%)")).toBeInTheDocument();
+          fireEvent.click(more);
+        }, { width: 16, height: 40 }, { heatOnly: true });
+        expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByRole("button", { name: "Heat" })).toHaveAttribute("aria-pressed", "false");
+        for (const symbol of ["TCS", "INFY", "WIPRO"]) {
+          const row = document.querySelector(`[data-position-key="${symbol}:CNC:NSE"]`);
+          expect(row).toHaveAttribute("data-highlighted", "true");
+        }
+        expect(scrollIntoView).toHaveBeenCalled();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScroll;
+      }
     });
 
     it("still labels a single exchange group so the mode control looks used", () => {
@@ -1802,7 +1965,7 @@ describe("PositionsWidget", () => {
         queryResult({
           data: [
             { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
-            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 75, averagePrice: 180, ltp: 235, pnl: 4125, pnlPercent: 30.6 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 65, averagePrice: 180, ltp: 235, pnl: 3575, pnlPercent: 30.6 },
           ],
         }),
       );
@@ -1845,7 +2008,52 @@ describe("PositionsWidget", () => {
         expect(screen.getByTestId("heat-group-chip-NSE")).toHaveTextContent("NSE");
         expect(screen.getByTestId("heat-group-chip-NFO")).toHaveTextContent("NFO");
         expect(screen.queryByText("No exchange groups in these positions")).not.toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^NIFTY24APR22500CE:/ })).toHaveLength(2);
+        expect(screen.getByRole("button", { name: /^BANKNIFTY24APR49000PE:/ })).toBeInTheDocument();
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
       });
+    });
+
+    it("keeps every Example sample tile when grouped by sector", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "sector" })} />);
+        expect(screen.getByRole("group", { name: "Other group" })).toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^NIFTY24APR22500CE:/ })).toHaveLength(2);
+        expect(screen.getByRole("button", { name: /^BANKNIFTY24APR49000PE:/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^SUNPHARMA:/ })).toBeInTheDocument();
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+      });
+    });
+
+    it("keeps the Example sample's small exchange group on a short canvas", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+      }, { width: 320, height: 160 });
+    });
+
+    it("keeps every Example sample sector band on a short canvas", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "sector" })} />);
+        expect(screen.getByRole("group", { name: "Other group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "Pharma group" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^SUNPHARMA:/ })).toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^NIFTY24APR22500CE:/ })).toHaveLength(2);
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+      }, { width: 320, height: 160 });
     });
   });
 });
@@ -1904,14 +2112,42 @@ describe("positionBook", () => {
     expect(rows[0].legs).toBe(2);
   });
 
-  it("excludes flat positions (net qty = 0)", () => {
+  it("keeps open legs that net to zero as separate offset rows", () => {
     const rows = netPositions(
       normalisePositions([
-        { symbol: "NIFTY FUT", quantity: 1, average_price: 22400, ltp: 22400 },
-        { symbol: "NIFTY FUT", quantity: -1, average_price: 22400, ltp: 22400 },
+        { symbol: "NIFTY FUT", exchange: "NFO", product: "MIS", quantity: 1, average_price: 22400, ltp: 22400 },
+        { symbol: "NIFTY FUT", exchange: "NFO", product: "NRML", quantity: -1, average_price: 22400, ltp: 22400 },
       ]),
     );
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.netQty)).toEqual([1, -1]);
+    expect(rows.every((row) => row.offset)).toBe(true);
+    expect(rows[0]?.exposure).toBe(22400);
+    expect(rows[1]?.exposure).toBe(22400);
+    expect(rows[0]?.offsetProducts).toEqual(["MIS", "NRML"]);
+  });
+
+  it("drops a symbol only when every leg is at quantity 0", () => {
+    const rows = netPositions(
+      normalisePositions([
+        { symbol: "WIPRO", exchange: "NSE", product: "CNC", quantity: 0, average_price: 455, ltp: 448 },
+        { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, average_price: 800, ltp: 810 },
+      ]),
+    );
+    expect(rows.map((row) => row.symbol)).toEqual(["SBIN"]);
+    expect(rows[0]?.offset).toBeUndefined();
+  });
+
+  it("names offset products and drops the square-off sentence when neither leg is MIS", () => {
+    expect(offsetLegTooltip(["MIS", "NRML"])).toBe(
+      "MIS and NRML legs don't cancel at your broker. At intraday square-off the MIS leg closes and the NRML leg stays open.",
+    );
+    expect(offsetLegTooltip(["CNC", "MIS"])).toBe(
+      "CNC and MIS legs don't cancel at your broker. At intraday square-off the MIS leg closes and the CNC leg stays open.",
+    );
+    expect(offsetLegTooltip(["CNC", "NRML"])).toBe(
+      "CNC and NRML legs don't cancel at your broker.",
+    );
   });
 
   it("nets P&L as the sum of the rows' mark-to-market, so views cannot disagree", () => {
@@ -1944,15 +2180,26 @@ describe("positionBook", () => {
     expect(net.exposure).toBe(2 * 22450);
   });
 
-  it("nets the sample book into fewer rows than it has legs", () => {
+  it("keeps the example sample book's offset legs as separate rows", () => {
     const rows = netPositions(normalisePositions(SAMPLE_POSITION_BOOK));
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.length).toBeLessThan(SAMPLE_POSITION_BOOK.length);
-    // The two RELIANCE legs cancel exactly.
-    expect(rows.find((row) => row.symbol === "RELIANCE")).toBeUndefined();
-    // The two NIFTY option legs net to +45 under the NIFTY underlying.
-    const nifty = rows.find((row) => row.symbol === "NIFTY24APR22500CE");
-    expect(nifty?.netQty).toBe(45);
-    expect(nifty?.underlying).toBe("NIFTY");
+    expect(rows).toHaveLength(SAMPLE_POSITION_BOOK.length);
+    const nifty = rows.filter((row) => row.symbol === "NIFTY24APR22500CE");
+    expect(nifty.map((row) => row.netQty)).toEqual([65, -65]);
+    expect(nifty.every((row) => row.offset)).toBe(true);
+    const reliance = rows.filter((row) => row.symbol === "RELIANCE");
+    expect(reliance.map((row) => [row.product, row.netQty])).toEqual([
+      ["CNC", 80],
+      ["MIS", -80],
+    ]);
+    const bank = rows.find((row) => row.symbol === "BANKNIFTY24APR49000PE");
+    expect(bank?.netQty).toBe(-30);
+    expect(bank?.offset).toBeUndefined();
+  });
+
+  it("prices the example sample book at 16,575 and the offset NIFTY group at 1,625", () => {
+    const rows = normalisePositions(SAMPLE_POSITION_BOOK);
+    expect(totalPositionMtm(rows)).toBe(16_575);
+    const nifty = rows.filter((row) => row.symbol === "NIFTY24APR22500CE");
+    expect(nifty.reduce((sum, row) => sum + row.mtm, 0)).toBe(1_625);
   });
 });

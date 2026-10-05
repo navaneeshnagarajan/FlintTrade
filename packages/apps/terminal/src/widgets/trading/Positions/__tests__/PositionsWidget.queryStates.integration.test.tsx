@@ -34,6 +34,7 @@ vi.mock("@/services/api", () => ({
   getPositionbook: mockGetPositionbook,
   getOrderbook: vi.fn().mockResolvedValue([]),
   placeOrder: mockPlaceOrder,
+  getFunds: vi.fn().mockResolvedValue({ availableCash: 0, usedMargin: 0, totalBalance: 0, estimatedCharges: 0 }),
 }));
 vi.mock("@/services/ftApi.helpers", () => ({
   postWithMode: mockPost,
