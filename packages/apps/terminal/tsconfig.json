@@ -31,6 +31,7 @@
   // would demand a built *.d.ts (TS6305) instead of the source types.
   "include": [
     "src",
+    "e2e/about-versions.fixture.tsx",
     "vite-env.d.ts",
     "vite.reticleConnectGate.ts",
     "../../core/core/src/flinttrade_core/data/indian_charges.json",

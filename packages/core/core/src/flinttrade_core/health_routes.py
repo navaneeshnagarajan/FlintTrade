@@ -8,6 +8,8 @@ Provides a Blueprint with these routes:
 - ``GET /healthz``        — Kubernetes liveness probe
 - ``GET /readyz``         — Kubernetes readiness probe
 - ``GET /api/v1/ping``    — simple liveness check with IST timestamp
+- ``GET /api/v1/versions`` — authenticated, read-only About metadata
+- ``GET /api/v1/versions/ollama`` — bounded, observational Ollama version probe
 - ``POST /api/v1/laya/start`` — start or restart the managed Laya sidecar
 - ``GET /api/v1/health``  — aggregated subsystem health (broker, DuckDB,
   disk, memory) via :class:`HealthAggregator`
@@ -25,7 +27,9 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
+
+from flinttrade_core.version_inventory import build_version_inventory
 
 from .health_monitor import HealthMonitor
 from .monitoring import HealthAggregator
@@ -237,6 +241,29 @@ def readyz() -> tuple[Any, int]:
     if mem_check.status == "unhealthy" or disk_check.status == "unhealthy":
         return jsonify({"status": "not_ready"}), 503
     return jsonify({"status": "ready"}), 200
+
+
+@health_bp.route("/api/v1/versions", methods=["GET"])
+def versions() -> tuple[Any, int]:
+    """Return allowlisted version metadata under the default session guard."""
+    response = jsonify(build_version_inventory())
+    response.headers["Cache-Control"] = "no-store"
+    return response, 200
+
+
+@health_bp.route("/api/v1/versions/ollama", methods=["GET"])
+def ollama_versions() -> tuple[Any, int]:
+    """Read a managed loopback version without invoking lifecycle status."""
+    payload: dict[str, str | None] = {"configured": None, "reported": None, "status": "unavailable"}
+    runtime = current_app.config.get("OLLAMA_RUNTIME")
+    if runtime is not None:
+        from flinttrade_core.ollama_runtime import OllamaRuntime
+
+        if isinstance(runtime, OllamaRuntime):
+            payload = OllamaRuntime.version_snapshot(runtime)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response, 200
 
 
 @health_bp.route("/api/v1/ping", methods=["GET"])

@@ -20,6 +20,7 @@
     "playwright.infra.config.ts",
     "playwright.visual.config.ts",
     "e2e/fixture-registry.ts",
+    "e2e/about-versions.spec.ts",
     "e2e/infra-self-tests.spec.ts",
     "e2e/workspace-lifecycle.spec.ts",
     "e2e/order-pad-practice.spec.ts",

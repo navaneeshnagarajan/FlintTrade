@@ -9,6 +9,7 @@ import path from "path";
 
 import { reticle } from "@reticlehq/vite-plugin";
 import { shouldInjectReticleConnect } from "./vite.reticleConnectGate.ts";
+import { readVersionInventory } from "./vite.versionInventory.ts";
 
 function readFlintTradeVersion(): string {
   const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -31,6 +32,7 @@ export default defineConfig({
   envDir: publicDemoBuild ? false : undefined,
   define: {
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
+    __FLINTTRADE_VERSION_INVENTORY__: JSON.stringify(readVersionInventory(import.meta.dirname)),
   },
   plugins: [
     // Official plugin. inject is off unless a Reticle daemon is already on
