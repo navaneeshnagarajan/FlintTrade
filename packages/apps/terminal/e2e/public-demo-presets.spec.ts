@@ -13,6 +13,8 @@ test("public demo saves and restores presets through the legacy manager entry", 
 }, testInfo) => {
   const unexpectedSockets: string[] = [];
   const presetRequests: string[] = [];
+  const modeStatusCalls = [0, 0, 0];
+  let documentLoad = 0;
   // Production preview has no HMR. No application socket may reach a server.
   await page.routeWebSocket("**/*", async (socket) => {
     unexpectedSockets.push(socket.url());
@@ -71,8 +73,12 @@ test("public demo saves and restores presets through the legacy manager entry", 
     name: "public-demo shell Mode status",
     method: "GET",
     path: "/v1/auth/status",
-    expectedCalls: { minimum: 0, maximum: 3 },
+    // The first hosted trace made 1/2/2 reads across these three document
+    // loads. Bound each load separately so a repeated request loop still fails.
+    expectedCalls: { minimum: 3, maximum: 6 },
     handler: (request) => {
+      modeStatusCalls[documentLoad] += 1;
+      expect(modeStatusCalls[documentLoad]).toBeLessThanOrEqual(2);
       expect(request.url()).toBe("http://127.0.0.1:5173/v1/auth/status");
       expect(request.postData()).toBeNull();
       const authorization = request.headers()["authorization"];
@@ -149,6 +155,7 @@ test("public demo saves and restores presets through the legacy manager entry", 
       await expect(editForm.getByRole("button", { name: "Remove Watchlist", exact: true })).toHaveCount(0);
     };
 
+    documentLoad = 1;
     await page.reload();
     await expect(page).toHaveURL("http://127.0.0.1:5173/demo-app/trade");
     await page.getByRole("button", { name: "Manage workspaces", exact: true }).click();
@@ -162,6 +169,7 @@ test("public demo saves and restores presets through the legacy manager entry", 
 
     // The historical Settings URL must still reopen the manager with the
     // persisted custom record, even after leaving an editor open on reload.
+    documentLoad = 2;
     await page.goto("settings#presets");
     await expect(page).toHaveURL("http://127.0.0.1:5173/demo-app/trade");
     await expect(manager).toBeVisible();
@@ -173,5 +181,9 @@ test("public demo saves and restores presets through the legacy manager entry", 
     await page.close();
     expect(presetRequests, "Public-demo presets must stay browser-local").toEqual([]);
     expect(unexpectedSockets, "Public-demo presets must not open sockets").toEqual([]);
+    for (const calls of modeStatusCalls) {
+      expect(calls, "Mode status reads per document load").toBeGreaterThanOrEqual(1);
+      expect(calls, "Mode status reads per document load").toBeLessThanOrEqual(2);
+    }
   }
 });
