@@ -9,7 +9,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "httpx>=0.27.0",
     "websockets>=17.1",
-    "cryptography>=50.0.0",
+    "cryptography>=50.0.2",
     "dhanhq==2.2.0",
     "upstox-python-sdk==2.30.0",
     "kotakneoapi==3.0.7",
