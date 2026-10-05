@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 
@@ -64,6 +64,9 @@ vi.mock("../hooks/useWorkspaceLifecycle", () => ({
 vi.mock("@/tools/Settings/PresetSection", () => ({ PresetSection: () => <div>Saved preset controls<input aria-label="Preset draft" defaultValue="" /></div> }));
 
 import PresetPicker from "../PresetPicker";
+import useGlobalKeys from "@/hooks/useGlobalKeys";
+
+vi.mock("@/services/api", () => ({ cancelAllOrders: vi.fn(), exitAllPositions: vi.fn() }));
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -105,6 +108,23 @@ describe("PresetPicker", () => {
     expect(screen.getByRole("button", { name: new RegExp(WORKSPACE_PRESETS[0]!.name) })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText("Preset draft")).toHaveValue("Synthetic draft");
+  });
+
+  it("consumes template Escape before the desk global handler can close management", async () => {
+    const onClose = vi.fn();
+    renderHook(() => useGlobalKeys({ onEscape: onClose }));
+    render(<PresetPicker isOpen={true} onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Saved presets" }));
+    fireEvent.change(await screen.findByLabelText("Preset draft"), { target: { value: "Keep this draft" } });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace actions" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole("menuitem", { name: "New from Template" }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Manage workspaces" })).toBeVisible();
+    expect(screen.getByLabelText("Preset draft")).toHaveValue("Keep this draft");
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("renders the dialog title when open", () => {

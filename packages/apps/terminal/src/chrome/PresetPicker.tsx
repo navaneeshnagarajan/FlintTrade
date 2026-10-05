@@ -374,7 +374,17 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { if (showTemplateClone) setShowTemplateClone(false); else onClose(); } }}>
-        <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
+        <DialogContent
+          className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale"
+          onEscapeKeyDown={(event) => {
+            if (!showTemplateClone) return;
+            // This Escape cancels the nested view; the desk must not also close
+            // management and discard the retained saved-preset draft.
+            event.preventDefault();
+            event.stopPropagation();
+            setShowTemplateClone(false);
+          }}
+        >
           {/* Header with lifecycle menu */}
           <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default shrink-0">
             <div className="flex items-center justify-between">
