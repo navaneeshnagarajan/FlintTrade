@@ -381,6 +381,11 @@ class BrokerAccountLifecycleOwner:
                     raise RuntimeError("account_mutation_publication_revoked")
                 if any(not worker.done() for worker in operation.workers):
                     raise RuntimeError("account_mutation_worker_pending")
+                if any(
+                    worker.cancelled() or worker.exception() is not None
+                    for worker in operation.workers
+                ):
+                    raise RuntimeError("account_mutation_worker_failed")
                 retired = operation.retirement_worker
                 if retired is not None and (retired.exception() is not None or retired.result() is not True):
                     raise RuntimeError("account_mutation_retirement_pending")

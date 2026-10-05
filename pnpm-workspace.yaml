@@ -128,9 +128,6 @@ overrides:
   # dependencies must be checked separately when upgrading Plotly.
   maplibre-gl: 6.8.0
   postcss: 8.5.23
-  # GHSA-gjj5-9665-rwrc: synchronous and streaming SVG parser CPU exhaustion,
-  # patched in 7.4.0. Plotly's source dependency previously resolved to 7.3.0.
-  probe-image-size: 7.4.0
   # GHSA-rgj7-g3m4-5g8c: inherited libheif RCEs, patched in 0.35.4.
   sharp: 0.35.4
   # GHSA-rfgv-xxqx-mfg5 (unrequested WebSocket subprotocol DoS) and

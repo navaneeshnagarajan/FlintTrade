@@ -958,6 +958,17 @@ def test_reconstructed_publication_waits_for_real_worker(owner_factory):
         owner.publish_if_current(lease, lambda: pytest.fail("pending worker published"))
     worker.set_result(None)
     assert owner.publish_if_current(lease, lambda: "ready") == "ready"
+
+
+def test_reconstructed_publication_refuses_failed_retained_worker(owner_factory):
+    make, _ = owner_factory
+    owner = make()
+    lease = owner.begin(uuid4(), SELECTOR)
+    worker = Future()
+    worker.set_exception(RuntimeError("setup failed"))
+    owner.retain_worker(lease, worker)
+    with pytest.raises(RuntimeError, match="worker_failed"):
+        owner.publish_if_current(lease, lambda: pytest.fail("failed worker published"))
     assert owner.settle(lease)
 
 
@@ -1209,23 +1220,25 @@ def test_reconstructed_app_shutdown_keeps_worker_and_remaining_rotation_budget(o
         worker.result(1.0)
     assert owner.close_and_drain(1.0)
 
-    budgets = []
+    order = []
 
     class Lifecycle:
         def close_and_drain(self, timeout):
+            order.append(("lifecycle", timeout))
             time.sleep(0.02)
             return True
 
     class Rotation(NativeRotationAdmission):
         def close_and_drain(self, timeout):
-            budgets.append(timeout)
+            order.append(("rotation", timeout))
             return super().close_and_drain(timeout)
 
     app.extensions["flinttrade.broker_account_lifecycle_owner"] = Lifecycle()
     app.config["NATIVE_ROTATION_ADMISSION"] = Rotation()
     app_api._shutdown_rotation_scheduler(app, timeout=0.1)
-    assert len(budgets) == 1
-    assert 0.0 < budgets[0] < 0.09
+    assert [name for name, _timeout in order] == ["rotation", "lifecycle"]
+    assert order[0][1] > 0.09
+    assert order[1][1] < order[0][1]
 
 
 def test_reconstructed_app_composition_is_explicit_and_uses_existing_fence(owner_factory):

@@ -6552,11 +6552,8 @@ def _start_rotation_scheduler(app: Flask, *, fail_closed: bool = False) -> None:
 
 
 def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) -> None:
-    """Stop new refresh jobs, revoke publication, and drain admitted refreshes."""
+    """Stop new refresh jobs, drain admitted refreshes, then retire broker dependencies."""
     deadline = time.monotonic() + (30.0 if timeout is None else max(0.0, timeout))
-    lifecycle_owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
-    if lifecycle_owner is not None and not lifecycle_owner.close_and_drain(max(0.0, deadline - time.monotonic())):
-        raise TimeoutError("broker account lifecycle did not drain")
     rotation_scheduler = app.config.get("ROTATION_SCHEDULER")
     scheduler_error: Exception | None = None
     if rotation_scheduler is not None and getattr(rotation_scheduler, "running", False):
@@ -6579,10 +6576,13 @@ def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) ->
         close_and_drain = getattr(admission, "close_and_drain", None)
         if not callable(close_and_drain):
             raise RuntimeError("native session rotation admission owner is invalid")
-        if lifecycle_owner is not None:
-            drain_timeout = min(drain_timeout, max(0.0, deadline - time.monotonic()))
+        drain_timeout = min(drain_timeout, max(0.0, deadline - time.monotonic()))
         if not close_and_drain(drain_timeout):
             raise TimeoutError("native session rotation did not drain")
+
+    lifecycle_owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if lifecycle_owner is not None and not lifecycle_owner.close_and_drain(max(0.0, deadline - time.monotonic())):
+        raise TimeoutError("broker account lifecycle did not drain")
     if scheduler_error is not None:
         raise scheduler_error
 
