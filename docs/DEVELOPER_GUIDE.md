@@ -83,6 +83,8 @@ runner — no make and no bash needed, identical behaviour on Windows, macOS and
 Linux. `make <target>` is the POSIX alias for the same targets.
 
 ```bash
+python scripts/ft.py check       # affected checks while editing
+python scripts/ft.py check --full   # exhaustive local gate before pushing
 python scripts/ft.py test        # full pytest suite
 python scripts/ft.py test-fast   # stop on first failure
 python scripts/ft.py lint        # ruff over packages/ + tests/, then the terminal hooks lint
@@ -100,6 +102,10 @@ python -m pytest packages/services/screener/tests/
 > `--import-mode=importlib` is required for the flat-package layout.
 > `scripts/ft.py` and the Makefile set it for you; if you call `pytest`
 > directly, add it.
+
+Both test commands accept focused paths and pytest flags. Their default worker
+count is capped at four; `--workers 0` runs serially. `check --dry-run` prints the
+affected plan. Selection and CI contracts are documented in [CI.md](CI.md).
 
 ### Terminal (Vitest)
 

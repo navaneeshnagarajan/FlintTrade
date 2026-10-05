@@ -4214,6 +4214,9 @@ def test_posix_watcher_returns_after_first_orphan_request(
     request_shutdown = object()
     terminate_owned_tree = object()
 
+    # Bind the synthetic direct-parent topology so this unit test never probes
+    # whichever unrelated process happens to own PID 1234 on the test host.
+    monkeypatch.setattr(entry.os, "getppid", lambda: 1234)
     monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(entry, "_posix_parent_alive", lambda *_args, **_kwargs: False)
 
