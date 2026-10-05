@@ -234,7 +234,8 @@ def test_production_session_receives_reviewed_source_and_digest(monkeypatch):
     seen = []
 
     @contextmanager
-    def gate_session(model, digest):
+    def gate_session(model, digest, *, deadline):
+        assert 0 < deadline - time.monotonic() <= 3.0
         seen.append((model, digest))
         with _session(model) as admission:
             yield admission
@@ -246,6 +247,56 @@ def test_production_session_receives_reviewed_source_and_digest(monkeypatch):
     assert "answers" in client.decide("Synthetic note", questions_for_note())
     assert seen == [(_TAG, _DIGEST)]
     assert client.last_proof == "runtime"
+
+
+@pytest.mark.unit
+def test_gate_network_budget_is_context_local_and_restored_after_failure(monkeypatch):
+    import contextvars
+
+    from flinttrade_core import ollama_runtime
+
+    clock = _Clock()
+    monkeypatch.setattr(time, "monotonic", clock)
+    timeouts = []
+
+    def opened(_request, *, timeout):
+        timeouts.append(timeout)
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(ollama_runtime, "_open_loopback_request", opened)
+
+    def read():
+        return ollama_runtime._request_ollama_json("GET", "/api/tags", None, base_url=_BASE)
+
+    with pytest.raises(TimeoutError):
+        with ollama_runtime._gate_request_budget(clock() + 0.1):
+            assert read() == {}
+            assert contextvars.Context().run(read) == {}
+            with ollama_runtime._gate_request_budget(clock() + 10):
+                clock.advance(0.1)
+                read()
+    assert read() == {}
+    assert timeouts == pytest.approx([0.1, 10.0, 10.0])
+
+
+@pytest.mark.unit
+def test_version_probe_respects_the_enclosing_gate_budget(monkeypatch):
+    from flinttrade_core import ollama_runtime
+
+    clock = _Clock()
+    monkeypatch.setattr(time, "monotonic", clock)
+    timeouts = []
+
+    def stalled_connect(_address, *, timeout):
+        timeouts.append(timeout)
+        clock.advance(timeout)
+        raise TimeoutError("synthetic version stall")
+
+    monkeypatch.setattr(socket, "create_connection", stalled_connect)
+    with pytest.raises(TimeoutError):
+        with ollama_runtime._gate_request_budget(clock() + 0.1):
+            assert ollama_runtime._probe_ollama_server(_BASE) is None
+    assert timeouts == pytest.approx([0.1])
 
 
 @pytest.mark.unit

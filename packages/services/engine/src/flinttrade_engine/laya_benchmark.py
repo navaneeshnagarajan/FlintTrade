@@ -14,6 +14,8 @@ SafetySystem or the order gate. Vendor figures are not an input.
 ``why`` are reported when present. Unknown fields are ignored. Only
 ``order_context.side`` is sent to the model, through :func:`state_for_note`.
 Quantity and mode stay on the deterministic floor.
+Mode must be ``practice`` or ``live`` (case-insensitive); missing or empty
+mode defaults to ``practice``.
 
 Display counts use the first repeat. Stability uses every repeat; model
 latency uses only successful, verified, non-stub inference. Qualification
@@ -236,7 +238,11 @@ def state_for_case(case: BenchmarkCase) -> str:
 
 def file_sha256(path: Path) -> str:
     """SHA-256 of the case file's exact bytes."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise BenchmarkCaseError(f"could not read {path.name}") from exc
+    return hashlib.sha256(data).hexdigest()
 
 
 def load_cases(path: Path) -> tuple[BenchmarkCase, ...]:
@@ -427,7 +433,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cases", required=True, help="JSONL file of labelled cases")
     parser.add_argument("--repeats", type=int, default=1, help="Repeats of each case for stability")
     parser.add_argument("--model", default="", help="Candidate tag. Reported only.")
-    parser.add_argument("--route", default="", help="chat or systemone. Reported only.")
+    parser.add_argument(
+        "--route", choices=("chat", "systemone"), default="", help="Expected route. Must match the selected client."
+    )
     parser.add_argument("--split", choices=("dev", "test"), default=None, help="Score one split")
     parser.add_argument("--tune", action="store_true", help="Select thresholds. Refused unless --split dev")
     parser.add_argument("--exclude", default="", help="Optional file of case ids to report a second time")
@@ -444,12 +452,12 @@ def main(argv: list[str] | None = None) -> int:
         exclude = load_exclude_ids(Path(args.exclude)) if args.exclude else frozenset()
         split_name = args.split or _split_name(cases)
         tune_note = "tune=not_applied thresholds_unchanged=yes" if args.tune else ""
-        client = _StubAllowClient() if args.stub else _cli_client(args.model)
+        client = _StubAllowClient() if args.stub else _cli_client(args.model, args.route)
         report = run_benchmark(
             cases,
             client,
             repeats=args.repeats,
-            candidate=_candidate_label(args.model, args.route),
+            candidate=_candidate_label(args.model, client.route),
             split=split_name,
             file_sha256_hex=digest,
             stub=args.stub,
@@ -468,11 +476,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _cli_client(model: str) -> Any:
+def _cli_client(model: str, route: str = "") -> Any:
     """Use an owned, ready runtime, or report unavailable without model evidence."""
     from flinttrade_engine.laya_ollama import ready_ollama_client  # noqa: PLC0415
 
     client = ready_ollama_client(model) if model else None
+    if client is not None and route and route != client.route:
+        raise BenchmarkCaseError(f"requested route does not match reviewed route {client.route}")
     return client if client is not None else _FailClosedClient()
 
 
@@ -480,6 +490,7 @@ class _FailClosedClient:
     """No model call. The harness must not count this as an admit."""
 
     last_proof = ""
+    route = ""
 
     def decide(self, state: str, questions: Mapping[str, Mapping[str, object]]) -> Mapping[str, Any]:
         del state, questions
@@ -490,6 +501,7 @@ class _StubAllowClient:
     """Every deny option is 0.1. Host deny labels become wrong admits."""
 
     last_proof = "runtime"
+    route = ""
 
     def decide(self, state: str, questions: Mapping[str, Mapping[str, object]]) -> Mapping[str, Any]:
         del state, questions
@@ -714,7 +726,12 @@ def _parse_line(line: str, line_number: int) -> BenchmarkCase:
     side = str(order.get("side") or "").strip().upper()
     if side not in {"BUY", "SELL"}:
         raise BenchmarkCaseError(f"line {line_number} order_context.side must be BUY or SELL")
-    mode = str(order.get("mode") or "practice").strip().lower() or "practice"
+    raw_mode = order.get("mode")
+    if raw_mode is not None and not isinstance(raw_mode, str):
+        raise BenchmarkCaseError(f"line {line_number} order_context.mode must be practice or live")
+    mode = (raw_mode or "practice").strip().lower() or "practice"
+    if mode not in {"practice", "live"}:
+        raise BenchmarkCaseError(f"line {line_number} order_context.mode must be practice or live")
     return BenchmarkCase(
         id=identity,
         pair_id=pair_id,

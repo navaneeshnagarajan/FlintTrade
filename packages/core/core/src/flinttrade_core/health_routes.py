@@ -324,7 +324,10 @@ def start_laya() -> tuple[Any, int]:
     denied = require_operator_session()
     if denied is not None:
         return denied
-    ollama = laya_backend() == "ollama"
+    backend = laya_backend()
+    if backend == "closed":
+        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+    ollama = backend == "ollama"
     try:
         if ollama:
             _start_managed_ollama_for_gate()

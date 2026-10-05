@@ -432,6 +432,11 @@ class OllamaDecisionClient:
         """``runtime`` after a digest-matched admission. Empty when the call failed."""
         return self._last_proof
 
+    @property
+    def route(self) -> str:
+        """The reviewed route used by this client's immutable model entry."""
+        return self._entry.route
+
     def decide(self, state: str, questions: Mapping[str, Mapping[str, object]]) -> Mapping[str, Any]:
         """Ask the admitted model and return probabilities for the three questions.
 
@@ -446,7 +451,7 @@ class OllamaDecisionClient:
             raise DecisionCallError("runtime_too_old")
         try:
             _remaining(deadline)
-            with _open_session(self._entry.tag, self._entry.digest) as admission:
+            with _open_session(self._entry.tag, self._entry.digest, deadline=deadline) as admission:
                 _remaining(deadline)
                 _require_admission(admission, self._entry)
                 payload, path = _request_for(self._entry.route, admission.model, state, questions)
@@ -519,14 +524,14 @@ def _load_snapshot(model: str) -> Mapping[str, Any] | None:
 
 
 @contextmanager
-def _open_session(model: str, digest: str) -> Iterator[Any]:
+def _open_session(model: str, digest: str, *, deadline: float) -> Iterator[Any]:
     if _session_override is not None:
         with _session_override(model) as admission:
             yield admission
         return
     from flinttrade_core.ollama_runtime import managed_ollama_gate_session  # noqa: PLC0415
 
-    with managed_ollama_gate_session(model, digest) as admission:
+    with managed_ollama_gate_session(model, digest, deadline=deadline) as admission:
         yield admission
 
 

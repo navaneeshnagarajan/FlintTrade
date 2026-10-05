@@ -501,6 +501,196 @@ def _snapshot_runtime():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("phase", ["entry", "exit"])
+def test_identity_requests_share_the_decision_deadline(monkeypatch: pytest.MonkeyPatch, phase: str) -> None:
+    import time
+
+    from flinttrade_core import ollama_runtime
+    from flinttrade_engine.laya_decision import DecisionCallError, questions_for_note
+
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    stall = [phase == "entry"]
+    original_models = runtime._raw_models
+    waits: list[float] = []
+
+    def blocked_identity(_request, *, timeout):
+        waits.append(timeout)
+        clock[0] += timeout
+        raise TimeoutError("synthetic identity stall")
+
+    def models():
+        if stall[0]:
+            return ollama_runtime._request_ollama_json("GET", "/api/tags", None, base_url=runtime.base_url)
+        return original_models()
+
+    def poster(*_args):
+        clock[0] += 0.04
+        stall[0] = True
+        return _chat_body()
+
+    monkeypatch.setattr(ollama_runtime, "_open_loopback_request", blocked_identity)
+    runtime._raw_models = models
+    set_laya_ollama_transport_for_tests(session=None, poster=poster)
+    try:
+        client = OllamaDecisionClient(LayaOllamaModel(_TAG, _DIGEST, "chat"), timeout=0.1)
+        with pytest.raises(DecisionCallError, match="^timeout$"):
+            client.decide(_NOTE, questions_for_note())
+        assert clock[0] - 100.0 <= 0.100001
+        assert len(waits) == 1
+        assert 0 < waits[0] <= (0.1 if phase == "entry" else 0.060001)
+        assert runtime._active_inferences == 0
+        assert client.last_proof == ""
+    finally:
+        reset_laya_ollama_transport_for_tests()
+
+
+@pytest.mark.unit
+def test_ping_identity_requests_have_a_short_total_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from flask import Flask
+
+    from flinttrade_core import ollama_runtime
+    from flinttrade_core.health_routes import health_bp
+    import flinttrade_engine.laya_ollama as ollama_mod
+
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    monkeypatch.setenv(ollama_mod.BACKEND_ENV, "ollama")
+    monkeypatch.setenv(ollama_mod.MODEL_ENV, _TAG)
+    monkeypatch.setattr(ollama_mod, "LAYA_OLLAMA_ALLOWLIST", (LayaOllamaModel(_TAG, _DIGEST, "chat"),))
+    waits: list[float] = []
+
+    def blocked_identity(_request, *, timeout):
+        waits.append(timeout)
+        clock[0] += timeout
+        raise TimeoutError("synthetic identity stall")
+
+    monkeypatch.setattr(ollama_runtime, "_open_loopback_request", blocked_identity)
+    runtime._raw_models = lambda: ollama_runtime._request_ollama_json(
+        "GET", "/api/tags", None, base_url=runtime.base_url,
+    )
+    app = Flask(__name__)
+    app.register_blueprint(health_bp)
+    reset_process_laya_for_tests()
+    try:
+        response = app.test_client().get("/api/v1/ping")
+        assert response.status_code == 200
+        assert response.get_json()["laya_practice"] == "down"
+        assert clock[0] - 100.0 <= 0.500001
+        assert len(waits) == 1
+        assert 0 < waits[0] <= 0.5
+    finally:
+        reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("phase", ["headers", "body", "chunked_body", "no_response"])
+def test_real_identity_io_cannot_trickle_past_the_decision_budget(
+    monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    import json
+    import socket
+    import threading
+    import time
+
+    from flinttrade_core import ollama_runtime
+    from flinttrade_engine.laya_decision import DecisionCallError, questions_for_note
+
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    payload = json.dumps({"models": runtime.raw_models}).encode()
+    runtime._raw_models = lambda: ollama_runtime._request_ollama_json(
+        "GET", "/api/tags", None, base_url=runtime.base_url,
+    )["models"]
+    reader, writer = socket.socketpair()
+
+    class LocalSocket:
+        def __getattr__(self, name):
+            return getattr(reader, name)
+
+        def setsockopt(self, *_args):
+            pass  # The in-memory socketpair has no TCP_NODELAY option.
+
+    monkeypatch.setattr(socket, "create_connection", lambda *_args, **_kwargs: LocalSocket())
+    if phase == "chunked_body":
+        header = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+        parts = [f"{len(payload):x}\r\n".encode(), *[payload[i:i + 8] for i in range(0, len(payload), 8)],
+                 b"\r\n0\r\n\r\n"]
+    else:
+        header = b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(payload)).encode() + b"\r\n\r\n"
+        parts = ([header[i:i + 2] for i in range(0, len(header), 2)] + [payload] if phase == "headers"
+                 else [payload[i:i + 8] for i in range(0, len(payload), 8)])
+    if phase not in {"headers", "no_response"}:
+        writer.sendall(header)
+    stopped = threading.Event()
+
+    def fragments():
+        try:
+            if phase == "no_response":
+                stopped.wait(0.8)
+                return
+            for part in parts:
+                if stopped.wait(0.02):
+                    return
+                writer.sendall(part)
+        except OSError:
+            pass
+        finally:
+            writer.close()
+
+    worker = threading.Thread(target=fragments)
+    worker.start()
+    set_laya_ollama_transport_for_tests(session=None, poster=lambda *_args: _chat_body())
+    client = OllamaDecisionClient(LayaOllamaModel(_TAG, _DIGEST, "chat"), timeout=0.12)
+    started = time.monotonic()
+    try:
+        with pytest.raises(DecisionCallError) as error:
+            client.decide(_NOTE, questions_for_note())
+        assert time.monotonic() - started < 0.3
+        assert error.value.code == "timeout"
+        assert client.last_proof == ""
+        assert runtime._active_inferences == 0
+    finally:
+        stopped.set()
+        reader.close()
+        worker.join(timeout=1.0)
+        reset_laya_ollama_transport_for_tests()
+    assert not worker.is_alive()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("authorised", [True, False])
+def test_closed_backend_start_never_launches_a_runtime(monkeypatch: pytest.MonkeyPatch, authorised: bool) -> None:
+    from flask import Flask, jsonify
+
+    from flinttrade_core import auth_routes, health_routes, laya_runtime
+
+    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "typo")
+    starts: list[str] = []
+    checks: list[str] = []
+
+    def session():
+        checks.append("session")
+        return None if authorised else (jsonify({"status": "error"}), 401)
+
+    monkeypatch.setattr(auth_routes, "require_operator_session", session)
+    monkeypatch.setattr(laya_runtime, "start_managed_sidecar", lambda: starts.append("sidecar"))
+    monkeypatch.setattr(health_routes, "_start_managed_ollama_for_gate", lambda: starts.append("ollama"))
+    app = Flask(__name__)
+    app.register_blueprint(health_routes.health_bp)
+    response = app.test_client().post("/api/v1/laya/start")
+    assert response.status_code == (503 if authorised else 401)
+    assert starts == []
+    assert checks == ["session"]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("model", ["", _TAG])
 def test_gate_snapshot_keeps_a_healthy_owned_runtime_ready(monkeypatch: pytest.MonkeyPatch, model: str) -> None:
     from flinttrade_core import ollama_runtime

@@ -5,6 +5,7 @@ The fixture is synthetic Example text. It is not the Researcher's draft set.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -304,6 +305,61 @@ def test_unknown_fields_are_ignored(tmp_path: Path) -> None:
     assert _HIDDEN not in state_for_case(case)
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["lvie", "paper", "explore", 1, False, 0, [], {}])
+def test_unsupported_case_modes_are_rejected(tmp_path: Path, mode: object) -> None:
+    raw = json.loads(_FIXTURE.read_text(encoding="utf-8").splitlines()[0])
+    raw["order_context"]["mode"] = mode
+    path = tmp_path / "bad-mode.jsonl"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(BenchmarkCaseError, match="line 1 order_context.mode must be practice or live"):
+        load_cases(path)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mode,expected",
+    [(None, "practice"), ("", "practice"), ("  ", "practice"), ("Practice", "practice"), (" LIVE ", "live")],
+)
+def test_supported_case_modes_and_empty_default(tmp_path: Path, mode: object, expected: str) -> None:
+    raw = json.loads(_FIXTURE.read_text(encoding="utf-8").splitlines()[0])
+    raw["order_context"]["mode"] = mode
+    path = tmp_path / "mode.jsonl"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    assert load_cases(path)[0].mode == expected
+    del raw["order_context"]["mode"]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert load_cases(path)[0].mode == "practice"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("unreadable", ["missing", "directory"])
+def test_hash_read_errors_are_benchmark_errors(tmp_path: Path, unreadable: str) -> None:
+    path = tmp_path / "cases.jsonl"
+    if unreadable == "directory":
+        path.mkdir()
+
+    with pytest.raises(BenchmarkCaseError, match="could not read cases.jsonl"):
+        file_sha256(path)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("unreadable", ["missing", "directory"])
+def test_cli_unreadable_case_file_returns_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], unreadable: str
+) -> None:
+    path = tmp_path / "cases.jsonl"
+    if unreadable == "directory":
+        path.mkdir()
+
+    assert main(["--cases", str(path), "--stub", "--skip-drills"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "error=could not read cases.jsonl\n"
+    assert not captured.err
+
+
 class _Unavailable:
     last_proof = ""
 
@@ -568,3 +624,86 @@ def test_cli_client_requires_owned_readiness_and_uses_its_version(
         assert _metric(text, "model_score") == "no"
         assert report.outcomes[0].band == "down"
         assert not posted
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", ["chat", "systemone"])
+@pytest.mark.parametrize("requested", ["omitted", "matching", "mismatched"])
+def test_cli_report_route_matches_the_reviewed_client_route(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], route: str, requested: str
+) -> None:
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import flinttrade_engine.laya_ollama as ollama_mod
+
+    digest = "ab" * 32
+    tag = "example:bench"
+    monkeypatch.setattr(ollama_mod, "LAYA_OLLAMA_ALLOWLIST", (ollama_mod.LayaOllamaModel(tag, digest, route),))
+    posted: list[str] = []
+
+    @contextmanager
+    def session(model: str):
+        assert model == tag
+        yield SimpleNamespace(
+            digest=digest, model=f"flinttrade/sha256-{digest}:locked", base_url="http://127.0.0.1:11435"
+        )
+
+    def poster(base: str, path: str, payload: dict[str, object], timeout: float) -> dict[str, object]:
+        del base, payload, timeout
+        posted.append(path)
+        answers = _payload(0.95)
+        return {"message": {"content": json.dumps(answers)}} if route == "chat" else answers
+
+    snapshot = {
+        "ready": True,
+        "state": "ready",
+        "model_present": True,
+        "reported_digest": digest,
+        "pinned_server_version": "0.35.0",
+        "port": 11435,
+    }
+    args = ["--cases", str(_FIXTURE), "--model", tag, "--skip-drills"]
+    if requested != "omitted":
+        selected = route if requested == "matching" else "systemone" if route == "chat" else "chat"
+        args.extend(["--route", selected])
+    ollama_mod.set_laya_ollama_transport_for_tests(session=session, poster=poster, snapshot=lambda _tag: snapshot)
+    try:
+        code = main(args)
+    finally:
+        ollama_mod.reset_laya_ollama_transport_for_tests()
+
+    text = capsys.readouterr().out
+    if requested == "mismatched":
+        assert code == 2
+        assert f"error=requested route does not match reviewed route {route}" in text
+        assert not posted
+    else:
+        assert code == 0
+        assert f"candidate tag={tag} route={route} " in text
+        assert posted
+        assert set(posted) == {"/api/chat" if route == "chat" else "/v1/systemone"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", ["chat", "systemone"])
+def test_cli_client_exposes_its_reviewed_route_read_only(route: str) -> None:
+    from flinttrade_engine.laya_ollama import LayaOllamaModel, OllamaDecisionClient
+
+    client = OllamaDecisionClient(LayaOllamaModel("example:bench", "ab" * 32, route))
+    assert client.route == route
+    with pytest.raises(AttributeError):
+        client.route = "chat" if route == "systemone" else "systemone"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stub", [False, True])
+def test_cli_without_a_model_client_does_not_claim_a_route(capsys: pytest.CaptureFixture[str], stub: bool) -> None:
+    args = ["--cases", str(_FIXTURE), "--model", "example:unknown", "--route", "systemone", "--skip-drills"]
+    if stub:
+        args.append("--stub")
+
+    assert main(args) == 0
+    text = capsys.readouterr().out
+    assert "candidate tag=example:unknown route=unset " in text
+    assert _metric(text, "model_score") == "no"
