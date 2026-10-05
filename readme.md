@@ -291,9 +291,10 @@ python scripts/ft.py dev
 `make <target>` is the POSIX alias:
 
 - `python scripts/ft.py test` runs the Python pytest suites.
+- `python scripts/ft.py check` runs affected checks while editing;
+  `python scripts/ft.py check --full` runs the exhaustive local gate before pushing.
 - `python scripts/ft.py lint` runs Ruff over Python packages and tests.
-- `make full-check` runs a compact test, lint, and terminal typecheck pass
-  (POSIX only — it needs bash).
+- `make full-check` is the POSIX alias for `python scripts/ft.py check --full`.
 - `pnpm --filter @flinttrade/terminal build` runs the terminal typecheck
   and Vite build.
 - `pnpm --filter @flinttrade/terminal test` runs Vitest.

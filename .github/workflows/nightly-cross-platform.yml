@@ -17,6 +17,12 @@ on:
   workflow_dispatch:        # Allow manual trigger from the Actions tab
 
 env:
+  # Keep numerical pools inside each Python worker bounded on native runners too.
+  OMP_NUM_THREADS: '1'
+  OPENBLAS_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  VECLIB_MAXIMUM_THREADS: '1'
+  NUMEXPR_NUM_THREADS: '1'
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # Least-privilege token. These jobs only check out and run the test suite
@@ -45,7 +51,7 @@ jobs:
         with: { python-version: '3.12' }
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --frozen          # SC-07: hash-verified install
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20
 
   python-tests-windows:
     runs-on: windows-latest
@@ -70,7 +76,7 @@ jobs:
         with: { python-version: '3.12' }
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --frozen          # SC-07: hash-verified install
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 -k "not resource_module"
 
   # Canary for the newest-Ubuntu user base (maintainer develops on 26.04).
   # The ubuntu-26.04 hosted runner is still a GitHub preview image, so this
@@ -85,7 +91,7 @@ jobs:
         with: { python-version: '3.12' }
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --frozen          # SC-07: hash-verified install
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20
 
   # The DECLARED TARGETS from flint.toml [requirements] - python_target and
   # node_target - are exercised here and nowhere else. Every per-push lane runs
@@ -111,7 +117,7 @@ jobs:
         with: { python-version: '3.14' }
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --frozen
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20
 
   node-target-version:
     runs-on: ubuntu-latest
