@@ -1108,6 +1108,7 @@ def test_build_security_resolver_exposes_reverse_option_identity() -> None:
         "security_id": "49081",
         "symbol": "NIFTY-Jun2026-24000-CE",
         "exchange": "NFO",
+        "instrument": "",
         "instrument_type": "",
         "option_type": "CE",
         "expiry": "2026-06-25",
