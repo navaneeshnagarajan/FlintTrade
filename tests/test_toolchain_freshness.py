@@ -10,6 +10,7 @@ Every test drives the module with synthetic release data - no network.
 
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import importlib.util
 import json
@@ -153,7 +154,14 @@ def test_the_ollama_pin_is_read_as_it_is_on_the_checkout(module: ModuleType) -> 
     assert not report.failed, [finding.message for finding in report.findings]
     assert pin is not None
     assert re.fullmatch(r"v\d+\.\d+\.\d+", pin)
-    assert f'_OLLAMA_VERSION = "{pin}"' in module._OLLAMA_RUNTIME.read_text(encoding="utf-8")
+    assignments = []
+    for statement in ast.parse(module._OLLAMA_RUNTIME.read_text(encoding="utf-8")).body:
+        match statement:
+            case ast.Assign(targets=[ast.Name(id="_OLLAMA_VERSION")], value=ast.Constant(value=value)):
+                assignments.append(value)
+            case ast.AnnAssign(target=ast.Name(id="_OLLAMA_VERSION"), value=ast.Constant(value=value)):
+                assignments.append(value)
+    assert assignments == [pin]
 
 
 @pytest.mark.unit
