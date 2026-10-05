@@ -166,6 +166,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - name: HTTP cache dependency contract (offline)
+        run: node --test scripts/__tests__/http-cache-semantics.test.mjs
       - name: pnpm audit (allowlist)
         run: python scripts/pnpm-audit-with-allowlist.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
