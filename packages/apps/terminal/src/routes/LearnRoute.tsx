@@ -606,54 +606,26 @@ function PaperTradingTab() {
           What is Practice Trading?
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4 break-words">
-          Practice trading lets you trade with virtual money. You execute the same strategies,
-          see the same market data, but don&apos;t risk real capital. It&apos;s the best way to learn
-          before going live.
+          Practice is built in. Open the Trade desk and place a simulated order, no broker needed.
         </p>
         <h4 className="font-heading font-semibold text-sm text-text-primary mb-2 break-words">
           How to start Practice Trading:
         </h4>
         <ol className="min-w-0 space-y-2 pl-5 text-sm text-text-secondary list-decimal list-outside break-words">
-          <li>
-            Set up OpenAlgo with your broker&apos;s <strong>Practice mode</strong>{" "}
-            (Dhan Sandbox provides ₹10L virtual capital)
-          </li>
-          <li>Configure FlintTrade&apos;s Broker Gateway to reach that OpenAlgo Practice instance</li>
-          <li>Trade normally — all orders execute against virtual funds</li>
-          <li>Review your P&L Dashboard to analyse performance</li>
-          <li>When confident, point OpenAlgo at your live broker credentials</li>
+          <li>Choose Practice from the Mode menu before placing an order.</li>
+          <li>Open the Trade desk and use the Order Pad to place a simulated order.</li>
+          <li>Review your simulated orders, positions and P&amp;L to learn from each trade.</li>
         </ol>
+        <p className="mt-4 text-sm text-text-secondary break-words">
+          Practice uses virtual funds. Simulated fills do not guarantee the same results in Live trading.
+        </p>
         <div className="mt-4 min-w-0">
-          <p className="mb-3 text-sm text-text-secondary break-words">
-            Configure OpenAlgo in Settings → Broker Gateway.
-          </p>
           <Button
             asChild
             className="h-auto w-full min-w-0 max-w-full shrink whitespace-normal break-words sm:w-auto"
           >
-            <Link to="/settings#api">Open Settings → Broker Gateway</Link>
+            <Link to="/trade">Open Trade desk</Link>
           </Button>
-        </div>
-      </GlassCard>
-
-      <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3 break-words">
-          Supported Sandboxes
-        </h3>
-        <div className="space-y-3">
-          <div
-            data-testid="practice-sandbox-row"
-            className="flex min-w-0 flex-wrap items-center gap-2"
-          >
-            <Badge className="shrink-0 bg-bullish-bg text-profit border-0">Active</Badge>
-            <span className="text-sm text-text-primary">Dhan Sandbox</span>
-            <span className="min-w-0 break-words text-xs text-text-muted">
-              — ₹10L virtual funds, 24/7, all instruments
-            </span>
-          </div>
-          <p className="min-w-0 break-words text-xs text-text-muted" data-testid="neo-no-practice">
-            Kotak Neo has no sandbox — never offer Neo Practice. Live read only until funded unlock.
-          </p>
         </div>
       </GlassCard>
     </div>

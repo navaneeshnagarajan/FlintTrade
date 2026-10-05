@@ -496,8 +496,8 @@ function AccountsTab() {
         <BrokerOperationsPanels />
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <Users className="size-8 text-text-muted" />
-          <p className="text-sm text-text-muted">No accounts connected</p>
-          <p className="text-xs text-text-disabled">Add an account to get started.</p>
+          <p className="text-sm text-text-muted">Connect a broker to mirror accounts</p>
+          <p className="text-xs text-text-disabled">Add an OpenAlgo-compatible account to get started.</p>
           <Button size="sm" variant="outline" onClick={openAddAccount}>
             <Plus className="size-3.5" />
             Add Account

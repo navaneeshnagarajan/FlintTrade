@@ -177,7 +177,8 @@ describe("TradeJournalTool (Trade Review)", () => {
 
   it("shows the Trade Review heading (renamed from Trade Journal)", () => {
     render(<TradeJournalTool />);
-    expect(screen.getByText("Trade Review")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Trade Review" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     expect(screen.queryByText("Trade Journal")).not.toBeInTheDocument();
   });
 

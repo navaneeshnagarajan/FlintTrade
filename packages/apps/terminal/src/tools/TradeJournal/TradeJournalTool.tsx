@@ -105,9 +105,9 @@ export default function TradeJournalTool({ onClose }: Props) {
       <div className="flex items-center gap-3 px-4 py-2 border-b border-border-default bg-surface-card shrink-0 flex-wrap">
         <div className="flex items-center gap-2 shrink-0">
           <BookOpen size={16} className="text-primary" />
-          <h1 className="font-heading font-bold text-base text-text-primary">
+          <h2 className="font-heading font-bold text-base text-text-primary">
             Trade Review
-          </h1>
+          </h2>
         </div>
 
         {/* Date range + strategy filters (the tool's timeframe selector) */}

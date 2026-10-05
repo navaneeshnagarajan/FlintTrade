@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
@@ -129,7 +129,8 @@ describe("LabRoute", () => {
   it("renders the Strategy Lab heading", () => {
     renderLab();
 
-    expect(screen.getByText("Strategy Lab")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Strategy Lab" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("shows Backtest and Forward Test tabs", () => {
@@ -156,6 +157,10 @@ describe("LabRoute", () => {
     renderLab();
 
     expect(screen.getByRole("tab", { name: /options builder/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /options builder/i }));
+    expect(screen.getByRole("heading", { level: 2, name: "Strategy Builder" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Strategy Lab" })).toBeInTheDocument();
   });
 
   it("leaves Run Backtest disabled when the Lab opens without a strategy query", async () => {

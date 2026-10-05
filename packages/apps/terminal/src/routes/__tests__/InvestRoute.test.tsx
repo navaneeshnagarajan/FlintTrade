@@ -96,6 +96,7 @@ describe("InvestRoute", () => {
   it("renders the Invest heading, matching its sidebar label", () => {
     render(<InvestRoute />, { wrapper: createWrapper() });
     expect(screen.getByRole("heading", { level: 1, name: "Invest" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("shows five Invest groups instead of the flat tab row", () => {

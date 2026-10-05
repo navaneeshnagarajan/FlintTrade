@@ -25,6 +25,12 @@ describe("sidebarStore", () => {
     expect(Object.values(labels)).not.toContain("AI Hub");
   });
 
+  it("has exactly one AI entry at the canonical chat route", () => {
+    const entries = useSidebarStore.getState().items.filter((item) => item.route === "/ai");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ id: "ai", label: "AI Centre", type: "route" });
+  });
+
   it("groups the navigation under labelled separators", () => {
     const order = useSidebarStore.getState().items.map((item) =>
       item.type === "separator" ? `[${item.label}]` : item.id,

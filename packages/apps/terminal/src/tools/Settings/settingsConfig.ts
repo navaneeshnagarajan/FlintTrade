@@ -125,7 +125,7 @@ export function buildSections(desktopShell: boolean, publicDemo: boolean = isPub
     { id: "risk",       label: "Risk Limits",        icon: ShieldAlert,    group: "trading" },
     { id: "leverage",   label: "Leverage",           icon: Scale,          group: "trading" },
     { id: "practice",   label: "Practice Mode",      icon: FlaskConical,   group: "trading" },
-    { id: "llm",        label: "LLM Config",         icon: Brain,          group: "integrations" },
+    { id: "llm",        label: "AI",         icon: Brain,          group: "integrations" },
     { id: "telegram",   label: "Telegram",           icon: Send,           group: "integrations" },
     { id: "dataPaths",  label: "Data Paths",         icon: HardDrive,      group: "system" },
     { id: "monitoring", label: "Monitoring",         icon: Activity,       group: "system" },

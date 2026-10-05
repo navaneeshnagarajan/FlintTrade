@@ -267,6 +267,7 @@ describe("DittoRoute", () => {
   it("renders the Accounts heading, matching its sidebar label", () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     expect(screen.getByRole("heading", { level: 1, name: "Accounts" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("keeps route-local checkmark SVG markup out of the source", () => {
@@ -295,7 +296,8 @@ describe("DittoRoute", () => {
 
     expect(await screen.findByText("Upstox live token test")).toBeInTheDocument();
     expect(screen.getByText(/Upstox · Native/i)).toBeInTheDocument();
-    expect(screen.getByText("No accounts connected")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to mirror accounts")).toBeInTheDocument();
+    expect(screen.queryByText(/Could not load accounts/)).not.toBeInTheDocument();
   });
 
   it("shows Master badge on master account", async () => {
