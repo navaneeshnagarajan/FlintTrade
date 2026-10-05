@@ -143,14 +143,4 @@ OpenAlgo is an external service (formerly a submodule). For local testing, `scri
 
 ## Agent skills
 
-### Issue tracker
-
-Issues, tickets and publishable specs use GitHub Issues in `navaneeshnagarajan/FlintTrade`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the five default triage labels. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: root `GLOSSARY.md` and `docs/adr/`, created lazily. See `docs/agents/domain.md`.
+Read the [Agent skills section in AGENTS.md](AGENTS.md#agent-skills) for the issue tracker, triage labels and domain docs configuration.
