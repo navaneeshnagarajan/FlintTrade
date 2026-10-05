@@ -17,8 +17,8 @@
  *   - Empty custom presets shows the placeholder message
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -194,6 +194,50 @@ function makeWrapper() {
 // ---------------------------------------------------------------------------
 
 describe("PresetSection", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("explains browser-only storage in the public demo", () => {
+    vi.stubEnv("BASE_URL", "/demo-app/");
+    setupQuery([]);
+    render(<PresetSection />, { wrapper: makeWrapper() });
+    expect(screen.getByText(/custom presets are saved only in this browser/)).toBeVisible();
+  });
+
+  it("keeps repeated chart occurrences distinct when editing a preset", () => {
+    setupQuery([{ ...CUSTOM_PRESET, name: "Multi Chart", widgets: ["chart", "chart", "chart", "chart"] }]);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      render(<PresetSection />, { wrapper: makeWrapper() });
+      fireEvent.click(screen.getByRole("button", { name: "Edit Multi Chart" }));
+      expect(screen.getAllByRole("button", { name: "Remove Chart" })).toHaveLength(4);
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove Chart" })[1]);
+      expect(screen.getAllByRole("button", { name: "Remove Chart" })).toHaveLength(3);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("previews fork contents read-only while ordinary editing remains available", () => {
+    setupQuery([BUILTIN_PRESET, CUSTOM_PRESET]);
+    render(<PresetSection />, { wrapper: makeWrapper() });
+    fireEvent.click(screen.getByRole("button", { name: "Fork Scalper Zone" }));
+    const fork = within(screen.getByRole("form", { name: "Fork Preset form" }));
+    expect(fork.getByLabelText("Name *")).not.toHaveAttribute("readonly");
+    expect(fork.getByLabelText("Description")).toHaveAttribute("readonly");
+    expect(fork.getByText("Create a copy, then edit its contents.")).toBeVisible();
+    expect(fork.queryByRole("button", { name: "Toggle widget list" })).not.toBeInTheDocument();
+    expect(fork.queryByRole("button", { name: /Remove / })).not.toBeInTheDocument();
+    fireEvent.click(fork.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
+    const edit = within(screen.getByRole("form", { name: "Edit Preset form" }));
+    expect(edit.getByLabelText("Description")).not.toHaveAttribute("readonly");
+    fireEvent.change(edit.getByLabelText("Description"), { target: { value: "Editable after copying" } });
+    expect(edit.getByLabelText("Description")).toHaveValue("Editable after copying");
+    expect(edit.getByRole("button", { name: "Toggle widget list" })).toBeVisible();
+    expect(edit.getAllByRole("button", { name: /Remove / })).toHaveLength(2);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     setupMutations();
@@ -211,6 +255,7 @@ describe("PresetSection", () => {
       expect(screen.getByText("Workspace Presets")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /import preset/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /create a new workspace preset/i })).toBeInTheDocument();
+      expect(screen.queryByText(/custom presets are saved only in this browser/)).not.toBeInTheDocument();
     });
 
     it("disables New Preset while a form is already open", () => {

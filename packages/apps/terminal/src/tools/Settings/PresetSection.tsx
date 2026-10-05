@@ -49,6 +49,7 @@ import {
   type CreatePresetPayload,
 } from "@/services/ftApi";
 import { widgetCatalog } from "@/layout/widgetFactory";
+import { isPublicDemoBuild } from "@/lib/demoSession";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,9 +96,10 @@ function downloadJson(data: unknown, filename: string): void {
 interface WidgetSelectorProps {
   selected: string[];
   onChange: (selected: string[]) => void;
+  readOnly?: boolean;
 }
 
-function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
+function WidgetSelector({ selected, onChange, readOnly = false }: WidgetSelectorProps) {
   const [expanded, setExpanded] = useState(false);
   const categories = ["Trading", "Analysis", "Utility"] as const;
 
@@ -120,7 +122,7 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
             </span>
           )}
         </p>
-        <button
+        {!readOnly && <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
@@ -129,10 +131,10 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
         >
           {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           {expanded ? "Collapse" : "Choose widgets"}
-        </button>
+        </button>}
       </div>
 
-      {expanded && (
+      {expanded && !readOnly && (
         <div
           className="rounded border border-border-default bg-surface-card overflow-y-auto"
           style={{ maxHeight: "280px" }}
@@ -184,22 +186,22 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
       {/* Selected chips */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
-          {selected.map((id) => {
+          {selected.map((id, index) => {
             const name = widgetCatalog.find((w) => w.id === id)?.name ?? id;
             return (
               <span
-                key={id}
+                key={`${id}-${index}`}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-accent/10 text-accent border border-accent/20"
               >
                 {name}
-                <button
+                {!readOnly && <button
                   type="button"
-                  onClick={() => toggle(id)}
+                  onClick={() => onChange(selected.filter((_, occurrence) => occurrence !== index))}
                   aria-label={`Remove ${name}`}
                   className="hover:text-loss transition-colors"
                 >
                   <X size={9} />
-                </button>
+                </button>}
               </span>
             );
           })}
@@ -256,6 +258,7 @@ function PresetForm({
     >
       <fieldset disabled={isPending} className="space-y-4">
       <p className="text-xs font-semibold text-accent">{heading}</p>
+      {mode === "fork" && <p className="text-xs text-text-muted">Create a copy, then edit its contents.</p>}
 
       {/* Name */}
       <div className="space-y-1">
@@ -288,7 +291,8 @@ function PresetForm({
           id="preset-description"
           type="text"
           value={form.description}
-          onChange={(e) => update("description", e.target.value)}
+          readOnly={mode === "fork"}
+          onChange={mode === "fork" ? undefined : (e) => update("description", e.target.value)}
           placeholder="Brief summary of what this layout is for"
           className="w-full px-3 py-1.5 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/20 transition-colors"
         />
@@ -298,6 +302,7 @@ function PresetForm({
       <WidgetSelector
         selected={form.selectedWidgets}
         onChange={(sel) => update("selectedWidgets", sel)}
+        readOnly={mode === "fork"}
       />
 
       {/* Actions */}
@@ -759,6 +764,11 @@ export function PresetSection() {
 
   return (
     <div className="space-y-6">
+      {isPublicDemoBuild() && (
+        <p className="text-xs text-text-muted">
+          In this public demo, custom presets are saved only in this browser. They are not synced to an installed account.
+        </p>
+      )}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <SectionTitle>Workspace Presets</SectionTitle>
 
