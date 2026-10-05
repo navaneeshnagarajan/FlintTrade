@@ -130,6 +130,80 @@ export function layaReasonTooltip(reason: string | null | undefined, port: numbe
 }
 
 /**
+ * Status-menu detail for a wrong model version. The chip stays
+ * "Wrong model version" and does not use this sentence.
+ */
+export const OLLAMA_DIGEST_DETAIL =
+  "FlintTrade checks the digest Ollama reports for the exact model tag on every admission. The tag is not the proof. If that digest does not match the pinned digest, the gate shows Wrong model version and new orders stay paused. You can still close positions.";
+
+/** Next line when a FlintTrade-managed Ollama install is not running. */
+export const OLLAMA_NOT_STARTED_MANAGED = "Ollama isn't running. Start it to bring Laya back.";
+
+/** Next line when Ollama is the operator's own install. There is no Start action. */
+export const OLLAMA_NOT_STARTED_UNMANAGED = "Ollama isn't running. Start Ollama on this computer, then try again.";
+
+export const OLLAMA_START_ACTION = "Start Laya";
+export const OLLAMA_STARTING_ACTION = "Starting…";
+export const OLLAMA_START_FAILED = "Laya could not be started.";
+
+/** Chip words on the Ollama route. Identical to the sidecar chip. */
+export function ollamaChipText(
+  reason: string | null | undefined,
+  port: number,
+  downloadBytes?: number | null,
+  downloadTotal?: number | null,
+): string | null {
+  return layaReasonPlain(reason, port, downloadBytes, downloadTotal);
+}
+
+export function ollamaNotStartedLine(managed: boolean): string {
+  return managed ? OLLAMA_NOT_STARTED_MANAGED : OLLAMA_NOT_STARTED_UNMANAGED;
+}
+
+/** Status-menu detail. Absent for reasons that keep the sidecar tooltip. */
+export function ollamaStatusMenuDetail(reason: string | null | undefined, managed: boolean): string | null {
+  if (reason === "wrong_revision") return OLLAMA_DIGEST_DETAIL;
+  if (reason === "not_started") return ollamaNotStartedLine(managed);
+  return null;
+}
+
+/** Hover text on the Ollama route. It never names the sidecar start command. */
+export function ollamaRouteTooltip(
+  reason: string | null | undefined,
+  port: number,
+  managed: boolean,
+): string | null {
+  if (reason === "not_started") return ollamaNotStartedLine(managed);
+  const tooltip = layaReasonTooltip(reason, port);
+  if (tooltip?.includes(LAYA_START_COMMAND)) return layaReasonPlain(reason, port);
+  return tooltip;
+}
+
+/** Every sentence the Ollama route can show the operator. */
+export function ollamaRouteVisibleLines(managed: boolean): string[] {
+  const lines: string[] = [];
+  for (const reason of LAYA_REASON_CODES) {
+    const chip = ollamaChipText(
+      reason,
+      11434,
+      reason === "downloading" ? 1_200_000_000 : 0,
+      reason === "downloading" ? 3_400_000_000 : 0,
+    );
+    if (chip) lines.push(chip);
+    const detail = ollamaStatusMenuDetail(reason, managed);
+    if (detail) lines.push(detail);
+    const tooltip = ollamaRouteTooltip(reason, 11434, managed);
+    if (tooltip && tooltip !== chip && tooltip !== detail) lines.push(tooltip);
+  }
+  lines.push(LAYA_CHECKING_DETAIL, LAYA_DOWN_PAUSE, OLLAMA_START_FAILED);
+  if (managed) lines.push(OLLAMA_START_ACTION, OLLAMA_STARTING_ACTION);
+  for (const label of ["Ready", "Degraded", "Down", "Still loading", "Downloading", "Checking"]) {
+    lines.push(`Laya ${label}`);
+  }
+  return lines;
+}
+
+/**
  * Chip label. Still loading replaces Down for the first model load and
  * Downloading replaces it while the model downloads. Other states keep
  * Ready, Degraded, or Down.

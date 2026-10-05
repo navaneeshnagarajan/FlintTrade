@@ -62,14 +62,24 @@ export function OperatorIncidentProbes() {
     const store = useOperatorSignalStore.getState();
     if (ping.data.epoch !== store.layaEpoch) return;
     const sample = ping.data.probe;
-    store.setLayaChecking(false);
+    const validHeartbeat = sample.localPing === "ok" && sample.layaHeartbeatValid;
+    // Failed/invalid reads can revoke readiness, but cannot select another backend
+    // or turn an unmanaged Ollama install into a sidecar Start action.
+    if (validHeartbeat) {
+      store.setLayaRoute(sample.layaRoute);
+      store.setLayaManaged(sample.layaManaged === true);
+      store.setLayaPort(sample.layaPort);
+    }
+    store.setLayaChecking(validHeartbeat && sample.layaChecking === true);
     store.setPing(sample);
-    store.setDecisionStatus(sample.laya ?? "down");
-    store.setLayaPracticeStatus(sample.layaPractice ?? "down");
-    store.setLayaLiveQualified(sample.layaLiveQualified);
-    store.setLayaReason(sample.layaReason);
-    store.setLayaPort(sample.layaPort);
-    store.setLayaDownloadProgress(sample.layaDownloadBytes, sample.layaDownloadTotal);
+    store.setDecisionStatus(validHeartbeat ? sample.laya ?? "down" : "down");
+    store.setLayaPracticeStatus(validHeartbeat ? sample.layaPractice ?? "down" : "down");
+    store.setLayaLiveQualified(validHeartbeat && sample.layaLiveQualified);
+    store.setLayaReason(validHeartbeat ? sample.layaReason : null);
+    store.setLayaDownloadProgress(
+      validHeartbeat ? sample.layaDownloadBytes : null,
+      validHeartbeat ? sample.layaDownloadTotal : null,
+    );
   }, [ping.data]);
 
   useEffect(() => {
