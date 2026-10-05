@@ -22,7 +22,7 @@
 import { useState, useRef, useCallback } from "react";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useIsMutating } from "@tanstack/react-query";
 import {
   Plus,
   Upload,
@@ -49,6 +49,7 @@ import {
   type CreatePresetPayload,
 } from "@/services/ftApi";
 import { widgetCatalog } from "@/layout/widgetFactory";
+import { isPublicDemoBuild } from "@/lib/demoSession";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +63,8 @@ interface PresetFormState {
   selectedWidgets: string[]; // widget component ids
   targetId: string; // preset id being edited/forked (empty for create)
 }
+
+const PRESET_WRITE_KEY = ["presets", "write"] as const;
 
 const EMPTY_FORM: PresetFormState = {
   name: "",
@@ -93,9 +96,10 @@ function downloadJson(data: unknown, filename: string): void {
 interface WidgetSelectorProps {
   selected: string[];
   onChange: (selected: string[]) => void;
+  readOnly?: boolean;
 }
 
-function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
+function WidgetSelector({ selected, onChange, readOnly = false }: WidgetSelectorProps) {
   const [expanded, setExpanded] = useState(false);
   const categories = ["Trading", "Analysis", "Utility"] as const;
 
@@ -118,7 +122,7 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
             </span>
           )}
         </p>
-        <button
+        {!readOnly && <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
@@ -127,10 +131,10 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
         >
           {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           {expanded ? "Collapse" : "Choose widgets"}
-        </button>
+        </button>}
       </div>
 
-      {expanded && (
+      {expanded && !readOnly && (
         <div
           className="rounded border border-border-default bg-surface-card overflow-y-auto"
           style={{ maxHeight: "280px" }}
@@ -182,22 +186,22 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
       {/* Selected chips */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
-          {selected.map((id) => {
+          {selected.map((id, index) => {
             const name = widgetCatalog.find((w) => w.id === id)?.name ?? id;
             return (
               <span
-                key={id}
+                key={`${id}-${index}`}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-accent/10 text-accent border border-accent/20"
               >
                 {name}
-                <button
+                {!readOnly && <button
                   type="button"
-                  onClick={() => toggle(id)}
+                  onClick={() => onChange(selected.filter((_, occurrence) => occurrence !== index))}
                   aria-label={`Remove ${name}`}
                   className="hover:text-loss transition-colors"
                 >
                   <X size={9} />
-                </button>
+                </button>}
               </span>
             );
           })}
@@ -213,7 +217,8 @@ function WidgetSelector({ selected, onChange }: WidgetSelectorProps) {
 
 interface PresetFormProps {
   mode: "create" | "edit" | "fork";
-  initial: PresetFormState;
+  form: PresetFormState;
+  onChange: (form: PresetFormState) => void;
   onSubmit: (form: PresetFormState) => void;
   onCancel: () => void;
   isPending: boolean;
@@ -221,12 +226,12 @@ interface PresetFormProps {
 
 function PresetForm({
   mode,
-  initial,
+  form,
+  onChange,
   onSubmit,
   onCancel,
   isPending,
 }: PresetFormProps) {
-  const [form, setForm] = useState<PresetFormState>(initial);
 
   const heading =
     mode === "create"
@@ -236,12 +241,12 @@ function PresetForm({
         : "Edit Preset";
 
   function update(field: keyof PresetFormState, value: string | string[]) {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    if (!isPending) onChange({ ...form, [field]: value });
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim()) return;
+    if (isPending || !form.name.trim()) return;
     onSubmit(form);
   }
 
@@ -251,7 +256,9 @@ function PresetForm({
       className="rounded-lg border border-accent/30 bg-surface-card p-4 space-y-4 mb-4"
       aria-label={`${heading} form`}
     >
+      <fieldset disabled={isPending} className="space-y-4">
       <p className="text-xs font-semibold text-accent">{heading}</p>
+      {mode === "fork" && <p className="text-xs text-text-muted">Create a copy, then edit its contents.</p>}
 
       {/* Name */}
       <div className="space-y-1">
@@ -284,7 +291,8 @@ function PresetForm({
           id="preset-description"
           type="text"
           value={form.description}
-          onChange={(e) => update("description", e.target.value)}
+          readOnly={mode === "fork"}
+          onChange={mode === "fork" ? undefined : (e) => update("description", e.target.value)}
           placeholder="Brief summary of what this layout is for"
           className="w-full px-3 py-1.5 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/20 transition-colors"
         />
@@ -294,6 +302,7 @@ function PresetForm({
       <WidgetSelector
         selected={form.selectedWidgets}
         onChange={(sel) => update("selectedWidgets", sel)}
+        readOnly={mode === "fork"}
       />
 
       {/* Actions */}
@@ -317,6 +326,7 @@ function PresetForm({
           Cancel
         </Button>
       </div>
+      </fieldset>
     </form>
   );
 }
@@ -505,10 +515,24 @@ function DeleteConfirmDialog({
 
 export function PresetSection() {
   const queryClient = useQueryClient();
+  const pendingWrites = useIsMutating({ mutationKey: PRESET_WRITE_KEY });
+  const pendingWriteRef = useRef(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   const [formMode, setFormMode] = useState<FormMode>("idle");
   const [formState, setFormState] = useState<PresetFormState>(EMPTY_FORM);
+  const drafts = useRef(new Map<string, PresetFormState>());
+  const activeDraft = useRef("");
+  activeDraft.current = `${formMode}:${formState.targetId}`;
+
+  function completeDraft(mode: "create" | "edit" | "fork", targetId: string) {
+    const key = `${mode}:${targetId}`;
+    drafts.current.delete(key);
+    if (activeDraft.current === key) {
+      setFormMode("idle");
+      setFormState(EMPTY_FORM);
+    }
+  }
   const [deleteTarget, setDeleteTarget] =
     useState<WorkspacePresetRecord | null>(null);
   const [importError, setImportError] = useState<string>("");
@@ -531,25 +555,31 @@ export function PresetSection() {
   // ---------------------------------------------------------------------------
 
   const createMutation = useMutation({
-    mutationFn: (payload: CreatePresetPayload) => createPreset(payload),
-    onSuccess: () => {
+    mutationKey: PRESET_WRITE_KEY,
+    mutationFn: (request: CreatePresetPayload & { fromEditor?: boolean }) => createPreset({
+      name: request.name,
+      description: request.description,
+      widgets: request.widgets,
+    }),
+    onSuccess: (_result, submitted) => {
       void queryClient.invalidateQueries({ queryKey: ["presets"] });
-      setFormMode("idle");
-      setFormState(EMPTY_FORM);
+      // Import shares this API operation, but does not own an editor draft.
+      if (submitted.fromEditor) completeDraft("create", "");
     },
   });
 
   const updateMutation = useMutation({
+    mutationKey: PRESET_WRITE_KEY,
     mutationFn: ({ id, ...payload }: { id: string } & CreatePresetPayload) =>
       updatePreset(id, payload),
-    onSuccess: () => {
+    onSuccess: (_result, submitted) => {
       void queryClient.invalidateQueries({ queryKey: ["presets"] });
-      setFormMode("idle");
-      setFormState(EMPTY_FORM);
+      completeDraft("edit", submitted.id);
     },
   });
 
   const deleteMutation = useMutation({
+    mutationKey: PRESET_WRITE_KEY,
     mutationFn: (id: string) => deletePreset(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["presets"] });
@@ -558,20 +588,22 @@ export function PresetSection() {
   });
 
   const forkMutation = useMutation({
+    mutationKey: PRESET_WRITE_KEY,
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       forkPreset(id, name),
-    onSuccess: () => {
+    onSuccess: (_result, submitted) => {
       void queryClient.invalidateQueries({ queryKey: ["presets"] });
-      setFormMode("idle");
-      setFormState(EMPTY_FORM);
+      completeDraft("fork", submitted.id);
     },
   });
 
   const anyPending =
+    pendingWrites > 0 ||
     createMutation.isPending ||
     updateMutation.isPending ||
     deleteMutation.isPending ||
     forkMutation.isPending;
+  pendingWriteRef.current = anyPending;
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -579,13 +611,13 @@ export function PresetSection() {
 
   function handleOpenCreate() {
     setDeleteTarget(null);
-    setFormState(EMPTY_FORM);
+    setFormState(drafts.current.get("create:") ?? EMPTY_FORM);
     setFormMode("create");
   }
 
   function handleOpenEdit(preset: WorkspacePresetRecord) {
     setDeleteTarget(null);
-    setFormState({
+    setFormState(drafts.current.get(`edit:${preset.id}`) ?? {
       name: preset.name,
       description: preset.description,
       selectedWidgets: preset.widgets,
@@ -596,7 +628,7 @@ export function PresetSection() {
 
   function handleOpenFork(preset: WorkspacePresetRecord) {
     setDeleteTarget(null);
-    setFormState({
+    setFormState(drafts.current.get(`fork:${preset.id}`) ?? {
       name: `${preset.name} (copy)`,
       description: preset.description,
       selectedWidgets: preset.widgets,
@@ -606,16 +638,20 @@ export function PresetSection() {
   }
 
   function handleCancel() {
+    drafts.current.delete(`${formMode}:${formState.targetId}`);
     setFormMode("idle");
     setFormState(EMPTY_FORM);
   }
 
   function handleFormSubmit(form: PresetFormState) {
+    if (pendingWriteRef.current) return;
+    pendingWriteRef.current = true;
     // Backend stores widgets as an ordered list of widget IDs.
     const widgets = form.selectedWidgets;
 
     if (formMode === "create") {
       createMutation.mutate({
+        fromEditor: true,
         name: form.name,
         description: form.description,
         widgets,
@@ -643,11 +679,19 @@ export function PresetSection() {
   }
 
   function handleDeleteConfirm() {
-    if (!deleteTarget) return;
+    if (!deleteTarget || pendingWriteRef.current) return;
+    pendingWriteRef.current = true;
     deleteMutation.mutate(deleteTarget.id);
   }
 
+  function canImport() {
+    if (!pendingWriteRef.current) return true;
+    setImportError("Finish the current preset change before importing.");
+    return false;
+  }
+
   function handleImportClick() {
+    if (!canImport()) return;
     setImportError("");
     importRef.current?.click();
   }
@@ -655,6 +699,10 @@ export function PresetSection() {
   function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!canImport()) {
+      e.target.value = "";
+      return;
+    }
 
     const reader = new FileReader();
     const importedPresetSchema = z.object({
@@ -665,6 +713,7 @@ export function PresetSection() {
     });
 
     reader.onload = (ev) => {
+      if (!canImport()) return;
       try {
         const parsed = safeParse(ev.target?.result as string, importedPresetSchema);
         if (!parsed) {
@@ -673,6 +722,7 @@ export function PresetSection() {
           );
           return;
         }
+        pendingWriteRef.current = true;
         createMutation.mutate({
           name: parsed.name,
           description: parsed.description ?? "",
@@ -714,6 +764,11 @@ export function PresetSection() {
 
   return (
     <div className="space-y-6">
+      {isPublicDemoBuild() && (
+        <p className="text-xs text-text-muted">
+          In this public demo, custom presets are saved only in this browser. They are not synced to an installed account.
+        </p>
+      )}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <SectionTitle>Workspace Presets</SectionTitle>
 
@@ -724,6 +779,7 @@ export function PresetSection() {
             type="file"
             accept=".json,application/json"
             onChange={handleImportFile}
+            disabled={anyPending}
             className="sr-only"
             aria-hidden="true"
             tabIndex={-1}
@@ -733,6 +789,7 @@ export function PresetSection() {
             variant="outline"
             size="sm"
             onClick={handleImportClick}
+            disabled={anyPending}
             className="text-xs gap-1.5"
             aria-label="Import preset from JSON file"
           >
@@ -779,7 +836,11 @@ export function PresetSection() {
       {formMode !== "idle" && (
         <PresetForm
           mode={formMode === "fork" ? "fork" : formMode}
-          initial={formState}
+          form={formState}
+          onChange={(draft) => {
+            drafts.current.set(`${formMode}:${draft.targetId}`, draft);
+            setFormState(draft);
+          }}
           onSubmit={handleFormSubmit}
           onCancel={handleCancel}
           isPending={anyPending}

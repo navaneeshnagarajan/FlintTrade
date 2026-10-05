@@ -1,3 +1,4 @@
+import { BrokerSummary } from "@/tools/Settings/BrokerSummary";
 /**
  * BrokerConnect — shared native broker connect surface.
  *
@@ -65,7 +66,6 @@ import { cancelAccountAction, runAccountAction } from "@/services/accountMutatio
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { honestBrokerStatus } from "@/lib/operatorIncident";
 import {
-  API_SMOKE_LABEL,
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isMondayReadBroker,
@@ -705,17 +705,19 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
       <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-secondary">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <div className="space-y-2">
-          <p>
-            <strong className="text-text-primary">Native Dhan + Kotak Neo is Connected (read).</strong>{" "}
-            Native connection is currently enabled for{" "}
-            {connectableNativeLabel || "the currently selectable native brokers"}. Non-funded live
-            reads stay {CONNECTED_READ_LABEL}. The non-funded read check is {API_SMOKE_LABEL} —
-            never placeable Live orders. Neo
-            has no sandbox: {NEO_OPERATOR_COPY} Native order placement stays fail-closed.{" "}
-            {unavailableNativeLabel
-              ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their activation blockers clear.`
-              : "Unavailable adapters stay disabled until their activation blockers clear."}
+          <BrokerSummary connectedAccounts={accounts.filter((account) => account.status === "connected").length} />
+          <p className="text-xs text-text-muted">
+            Native broker HTTP connectivity is unavailable while native-session support is completed.
+            Local Practice trading remains available.
           </p>
+          <details>
+            <summary className="cursor-pointer text-xs">Broker availability</summary>
+            <p className="mt-2 text-xs text-text-muted">
+              Native connection options: {connectableNativeLabel || "see the available brokers below"}.{" "}
+              {unavailableNativeLabel
+                ? `${unavailableNativeLabel} ${unavailableNativeVerb} listed but unavailable until their requirements are met.`
+                : "Unavailable brokers are disabled until their requirements are met."}
+            </p>
           {unavailableNativeBlockers.length > 0 && (
             <ul className="space-y-1 text-xs text-text-muted" data-testid="native-connect-blockers">
               {unavailableNativeBlockers.map((b) => (
@@ -726,6 +728,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               ))}
             </ul>
           )}
+          </details>
         </div>
       </div>
 

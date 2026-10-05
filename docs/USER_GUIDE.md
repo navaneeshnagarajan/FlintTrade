@@ -188,7 +188,7 @@ For step-by-step instructions tailored to each operating system, see:
 - [Raspberry Pi setup](setup/raspberry-pi.md)
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
-![Welcome screen](screenshots/01-welcome.png)
+![Welcome screen](screenshots/01-welcome.jpg)
 *The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with example data opens sample data, labelled Example.*
 
 ---
@@ -889,8 +889,8 @@ An empty watchlist never silently retargets
 (FT-TRADE-011).
 
 With example data, `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
-stay disarmed — the same honesty class as Automate Telegram
-**Send Test**. They never open Confirm Order and never place.
+stay disarmed — the same honesty class as Settings → Telegram
+**Test Send**. They never open Confirm Order and never place.
 Helper: `Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` **1-CLICK**
 stays OFF and disabled; its title is `One-click is unavailable for Example`. Sample quote preview is allowed; there is no Confirm
 BUY / Confirm SELL chrome. Practice and Live open Confirm only
@@ -989,7 +989,7 @@ See [Start Laya](#start-laya) and [Laya on place](#laya-on-place).
 
 If anything looks wrong during live-capable testing, hit the **Kill Switch** on
 the `/trade` workspace (Live mode only). Activate and reset also live under
-`/automate` → Settings. It cancels open orders and then flattens positions
+Settings → Risk & Safety. It cancels open orders and then flattens positions
 through the emergency broker path. It does not use a separate close-position
 route. **Cancel all** only cancels open orders. The kill switch fires only
 when you explicitly activate it from the UI, API, or configured Telegram
@@ -1044,7 +1044,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`; choose Practice in the Mode menu before placing a simulated order. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
-| `/automate` | Automate — schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Automate → Automation Settings. |
+| `/automate` | Automate — schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Settings → Risk & Safety. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Accounts — native broker account metadata and connection status. Mirroring and aggregate broker risk remain unavailable until native cutover. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
@@ -1642,10 +1642,10 @@ When none are running, the empty state shows "No strategies running"
 and "Start a strategy from the Strategy Builder tool.", plus an
 **Open Strategy Builder** outline link that navigates to `/lab`.
 
-With example data, `/automate` → Settings → Telegram Alerts, **Send Test** is
+With example data, Settings → Telegram, **Test Send** is
 disabled (click and Enter do not send). The prefilled message stays
 visible as a preview-only sample. Helper: `Telegram tests are blocked for Example. Switch to Practice or Live with Telegram configured to send a real test.` There is no confirm-and-send path from example data.
-Practice and Live arm Send Test only when Telegram is configured; otherwise
+Practice and Live arm Test Send only when Telegram is configured; otherwise
 the helper is "Configure Telegram first".
 
 ### Execution Logs
@@ -1661,7 +1661,7 @@ offline.` line (or Retry) is reserved for a real request failure. While
 logs are loading, the view shows a spinner / `Loading logs…` and never
 flashes the outage copy.
 
-![Automate](screenshots/07-automate.png)
+![Automate](screenshots/07-automate.jpg)
 
 ---
 
@@ -1820,7 +1820,7 @@ do not download models, embed documents, or carry optional AI dependencies. Set
 `FLINTTRADE_RAG_AUTO_INDEX=true` when you intentionally want `docs/` indexed at
 startup.
 
-![AI](screenshots/08-ai.png)
+![AI](screenshots/08-ai.jpg)
 
 ---
 
@@ -1867,8 +1867,8 @@ least 1). The Settings reminder has **Show** and **Hide**. It has no
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
-| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); example data keeps that control disarmed. |
-| **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
+| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives in Settings → Telegram (**Test Send**); example data keeps that control disarmed. |
+| **Risk & Safety** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
 On `/settings#security`, **Quick-unlock PIN** is the 6-digit PIN that
 Quick Unlock and the Live switch both ask for. The PIN is optional at
@@ -2019,7 +2019,7 @@ Secrets are stored as `_ref` fields — `secret://` references to hardened
 files under `<workspace>/secrets/`. They are never written to
 `workspace.json` in clear text.
 
-![Settings](screenshots/10-settings.png)
+![Settings](screenshots/10-settings.jpg)
 
 ---
 
@@ -2361,3 +2361,31 @@ powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps
 ```
 
 Both accept the same purge flag (`--purge` / `-Purge`).
+
+
+### Where settings live
+
+Open Settings from the sidebar, your avatar, or Tools. Ctrl+, (Command+, on macOS)
+opens Quick Settings for common display preferences. Appearance has one colour-mode
+selector and one glass-effect toggle.
+
+Broker shows native account status and availability restrictions. Connection alone
+does not enable live orders. Native connection and HTTP account reads remain frozen
+on this unreleased line. Leverage appears only with a connected broker outside
+Example mode. Existing `/settings#api` links open the native Broker page.
+
+Risk & Safety owns daily-loss thresholds, global safety caps, the confirmed kill
+switch and account-scoped opening-capital/reset controls. Automate and the Trade
+desk link to it. Telegram setup and test messages live in Settings → Telegram.
+
+Manage workspaces on the Trade desk includes built-in templates and Saved presets.
+Saved presets retains create, edit, fork, import, export and delete controls; existing
+`/settings#presets` links open desk management. AI save status appears only on the
+AI page.
+
+Fork creates a named copy with the same description and widgets. Open Edit on the
+copy to change its contents.
+
+In the public demo, custom presets are saved only in the current browser and are
+not synced to an installed account. Export a preset as JSON to keep a portable copy.
+Installed builds continue to save presets through their local FlintTrade backend.

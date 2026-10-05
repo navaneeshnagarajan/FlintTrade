@@ -314,6 +314,18 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await page.goto("/welcome");
   await installMismatchedPracticeAuthority(page);
 
+  // Await real module loading before spending the bounded virtual-time budget.
+  // Cold Vite transforms must not strand React/layout work behind a paused clock.
+  await page.evaluate(async () => {
+    const importModule = new Function("path", "return import(path)") as (
+      path: string,
+    ) => Promise<unknown>;
+    await Promise.all([
+      importModule("/src/routes/TerminalRoute.tsx"),
+      importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"),
+    ]);
+  });
+
   await expect(page).toHaveURL(/\/trade$/);
   const limitOrderType = page.getByRole("radio", { name: "LIMIT" });
   // Lazy widget imports can schedule immediate work after their network module

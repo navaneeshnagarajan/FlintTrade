@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
+vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({ emitNotification: vi.fn() }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtime = vi.hoisted(() => ({
@@ -15,6 +16,9 @@ const runtime = vi.hoisted(() => ({
 }));
 
 const api = vi.hoisted(() => ({
+  getSafetyConfig: vi.fn(),
+  activateKillSwitch: vi.fn(),
+  resetKillSwitch: vi.fn(),
   getSafetyConfigForTarget: vi.fn(),
   resetDailyPnLState: vi.fn(),
   updateSafetyConfig: vi.fn(),
@@ -63,6 +67,9 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 vi.mock("@/services/ftApi", () => ({
+  getSafetyConfig: api.getSafetyConfig,
+  activateKillSwitch: api.activateKillSwitch,
+  resetKillSwitch: api.resetKillSwitch,
   getSafetyConfigForTarget: api.getSafetyConfigForTarget,
   resetDailyPnLState: api.resetDailyPnLState,
   updateSafetyConfig: api.updateSafetyConfig,
@@ -122,6 +129,7 @@ describe("RiskSection account-bound safety controls", () => {
     runtime.mode = "live";
     runtime.apiKey = "";
     runtime.activeAccountId = "native:upstox:A";
+    api.getSafetyConfig.mockReset().mockResolvedValue(safetyConfig("A"));
     api.getSafetyConfigForTarget.mockReset().mockImplementation(
       (target: { account_id: "A" | "B" }) => Promise.resolve(safetyConfig(target.account_id)),
     );
@@ -155,7 +163,7 @@ describe("RiskSection account-bound safety controls", () => {
 
     expect(await screen.findByText("native:upstox:B")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByLabelText("Daily loss pause threshold in percent")).toHaveValue(4);
+      expect(screen.getByLabelText("Daily loss pause threshold in percent")).toHaveValue(3);
       expect(screen.getByLabelText("Opening risk capital in INR")).toHaveValue(null);
     });
     expect(screen.queryByRole("button", { name: "Reset Daily-Loss Stop" })).not.toBeInTheDocument();
@@ -201,10 +209,120 @@ describe("RiskSection account-bound safety controls", () => {
     expect(screen.queryByText(/saved locally/i)).not.toBeInTheDocument();
   });
 
+  it("owns the process-wide emergency controls and all four global caps", async () => {
+    renderRiskSection();
+    expect(await screen.findByRole("heading", { name: "Kill Switch" })).toBeInTheDocument();
+    for (const name of ["Max Positions", "Max Margin", "Max Net Delta", "Max Net Vega"]) {
+      expect(await screen.findByRole("spinbutton", { name })).toBeInTheDocument();
+    }
+    expect(screen.getAllByLabelText("Daily loss pause threshold in percent")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Daily loss hard stop threshold in percent")).toHaveLength(1);
+  });
+
+  it("edits global daily-loss percentages in Live without a selected account", async () => {
+    const user = userEvent.setup();
+    runtime.activeAccountId = null;
+    renderRiskSection();
+    const pause = screen.getByLabelText("Daily loss pause threshold in percent");
+    await waitFor(() => expect(pause).toHaveValue(3));
+    expect(pause).toBeEnabled();
+    expect(screen.getByLabelText("Opening risk capital in INR")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Freeze" })).toBeDisabled();
+    expect(api.getSafetyConfigForTarget).not.toHaveBeenCalled();
+    await user.clear(pause);
+    await user.type(pause, "4");
+    await user.click(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" }));
+    await waitFor(() => expect(api.updateSafetyConfig).toHaveBeenCalledWith({
+      daily_loss_pause_pct: 4,
+      daily_loss_kill_pct: 8,
+    }));
+    expect(api.updateSafetyConfig.mock.calls[0]).toHaveLength(1);
+  });
+
+  it.each(["practice", "explore"])("disarms global and account safety writes in %s", async (mode) => {
+    runtime.mode = mode;
+    renderRiskSection();
+    expect(screen.getByLabelText("Daily loss pause threshold in percent")).toBeDisabled();
+    expect(screen.getByLabelText("Daily loss hard stop threshold in percent")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Freeze" })).toBeDisabled();
+    expect(api.getSafetyConfigForTarget).not.toHaveBeenCalled();
+  });
+
+  it("keeps global saves disabled without authoritative global safety state", async () => {
+    api.getSafetyConfig.mockRejectedValue(new Error("Global safety unavailable"));
+    renderRiskSection();
+    await waitFor(() => expect(api.getSafetyConfigForTarget).toHaveBeenCalled());
+    expect(screen.getByLabelText("Daily loss pause threshold in percent")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" })).toBeDisabled();
+  });
+
   it("wraps the safety action row on narrow surfaces", async () => {
     renderRiskSection();
 
     const syncButton = await screen.findByRole("button", { name: "Sync Backend Daily-Loss Limits" });
     expect(syncButton.parentElement).toHaveClass("flex-wrap");
+  });
+  it("does not block global thresholds when the selected account state fails", async () => {
+    const user = userEvent.setup();
+    api.getSafetyConfigForTarget.mockRejectedValue(new Error("Account state unavailable"));
+    renderRiskSection();
+    await screen.findByText("Account state unavailable");
+    const pause = screen.getByLabelText("Daily loss pause threshold in percent");
+    expect(pause).toBeEnabled();
+    expect(screen.getByLabelText("Opening risk capital in INR")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" }));
+    await waitFor(() => expect(api.updateSafetyConfig).toHaveBeenCalledWith({
+      daily_loss_pause_pct: 3,
+      daily_loss_kill_pct: 8,
+    }));
+  });
+
+  it("requires matching account state for capital and latch reset", async () => {
+    api.getSafetyConfigForTarget.mockResolvedValue({ ...safetyConfig("A"), daily_loss_selector: "upstox:B" });
+    renderRiskSection();
+    const reset = await screen.findByRole("button", { name: "Reset Daily-Loss Stop" });
+    expect(reset).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Freeze" })).toBeDisabled();
+    expect(screen.getByLabelText("Opening risk capital in INR")).toBeDisabled();
+    expect(screen.getByLabelText("Daily loss pause threshold in percent")).toBeEnabled();
+  });
+
+  it("preserves an unsaved global threshold while the selected account changes", async () => {
+    const user = userEvent.setup();
+    const { rerender, queryClient } = renderRiskSection();
+    const pause = screen.getByLabelText("Daily loss pause threshold in percent");
+    await waitFor(() => expect(pause).toHaveValue(3));
+    await user.clear(pause);
+    await user.type(pause, "6");
+    runtime.activeAccountId = "native:upstox:B";
+    rerender(<QueryClientProvider client={queryClient}><RiskSection settings={localSettings} onChange={vi.fn()} /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByLabelText("Opening risk capital in INR")).toHaveValue(null));
+    expect(pause).toHaveValue(6);
+  });
+  it("keeps accepted global limits visible while the post-save refresh is pending", async () => {
+    const user = userEvent.setup();
+    api.getSafetyConfig.mockResolvedValueOnce(safetyConfig("A"))
+      .mockReturnValue(new Promise(() => {}));
+    renderRiskSection();
+    const pause = screen.getByLabelText("Daily loss pause threshold in percent");
+    await waitFor(() => expect(pause).toHaveValue(3));
+    await user.clear(pause);
+    await user.type(pause, "4");
+    await user.click(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" }));
+    await screen.findByText("Backend daily-loss limits updated");
+    expect(pause).toHaveValue(4);
+  });
+
+  it("disables percentage edits and repeat saves during a pending global save", async () => {
+    const user = userEvent.setup();
+    api.updateSafetyConfig.mockReturnValue(new Promise(() => {}));
+    renderRiskSection();
+    const pause = screen.getByLabelText("Daily loss pause threshold in percent");
+    await waitFor(() => expect(pause).toHaveValue(3));
+    await user.click(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" }));
+    expect(pause).toBeDisabled();
+    expect(screen.getByLabelText("Daily loss hard stop threshold in percent")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Syncing..." })).toBeDisabled();
   });
 });

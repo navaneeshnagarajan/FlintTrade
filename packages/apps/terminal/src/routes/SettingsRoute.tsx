@@ -1,7 +1,8 @@
 /**
  * SettingsRoute — /settings app route.
  *
- * Accessible from ALL routes via the TOOLS dropdown, gear icon, or Ctrl+,.
+ * Accessible from all routes via the sidebar, avatar, or Tools menu.
+ * Ctrl+, opens Quick Settings in the shared chrome.
  * Shares section components and Zustand stores with QuickAccessPanel.
  *
  * Layout: shared PageHeader + grouped section nav + scrollable content area
@@ -9,7 +10,10 @@
  */
 
 import { useState, useCallback, useEffect, useMemo, type JSX } from "react";
-import { RouteBanner } from "@/components/help/RouteBanner";
+import { useNavigate } from "react-router";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,7 +36,6 @@ import { PracticeSection }   from "@/tools/Settings/PracticeSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
-import { PresetSection }     from "@/tools/Settings/PresetSection";
 import { UpdatesSection }    from "@/tools/Settings/UpdatesSection";
 import { SupportSection }    from "@/tools/Settings/SupportSection";
 import { TickerSettings }    from "@/routes/settings/TickerSettings";
@@ -47,28 +50,47 @@ import { PracticeLaterSetup } from "@/routes/SetupAccountRoute";
 // ---------------------------------------------------------------------------
 
 export default function SettingsRoute() {
-  // Read hash fragment to allow deep-linking: /settings#brokers, /settings#brokers, etc.
-  const sectionFromHash = (): SectionId => {
-    const hash = window.location.hash.replace("#", "") as SectionId;
-    return SECTIONS.some((s) => s.id === hash) ? hash : "general";
-  };
-
-  const [activeSection, setActiveSection] = useState<SectionId>(sectionFromHash);
+  const navigate = useNavigate();
+  const mode = useModeStore((state) => state.mode);
+  const hasConnectedAccount = useBrokerStore((state) =>
+    state.accounts.some((account) => account.source === "native" && account.status === "connected"),
+  );
+  // Visibility only; execution keeps its existing independent readiness gates.
+  const showLeverage = mode !== "explore" && hasConnectedAccount;
+  const [requestedSection, setRequestedSection] = useState(() => window.location.hash.slice(1));
+  const canonicalSection = requestedSection === "api" ? "brokers" : requestedSection;
+  const activeSection: SectionId = canonicalSection === "leverage" && !showLeverage
+    ? (SECTIONS.some((section) => section.id === "brokers") ? "brokers" : "general")
+    : SECTIONS.some((section) => section.id === canonicalSection)
+      ? canonicalSection as SectionId
+      : "general";
   const [llmWasOpened, setLlmWasOpened] = useState(activeSection === "llm");
-  const [toastMsg, setToastMsg]           = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [llmProviderDraftPending, setLlmProviderDraftPending] = useState(false);
-  const dismissToast                      = useCallback(() => setToastMsg(null), []);
+  const dismissToast = useCallback(() => setToastMsg(null), []);
 
   useEffect(() => {
-    const syncSectionFromHash = () => setActiveSection(sectionFromHash());
+    const syncSectionFromHash = () => {
+      const hash = window.location.hash.slice(1);
+      setRequestedSection(hash);
+    };
     window.addEventListener("hashchange", syncSectionFromHash);
     return () => window.removeEventListener("hashchange", syncSectionFromHash);
   }, []);
 
-  // Update hash when section changes for deep-link support
   useEffect(() => {
-    window.history.replaceState(null, "", `#${activeSection}`);
-  }, [activeSection]);
+    if (requestedSection === "presets") {
+      useLayoutStore.getState().setPresetPickerOpen(true);
+      navigate("/trade", { replace: true });
+    }
+  }, [navigate, requestedSection]);
+
+  const selectSection = (section: SectionId) => {
+    // Write even when the fallback tab is already selected, cancelling pending
+    // deep links while asynchronous broker discovery is still in flight.
+    window.history.replaceState(null, "", `#${section}`);
+    setRequestedSection(section);
+  };
 
   useEffect(() => {
     if (activeSection === "llm") setLlmWasOpened(true);
@@ -149,7 +171,7 @@ export default function SettingsRoute() {
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;
       case "skill":      return <SkillSection />;
-      case "presets":    return <PresetSection />;
+      case "presets":    return <></>;
       case "updates":    return <UpdatesSection />;
       case "support":    return <SupportSection />;
       case "about":      return <AboutSection />;
@@ -177,13 +199,13 @@ export default function SettingsRoute() {
       SECTION_GROUPS.map((group) => ({
         id: group.id,
         label: group.label,
-        items: SECTIONS.filter((section) => section.group === group.id).map(({ id, label, icon }) => ({
+        items: SECTIONS.filter((section) => section.group === group.id && (section.id !== "leverage" || showLeverage)).map(({ id, label, icon }) => ({
           id,
           label,
           icon,
         })),
       })).filter((group) => group.items.length > 0),
-    [],
+    [showLeverage],
   );
 
   return (
@@ -217,7 +239,7 @@ export default function SettingsRoute() {
         <SectionNav<SectionId>
           groups={navGroups}
           value={activeSection}
-          onChange={setActiveSection}
+          onChange={selectSection}
           label="Settings sections"
           idPrefix="settings"
         />
@@ -230,12 +252,6 @@ export default function SettingsRoute() {
           className="min-w-0 flex-1 overflow-y-auto"
         >
           <div className="w-full max-w-3xl px-[var(--ft-page-gutter)] pb-16 pt-6">
-            {/* Route-level hint — dismissible, respects helpPrefs.inlineHints */}
-            <RouteBanner
-              hintId="settings-broker-gateway-connect"
-              text="Use Brokers to connect broker accounts. Broker credentials are stored in your local encrypted vault."
-              className="mb-5"
-            />
             <PracticeLaterSetup surface="settings" />
             {activeSection !== "llm" && renderContent()}
             {(llmWasOpened || activeSection === "llm") && (
@@ -247,8 +263,8 @@ export default function SettingsRoute() {
         </div>
       </div>
 
-      {/* Footer status bar */}
-      <div
+      {/* Model persistence belongs only to its settings page. */}
+      {activeSection === "llm" && <div
         className="flex-none px-4 py-2 bg-glass-l1 border-t border-glass-l1 flex items-center gap-2"
         role="status"
         aria-label="Settings save status"
@@ -257,7 +273,7 @@ export default function SettingsRoute() {
       >
         <div className={`size-1.5 rounded-full ${saveStatus.dot}`} />
         <span className="text-xs text-text-muted">{saveStatus.copy}</span>
-      </div>
+      </div>}
     </section>
     </CinematicLayout>
   );

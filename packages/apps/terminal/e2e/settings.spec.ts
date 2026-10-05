@@ -91,7 +91,7 @@ test.describe('Settings page', () => {
   test('section tabs contain expected sections', async ({ page }) => {
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
-    for (const label of ['General', 'Appearance', 'Brokers', 'Skill & Experience', 'Report Bug', 'About']) {
+    for (const label of ['General', 'Appearance', 'Broker', 'Skill & Experience', 'Report Bug', 'About']) {
       await expect(sectionTabs.getByText(label, { exact: true })).toBeVisible();
     }
   });
@@ -119,18 +119,20 @@ test.describe('Settings page', () => {
     await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
-  test('deep-link /settings#brokers activates Brokers section', async ({ page }) => {
-    await page.goto('/settings#brokers');
+  test('legacy /settings#api opens the native Broker page', async ({ page }) => {
+    await page.goto('/settings#api');
     await page
       .getByRole('tablist', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
 
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
-    const activeTab = sectionTabs.getByRole('tab', { name: 'Brokers' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('heading', { name: 'Brokers', exact: true })).toBeVisible();
+    await expect(page.getByText(/connecting an account does not enable live orders/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save Connection' })).toHaveCount(0);
+    await expect(sectionTabs.getByRole('tab', { name: 'Broker Gateway' })).toHaveCount(0);
   });
-
-
 
   test('managed Ollama update, rollback, uninstall, and reinstall preserve the model inventory', async ({ page }) => {
     const operations: Array<{ path: string; admissionId: string; responseStatus: number }> = [];

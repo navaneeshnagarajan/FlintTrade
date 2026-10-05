@@ -163,7 +163,7 @@ export default async function HomePage() {
         <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
           <div className="screenshot-stack">
             <figure className="screen-frame main">
-              <Image src={flinttradeAsset('screenshots/01-welcome.png')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
+              <Image src={flinttradeAsset('screenshots/01-welcome.jpg')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
             </figure>
             <figure className="screen-frame side">
               <Image src={flinttradeAsset('screenshots/04-trade.png')} alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />

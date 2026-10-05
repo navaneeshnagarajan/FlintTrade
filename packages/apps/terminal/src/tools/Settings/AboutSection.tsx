@@ -4,7 +4,6 @@
 
 import { Settings, GitBranch, ExternalLink } from "lucide-react";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
-import { widgetCatalog } from "@/layout/widgetFactory";
 import { VersionInventory } from "./VersionInventory";
 import { SectionTitle } from "./shared";
 
@@ -26,10 +25,9 @@ export function AboutSection() {
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
-          Native-first trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
-          FlintTrade has its own backend, native gateway contract, {widgetCatalog.length} widgets, and an optional
-          ships as a native desktop app for macOS, Windows, and Linux.
-          Monorepo with 18 package surfaces across Python, React, Electron, shared UI, and Rust.
+          Research markets, practise strategies with simulated funds, and manage your trading workspace.
+          Connect supported brokers when you are ready; live trading remains subject to account permissions and safety checks.
+          FlintTrade runs on your own machine.
         </p>
       </div>
 

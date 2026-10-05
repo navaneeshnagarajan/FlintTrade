@@ -65,9 +65,6 @@ vi.mock("@/tools/Settings/GeneralSection", () => ({
 vi.mock("@/tools/Settings/AppearanceSection", () => ({
   AppearanceSection: () => <div data-testid="appearance-section">Appearance</div>,
 }));
-vi.mock("@/tools/Settings/ConnectionSection", () => ({
-  ConnectionSection: () => <div data-testid="connection-section">Connection</div>,
-}));
 vi.mock("@/components/account/BrokerConnect", () => ({
   BrokerConnect: (props: Record<string, unknown>) => {
     brokerRouteMocks.props = props;
@@ -133,7 +130,6 @@ vi.mock("@/hooks/useSettingsState", () => ({
     llmCredentialLast4: "live",
     telegram: {},
     dataPaths: {},
-    connection: {},
     restarting: false,
     updateGeneral: vi.fn(),
     updateTradingDefaults: vi.fn(),
@@ -144,7 +140,6 @@ vi.mock("@/hooks/useSettingsState", () => ({
     retryLlmHydration: llmRouteMocks.retryLlmHydration,
     updateTelegram: vi.fn(),
     updateDataPaths: vi.fn(),
-    acceptConnection: vi.fn(),
     handleRestart: vi.fn(),
   }),
 }));
@@ -154,7 +149,17 @@ vi.mock("@/hooks/useSettingsState", () => ({
 // ---------------------------------------------------------------------------
 
 import SettingsRoute from "../SettingsRoute";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { SECTIONS } from "@/tools/Settings/settingsConfig";
+import type { BrokerAccount } from "@/types/broker";
+
+const nativeAccount: BrokerAccount = {
+  account_id: "synthetic", broker: "dhan", source: "native", label: "Synthetic account",
+  status: "connected", connected_at: null, error_message: null, is_primary: false,
+};
 
 function mockSettingsBreakpoint(initialDesktop: boolean) {
   let matches = initialDesktop;
@@ -200,7 +205,90 @@ describe("SettingsRoute", () => {
     llmRouteMocks.setupPending = false;
     llmRouteMocks.retryLlmHydration.mockClear();
     brokerRouteMocks.props = null;
+    useBrokerStore.setState({ accounts: [] });
+    useConnectionStore.setState({ status: "disconnected" });
+    useModeStore.setState({ mode: "practice" });
+    useLayoutStore.getState().setPresetPickerOpen(false);
+    mockNavigate.mockClear();
     window.history.replaceState(null, "", "/settings");
+  });
+
+
+  it("shows model persistence only on the AI tab", () => {
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("status", { name: "Settings save status" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
+    expect(screen.getByRole("status", { name: "Settings save status" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "General" }));
+    expect(screen.queryByRole("status", { name: "Settings save status" })).not.toBeInTheDocument();
+  });
+
+  it("opens the single native Broker page from the legacy gateway hash", () => {
+    window.history.replaceState(null, "", "/settings#api");
+    render(<SettingsRoute />);
+    expect(screen.getByRole("tab", { name: "Broker", selected: true })).toBeVisible();
+    expect(screen.queryByRole("tab", { name: "Broker Gateway" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("connection-section")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Advanced/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("brokers-section")).toBeVisible();
+  });
+
+  it("routes legacy presets to desk management without a duplicate Settings tab", () => {
+    window.history.replaceState(null, "", "/settings#presets");
+    render(<SettingsRoute />);
+    expect(mockNavigate).toHaveBeenCalledWith("/trade", { replace: true });
+    expect(useLayoutStore.getState().presetPickerOpen).toBe(true);
+    expect(screen.queryByRole("tab", { name: "Workspace Presets" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Risk & Safety" })).toBeVisible();
+  });
+
+  it("retains a cold Leverage deep link while waiting for account discovery", () => {
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe("#leverage");
+    act(() => useBrokerStore.setState({ accounts: [{ account_id: "synthetic", broker: "dhan", source: "native", label: "Synthetic account", status: "connected", connected_at: null, error_message: null, is_primary: false }] }));
+    expect(screen.getByTestId("leverage-section")).toBeVisible();
+    act(() => useBrokerStore.setState({ accounts: [] }));
+    expect(screen.queryByTestId("leverage-section")).not.toBeInTheDocument();
+  });
+
+  it("lets explicit navigation cancel a pending Leverage link", () => {
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole("tab", { name: "Broker", selected: true }));
+    expect(window.location.hash).toBe("#brokers");
+    act(() => useBrokerStore.setState({ accounts: [nativeAccount] }));
+    expect(screen.getByRole("tab", { name: "Broker", selected: true })).toBeVisible();
+  });
+
+  it("retains Leverage for a confirmed native session and hides it in Example", () => {
+    useBrokerStore.setState({ accounts: [nativeAccount] });
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    expect(screen.getByTestId("leverage-section")).toBeVisible();
+    act(() => useModeStore.setState({ mode: "explore" }));
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
+  });
+
+  it("does not treat backend liveness as a configured broker", () => {
+    useConnectionStore.setState({ status: "connected" });
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { ...nativeAccount, source: "gateway" as const },
+    { ...nativeAccount, source: undefined },
+    { ...nativeAccount, status: "disconnected" as const },
+    { ...nativeAccount, status: "authenticating" as const },
+  ])("does not show Leverage for an unconfirmed native snapshot %j", (account) => {
+    useBrokerStore.setState({ accounts: [account] });
+    window.history.replaceState(null, "", "/settings#leverage");
+    render(<SettingsRoute />);
+    expect(screen.queryByRole("tab", { name: "Leverage" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Broker", selected: true })).toBeVisible();
+    expect(screen.queryByTestId("leverage-section")).not.toBeInTheDocument();
   });
 
   it("delegates broker-account polling to the surrounding AppLayout", () => {
@@ -357,6 +445,7 @@ describe("SettingsRoute", () => {
     ["saving", "Saving LLM changes"],
     ["error", "LLM changes not saved"],
   ] as const)("reports the truthful %s persistence state", (saveState, copy) => {
+    window.history.replaceState(null, "", "/settings#llm");
     llmRouteMocks.saveState = saveState;
     render(<SettingsRoute />);
 
@@ -368,6 +457,7 @@ describe("SettingsRoute", () => {
     ["error", "LLM settings unavailable"],
     ["empty", "LLM is not configured"],
   ] as const)("reports the truthful %s hydration state", (hydrationState, copy) => {
+    window.history.replaceState(null, "", "/settings#llm");
     llmRouteMocks.hydrationState = hydrationState;
     render(<SettingsRoute />);
 
@@ -410,6 +500,7 @@ describe("SettingsRoute", () => {
   it.each(SECTIONS.map((s) => [s.id, s.label] as const))(
     "deep-links #%s to its tab and renders that section's panel",
     (id, label) => {
+      useBrokerStore.setState({ accounts: [nativeAccount] });
       window.history.replaceState(null, "", `/settings#${id}`);
       render(<SettingsRoute />);
 
@@ -429,6 +520,7 @@ describe("SettingsRoute", () => {
     // A dropped renderContent() case returns undefined → an empty panel. With
     // every section mocked to emit text, an empty panel can only mean the
     // switch lost a case.
+    useBrokerStore.setState({ accounts: [nativeAccount] });
     for (const { id } of SECTIONS) {
       window.history.replaceState(null, "", `/settings#${id}`);
       const { unmount } = render(<SettingsRoute />);

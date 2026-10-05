@@ -46,17 +46,17 @@ const fallbackPackagePaths = [
 ];
 
 const fallbackScreenshotFiles = [
-  '01-welcome.png',
-  '02-explore.png',
-  '03-invest.png',
-  '04-trade-dismissed.png',
+  '01-welcome.jpg',
+  '02-home.jpg',
+  '03-invest.jpg',
+  '04-trade-dismissed.jpg',
   '04-trade.png',
   '05-learn.png',
   '06-lab.png',
-  '07-automate.png',
-  '08-ai.png',
-  '09-ditto.png',
-  '10-settings.png',
+  '07-automate.jpg',
+  '08-ai.jpg',
+  '09-ditto.jpg',
+  '10-settings.jpg',
 ];
 
 const rootDocs = [
@@ -389,11 +389,11 @@ async function listPackageReadmeDirectories() {
   }
 }
 
-async function listRepositoryFiles(relativePath, extension, fallbackFiles) {
+async function listRepositoryFiles(relativePath, extensions, fallbackFiles) {
   try {
     const directory = path.join(repoRoot, relativePath);
     return (await fs.readdir(directory))
-      .filter((file) => file.endsWith(extension))
+      .filter((file) => extensions.some((extension) => file.endsWith(extension)))
       .sort();
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
@@ -402,7 +402,7 @@ async function listRepositoryFiles(relativePath, extension, fallbackFiles) {
   try {
     const entries = await fetchRepositoryDirectory(relativePath);
     return entries
-      .filter((entry) => entry.type === 'file' && entry.name.endsWith(extension))
+      .filter((entry) => entry.type === 'file' && extensions.some((extension) => entry.name.endsWith(extension)))
       .map((entry) => entry.name)
       .sort();
   } catch {
@@ -518,7 +518,7 @@ async function copyPublicAssets() {
   await fs.mkdir(path.join(publicRoot, 'screenshots'), { recursive: true });
   await copyRepositoryFile('docs/assets/logo.svg', path.join(publicRoot, 'logo.svg'));
 
-  const screenshots = await listRepositoryFiles('docs/screenshots', '.png', fallbackScreenshotFiles);
+  const screenshots = await listRepositoryFiles('docs/screenshots', ['.png', '.jpg'], fallbackScreenshotFiles);
 
   for (const screenshot of screenshots) {
     await copyRepositoryFile(`docs/screenshots/${screenshot}`, path.join(publicRoot, 'screenshots', screenshot));
@@ -668,9 +668,9 @@ async function main() {
     JSON.stringify({
       screenshots,
       heroScreenshots: [
-        '/flinttrade/screenshots/01-welcome.png',
+        '/flinttrade/screenshots/01-welcome.jpg',
         '/flinttrade/screenshots/04-trade.png',
-        '/flinttrade/screenshots/08-ai.png',
+        '/flinttrade/screenshots/08-ai.jpg',
         '/flinttrade/screenshots/06-lab.png',
       ],
     }, null, 2),

@@ -1,7 +1,7 @@
 /**
  * SettingsSections.test.tsx — Render tests for all Settings section components.
  *
- * Covers: ConnectionSection, AppearanceSection, SecuritySection,
+ * Covers: AppearanceSection, SecuritySection,
  *         RiskSection, GeneralSection.
  */
 
@@ -12,16 +12,6 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 // Mocks — must be before imports
 // ---------------------------------------------------------------------------
-
-// useTestConnection (ConnectionSection)
-vi.mock("@/hooks/useTestConnection", () => ({
-  useTestConnection: () => ({
-    status: "idle",
-    message: "",
-    testConnection: vi.fn(),
-    reset: vi.fn(),
-  }),
-}));
 
 // themeStore (AppearanceSection) — called both with selector and destructured
 const themeState = {
@@ -66,6 +56,11 @@ vi.mock("@/components/theme/BackgroundPicker", () => ({
   BackgroundPicker: () => <div data-testid="bg-picker">BackgroundPicker</div>,
 }));
 
+// Keep layout wrappers transparent; these tests mock the theme store.
+vi.mock("@/components/ui/GlassCard", () => ({
+  GlassCard: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 // TanStack Query (SecuritySection + RiskSection)
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
@@ -80,6 +75,9 @@ vi.mock("@tanstack/react-query", () => ({
   }),
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
+    cancelQueries: vi.fn(),
+    getQueryData: vi.fn(),
+    setQueryData: vi.fn(),
   }),
 }));
 
@@ -97,6 +95,8 @@ vi.mock("@/services/ftApi", () => ({
   getSafetyConfigForTarget: vi.fn(),
   resetDailyPnLState: vi.fn(),
   updateSafetyConfig: vi.fn(),
+  activateKillSwitch: vi.fn(),
+  resetKillSwitch: vi.fn(),
   getHealth: vi.fn(),
   getTrafficStats: vi.fn(),
   getLatencyStats: vi.fn(),
@@ -206,24 +206,16 @@ import { SkillSection } from "../SkillSection";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
-// 1. ConnectionSection
-// ---------------------------------------------------------------------------
-
-
-
-// ---------------------------------------------------------------------------
 // 2. AppearanceSection
 // ---------------------------------------------------------------------------
 
 describe("AppearanceSection", () => {
-  it("renders with theme picker and colour mode buttons", () => {
+  it("delegates colour and glass controls to ThemePicker", () => {
     render(<AppearanceSection />);
 
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByTestId("theme-picker")).toBeInTheDocument();
-    expect(screen.getByLabelText("Light mode")).toBeInTheDocument();
-    expect(screen.getByLabelText("Dark mode")).toBeInTheDocument();
-    expect(screen.getByLabelText("System mode")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Light mode")).not.toBeInTheDocument();
   });
 });
 
@@ -262,7 +254,7 @@ describe("RiskSection", () => {
       />,
     );
 
-    expect(screen.getByText("Risk Limits")).toBeInTheDocument();
+    expect(screen.getByText("Risk & Safety")).toBeInTheDocument();
     expect(screen.getByLabelText("Position lot reference")).toBeInTheDocument();
     expect(screen.getByLabelText("MTM stoploss in INR")).toBeInTheDocument();
     expect(screen.getByLabelText("MTM profit target in INR")).toBeInTheDocument();

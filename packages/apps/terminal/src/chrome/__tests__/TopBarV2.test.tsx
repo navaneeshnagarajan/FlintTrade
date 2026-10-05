@@ -535,6 +535,14 @@ describe("TopBarV2", () => {
     window.removeEventListener("flinttrade:open-tool", listener);
   });
 
+  it.each(["ctrlKey", "metaKey"] as const)("opens one Quick Settings panel with %s+,", (modifier) => {
+    renderTopBarV2();
+    fireEvent.keyDown(window, { key: ",", [modifier]: true });
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeVisible();
+    fireEvent.keyDown(window, { key: ",", [modifier]: true, repeat: true });
+    expect(screen.getAllByRole("dialog", { name: /quick settings/i })).toHaveLength(1);
+  });
+
   it("sends Tools Settings to the full Settings route", () => {
     renderTopBarV2();
     const listener = vi.fn();

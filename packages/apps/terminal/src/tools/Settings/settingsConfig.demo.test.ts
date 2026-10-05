@@ -19,11 +19,12 @@ describe("settings sections in the public demo build", () => {
     }
   });
 
-  it("keeps them in a local install", () => {
+  it("keeps native credential surfaces locally under their canonical settings", () => {
     const ids = buildSections(false, false).map((section) => section.id);
     for (const hidden of DEMO_HIDDEN_SECTIONS) {
       expect(ids).toContain(hidden);
     }
+    expect(ids).not.toContain("api");
   });
 
   it("names the sections that actually collect a secret", () => {
