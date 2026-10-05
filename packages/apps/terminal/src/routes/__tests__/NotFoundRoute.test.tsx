@@ -57,4 +57,13 @@ describe("NotFoundRoute", () => {
 
     expect(mockNavigate).toHaveBeenCalledWith("/");
   });
+
+  it("goes back to the previous page when Go back is clicked", async () => {
+    const user = userEvent.setup();
+    render(<NotFoundRoute />);
+
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
+  });
 });

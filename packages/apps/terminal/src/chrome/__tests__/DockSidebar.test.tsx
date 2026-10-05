@@ -58,18 +58,18 @@ vi.mock("framer-motion", () => ({
 // ---------------------------------------------------------------------------
 
 const DEFAULT_MOCK_ITEMS = [
-  { id: "home",     label: "Home",     icon: "Home",         route: "/home",     type: "route" as const },
-  { id: "trade",    label: "Trade",    icon: "TrendingUp",   route: "/trade",    type: "route" as const },
-  { id: "invest",   label: "Invest",   icon: "Wallet",       route: "/invest",   type: "route" as const },
-  { id: "learn",    label: "Learn",    icon: "BookOpen",     route: "/learn",    type: "route" as const },
-  { id: "lab",      label: "Lab",      icon: "FlaskConical", route: "/lab",      type: "route" as const },
-  { id: "automate", label: "Automate", icon: "Zap",          route: "/automate", type: "route" as const },
-  { id: "sep-1",    label: "",         icon: "",             route: "",          type: "separator" as const },
-  { id: "ai",       label: "AI Hub",   icon: "Bot",          route: "/ai",       type: "route" as const },
-  { id: "ditto",    label: "Ditto",    icon: "Copy",         route: "/ditto",    type: "route" as const },
-  { id: "admin",    label: "Admin",    icon: "Shield",       route: "/admin",    type: "route" as const },
-  { id: "sep-2",    label: "",         icon: "",             route: "",          type: "separator" as const },
-  { id: "settings", label: "Settings", icon: "Settings",     route: "/settings", type: "route" as const },
+  { id: "home",     label: "Home",         icon: "Home",         route: "/home",     type: "route" as const },
+  { id: "trade",    label: "Trade",        icon: "TrendingUp",   route: "/trade",    type: "route" as const },
+  { id: "invest",   label: "Invest",       icon: "Wallet",       route: "/invest",   type: "route" as const },
+  { id: "learn",    label: "Learn",        icon: "BookOpen",     route: "/learn",    type: "route" as const },
+  { id: "sep-1",    label: "Tools",        icon: "",             route: "",          type: "separator" as const },
+  { id: "lab",      label: "Strategy Lab", icon: "FlaskConical", route: "/lab",      type: "route" as const },
+  { id: "automate", label: "Automate",     icon: "Zap",          route: "/automate", type: "route" as const },
+  { id: "ai",       label: "AI Centre",    icon: "Bot",          route: "/ai",       type: "route" as const },
+  { id: "sep-2",    label: "Manage",       icon: "",             route: "",          type: "separator" as const },
+  { id: "ditto",    label: "Accounts",     icon: "Users",        route: "/ditto",    type: "route" as const },
+  { id: "admin",    label: "Admin",        icon: "Shield",       route: "/admin",    type: "route" as const },
+  { id: "settings", label: "Settings",     icon: "Settings",     route: "/settings", type: "route" as const },
 ];
 
 const mockSetMode = vi.fn();
@@ -293,9 +293,45 @@ describe("DockSidebar", () => {
     expect(screen.getByRole("navigation", { name: "Main navigation" })).toBeInTheDocument();
   });
 
+  it("keeps the pinned Settings item inside the navigation landmark", () => {
+    renderSidebar("/trade");
+
+    const nav = screen.getByRole("navigation", { name: "Main navigation" });
+    expect(nav).toContainElement(screen.getByRole("button", { name: "Settings" }));
+  });
+
   it("has an aside landmark with accessible label", () => {
     renderSidebar("/trade");
 
     expect(screen.getByRole("complementary", { name: "Navigation sidebar" })).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Labelled groups
+  // -------------------------------------------------------------------------
+
+  it("shows group headings and visible labels when expanded", () => {
+    mockStoreState = { ...mockStoreState, mode: "expanded" };
+    renderSidebar("/lab");
+
+    expect(screen.getByTestId("sidebar-separator-sep-1")).toHaveTextContent("Tools");
+    expect(screen.getByTestId("sidebar-separator-sep-2")).toHaveTextContent("Manage");
+    expect(screen.getByRole("button", { name: "Strategy Lab" })).toHaveTextContent("Strategy Lab");
+    expect(screen.getByRole("button", { name: "Strategy Lab" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("reduces group headings to quiet rules on the icon rail", () => {
+    renderSidebar("/trade");
+
+    expect(screen.getByTestId("sidebar-separator-sep-1")).toHaveTextContent("");
+    expect(screen.getByTestId("sidebar-separator-sep-1")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("does not magnify items on hover", () => {
+    renderSidebar("/trade");
+
+    const home = screen.getByTestId("sidebar-item-home-button");
+    expect(home).not.toHaveAttribute("whileHover");
+    expect(home.className).not.toMatch(/scale/);
   });
 });

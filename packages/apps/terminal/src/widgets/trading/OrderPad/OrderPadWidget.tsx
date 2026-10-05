@@ -65,8 +65,13 @@ import {
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
 } from "@/lib/orderGuards";
+import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
+import {
+  deskContractName,
+  missingLotRefusal,
+} from "@/lib/instrumentLots";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
 import {
   SESSION_OPEN_LABEL,
@@ -183,7 +188,7 @@ function PillGroup({ value, options, onChange, className = "", label }: PillGrou
           onClick={() => onChange(opt)}
           className={`flex-1 h-8 text-xs font-medium transition-colors ${
             value === opt
-              ? "bg-accent text-white"
+              ? "bg-accent text-accent-foreground"
               : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
           }`}
         >
@@ -387,6 +392,16 @@ interface OrderPadPrefill {
 function prefillTargetKey(next: OrderPadPrefill): string {
   return `${next.symbol ?? ""}|${next.exchange ?? ""}|${next.action ?? ""}`;
 }
+
+/** Place-response fields the Practice fill sentence reads.
+ *  Kept outside the submit callback so a type member is not a hook dependency.
+ */
+type PracticeFillResult = {
+  message?: unknown;
+  price?: unknown;
+  price_source?: unknown;
+  price_age_s?: unknown;
+};
 
 function OrderPadWidget(props: WidgetProps) {
   // Optional prefill from a launcher (e.g. a CreateOrder intent or a
@@ -616,10 +631,11 @@ function OrderPadWidget(props: WidgetProps) {
   }, [isPinned, channelInstrument, setValue, prefill.exchange]);
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
-  // On match, qty is set to the instrument's lotsize so the first order is valid.
-  // The lot constraint is reset BEFORE the lookup so a failed fetch never leaves
-  // a stale lot size from the previous instrument — derivative submissions fail
-  // closed on an unknown lot size.
+  // A lot belongs to this exact contract: different expiries can have different
+  // sizes. Reset BEFORE the lookup so a failed fetch cannot leave a stale lot
+  // from the previous instrument or accept a nearby underlying's contract.
+  // Re-read on selection changes; an underlying-cache refresh is not evidence
+  // of a change to this selected contract's metadata.
   useEffect(() => {
     if (!symbol || !exchange) return;
     let cancelled = false;
@@ -629,6 +645,8 @@ function OrderPadWidget(props: WidgetProps) {
     if (!result || typeof result.then !== "function") return;
     result.then((info) => {
         if (cancelled) return;
+        if (contractToken(info.symbol) !== contractToken(symbol)
+          || contractToken(info.exchange) !== contractToken(exchange)) return;
         // Coerce defensively — some adapters send numerics as strings.
         const ls = Number(info.lotsize ?? 0);
         if (Number.isFinite(ls) && ls > 0) {
@@ -853,9 +871,12 @@ function OrderPadWidget(props: WidgetProps) {
       const placedMode = useModeStore.getState().mode;
       const exitWhileDown = options?.exit === true
         && useOperatorSignalStore.getState().decisionStatus !== "ready";
+      const practiceFill = placedMode === "practice"
+        ? visiblePracticeFill(result as PracticeFillResult)
+        : "";
       const successText = exitWhileDown
         ? LAYA_EXIT_WHILE_DOWN
-        : orderSuccessToast(placedMode, orderId);
+        : practiceFill || orderSuccessToast(placedMode, orderId);
       showToast("success", successText, 3000);
       // Log to the central Notification Centre (complements the transient toast).
       emitNotification({
@@ -898,11 +919,11 @@ function OrderPadWidget(props: WidgetProps) {
         && typeof (err.body as { code?: unknown }).code === "string"
         ? (err.body as { code: string }).code
         : undefined;
-      const msg = orderRefusalMessage(
+      const msg = visiblePracticeRefusal(orderRefusalMessage(
         code,
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
-      );
+      ), getValues("symbol"));
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
@@ -995,7 +1016,7 @@ function OrderPadWidget(props: WidgetProps) {
     );
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
-        ? `Lot size unknown for ${values.symbol} (${values.exchange}) — cannot validate the F&O quantity. Reselect the symbol and try again.`
+        ? missingLotRefusal(deskContractName(values.symbol))
         : lotRefusal;
       setError("qty", { type: "validate", message: msg });
       showToast("error", msg, 6000);
@@ -1036,6 +1057,7 @@ function OrderPadWidget(props: WidgetProps) {
       orderType: values.orderType as "MARKET" | "LIMIT" | "SL" | "SL-M",
       quantity: values.qty,
       price: priceEnabled ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
+      ...(practiceMarketFill ? { priceBasis: "ltp" as const } : {}),
       triggerPrice: triggerEnabled ? (values.trigPrice ?? 0) : 0,
       // The pad has always offered a disclosed-quantity input, but the value
       // was dropped before dispatch — operator intent silently discarded. The
@@ -1153,6 +1175,7 @@ function OrderPadWidget(props: WidgetProps) {
       orderType: selectedType as "MARKET" | "LIMIT" | "SL" | "SL-M",
       quantity: closeQty,
       price: priceOn ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
+      ...(practiceMarketFill ? { priceBasis: "ltp" as const } : {}),
       triggerPrice: triggerOn ? (values.trigPrice ?? 0) : 0,
       ...(values.discQty != null && values.discQty > 0
         ? { disclosedQuantity: values.discQty }
@@ -1450,7 +1473,7 @@ function OrderPadWidget(props: WidgetProps) {
               onClick={() => setInputMode("qty")}
               className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
                 inputMode === "qty"
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-foreground"
                   : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
               }`}
               aria-pressed={inputMode === "qty"}
@@ -1463,7 +1486,7 @@ function OrderPadWidget(props: WidgetProps) {
               onClick={() => setInputMode("fund")}
               className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
                 inputMode === "fund"
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-foreground"
                   : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
               }`}
               aria-pressed={inputMode === "fund"}

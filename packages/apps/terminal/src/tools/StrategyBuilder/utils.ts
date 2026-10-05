@@ -2,6 +2,7 @@
 // Adapted patterns from openalgo-chart/src/services/strategyTemplates.js
 
 import { formatCurrency as formatINRCanonical } from "@/lib/formatters";
+import { lotCountLabel } from "@/lib/instrumentLots";
 
 import type { Leg, PayoffPoint, EquityPoint, PerfMetrics, Underlying } from "./types";
 
@@ -51,9 +52,9 @@ export function calculateNetPremium(legs: readonly Leg[]): number | null {
  * Position rupees: per-unit net × contract lot size.
  * This is the shared basis for Net Debit/Credit, Max Loss, and Max Profit.
  */
-export function calculatePositionNetPremium(legs: readonly Leg[], lotSize: number): number | null {
+export function calculatePositionNetPremium(legs: readonly Leg[], lotSize: number | null): number | null {
   const net = calculateNetPremium(legs);
-  if (net == null) return null;
+  if (net == null || lotSize == null || lotSize <= 0) return null;
   return net * lotSize;
 }
 
@@ -66,18 +67,19 @@ export function uniformLotCount(legs: readonly Leg[]): number | null {
 
 /**
  * Muted breakdown under a position-₹ primary figure.
- * `₹X per lot · N lots · lot size L` — omitted when lots differ, the figure is
- * unbounded, or premium is unset. `positionRupees` defaults to the net debit.
+ * `₹X per lot · 1 lot · lot size L`, or `N lots` when the count is not 1.
+ * Omitted when lots differ, the figure is unbounded, or premium is unset.
+ * `positionRupees` defaults to the net debit.
  */
 export function formatPositionSublabel(
   legs: readonly Leg[],
-  lotSize: number,
+  lotSize: number | null,
   positionRupees?: number | null,
 ): string | null {
   const lots = uniformLotCount(legs);
   const amount = positionRupees ?? calculatePositionNetPremium(legs, lotSize);
-  if (lots == null || lotSize <= 0 || amount == null || !Number.isFinite(amount)) return null;
-  return `${formatINR(Math.abs(amount / lots))} per lot · ${lots} lots · lot size ${lotSize}`;
+  if (lots == null || lotSize == null || lotSize <= 0 || amount == null || !Number.isFinite(amount)) return null;
+  return `${formatINR(Math.abs(amount / lots))} per lot · ${lotCountLabel(lots)} · lot size ${lotSize}`;
 }
 
 /** Fallback tag when a per-lot breakdown cannot be formed. */
@@ -236,14 +238,16 @@ export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
 // own strike × lot size — previously a hardcoded ₹20,000 "NIFTY unit value"
 // was applied to every underlying, so a SENSEX (~80,000) collar and a
 // MIDCPNIFTY one showed the same number.
-export function estimateMargin(legs: Leg[], underlying: Underlying): number {
+export function estimateMargin(legs: Leg[], underlying: Underlying): number | null {
+  const lotSize = underlying.lotSize;
+  if (lotSize == null || lotSize <= 0) return null;
   let margin = 0;
   for (const leg of legs) {
     if (leg.action === "SELL") {
-      const notionalPerLot = leg.strike * underlying.lotSize;
+      const notionalPerLot = leg.strike * lotSize;
       margin += 0.15 * notionalPerLot * leg.lots;
     } else if (isPricedPremium(leg.premium)) {
-      margin += leg.premium * leg.lots * underlying.lotSize;
+      margin += leg.premium * leg.lots * lotSize;
     }
   }
   return margin;

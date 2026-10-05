@@ -157,7 +157,9 @@ def get_status() -> Response:
         "data": {
             "capital": capital.get("current", 0.0),
             "initial_capital": capital.get("initial", 0.0),
-            "pnl": pnl.get("total", 0.0),
+            "pnl": pnl.get("net", pnl.get("total", 0.0)),
+            "gross_pnl": pnl.get("gross", pnl.get("total", 0.0)),
+            "charges": pnl.get("charges", 0.0),
             "trades_count": trades_count,
         },
     })

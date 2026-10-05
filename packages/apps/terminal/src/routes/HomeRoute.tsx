@@ -20,6 +20,9 @@ import {
 } from "@/routes/home/homeWidgetPresence";
 import { useBentoStore } from "@/stores/bentoStore";
 import StatusBar from "@/chrome/StatusBar";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Page, PageHeader } from "@/components/layout/Page";
 
 function UnknownHomeWidgetCard({ componentId }: { componentId: string }) {
   return (
@@ -167,8 +170,24 @@ export default function HomeRoute() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-base" data-testid="home-route">
-      <BentoGridContainer className="min-h-0 flex-1 px-3 pb-20 pt-3">
+    <Page className="min-h-0" data-testid="home-route">
+      <PageHeader
+        title="Home"
+        description="Markets, your positions and the day's news at a glance. Drag cards to rearrange them."
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIsWidgetPickerOpen(true)}
+            data-testid="home-add-card"
+          >
+            <Plus aria-hidden="true" />
+            Add card
+          </Button>
+        }
+      />
+      <BentoGridContainer className="min-h-0 flex-1 px-[var(--ft-page-gutter)] pb-20 pt-5">
         <BentoGrid data-testid="home-bento-grid">
           {sortedCards.map((card) => {
             const Widget = HOME_WIDGET_COMPONENTS[card.componentId];
@@ -204,6 +223,6 @@ export default function HomeRoute() {
         onAdd={handleAddWidget}
         presentComponentIds={presentComponentIds}
       />
-    </div>
+    </Page>
   );
 }

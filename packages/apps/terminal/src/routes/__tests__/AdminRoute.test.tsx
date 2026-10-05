@@ -49,7 +49,8 @@ describe("AdminRoute", () => {
   it("renders the admin dashboard heading", () => {
     render(<AdminRoute />, { wrapper: Wrapper });
 
-    expect(screen.getByText("Admin Dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Admin" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("shows all navigation tabs", () => {

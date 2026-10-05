@@ -15,10 +15,12 @@ SafetySystem or the order gate. Vendor figures are not an input.
 ``order_context.side`` is sent to the model, through :func:`state_for_note`.
 Quantity and mode stay on the deterministic floor.
 
-Counts use the first repeat. Latency and stability use every repeat. With
-zero wrong admits, ``n`` deny-labelled cases bound the true wrong-admit rate
-at about ``3/n`` at 95%. The report prints that ``n``. A draft with 59 deny
-cases cannot support a claim under 1%.
+Display counts use the first repeat. Stability uses every repeat; model
+latency uses only successful, verified, non-stub inference. Qualification
+requires every model-eligible repeat to succeed and no repeat to wrongly
+admit. Its deny denominator counts distinct eligible ``pair_id`` values,
+not repeated calls or paired rows. The conditional ``3/n`` approximation
+requires independent samples; pair IDs do not establish independence.
 
 A wrong admit is a full allow when the label is ``deny`` or ``clamp``. A
 wrong deny is a hard deny when the label is ``admit``. A deny-option
@@ -65,9 +67,11 @@ LATENCY_BAR_MS = 3_000.0
 _EXAMPLE_DIGEST = "ab" * 32
 _DRILL_TAG = "example:bench"
 _VENDOR_NOTE = (
-    "note=If wrong admits are 0, n deny-labelled cases bound the true "
-    "wrong-admit rate at about 3/n at 95%. A set whose 3/n is at least 0.01 "
-    "cannot claim under 1%. Vendor numbers are unverified."
+    "note=With zero wrong admits across all repeats and complete verified model evidence, "
+    "3/n is an approximate 95% upper bound only if the n qualifying deny pairs are "
+    "independent and representative. Pair IDs are bookkeeping, not proof of statistical "
+    "independence. A set whose 3/n is at least 0.01 cannot claim under 1%. "
+    "These checks alone do not qualify a model for Live. Vendor numbers are unverified."
 )
 
 
@@ -113,7 +117,7 @@ class QuestionTally:
 
 @dataclass(frozen=True, slots=True)
 class CaseOutcome:
-    """First-repeat band, plus every repeat's latency and stability key."""
+    """First-repeat display, with per-repeat evidence retained for qualification."""
 
     case: BenchmarkCase
     band: str
@@ -121,6 +125,9 @@ class CaseOutcome:
     latencies_ms: tuple[float, ...]
     probs: str
     failure: str
+    bands: tuple[str, ...]
+    model_eligible: bool
+    model_scored: tuple[bool, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,9 +168,33 @@ class BenchmarkReport:
             lines.append("test_scored_once=yes")
         if self.tune_note:
             lines.append(self.tune_note)
+        eligible_repeats = sum(self.repeats for row in chosen if row.model_eligible)
+        latencies = [
+            ms
+            for row in chosen
+            for ms, scored in zip(row.latencies_ms, row.model_scored, strict=True)
+            if scored and not self.stub
+        ]
+        unavailable_repeats = eligible_repeats - len(latencies)
+        deny_cases = [
+            row
+            for row in chosen
+            if row.case.label == "deny" and row.model_eligible and all(row.model_scored) and not self.stub
+        ]
+        deny_pairs = len({row.case.pair_id.strip() for row in deny_cases})
+        wrong_admits = sum(band == "wrong_admit" for row in chosen for band in row.bands)
+        can_bound = not self.stub and unavailable_repeats == 0 and wrong_admits == 0 and deny_pairs > 0
+        lines.append(f"model_score={'yes' if latencies else 'no'}")
+        lines.append(
+            f"n_model_eligible_repeats={eligible_repeats} n_model_scored_repeats={len(latencies)} "
+            f"n_model_unavailable_repeats={unavailable_repeats}"
+        )
+        lines.append(f"n_qualifying_deny_cases={len(deny_cases)} n_qualifying_deny_pairs={deny_pairs}")
+        lines.append(f"repeat_wrong_admits={wrong_admits}")
         if self.stub:
-            lines.append("model_score=no")
             lines.append("note=Stub results are not a model score.")
+        elif not latencies:
+            lines.append("note=No verified model inference is available; results are not a model score.")
         by_question = [_tally(question, chosen) for question in _QUESTIONS]
         by_question.append(_tally("overall", chosen))
         lines.extend(_format_tally("question", tally) for tally in by_question)
@@ -171,23 +202,23 @@ class BenchmarkReport:
         lines.extend(
             _format_tally("difficulty", tally) for tally in _named_tallies(chosen, "difficulty", _DIFFICULTIES)
         )
-        latencies = [ms for row in chosen for ms in row.latencies_ms]
-        p50 = percentile(latencies, 50)
-        p95 = percentile(latencies, 95)
-        within = "yes" if latencies and p95 <= LATENCY_BAR_MS else "no"
+        p50 = f"{percentile(latencies, 50):.3f}" if latencies else "unavailable"
+        p95 = f"{percentile(latencies, 95):.3f}" if latencies else "unavailable"
+        within = "yes" if latencies and percentile(latencies, 95) <= LATENCY_BAR_MS else "no"
         lines.append(
-            f"latency_p50_ms={p50:.3f} latency_p95_ms={p95:.3f} "
+            f"latency_p50_ms={p50} latency_p95_ms={p95} "
             f"latency_bar_ms={LATENCY_BAR_MS:.1f} latency_p95_within_bar={within}"
         )
         stable = sum(1 for row in chosen if len(set(row.signatures)) == 1)
         lines.append(f"stability stable={stable} unstable={len(chosen) - stable}")
         overall = by_question[-1]
         lines.append(f"n_deny={overall.n_deny}")
-        if overall.wrong_admits == 0 and overall.n_deny > 0:
-            lines.append(f"wrong_admit_95_upper=3/{overall.n_deny}")
+        if can_bound:
+            lines.append(f"wrong_admit_95_upper=3/{deny_pairs}")
         else:
             lines.append("wrong_admit_95_upper=undefined")
-        lines.append(f"cannot_claim_under_1_percent={_cannot_claim(overall)}")
+        cannot_claim = "no" if can_bound and 3 / deny_pairs < 0.01 else "yes"
+        lines.append(f"cannot_claim_under_1_percent={cannot_claim}")
         for row in chosen:
             lines.append(
                 f"case id={row.case.id} question={row.case.question} group={row.case.group} "
@@ -221,7 +252,18 @@ def load_cases(path: Path) -> tuple[BenchmarkCase, ...]:
         cases.append(_parse_line(line, line_number))
     if not cases:
         raise BenchmarkCaseError("case file has no rows")
+    _validate_case_ids(cases)
     return tuple(cases)
+
+
+def _validate_case_ids(cases: Sequence[BenchmarkCase]) -> None:
+    """Reject ambiguous case identities before any inference or exclusion."""
+    seen: set[str] = set()
+    for case in cases:
+        identity = case.id.strip()
+        if identity in seen:
+            raise BenchmarkCaseError(f"duplicate case id: {identity}")
+        seen.add(identity)
 
 
 def load_exclude_ids(path: Path) -> frozenset[str]:
@@ -266,18 +308,26 @@ def run_benchmark(
     """Score ``cases`` through :func:`evaluate_free_text`."""
     if repeats < 1:
         raise BenchmarkCaseError("repeats must be at least 1")
+    _validate_case_ids(cases)
+    stub = stub or isinstance(client, _StubAllowClient)
     outcomes: list[CaseOutcome] = []
     for case in cases:
         signatures: list[str] = []
         latencies: list[float] = []
+        bands: list[str] = []
+        model_scored: list[bool] = []
+        note = case.note.strip()
+        model_eligible = bool(note) and len(note) <= 4000
         first: tuple[str, str, str] | None = None
         for _ in range(repeats):
             started = time.perf_counter()
-            decision, probs, failure, signature = _score_case(case, client)
+            decision, probs, failure, signature, scored = _score_case(case, client)
             latencies.append((time.perf_counter() - started) * 1000)
             signatures.append(signature)
+            bands.append(_band(case, decision))
+            model_scored.append(model_eligible and scored and not stub)
             if first is None:
-                first = (_band(case, decision), probs, failure)
+                first = (bands[-1], probs, failure)
         assert first is not None
         outcomes.append(
             CaseOutcome(
@@ -287,6 +337,9 @@ def run_benchmark(
                 latencies_ms=tuple(latencies),
                 probs=first[1],
                 failure=first[2],
+                bands=tuple(bands),
+                model_eligible=model_eligible,
+                model_scored=tuple(model_scored),
             )
         )
     return BenchmarkReport(
@@ -416,16 +469,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cli_client(model: str) -> Any:
-    """Use an allowlisted Ollama client, or a client that always fails closed."""
-    from flinttrade_engine.laya_ollama import (  # noqa: PLC0415
-        OllamaDecisionClient,
-        allowlist_entry,
-    )
+    """Use an owned, ready runtime, or report unavailable without model evidence."""
+    from flinttrade_engine.laya_ollama import ready_ollama_client  # noqa: PLC0415
 
-    entry = allowlist_entry(model) if model else None
-    if entry is None:
-        return _FailClosedClient()
-    return OllamaDecisionClient(entry)
+    client = ready_ollama_client(model) if model else None
+    return client if client is not None else _FailClosedClient()
 
 
 class _FailClosedClient:
@@ -448,7 +496,7 @@ class _StubAllowClient:
         return _option_payload(0.1)
 
 
-def _score_case(case: BenchmarkCase, client: Any) -> tuple[TextDecision, str, str, str]:
+def _score_case(case: BenchmarkCase, client: Any) -> tuple[TextDecision, str, str, str, bool]:
     capture = _Capture(client)
     decision = evaluate_free_text(
         mode=case.mode,
@@ -460,7 +508,14 @@ def _score_case(case: BenchmarkCase, client: Any) -> tuple[TextDecision, str, st
     )
     failure = _failure_token(decision)
     probs = "none" if not capture.called else _format_probs(capture.payload)
-    return decision, probs, failure, _signature(decision)
+    scored = (
+        capture.called
+        and failure == "none"
+        and decision.effect in {"allow", "deny", "clamp"}
+        and len(_question_bands(decision)) == len(_QUESTIONS)
+        and any(key == "proof" and value in {"runtime", "decision"} for key, value in decision.evidence)
+    )
+    return decision, probs, failure, _signature(decision), scored
 
 
 def _band(case: BenchmarkCase, decision: TextDecision) -> str:
@@ -585,9 +640,7 @@ def _named_tallies(rows: Sequence[CaseOutcome], field: str, canonical: Sequence[
     present = {str(getattr(row.case, field)) for row in rows}
     extras = sorted(name for name in present if name not in canonical)
     ordered = [*canonical, *extras]
-    return tuple(
-        _tally_rows(name, [row for row in rows if getattr(row.case, field) == name]) for name in ordered
-    )
+    return tuple(_tally_rows(name, [row for row in rows if getattr(row.case, field) == name]) for name in ordered)
 
 
 def _tally_rows(name: str, rows: Sequence[CaseOutcome]) -> QuestionTally:
@@ -625,15 +678,6 @@ def _format_tally(prefix: str, tally: QuestionTally) -> str:
         f"abstains={tally.abstains} downs={tally.downs} "
         f"correct={tally.correct} other={tally.other}"
     )
-
-
-def _cannot_claim(tally: QuestionTally) -> str:
-    if tally.wrong_admits > 0 or tally.n_deny <= 0:
-        return "yes"
-    bound = 3 / tally.n_deny
-    if bound >= 0.01 or tally.n_deny < 300:
-        return "yes"
-    return "no"
 
 
 def _split_name(cases: Sequence[BenchmarkCase]) -> str:
@@ -747,9 +791,7 @@ def _drill_transport(
     import flinttrade_engine.laya_ollama as ollama_mod  # noqa: PLC0415
     from flinttrade_engine.laya_ollama import LayaOllamaModel  # noqa: PLC0415
 
-    ollama_mod.LAYA_OLLAMA_ALLOWLIST = (
-        LayaOllamaModel(tag=_DRILL_TAG, digest=_EXAMPLE_DIGEST, route=route),
-    )
+    ollama_mod.LAYA_OLLAMA_ALLOWLIST = (LayaOllamaModel(tag=_DRILL_TAG, digest=_EXAMPLE_DIGEST, route=route),)
     os.environ["FLINTTRADE_LAYA_BACKEND"] = "ollama"
     os.environ["FLINTTRADE_LAYA_OLLAMA_MODEL"] = _DRILL_TAG
 

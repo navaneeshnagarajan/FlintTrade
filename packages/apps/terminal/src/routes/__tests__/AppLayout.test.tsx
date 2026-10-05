@@ -222,14 +222,23 @@ describe("AppLayout", () => {
     mockLocation.pathname = "/trade";
   });
 
+  it("keeps the narrow-screen warning below the route's page heading level", () => {
+    Object.defineProperty(window, "innerWidth", { value: 390, writable: true });
+    renderApp();
+    expect(screen.getByRole("heading", { level: 2, name: "FlintTrade is designed for desktop" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  });
+
   it("renders header with TopBar and one ticker strip, and a main landmark", () => {
     renderApp();
 
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
     expect(screen.getAllByTestId("ticker-strip")).toHaveLength(1);
     expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
-    // <main> landmark with aria-label from route title
-    expect(screen.getByRole("main", { name: /trading workspace/i })).toBeInTheDocument();
+    // <main> landmark named after the route, matching its sidebar label
+    expect(screen.getByRole("main", { name: "Trade" })).toBeInTheDocument();
+    // The shell leaves the single H1 to the route itself
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
   it("keeps route-local icon SVG markup out of the layout source", () => {

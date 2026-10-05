@@ -83,6 +83,8 @@ runner — no make and no bash needed, identical behaviour on Windows, macOS and
 Linux. `make <target>` is the POSIX alias for the same targets.
 
 ```bash
+python scripts/ft.py check       # affected checks while editing
+python scripts/ft.py check --full   # exhaustive local gate before pushing
 python scripts/ft.py test        # full pytest suite
 python scripts/ft.py test-fast   # stop on first failure
 python scripts/ft.py lint        # ruff over packages/ + tests/, then the terminal hooks lint
@@ -100,6 +102,10 @@ python -m pytest packages/services/screener/tests/
 > `--import-mode=importlib` is required for the flat-package layout.
 > `scripts/ft.py` and the Makefile set it for you; if you call `pytest`
 > directly, add it.
+
+Both test commands accept focused paths and pytest flags. Their default worker
+count is capped at four; `--workers 0` runs serially. `check --dry-run` prints the
+affected plan. Selection and CI contracts are documented in [CI.md](CI.md).
 
 ### Terminal (Vitest)
 
@@ -120,6 +126,42 @@ cd packages/apps/terminal
 npx vitest run src/widgets/path/foo.test.tsx
 npx vitest run -t "renders the order pad"  # single test by name
 npx vitest                                 # watch mode (great for TDD)
+```
+
+### Visual and accessibility checks
+
+Playwright screenshot comparison and axe checks live in
+`packages/apps/terminal/e2e/visual-a11y.spec.ts`. They cover Home, the
+Trading Desk dashboard, the Practice Order Pad before and after a refused
+order, the Laya row in the labels the desk actually paints (Ready,
+Degraded, Down), the TopBar Status menu, the two-operator
+screen, sign-in, and setup. Each one runs at 1440×900 and 2560×1440.
+
+The checks use Example sample data, a frozen clock, motion turned off,
+fonts loaded, and masks on the ticker and canvases. Route mocks come from
+the same fail-closed registry as the other Playwright specs, so an
+unmocked `/ft-api` call still fails the fixture.
+
+Reticle does not judge these pictures. Reticle reads network, app state,
+and the console. It cannot see contrast, spacing, or clipping.
+
+The lane is advisory. `.github/workflows/visual-a11y.yml` writes diffs and
+axe results to the job summary, uploads the images, and finishes green
+while `VISUAL_AXE_GATE` is `"0"`. Change that one value to `"1"` to make
+the job fail on a regression. It is not a required check, and it should
+stay advisory until it has run quiet on a few pull requests.
+
+Screenshot baselines are generated only by that workflow on `ubuntu-latest`
+(the same hosted image as the terminal Playwright job). Dispatch **Visual
+and accessibility** with **Regenerate screenshot baselines** enabled, on
+the branch that should receive the files. The job commits the
+`*-chromium-linux.png` baselines and pushes them. Do not commit baselines
+taken on any other machine. See `packages/apps/terminal/e2e/visual/baselines/README.md`.
+
+From `packages/apps/terminal`:
+
+```bash
+pnpm run e2e:visual
 ```
 
 ### Desktop (Electron)
@@ -496,7 +538,7 @@ Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Example-data
 placement is refused by the backend (HTTP 403 `mode_blocked`,
 `Orders are not available for Example. Switch to Practice or Live to trade.`);
-Order Pad Example Buy is a local example fill (no HTTP order route, no Laya admit, no
+Order Pad Example Buy is a local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no Laya admit, no
 SafetySystem). Other Live write verbs still reach SafetySystem without
 this place admission. The global auth check covers both a session JWT
 and `FLINTTRADE_API_KEY`. The session JWT is read from
@@ -575,7 +617,7 @@ sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1` (read by `huggingface_hub` 1.33.0), so transfer
 logs stay in that folder. The step does
 not start the sidecar. While it runs, including a pin change, the reason
-is `downloading` and the popover is `Downloading the model · 1.2 of 3.4 GB`
+is `downloading` and the popover is `Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`)
 (live, one decimal, decimal GB), with no Next line and no Updating label.
 Orders stay on the Down refusal. It then hashes `model.safetensors` and
 every manifest file in that staging directory. When no checkpoint is
@@ -592,7 +634,8 @@ checkpoint already on disk is left in place. An extra loadable file in a
 complete download is `unverified`. A dropped connection, a partial or
 missing file, or a read error is `download_failed` ("Can't download the
 model"; tooltip "Check your connection, then Start Laya again."). The
-status word for `downloading` and `download_failed` is Down, not Still
+status word for `downloading` is Downloading (neutral colour) and for
+`download_failed` it is Down, never Still
 loading, and orders use "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
 model cache alone. The sidecar does not start on files that do not match
 the pin. If the download does not finish, the reason is `download_failed`, not
@@ -674,7 +717,7 @@ version. Restart Laya. If it keeps happening, reinstall it."
 `still_loading`, `downloading`, `download_failed`, `unreachable`,
 `wrong_revision`, `unverified`, `key_rejected`, or `key_missing`. `identity_absent` is
 not a status code. The desk shows Not started, Stopped,
-`Port <n> in use`, Still loading, Downloading the model · 1.2 of 3.4 GB,
+`Port <n> in use`, Still loading, `Downloading the model · X of Y GB`,
 Can't download the model, Unreachable, Wrong model version, Can't verify
 the model, Can't reach Laya, and The Laya API key file is missing.
 `key_missing` stays until a later start finds the file, or an explicit
@@ -901,6 +944,94 @@ and Cash notes are blank on example data. A connected book keeps
    `packages/core/core/src/flinttrade_core/symbol_utils.py`.
 6. **Never touch OpenAlgo's SQLite directly.** Concurrent access
    corrupts the DB. Always go through the REST API.
+
+### Instrument lot sizes
+
+A lot belongs to one listed contract. NIFTY, BANKNIFTY, and SENSEX are
+not stored as fixed sizes in this module. `flinttrade_core.instrument_lots.active_rows`
+uses the workspace disk cache `instrument_lot_cache.json` when that file
+has rows, and otherwise the shipped excerpt
+`packages/core/core/src/flinttrade_core/data/instrument_lot_fixture.json`.
+`instrument_lot_master.build_excerpt` builds that excerpt from the public
+Dhan scrip master and the Kotak Neo F&O master (near month and next month
+of NIFTY, BANKNIFTY, and SENSEX futures). The document carries `source`
+and `fetched_at`. `refresh_master_cache_if_due` downloads again when the
+cache is missing or from an earlier IST day; `start_instrument_master_refresh`
+runs that at startup and again at each IST midnight. A failed download
+leaves a previous non-empty cache in place. Contracts whose expiry is
+before today (IST) are dropped. `contracts_from_rows` raises only when
+the same contract (underlying, expiry month, and kind) has two sizes
+across Dhan and Neo. A later expiry with a different size is kept.
+
+`scalper_lot_label` returns `size · expiry` (for example `65 · Sep expiry`
+per the broker instrument master). When the next month’s size differs,
+both months are named. `index_lot_line` is the risk line, for example
+`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)` on the shipped
+excerpt, with `—` for an underlying the master does not list.
+`missing_lot_refusal` is the order text:
+`Not placed. The lot size for <contract> isn't in the instrument master, so this order can't be sized.`
+Order Pad shows that string when a derivative has no lot in the lookup.
+The terminal does not bundle a second copy of the excerpt. The app shell
+calls `loadInstrumentLotRows` once (`GET /api/v1/instrument-lots`). A
+store that already has rows does not fetch again. Glossary (`useIndexLotLine`),
+Scalper, and Order Pad read that one in-memory lookup. The route returns
+`active_rows()` and `index_lot_line()`. Tests may still import the
+excerpt through `@flinttrade/instrument-lots`. Demo `getLotSize` rows are
+labelled `Example`, follow the near-month size, and do not name a
+contract month. Glossary Lot Size is
+`Minimum quantity for F&O trading. ` plus `indexLotLine()` plus `.`.
+
+### Statutory charges
+
+One table, `packages/core/core/src/flinttrade_core/data/indian_charges.json`,
+is loaded by `flinttrade_core.indian_charges`. It feeds the backtest
+calculator, Practice fills (`estimate_practice_fill`), the terminal
+charges calculator, and mirror statutory defaults. Each row has an
+exchange (`NSE`, `BSE`, `MCX`, or `ANY`), a segment, a component, a side,
+a basis, a rate, `effective_from`, and an optional `effective_to`.
+Components are STT, exchange transaction, SEBI fee, stamp duty, and GST.
+Segments cover equity delivery, equity intraday, equity futures, equity
+options, Sensex options, Bankex options, Sensex 50 options, and MCX
+commodity futures and options.
+Brokerage is not in the table. Lot sizes are not in the table; callers
+read them from the instrument master. Practice passes brokerage zero.
+`exchange_transaction_label` names the line `BSE transaction`,
+`MCX transaction`, or `NSE transaction`. The Fills widget names the
+line from the fill's exchange: `BSE transaction` for BSE and BFO, and
+`NSE transaction` otherwise. Each component is rounded to the paisa
+before GST is applied to the rounded brokerage, exchange charge, and
+SEBI fee. The BSE futures exchange-transaction rate in the table is zero.
+Sensex options and Bankex options use their own premium rate.
+Home and Invest share `NET_WORTH_LABEL` in
+`packages/apps/terminal/src/lib/accountNetWorth.ts`
+(`Net Worth (Cash + Holdings + Positions)`). Invest → Net Worth is
+headed `Net Worth Breakdown`. `Known Total` is not rendered.
+`accountNetWorth` is the mark of holdings, plus the mark of positions,
+plus available cash, minus the estimated-charges argument. `markedValue`
+is last price times absolute quantity for every row. Callers pass
+available cash from the funds available-cash field, and pass estimated
+charges only in Practice (otherwise zero). In Practice the source line
+is `Practice account, after estimated charges`.
+
+### Positions book
+
+Positions Table, Net, and Heat render one normalised book
+(`positionBook.ts`). Flat means every leg of a symbol is at quantity 0;
+those symbols are omitted from Net rows. Offset means the legs net to 0
+and at least one leg is still open: each open leg stays its own row,
+with its own margin, and an `Offset` tag. `offsetLegTooltip` names the
+first two open products in book order. It adds the intraday square-off
+sentence only when one product is MIS. The Net footer shows
+`incl. N offset symbol(s) (legs still open)` and
+`incl. N flat symbol(s)`, each hidden at 0. The Example book
+(`sampleBook.ts`) is `+₹16,575`, with the NIFTY group at `+₹1,625`
+(MIS `+₹3,575`, NRML `-₹1,950`) and BANKNIFTY at `+₹2,400`, and the
+footer `incl. 2 offset symbols (legs still open)`. Heat bands are at
+least tall enough for a header and one tile row, and the map scrolls
+when the stack is taller than the canvas. A `+N more` chip’s tooltip
+lists symbols that still do not fit; clicking it opens the list on
+those rows and highlights them. Hidden positions are also in a
+screen-reader list, `Positions without a heat map tile`.
 
 ---
 

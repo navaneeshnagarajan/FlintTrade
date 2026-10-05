@@ -1350,9 +1350,11 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
   return (
     <section
       aria-label="Optional setup"
-      className={`shrink-0 border-b border-border-default bg-surface-card/80${
-        surface === "settings" ? " mb-4" : ""
-      }`}
+      className={
+        surface === "settings"
+          ? "mb-4 shrink-0 overflow-hidden rounded-lg border border-border-default bg-surface-card"
+          : "shrink-0 border-b border-border-default bg-surface-card/80"
+      }
     >
       <div className="flex h-9 items-center gap-2 px-3">
         <p className="min-w-0 flex-1 truncate text-sm text-text-primary">{strip}</p>

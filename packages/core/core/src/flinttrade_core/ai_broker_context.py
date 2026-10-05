@@ -31,12 +31,15 @@ from .broker_read_port import (
     ExactReadTarget,
     HistoricalRequest,
     HistoricalSnapshot,
+    InstrumentLotSizeSnapshot,
     InstrumentRef,
+    LotSizeRequest,
     QuoteRequest,
     QuoteSnapshot,
 )
 
 _CONTEXT_TIMEOUT_SECONDS = 15.0
+DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "MCX", "CDS", "BCD"})
 _MAX_CONTEXT_BYTES = 60 * 1024
 _INPUT_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._&:+/\-]{0,127}", re.ASCII)
 _ERROR_STATUS = {
@@ -263,15 +266,19 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
         today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         history_request = HistoricalRequest(instrument, "5m", (today - timedelta(days=3)).isoformat(), today.isoformat())
         quote_request = QuoteRequest(instrument)
+        lot_request = LotSizeRequest(exchange, symbols=(symbol,))
 
         async def collect() -> dict[str, Any]:
             records = {}
-            for name, call, expected, read_request in (
+            reads = [
                 ("quote", lambda: ports[0].quote(quote_request), QuoteSnapshot, quote_request),
                 ("depth", lambda: ports[0].depth(quote_request), DepthSnapshot, quote_request),
                 ("historical", lambda: ports[1].historical(history_request), HistoricalSnapshot, history_request),
                 ("balance", ports[2].balance, BalanceSnapshot, None),
-            ):
+            ]
+            if exchange in DERIVATIVE_EXCHANGES:
+                reads.append(("lot_size", lambda: ports[0].lot_sizes(lot_request), tuple, lot_request))
+            for name, call, expected, read_request in reads:
                 outcome = await call()
                 remaining()
                 if (name == "depth" and type(outcome) is BrokerReadFailure
@@ -287,6 +294,11 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
                 value = _read_value(outcome, expected)
                 outcomes.append(outcome)
                 extra = {}
+                if name == "lot_size":
+                    if (len(value) != 1 or type(value[0]) is not InstrumentLotSizeSnapshot
+                            or value[0].symbol != symbol or value[0].exchange != exchange):
+                        raise BrokerContextError("broker_context_invalid_response")
+                    value = value[0]
                 if name == "quote" and (not value.available or value.ltp is None or value.ltp <= 0):
                     raise BrokerContextError("broker_context_invalid_response")
                 if name == "balance" and value.available_balance is None:

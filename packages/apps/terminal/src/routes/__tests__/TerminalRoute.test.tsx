@@ -104,6 +104,10 @@ vi.mock("@/chrome/PresetPicker", () => ({
   default: () => <div data-testid="preset-picker" />,
 }));
 
+vi.mock("@/chrome/WorkspaceSwitcher", () => ({
+  default: () => <div data-testid="workspace-switcher" />,
+}));
+
 vi.mock("@/routes/trade/TradeBottomPanel", () => ({
   TradeBottomPanel: () => <div data-testid="trade-bottom-panel">Bottom</div>,
 }));
@@ -286,10 +290,16 @@ describe("TerminalRoute", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders without crashing and shows the sr-only heading", () => {
+  it("renders the desk toolbar with the page heading and canvas actions", () => {
     renderTerminalRoute();
 
-    expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Trade" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    const toolbar = screen.getByTestId("desk-toolbar");
+    expect(toolbar).toContainElement(screen.getByTestId("add-widget-button"));
+    expect(screen.getAllByTestId("add-widget-button")).toHaveLength(1);
+    expect(toolbar).toContainElement(screen.getByTestId("desk-layouts"));
+    expect(toolbar).toContainElement(screen.getByTestId("workspace-switcher"));
   });
 
   it("reports a transient workspace binding persistence failure instead of crashing", async () => {

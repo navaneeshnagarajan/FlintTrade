@@ -1,17 +1,8 @@
-"""Guard: every terminal vitest test file must run in a CI shard.
+"""Require every terminal Vitest file to run in exactly one CI command.
 
-CI splits the terminal's vitest suite across hand-listed path arguments in
-``.github/workflows/test.yml`` (node-core + node-widget-tests-1/2a/2b/3). A test
-file whose path is not under any of those prefixes runs in NO CI job — it passes
-locally and silently never runs on push, which is exactly how a broken
-safety-relevant suite (orders/account) or a mock-shape-drift test can rot
-unnoticed.
-
-This meta-test reconstructs the shard coverage from test.yml and fails, listing
-the offenders, if any ``*.test.ts(x)`` under the terminal ``src/`` tree is
-uncovered. Genuinely-excluded suites (e.g. TradeIdea, which OOMs the runner) are
-allowlisted here WITH a reason, so an exclusion is a deliberate, reviewed choice
-rather than an accident.
+Resolve literal and loop-expanded source arguments from the five required
+terminal contexts. There are no exclusions. Matching a loop's common directory
+prefix would falsely cover unlisted widgets, including the former TradeIdea gap.
 """
 
 from __future__ import annotations
@@ -20,76 +11,95 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 TERMINAL_SRC = ROOT / "packages" / "apps" / "terminal" / "src"
-
-# Suites deliberately excluded from CI, each with a reason. Keep this list short
-# and justified — every entry is a test file that never runs on push.
-DOCUMENTED_EXCLUSIONS: dict[str, str] = {
-    "src/widgets/utility/TradeIdea/": "OOMs the 7GB CI runner (vitest module-resolution overhead); passes locally with --max-old-space-size=8192",
-}
+CI_LANES = (
+    "node-core-tests", "node-widget-tests-1", "node-widget-tests-2a",
+    "node-widget-tests-2b", "node-widget-tests-3",
+)
 
 
-def _covered_prefixes() -> set[str]:
-    """Reconstruct the ``src/...`` path prefixes CI's vitest shards cover.
-
-    Handles both direct ``vitest run ... src/a/ src/b/`` argument lists and the
-    ``for d in X Y Z; do ... "src/widgets/utility/$d/"`` loop shard.
-    """
-    text = WORKFLOW.read_text(encoding="utf-8")
-    prefixes: set[str] = set()
-
-    # Literal src/ path tokens on any line that invokes vitest.
-    for line in text.splitlines():
-        if "vitest run" in line:
-            prefixes.update(re.findall(r"src/[\w./@-]+", line))
-
-    # Expand `for <var> in <dirs>; do` loops whose body templates a src/ path
-    # with `$<var>` (the node-widget-tests-2b utility-widget loop).
-    for var, dirs in re.findall(r"for\s+(\w+)\s+in\s+([\w\s]+?);\s*do", text):
-        template = re.search(rf'src/[\w./@-]*\${var}[\w./@-]*', text)
-        if not template:
+def _resolved_paths(command: str) -> list[str]:
+    """Resolve the exact source arguments without widening shell loop paths."""
+    loops = {
+        variable: directories.split()
+        for variable, directories in re.findall(r"for\s+(\w+)\s+in\s+([\w\s-]+?);\s*do", command)
+    }
+    paths: list[str] = []
+    for line in command.splitlines():
+        if "vitest run" not in line or line.lstrip().startswith("#"):
             continue
-        for d in dirs.split():
-            prefixes.add(template.group(0).replace(f"${var}", d))
+        assert not re.search(r"(?:--exclude|--shard|--changed|--related|--project|--testNamePattern|-t)(?:\s|=)", line), (
+            f"Vitest selection cannot shrink an exhaustive CI lane: {line}"
+        )
+        for target in re.findall(r"src/[\w./@${}-]+", line):
+            variable = re.search(r"\$(\w+)|\$\{(\w+)\}", target)
+            if variable is None:
+                assert "$" not in target, f"Unresolved Vitest target: {target}"
+                paths.append(target)
+                continue
+            name = variable.group(1) or variable.group(2)
+            assert name in loops, f"Unresolved Vitest loop variable: {target}"
+            paths.extend(target.replace(variable.group(0), directory) for directory in loops[name])
+    return paths
 
-    return prefixes
+
+def _coverage_targets() -> list[tuple[str, str]]:
+    """Keep command ownership so overlaps within or between lanes are visible."""
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    targets = []
+    for lane in CI_LANES:
+        assert lane in jobs, f"Required terminal context missing: {lane}"
+        for step in jobs[lane]["steps"]:
+            owner = f"{lane}: {step.get('name', 'unnamed step')}"
+            targets.extend((owner, path) for path in _resolved_paths(step.get("run", "")))
+    return targets
 
 
 def _rel_test_files() -> list[str]:
     return sorted(
-        f"src/{p.relative_to(TERMINAL_SRC).as_posix()}"
-        for p in TERMINAL_SRC.rglob("*.test.ts*")
-        if p.suffix in (".ts", ".tsx")
+        f"src/{path.relative_to(TERMINAL_SRC).as_posix()}"
+        for path in TERMINAL_SRC.rglob("*.test.ts*")
+        if path.suffix in (".ts", ".tsx")
     )
 
 
-def test_every_vitest_test_file_runs_in_a_ci_shard() -> None:
-    prefixes = _covered_prefixes()
-    assert prefixes, "parsed no vitest shard prefixes from test.yml — parser or workflow changed"
-
-    exclusions = tuple(DOCUMENTED_EXCLUSIONS)
-    uncovered = [
-        f
-        for f in _rel_test_files()
-        if not any(f.startswith(p) for p in prefixes) and not f.startswith(exclusions)
-    ]
-
-    assert not uncovered, (
-        f"{len(uncovered)} terminal test file(s) run in NO CI shard — add their "
-        f"directory to a node-* job in .github/workflows/test.yml (or, if truly "
-        f"excluded, to DOCUMENTED_EXCLUSIONS with a reason):\n  "
-        + "\n  ".join(uncovered)
-    )
+def test_every_vitest_test_file_runs_in_exactly_one_ci_command() -> None:
+    targets = _coverage_targets()
+    files = _rel_test_files()
+    assert targets and files, "Terminal coverage must not be vacuous"
+    incorrect = {
+        file: [owner for owner, path in targets if file.startswith(path)]
+        for file in files
+        if sum(file.startswith(path) for _, path in targets) != 1
+    }
+    assert not incorrect, f"Terminal files need exactly one CI command, with no exclusions: {incorrect}"
+    # A helper directory can contain no tests yet (src/test-utils), but every
+    # argument must resolve so a misspelling cannot silently hide coverage.
+    missing = [path for _, path in targets if not (TERMINAL_SRC.parent / path).exists()]
+    assert not missing, f"CI Vitest paths do not exist: {missing}"
 
 
-def test_documented_exclusions_still_exist() -> None:
-    # An exclusion for a suite that no longer exists is stale — drop it so the
-    # allowlist keeps meaning something.
-    for excluded in DOCUMENTED_EXCLUSIONS:
-        matches = list(TERMINAL_SRC.parent.glob(excluded + "**/*.test.ts*"))
-        assert matches, f"DOCUMENTED_EXCLUSIONS entry {excluded!r} matches no test files — remove it"
+def test_loop_resolution_does_not_cover_unlisted_widgets() -> None:
+    command = """for d in Alerts News; do
+      npx vitest run --pool=forks --maxWorkers=1 --no-file-parallelism "src/widgets/utility/$d/" || FAIL=1
+    done"""
+    assert _resolved_paths(command) == ["src/widgets/utility/Alerts/", "src/widgets/utility/News/"]
+
+
+def test_tradeidea_is_an_isolated_bounded_required_step() -> None:
+    job = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["node-widget-tests-2b"]
+    steps = [step for step in job["steps"] if "src/widgets/utility/TradeIdea/" in step.get("run", "")]
+    assert len(steps) == 1, "TradeIdea must run once in its own required step"
+    step = steps[0]
+    assert _resolved_paths(step["run"]) == ["src/widgets/utility/TradeIdea/"]
+    assert "--pool=forks --maxWorkers=1 --no-file-parallelism" in step["run"]
+    assert step["env"]["NODE_OPTIONS"] == "--max-old-space-size=4096"
+    assert not step.get("continue-on-error", False)
+    assert "||" not in step["run"]
+    assert step.get("timeout-minutes", job["timeout-minutes"]) <= 5

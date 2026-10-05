@@ -331,9 +331,7 @@ def test_ollama_chip_stays_wrong_model_version() -> None:
 @pytest.mark.unit
 def test_not_started_next_line_depends_on_who_installed_ollama() -> None:
     assert OLLAMA_NOT_STARTED_MANAGED == "Ollama isn't running. Start it to bring Laya back."
-    assert OLLAMA_NOT_STARTED_UNMANAGED == (
-        "Ollama isn't running. Start Ollama on this computer, then try again."
-    )
+    assert OLLAMA_NOT_STARTED_UNMANAGED == ("Ollama isn't running. Start Ollama on this computer, then try again.")
     for line in (OLLAMA_NOT_STARTED_MANAGED, OLLAMA_NOT_STARTED_UNMANAGED):
         assert LAYA_START_COMMAND not in line
         assert "laya_runtime" not in line
@@ -439,3 +437,309 @@ def test_ollama_start_action_is_only_for_a_managed_install(monkeypatch: pytest.M
     assert started == ["start"]
     assert sidecar_calls == []
     assert "sidecar" not in ok.get_data(as_text=True).lower()
+
+
+def _snapshot_runtime():
+    """Use the real status algorithm with fake process, listener and storage."""
+    import threading
+    from types import MethodType
+
+    from flinttrade_core import ollama_runtime
+
+    @contextmanager
+    def lock(*_args, **_kwargs):
+        yield
+
+    runtime = SimpleNamespace(
+        _installation_status=lambda **_kwargs: (True, None),
+        _deadline_lock=lock,
+        _process_lock=threading.RLock(),
+        _state_lock=threading.RLock(),
+        _process=SimpleNamespace(poll=lambda: None),
+        _probe=lambda: "0.35.0",
+        _listener_is_owned=lambda _process: True,
+        server_version="0.35.0",
+        _operation_truth_error=None,
+        _runtime_state_error=None,
+        _phase="ready",
+        _operation=None,
+        _operations=[],
+        _public_operation=lambda value: value,
+        _model_pull=None,
+        _error="",
+        _log_error="",
+        _downloaded_bytes=0,
+        _download_total_bytes=0,
+        _model_digest_drift={},
+        _teardown={},
+        _inference_processor=None,
+        _previous_version=None,
+        package_variant=None,
+        _active_version="v0.35.0",
+        target_version="v0.35.0",
+        _release_assets={"v0.35.0": ()},
+        _port=11435,
+        _accepted_model_identity=lambda _model: (_TAG, _DIGEST),
+    )
+    locked = f"flinttrade/sha256-{_DIGEST}:locked"
+    runtime.raw_models = [{"name": _TAG, "digest": _DIGEST}, {"name": locked, "digest": _DIGEST}]
+    runtime.sources = {_TAG: locked}
+    runtime.accepted = {locked: _DIGEST}
+    runtime._model_store_bytes = lambda: 0
+    runtime._managed_server_version = lambda: "0.35.0"
+    runtime._read_model_trust_state = lambda: (runtime.accepted, runtime.sources)
+    runtime._raw_models = lambda: runtime.raw_models
+    runtime._accepted_model_identity = MethodType(ollama_runtime.OllamaRuntime._accepted_model_identity, runtime)
+    runtime._status_snapshot = MethodType(ollama_runtime.OllamaRuntime._status_snapshot, runtime)
+    runtime.inference_session = MethodType(ollama_runtime.OllamaRuntime.inference_session, runtime)
+    runtime._lifecycle_condition = threading.Condition()
+    runtime._lifecycle_transition = runtime._lifecycle_interrupt = False
+    runtime._active_inferences = 0
+    runtime._loaded_model_matches = lambda _model, _digest: True
+    runtime.base_url = "http://127.0.0.1:11435"
+    return runtime
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", ["", _TAG])
+def test_gate_snapshot_keeps_a_healthy_owned_runtime_ready(monkeypatch: pytest.MonkeyPatch, model: str) -> None:
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    for _ in range(2):
+        snapshot = ollama_runtime.managed_ollama_gate_snapshot(model)
+        assert snapshot is not None
+        assert snapshot["ready"] is True
+        assert snapshot["state"] == "ready"
+        assert snapshot["model_present"] is bool(model)
+        assert snapshot["reported_digest"] == (_DIGEST if model else None)
+        assert runtime._phase == "ready"
+        assert runtime._error == ""
+        assert ollama_runtime._MANAGED_RUNTIME_OWNER() is runtime
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version, owned", [(None, True), ("0.34.0", True), ("0.35.0", False)])
+def test_gate_snapshot_still_closes_on_failed_runtime_proof(
+    monkeypatch: pytest.MonkeyPatch,
+    version: str | None,
+    owned: bool,
+) -> None:
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    runtime._probe = lambda: version
+    runtime._listener_is_owned = lambda _process: owned
+    runtime._accepted_model_identity = lambda _model: pytest.fail("unready runtime must not inspect a model")
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    snapshot = ollama_runtime.managed_ollama_gate_snapshot(_TAG)
+    assert snapshot is not None
+    assert snapshot["ready"] is False
+    assert snapshot["model_present"] is False
+    assert snapshot["reported_digest"] is None
+    assert runtime._phase == "failed"
+    assert ollama_runtime._MANAGED_RUNTIME_OWNER is None
+
+
+@pytest.mark.unit
+def test_gate_session_resolves_source_under_existing_immutable_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    assert runtime._accepted_model_identity(_TAG) is None
+    with ollama_runtime.managed_ollama_gate_session(_TAG, _DIGEST) as admission:
+        assert admission.model == f"flinttrade/sha256-{_DIGEST}:locked"
+        assert admission.digest == _DIGEST
+        assert runtime._active_inferences == 1
+    assert runtime._active_inferences == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("change", ["missing_mapping", "changed_source", "changed_pin"])
+def test_gate_session_refuses_unaccepted_or_changed_source(monkeypatch: pytest.MonkeyPatch, change: str) -> None:
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    digest = _DIGEST
+    if change == "missing_mapping":
+        runtime.sources = {}
+    elif change == "changed_source":
+        runtime.raw_models[0]["digest"] = "cd" * 32
+    else:
+        digest = "cd" * 32
+    with pytest.raises(ollama_runtime.OllamaRuntimeError):
+        with ollama_runtime.managed_ollama_gate_session(_TAG, digest):
+            pytest.fail("unverified source must not reach inference")
+    assert runtime._active_inferences == 0
+
+
+@pytest.mark.unit
+def test_gate_session_rechecks_source_after_inference(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    with pytest.raises(ollama_runtime.OllamaRuntimeError):
+        with ollama_runtime.managed_ollama_gate_session(_TAG, _DIGEST):
+            runtime.raw_models[0]["digest"] = "cd" * 32
+    assert runtime._active_inferences == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("phase", ["starting", "downloading", "failed"])
+def test_gate_snapshot_displays_configured_startup_without_admitting(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    from flask import Flask
+
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    runtime._phase = phase
+    runtime._process = None
+    runtime._probe = lambda: None
+    runtime._downloaded_bytes = 10
+    runtime._download_total_bytes = 20
+    runtime._error = "download failed" if phase == "failed" else ""
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", None)
+    app = Flask(__name__)
+    app.config["OLLAMA_RUNTIME"] = runtime
+    with app.app_context():
+        snapshot = ollama_runtime.managed_ollama_gate_snapshot(_TAG)
+        assert snapshot is not None
+        assert snapshot["state"] == phase
+        assert snapshot["ready"] is False
+        assert snapshot["reported_digest"] is None
+        with pytest.raises(ollama_runtime.OllamaRuntimeError):
+            with ollama_runtime.managed_ollama_gate_session(_TAG, _DIGEST):
+                pytest.fail("configured-only runtime is display evidence, not admission")
+    assert ollama_runtime._MANAGED_RUNTIME_OWNER is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("when", ["before", "during", "missing_mapping"])
+def test_real_gate_client_distinguishes_source_drift_from_missing_model(
+    monkeypatch: pytest.MonkeyPatch,
+    when: str,
+) -> None:
+    from flinttrade_core import ollama_runtime
+    from flinttrade_engine.laya_decision import DecisionCallError, questions_for_note
+
+    runtime = _snapshot_runtime()
+    if when == "before":
+        runtime.raw_models[0]["digest"] = "cd" * 32
+    elif when == "missing_mapping":
+        runtime.sources = {}
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+
+    def poster(*_args):
+        if when == "during":
+            runtime.raw_models[0]["digest"] = "cd" * 32
+        return _chat_body()
+
+    set_laya_ollama_transport_for_tests(session=None, poster=poster)
+    try:
+        client = OllamaDecisionClient(LayaOllamaModel(_TAG, _DIGEST, "chat"), server_version="0.35.0")
+        with pytest.raises(DecisionCallError) as error:
+            client.decide(_NOTE, questions_for_note())
+        assert error.value.code == ("model_missing" if when == "missing_mapping" else "digest_mismatch")
+        assert client.last_proof == ""
+        assert runtime._active_inferences == 0
+    finally:
+        reset_laya_ollama_transport_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("state", ["ready", "starting", "downloading", "installed", "failed"])
+def test_integrity_failure_precedes_every_display_state(state: str) -> None:
+    from flinttrade_engine.laya_ollama import surface_from_ollama_snapshot
+
+    snapshot = {"state": state, "ready": True, "integrity_error": "bad install", "port": 11435}
+    surface = surface_from_ollama_snapshot(snapshot, tag=_TAG, entry=LayaOllamaModel(_TAG, _DIGEST, "chat"))
+    assert surface.status is DecisionStatus.DOWN
+    assert surface.reason == "unverified"
+    assert surface.checking is False
+    assert surface.progress is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("when", ["before", "during"])
+@pytest.mark.parametrize(
+    "failure", ["missing_install", "install_integrity", "runtime_state", "operation_truth", "model_trust"]
+)
+def test_real_gate_client_rechecks_integrity_inside_admission(
+    monkeypatch: pytest.MonkeyPatch,
+    when: str,
+    failure: str,
+) -> None:
+    from flinttrade_core import ollama_runtime
+    from flinttrade_engine.laya_decision import DecisionCallError, questions_for_note
+
+    runtime = _snapshot_runtime()
+
+    def corrupt():
+        if failure == "missing_install":
+            runtime._installation_status = lambda **_kwargs: (False, None)
+        elif failure == "install_integrity":
+            runtime._installation_status = lambda **_kwargs: (False, "bad install")
+        elif failure == "runtime_state":
+            runtime._runtime_state_error = "bad runtime receipt"
+        elif failure == "operation_truth":
+            runtime._operation_truth_error = "bad operation receipt"
+        else:
+
+            def invalid_trust():
+                raise ollama_runtime.OllamaRuntimeError("bad model trust")
+
+            runtime._read_model_trust_state = invalid_trust
+
+    if when == "before":
+        corrupt()
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+
+    def poster(*_args):
+        if when == "during":
+            corrupt()
+        return _chat_body()
+
+    set_laya_ollama_transport_for_tests(session=None, poster=poster)
+    try:
+        client = OllamaDecisionClient(LayaOllamaModel(_TAG, _DIGEST, "chat"), server_version="0.35.0")
+        with pytest.raises(DecisionCallError) as error:
+            client.decide(_NOTE, questions_for_note())
+        assert error.value.code == "unverified"
+        assert client.last_proof == ""
+        assert runtime._active_inferences == 0
+    finally:
+        reset_laya_ollama_transport_for_tests()
+
+
+@pytest.mark.unit
+def test_real_ready_runtime_with_integrity_error_never_admits(monkeypatch: pytest.MonkeyPatch) -> None:
+    import flinttrade_engine.laya_ollama as ollama_mod
+    from flinttrade_core import ollama_runtime
+
+    runtime = _snapshot_runtime()
+    runtime._installation_status = lambda **_kwargs: (False, "bad install")
+    entry = LayaOllamaModel(_TAG, _DIGEST, "chat")
+    monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
+    monkeypatch.setattr(ollama_mod, "LAYA_OLLAMA_ALLOWLIST", (entry,))
+    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_LAYA_OLLAMA_MODEL", _TAG)
+    set_laya_ollama_transport_for_tests(
+        session=None,
+        poster=lambda *_args: pytest.fail("known integrity failure must not call model"),
+    )
+    try:
+        snapshot = ollama_runtime.managed_ollama_gate_snapshot(_TAG)
+        assert snapshot is not None and snapshot["ready"] is False
+        engine = Laya(status=DecisionStatus.READY)
+        verdict = engine.admit(_proposal(_NOTE))
+        assert verdict.allow is False
+        assert engine.runtime_reason()[0] == "unverified"
+    finally:
+        reset_laya_ollama_transport_for_tests()

@@ -470,6 +470,9 @@ const storeImpl: StateCreator<
     const accentHsl = hexToHslString(variant.colors.accent);
     const accentTextHsl = hexToHslString(variant.colors.accentText);
     style.setProperty("--primary", accentHsl);
+    // Primary buttons sit on the accent, so their label takes the accent's
+    // AA-safe text colour (dark on the bright dark-mode accents).
+    style.setProperty("--primary-foreground", accentTextHsl);
     style.setProperty("--ring",    accentHsl);
     style.setProperty("--accent",  accentHsl);
     style.setProperty("--accent-foreground", accentTextHsl);

@@ -1577,7 +1577,7 @@ export function LLMSection({
   if (hydrationState === "empty") {
     return (
       <div className="space-y-5">
-        <SectionTitle>LLM Config</SectionTitle>
+        <SectionTitle>AI</SectionTitle>
         <div
           className="space-y-3 rounded-md border border-border-default bg-surface-hover/40 p-4"
           role="status"
@@ -1590,7 +1590,7 @@ export function LLMSection({
             if an authenticated session is available.
           </p>
           <p className="text-xs text-text-muted">
-            Open Settings → LLM Config in Live or Practice, choose a provider, and save the
+            Open Settings → AI in Live or Practice, choose a provider, and save the
             credential on this machine.
           </p>
           {onRetry && (
@@ -1612,7 +1612,7 @@ export function LLMSection({
 
   return (
     <div className="space-y-5">
-      <SectionTitle>LLM Config</SectionTitle>
+      <SectionTitle>AI</SectionTitle>
 
       {hydrationState === "loading" && (
         <p className="text-xs text-text-muted" role="status" aria-live="polite">

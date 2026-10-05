@@ -30,6 +30,7 @@
  */
 
 import { positionMtm } from "@/lib/pnl";
+import { formatPriceAge, lastCloseRowTag } from "@/lib/practicePrice";
 import { isRestoredFromBackup } from "@/lib/restoredFills";
 import { classifySector, symbolRoot } from "@/lib/sectors";
 import type { Position } from "@/types/api";
@@ -53,7 +54,14 @@ export interface PositionRow extends Position {
   underlying: string;
 }
 
-/** One symbol's netted position, aggregated across the rows the broker split. */
+/**
+ * One net-view row.
+ *
+ * A symbol whose quantity is still open across products is one aggregated row.
+ * An offset symbol (legs that net to 0, with at least one open leg) is one row
+ * per open leg — Indian brokers do not net MIS against NRML or CNC, so each
+ * leg keeps its own quantity and margin.
+ */
 export interface NetPositionRow {
   symbol: string;
   underlying: string;
@@ -61,12 +69,26 @@ export interface NetPositionRow {
   netQty: number;
   avgPrice: number;
   ltp: number;
-  /** Σ of the constituent rows' {@link PositionRow.mtm}. */
+  /** Σ of the constituent rows' {@link PositionRow.mtm}, or this leg's own. */
   mtm: number;
-  /** Exposure of the NET quantity, same formula as a single row. */
+  /** Exposure of the net quantity, or of this open leg when the symbol is offset. */
   exposure: number;
-  /** How many broker rows were folded into this one. */
+  /** How many broker rows were folded into this one. One for an offset leg. */
   legs: number;
+  /** True on each open leg of a symbol whose legs net to 0. */
+  offset?: boolean;
+  /** Product of this offset leg. Absent on an aggregated row. */
+  product?: string;
+  /** Products of the open legs, in book order, for the Offset tooltip. */
+  offsetProducts?: readonly string[];
+}
+
+/** How a symbol's legs sit at the broker. */
+export type SymbolLegClass = "flat" | "offset" | "open";
+
+/** Stable key for one broker row, shared by the table and the heat map. */
+export function positionRowKey(row: { symbol: string; product: string; exchange: string }): string {
+  return `${row.symbol}:${row.product}:${row.exchange}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +126,24 @@ function str(value: unknown): string {
 export function positionExposure(quantity: number, ltp: number, averagePrice: number): number {
   const mark = ltp > 0 ? ltp : Math.max(averagePrice, 0);
   return Math.abs(quantity) * mark;
+}
+
+/** Short LTP tag when the figure is not a live quote. The title names the source. */
+export function ltpMarker(
+  row: Pick<Position, "ltpBasis" | "priceAgeS">,
+): { label: string; title: string } | null {
+  if (row.ltpBasis === "last_close") {
+    const age = row.priceAgeS;
+    const label = age !== undefined ? lastCloseRowTag(age) : "Last close";
+    const title = age !== undefined
+      ? `Source: last close (${formatPriceAge(age)})`
+      : "Source: last close";
+    return { label, title };
+  }
+  if (row.ltpBasis === "fill_price") {
+    return { label: "Fill price", title: "Source: fill price" };
+  }
+  return null;
 }
 
 /**
@@ -148,6 +188,13 @@ export function normalisePosition(raw: unknown): PositionRow {
     sector: classifySector(symbol),
     underlying: underlyingOf(symbol),
     restored: wire["restored"] === true || isRestoredFromBackup(str(wire["strategy"])),
+    ...(wire["ltpBasis"] === "last_close" || wire["ltpBasis"] === "fill_price" || wire["ltpBasis"] === "ltp"
+      ? { ltpBasis: wire["ltpBasis"] }
+      : {}),
+    ...(typeof wire["priceAgeS"] === "number" ? { priceAgeS: wire["priceAgeS"] } : {}),
+    ...(wire["priceSource"] === "ltp" || wire["priceSource"] === "last_close"
+      ? { priceSource: wire["priceSource"] }
+      : {}),
   };
 }
 
@@ -173,72 +220,158 @@ export function underlyingOf(symbol: string): string {
   return symbolRoot(symbol) || symbol;
 }
 
+/** Legs of one symbol, in the order the book listed them. */
+function legsBySymbol(rows: readonly PositionRow[]): Map<string, PositionRow[]> {
+  const map = new Map<string, PositionRow[]>();
+  for (const row of rows) {
+    const bucket = map.get(row.symbol);
+    if (bucket) bucket.push(row);
+    else map.set(row.symbol, [row]);
+  }
+  return map;
+}
+
 /**
- * Net a position book per symbol: long 2 + short 1 of one symbol is a net long
- * 1, and a symbol that nets flat is dropped — nothing of it is still at risk.
+ * Classify one symbol's legs the way an Indian broker carries them.
  *
- * The multi-row case is real even though the broker book is "already netted":
- * an intraday MIS leg and a delivery CNC leg of the same scrip arrive as two
- * rows, and a closed intraday position arrives as a `quantity: 0` row. Strategy
- * attribution is NOT available at this boundary (OpenAlgo does not tag
- * positions by strategy), so this nets across products and exchanges, never
- * across strategies.
+ * Flat means every leg is at quantity 0 — nothing is still open. Offset means
+ * the quantities net to 0 but at least one leg is still open: MIS does not
+ * cancel NRML or CNC, and each open leg keeps its own margin. Anything else
+ * is a single open net.
  *
- * Row P&L is the SUM of the constituents' {@link PositionRow.mtm}, so the net
- * view and the table view can never report different money for the same book.
+ * @param legs - Broker rows for one symbol.
+ * @returns `flat`, `offset`, or `open`.
+ */
+export function classifySymbolLegs(legs: readonly PositionRow[]): SymbolLegClass {
+  if (!legs.some((leg) => leg.quantity !== 0)) return "flat";
+  const net = legs.reduce((sum, leg) => sum + leg.quantity, 0);
+  return net === 0 ? "offset" : "open";
+}
+
+/** Open-leg products in book order, each product once. */
+export function offsetProductsOf(legs: readonly PositionRow[]): string[] {
+  const products: string[] = [];
+  for (const leg of legs) {
+    if (leg.quantity === 0) continue;
+    const name = leg.product.trim();
+    if (name.length === 0 || products.includes(name)) continue;
+    products.push(name);
+  }
+  return products;
+}
+
+/**
+ * Tooltip for an Offset tag.
+ *
+ * Names the products in book order. When one of them is MIS and another
+ * product is still open, says which leg the intraday square-off leaves
+ * behind. Two non-MIS products get only the first sentence.
+ *
+ * @param products - Open-leg products in book order.
+ * @returns The operator-facing sentence.
+ */
+export function offsetLegTooltip(products: readonly string[]): string {
+  const unique: string[] = [];
+  for (const product of products) {
+    const name = product.trim();
+    if (name.length === 0 || unique.includes(name)) continue;
+    unique.push(name);
+  }
+  const [first, second] = unique;
+  const intro = second
+    ? `${first} and ${second} legs don't cancel at your broker.`
+    : `${first ?? "These"} legs don't cancel at your broker.`;
+  const other = unique.find((product) => product !== "MIS");
+  if (unique.includes("MIS") && other) {
+    return `${intro} At intraday square-off the MIS leg closes and the ${other} leg stays open.`;
+  }
+  return intro;
+}
+
+/** How many symbols in the book are flat, and how many are offset. */
+export function countSymbolClasses(rows: readonly PositionRow[]): { flatSymbols: number; offsetSymbols: number } {
+  let flatSymbols = 0;
+  let offsetSymbols = 0;
+  for (const legs of legsBySymbol(rows).values()) {
+    const kind = classifySymbolLegs(legs);
+    if (kind === "flat") flatSymbols += 1;
+    else if (kind === "offset") offsetSymbols += 1;
+  }
+  return { flatSymbols, offsetSymbols };
+}
+
+function aggregateOpenLegs(symbol: string, legs: readonly PositionRow[]): NetPositionRow {
+  let underlying = legs[0]?.underlying ?? symbol;
+  let exchange = legs[0]?.exchange ?? "";
+  let qtyWeightedPrice = 0;
+  let netQty = 0;
+  let ltp = 0;
+  let mtm = 0;
+  for (const leg of legs) {
+    underlying = leg.underlying;
+    exchange = leg.exchange;
+    qtyWeightedPrice += leg.quantity * leg.averagePrice;
+    netQty += leg.quantity;
+    if (leg.ltp > 0) ltp = leg.ltp;
+    mtm += leg.mtm;
+  }
+  const avgPrice = netQty === 0 ? 0 : qtyWeightedPrice / netQty;
+  return {
+    symbol,
+    underlying,
+    exchange,
+    netQty,
+    avgPrice,
+    ltp,
+    mtm,
+    exposure: positionExposure(netQty, ltp, avgPrice),
+    legs: legs.length,
+  };
+}
+
+/**
+ * Net a position book per symbol.
+ *
+ * Long 2 + short 1 of one symbol, when the net quantity is still open, is one
+ * net long. A symbol whose legs are all at quantity 0 is flat and dropped.
+ * A symbol whose legs net to 0 but still has an open leg is offset: each open
+ * leg stays as its own row, with its own quantity and margin. Brokers do not
+ * net MIS against NRML or CNC, and an intraday square-off closes only the MIS
+ * leg.
+ *
+ * Strategy attribution is not available at this boundary, so an open (non-zero)
+ * net still folds products of one symbol into one row. Offset never does.
  *
  * @param rows - Normalised position rows.
- * @returns Net rows with a non-zero quantity, ordered by underlying then symbol.
+ * @returns Net rows ordered by underlying then symbol, offset legs in book order.
  */
 export function netPositions(rows: readonly PositionRow[]): NetPositionRow[] {
-  interface Agg {
-    underlying: string;
-    exchange: string;
-    qtyWeightedPrice: number;
-    netQty: number;
-    ltp: number;
-    mtm: number;
-    legs: number;
-  }
-  const map = new Map<string, Agg>();
-
-  for (const row of rows) {
-    const existing = map.get(row.symbol);
-    if (!existing) {
-      map.set(row.symbol, {
-        underlying: row.underlying,
-        exchange: row.exchange,
-        qtyWeightedPrice: row.quantity * row.averagePrice,
-        netQty: row.quantity,
-        ltp: row.ltp,
-        mtm: row.mtm,
-        legs: 1,
-      });
+  const out: NetPositionRow[] = [];
+  for (const [symbol, legs] of legsBySymbol(rows)) {
+    const kind = classifySymbolLegs(legs);
+    if (kind === "flat") continue;
+    if (kind === "offset") {
+      const products = offsetProductsOf(legs);
+      for (const leg of legs) {
+        if (leg.quantity === 0) continue;
+        out.push({
+          symbol: leg.symbol,
+          underlying: leg.underlying,
+          exchange: leg.exchange,
+          netQty: leg.quantity,
+          avgPrice: leg.averagePrice,
+          ltp: leg.ltp,
+          mtm: leg.mtm,
+          exposure: leg.exposure,
+          legs: 1,
+          offset: true,
+          product: leg.product,
+          offsetProducts: products,
+        });
+      }
       continue;
     }
-    existing.qtyWeightedPrice += row.quantity * row.averagePrice;
-    existing.netQty += row.quantity;
-    // Prefer any usable mark over a broker's zero.
-    if (row.ltp > 0) existing.ltp = row.ltp;
-    existing.mtm += row.mtm;
-    existing.legs += 1;
-  }
-
-  const out: NetPositionRow[] = [];
-  for (const [symbol, agg] of map) {
-    if (agg.netQty === 0) continue; // flat — netted out
-    const avgPrice = agg.qtyWeightedPrice / agg.netQty;
-    out.push({
-      symbol,
-      underlying: agg.underlying,
-      exchange: agg.exchange,
-      netQty: agg.netQty,
-      avgPrice,
-      ltp: agg.ltp,
-      mtm: agg.mtm,
-      exposure: positionExposure(agg.netQty, agg.ltp, avgPrice),
-      legs: agg.legs,
-    });
+    out.push(aggregateOpenLegs(symbol, legs));
   }
 
   return out.sort(

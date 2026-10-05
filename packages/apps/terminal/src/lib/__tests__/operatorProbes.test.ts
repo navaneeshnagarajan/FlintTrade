@@ -97,6 +97,46 @@ describe("Laya heartbeat on desk ping", () => {
     });
   });
 
+  it("confirms backend identity only from a valid successful Laya heartbeat", async () => {
+    for (const body of [
+      { status: "ok", laya: "down" },
+      { status: "ok", laya: "ready", laya_route: "ollama", laya_managed: false },
+      { status: "ok", laya: "down", laya_route: "ollama", laya_managed: true },
+    ]) {
+      await expect(probeLocalPing(asFetch(async () => jsonResponse(body, 200))))
+        .resolves.toMatchObject({ localPing: "ok", layaHeartbeatValid: true });
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { status: "ok" },
+    { status: "ok", laya: "connected" },
+    { status: "error", laya: "ready" },
+    { status: "ok", laya: "ready", laya_route: "unknown" },
+    { status: "ok", laya: "ready", laya_route: null },
+    { status: "ok", laya: "ready", laya_route: "ollama" },
+    { status: "ok", laya: "ready", laya_route: "ollama", laya_managed: "true" },
+  ].map((body) => [body]))("does not invent heartbeat authority from invalid HTTP 200 body %j", async (body) => {
+    await expect(probeLocalPing(asFetch(async () => jsonResponse(body, 200))))
+      .resolves.toMatchObject({ localPing: "ok", layaHeartbeatValid: false });
+  });
+
+  it("does not confirm backend identity after HTTP, JSON, or transport failures", async () => {
+    for (const fetchImpl of [
+      asFetch(async () => jsonResponse({ status: "ok", laya: "ready" }, 503)),
+      asFetch(async () => new Response("not json", { status: 200 })),
+      asFetch(async () => { throw new Error("failed to fetch"); }),
+    ]) {
+      await expect(probeLocalPing(fetchImpl)).resolves.toMatchObject({
+        layaHeartbeatValid: false,
+        laya: null,
+      });
+    }
+  });
+
   it("does not present Ready when ping fails or omits Laya", async () => {
     const missing = vi.fn(async () => jsonResponse({ status: "ok" }, 200));
     await expect(probeLocalPing(asFetch(missing))).resolves.toMatchObject({

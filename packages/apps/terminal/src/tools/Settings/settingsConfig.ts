@@ -59,11 +59,23 @@ export type SectionId =
   | "support"
   | "about";
 
+export type SectionGroupId = "account" | "preferences" | "trading" | "integrations" | "system";
+
 export interface SectionDef {
   id: SectionId;
   label: string;
   icon: LucideIcon;
+  group: SectionGroupId;
 }
+
+/** Headings for the Settings section nav, in display order. */
+export const SECTION_GROUPS: readonly { id: SectionGroupId; label: string }[] = [
+  { id: "account", label: "Account" },
+  { id: "preferences", label: "Preferences" },
+  { id: "trading", label: "Trading" },
+  { id: "integrations", label: "AI & alerts" },
+  { id: "system", label: "System" },
+];
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,31 +109,32 @@ export const DEMO_HIDDEN_SECTIONS: readonly SectionId[] = [
 ];
 
 export function buildSections(desktopShell: boolean, publicDemo: boolean = isPublicDemoBuild()): SectionDef[] {
+  // Listed in SECTION_GROUPS order so keyboard order matches what is on screen.
   const sections: SectionDef[] = [
-    { id: "profile",    label: "Profile",            icon: UserCircle   },
-    { id: "general",    label: "General",           icon: Monitor      },
-    { id: "appearance", label: "Appearance",         icon: Palette      },
-    { id: "ticker",     label: "Ticker Bar",         icon: Rss          },
-    { id: "api",        label: "Broker Gateway",     icon: Wifi         },
-    { id: "brokers",    label: "Brokers",            icon: Landmark     },
-    { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
-    { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
-    { id: "leverage",   label: "Leverage",           icon: Scale        },
-    { id: "practice",   label: "Practice Mode",      icon: FlaskConical },
-    { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
-    { id: "llm",        label: "LLM Config",         icon: Brain        },
-    { id: "telegram",   label: "Telegram",           icon: Send         },
-    { id: "dataPaths",  label: "Data Paths",         icon: HardDrive    },
-    { id: "security",   label: "Security",           icon: ShieldCheck  },
-    { id: "monitoring", label: "Monitoring",         icon: Activity     },
-    { id: "skill",      label: "Skill & Experience", icon: GraduationCap   },
-    { id: "presets",    label: "Workspace Presets",  icon: LayoutTemplate  },
+    { id: "profile",    label: "Profile",            icon: UserCircle,     group: "account" },
+    { id: "security",   label: "Security",           icon: ShieldCheck,    group: "account" },
+    { id: "general",    label: "General",            icon: Monitor,        group: "preferences" },
+    { id: "appearance", label: "Appearance",         icon: Palette,        group: "preferences" },
+    { id: "ticker",     label: "Ticker Bar",         icon: Rss,            group: "preferences" },
+    { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard,       group: "preferences" },
+    { id: "skill",      label: "Skill & Experience", icon: GraduationCap,  group: "preferences" },
+    { id: "presets",    label: "Workspace Presets",  icon: LayoutTemplate, group: "preferences" },
+    { id: "brokers",    label: "Brokers",            icon: Landmark,       group: "trading" },
+    { id: "api",        label: "Broker Gateway",     icon: Wifi,           group: "trading" },
+    { id: "trading",    label: "Trading Defaults",   icon: TrendingUp,     group: "trading" },
+    { id: "risk",       label: "Risk Limits",        icon: ShieldAlert,    group: "trading" },
+    { id: "leverage",   label: "Leverage",           icon: Scale,          group: "trading" },
+    { id: "practice",   label: "Practice Mode",      icon: FlaskConical,   group: "trading" },
+    { id: "llm",        label: "AI",         icon: Brain,          group: "integrations" },
+    { id: "telegram",   label: "Telegram",           icon: Send,           group: "integrations" },
+    { id: "dataPaths",  label: "Data Paths",         icon: HardDrive,      group: "system" },
+    { id: "monitoring", label: "Monitoring",         icon: Activity,       group: "system" },
   ];
   if (desktopShell) {
-    sections.push({ id: "updates", label: "Updates", icon: Download });
+    sections.push({ id: "updates", label: "Updates", icon: Download, group: "system" });
   }
-  sections.push({ id: "support", label: "Report Bug", icon: Bug });
-  sections.push({ id: "about", label: "About", icon: Info });
+  sections.push({ id: "support", label: "Report Bug", icon: Bug, group: "system" });
+  sections.push({ id: "about", label: "About", icon: Info, group: "system" });
   if (publicDemo) {
     return sections.filter((section) => !DEMO_HIDDEN_SECTIONS.includes(section.id));
   }

@@ -20,7 +20,7 @@ Check real-time margin using `/api/v1/margin` before placing each order.
 
 Hedge dramatically reduces margin because SPAN recognises that the long option caps your maximum loss.
 
-**Example: Nifty (lot = 75), Nifty at 22,000**
+**Example: Nifty at 22,000, quantity 65 in this example**
 
 | Position | Approx Margin |
 |----------|--------------|
@@ -52,7 +52,7 @@ If you have an existing naked short option that is consuming heavy margin, add a
 **After adding wing:**
 - Buy Nifty 22,300 CE for ₹40 premium. Net credit = ₹80 − ₹40 = ₹40. New margin = ₹22,000
 
-The wing costs ₹40 per unit (₹3,000 per lot) but frees up ₹83,000 in margin. The freed margin can be redeployed or kept as a buffer.
+Example: the wing costs ₹40 per unit. At the example quantity of 65 that is ₹2,600 (40 × 65), and it frees up ₹83,000 in margin. The freed margin can be redeployed or kept as a buffer.
 
 **Rule:** If a naked option's premium has decayed by 50%, consider adding the wing. The remaining risk of the naked position (delta, vega) may not justify the ongoing heavy margin.
 

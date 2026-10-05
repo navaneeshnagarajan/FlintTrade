@@ -5,7 +5,8 @@
  * sidecar. Live shows the Live-facing status. Qualification is a tooltip
  * and the disabled-Live reason, not a Down label while Practice can admit.
  * The first load keeps the label on Still loading so the chip does not
- * flash Down. Admission stays fail-closed for that wait.
+ * flash Down. A model download reads Downloading in the neutral colour.
+ * Admission stays fail-closed for both waits.
  */
 
 import { decisionSurfaceLabel } from "@/lib/deskStatus";
@@ -47,11 +48,21 @@ export function formatDownloadProgress(doneBytes: number, totalBytes: number): s
   return `Downloading the model · ${done} of ${total} GB`;
 }
 
-/** Desk poll for the same Laya status the order gate reads. Matches the 1.5s watch. */
+/**
+ * Desk poll for the same Laya status the order gate reads. Each ping first
+ * applies a command-line stop or start, then reads the gate, so the chip
+ * catches up by the next poll. The runtime watch uses the same interval.
+ */
 export const LAYA_STATUS_POLL_MS = 1_500;
 
-/** Chip label while a stop or start has not been confirmed. */
+/** Chip label after Start Laya, or an admitted place, until the next ping confirms the gate. */
 export const LAYA_CHECKING_LABEL = "Checking";
+
+/** Chip label while the model downloads. Orders stay refused, so this is not Ready. */
+export const LAYA_DOWNLOADING_LABEL = "Downloading";
+
+/** Every label the Laya chip can show. */
+export type LayaChipLabel = "Ready" | "Degraded" | "Down" | "Still loading" | "Checking" | "Downloading";
 
 /** Popover line for that unconfirmed window. Neutral colour, not Ready. */
 export const LAYA_CHECKING_DETAIL = "Checking Laya…";
@@ -186,15 +197,16 @@ export function ollamaRouteVisibleLines(managed: boolean): string[] {
   }
   lines.push(LAYA_CHECKING_DETAIL, LAYA_DOWN_PAUSE, OLLAMA_START_FAILED);
   if (managed) lines.push(OLLAMA_START_ACTION, OLLAMA_STARTING_ACTION);
-  for (const label of ["Ready", "Degraded", "Down", "Still loading", "Checking"]) {
+  for (const label of ["Ready", "Degraded", "Down", "Still loading", "Downloading", "Checking"]) {
     lines.push(`Laya ${label}`);
   }
   return lines;
 }
 
 /**
- * Chip label. Still loading replaces Down for the first model load.
- * Other states keep Ready, Degraded, or Down.
+ * Chip label. Still loading replaces Down for the first model load and
+ * Downloading replaces it while the model downloads. Other states keep
+ * Ready, Degraded, or Down.
  */
 export function layaChipLabel(input: {
   mode: string;
@@ -202,10 +214,14 @@ export function layaChipLabel(input: {
   live: LayaStatus | null | undefined;
   reason?: string | null;
   checking?: boolean;
-}): "Ready" | "Degraded" | "Down" | "Still loading" | "Checking" {
+}): LayaChipLabel {
   if (input.checking) return LAYA_CHECKING_LABEL;
   if (input.reason === "still_loading") return "Still loading";
-  return decisionSurfaceLabel(layaChipStatus(input));
+  const status = layaChipStatus(input);
+  if (input.reason === "downloading" && status !== "ready" && status !== "degraded") {
+    return LAYA_DOWNLOADING_LABEL;
+  }
+  return decisionSurfaceLabel(status);
 }
 
 /**

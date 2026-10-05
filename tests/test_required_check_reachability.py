@@ -13,7 +13,12 @@ trigger-level reachability.
 
 from __future__ import annotations
 
-import re
+import os
+import subprocess
+import sys
+import textwrap
+
+import pytest
 from pathlib import Path
 
 import yaml
@@ -79,177 +84,91 @@ def test_test_workflow_pull_request_trigger_has_no_paths_ignore():
     )
 
 
-# ----------------------------------------------------------------------
-# Classifier contract tests (exercise the *actual* YAML classify script)
-# ----------------------------------------------------------------------
-
-def _load_workflow():
-    return yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))
-
-
-def _extract_classify_pattern(doc: dict) -> str:
-    """Extract the non-code grep pattern from the actual changed-surfaces classify step."""
-    jobs = doc.get("jobs", {})
-    changed = jobs.get("changed-surfaces", {})
-    steps = changed.get("steps", [])
-    for step in steps:
-        run = step.get("run", "")
-        if isinstance(run, str) and "grep -qvE" in run:
-            # Extract the pattern inside the single quotes after -qvE
-            m = re.search(r"grep -qvE '([^']+)'", run)
-            if m:
-                return m.group(1)
-    raise AssertionError("Could not extract classify grep pattern from YAML")
-
-
-def _extract_expensive_lane_if(doc: dict) -> str:
-    """Confirm expensive lanes key on the code output (not hard-coded)."""
-    jobs = doc.get("jobs", {})
-    for job_name, job in jobs.items():
-        if "widget" in job_name or job_name in ("rust-ticks-tests", "electron-desktop-tests"):
-            if_cond = job.get("if", "")
-            if "needs.changed-surfaces.outputs.code == 'true'" in str(if_cond):
-                return if_cond
-    return ""
-
-
-def _simulate_classify(changed: str, noncode_pattern: str, resolvable: bool = True) -> str:
-    """Simulate the exact classify logic from the extracted YAML script."""
-    if not resolvable:
-        return "true"
-    # Same logic as: if printf ... | grep -qvE 'pattern' then true else false
-    # Use re.search because the ERE contains ^ and $ anchors inside the alternation
-    lines = [line for line in changed.strip().splitlines() if line.strip()]
-    if not lines:
-        return "false"
-    for line in lines:
-        if not re.search(noncode_pattern, line):
-            return "true"
-    return "false"
-
-
-# Representative matrix (paths that must be non-code when touched alone or with docs)
-FORMER_IGNORED = [
-    ".local/foo",
-    "notice",
-    "LICENSE",
-    ".gitignore",
-    ".gitattributes",
-    ".editorconfig",
-    ".github/workflows/status-report.yml",
-    ".github/ISSUE_TEMPLATE/bar.md",
-]
-
-ORDINARY_CODE = [
-    "packages/core/core/src/foo.py",
-    "packages/apps/terminal/src/App.tsx",
-    "packages/apps/desktop/src/main.ts",
-    "tests/test_something.py",
-    ".github/workflows/test.yml",
-]
-
-DOCS_ONLY = [
-    "README.md",
-    "docs/guide.md",
-    "packages/apps/site/pages/index.tsx",
-]
-
-
-def test_changed_surfaces_classifier_former_ignored_are_non_code():
-    """Former ignored surfaces alone must classify code=false (do not run expensive lanes)."""
-    doc = _load_workflow()
-    pattern = _extract_classify_pattern(doc)
-    for path in FORMER_IGNORED:
-        code = _simulate_classify(path, pattern)
-        assert code == "false", f"{path} must be non-code but got {code}"
-
-
-def test_changed_surfaces_classifier_ordinary_code_is_code():
-    """Ordinary code paths must classify code=true (run expensive lanes)."""
-    doc = _load_workflow()
-    pattern = _extract_classify_pattern(doc)
-    for path in ORDINARY_CODE:
-        code = _simulate_classify(path, pattern)
-        assert code == "true", f"{path} must be code but got {code}"
-
-
-def test_changed_surfaces_classifier_mixed_former_ignored_plus_code_is_code():
-    """Mix of former-ignored + ordinary code must be code=true."""
-    doc = _load_workflow()
-    pattern = _extract_classify_pattern(doc)
-    changed = "\n".join(FORMER_IGNORED[:2] + ORDINARY_CODE[:1])
-    code = _simulate_classify(changed, pattern)
-    assert code == "true"
-
-
-def test_changed_surfaces_classifier_docs_site_md_only_is_non_code():
-    """Existing docs/site/md-only must remain code=false (no regression)."""
-    doc = _load_workflow()
-    pattern = _extract_classify_pattern(doc)
-    for path in DOCS_ONLY:
-        code = _simulate_classify(path, pattern)
-        assert code == "false", f"{path} must be non-code but got {code}"
-
-
-def test_changed_surfaces_classifier_unresolvable_fails_open():
-    """Unresolvable diff range must fail open to code=true."""
-    doc = _load_workflow()
-    pattern = _extract_classify_pattern(doc)
-    code = _simulate_classify("", pattern, resolvable=False)
-    assert code == "true"
-
-
-def test_changed_surfaces_classifier_mutation_sensitive():
-    """If the YAML classifier is mutated (any single former-ignored fragment removed), test fails.
-    Uses explicit per-surface ERE fragments; omission of each makes its representative path code=true.
-    """
-    doc = _load_workflow()
-    pattern = _extract_classify_pattern(doc)
-    # Normalise: strip outer grouping parens so every fragment appears verbatim as alternation term
-    # and mutations keep valid regex for re.search in _simulate_classify
-    if pattern.startswith("(") and pattern.endswith(")"):
-        pattern = pattern[1:-1]
-
-    # Explicit per-surface expected ERE fragments (must match live YAML exactly; no any() fallback)
-    per_surface = {
-        ".local/**": ("^\\.local/", ".local/foo"),
-        "notice": ("^notice$", "notice"),
-        "LICENSE": ("^LICENSE$", "LICENSE"),
-        ".gitignore": ("^\\.gitignore$", ".gitignore"),
-        ".gitattributes": ("^\\.gitattributes$", ".gitattributes"),
-        ".editorconfig": ("^\\.editorconfig$", ".editorconfig"),
-        ".github/workflows/status-report.yml": ("^\\.github/workflows/status-report\\.yml$", ".github/workflows/status-report.yml"),
-        ".github/ISSUE_TEMPLATE/**": ("^\\.github/ISSUE_TEMPLATE/", ".github/ISSUE_TEMPLATE/config.json"),
-    }
-
-    for surf, (frag, rep) in per_surface.items():
-        assert frag in pattern, f"Expected fragment {frag} for {surf} missing from pattern"
-        # Mutation sensitivity: replace ONLY this fragment with sentinel (removes its protection);
-        # representative must now classify as code. (String replace keeps regex syntax valid.)
-        mutated = pattern.replace(frag, "NEVER_MATCH_SURFACE_42")
-        code = _simulate_classify(rep, mutated)
-        assert code == "true", (
-            f"After removing {frag} ({surf}), {rep} must become code=true (was non-code); got {code}"
-        )
-
-    # Also confirm expensive lanes still gate on the output (unchanged requirement)
-    if_cond = _extract_expensive_lane_if(doc)
-    assert "needs.changed-surfaces.outputs.code == 'true'" in if_cond, (
-        "Expensive lanes must remain gated on changed-surfaces code output"
+def test_protected_branch_pushes_do_not_bypass_the_exhaustive_gate():
+    document = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    push = _normalise_on(document)["push"]
+    assert {"main", "dev"} <= set(push["branches"])
+    assert not {"paths", "paths-ignore"} & push.keys(), (
+        "Protected-branch pushes must retain Site attribution and the full gate, including NOTICE/LICENSE changes"
     )
 
 
-def test_pull_request_branches_set_containment_mutation_sensitive():
-    """pull_request.branches must require the full set {main, dev}; mutation to drop one must fail."""
-    doc = _load_workflow()
-    on_block = _normalise_on(doc)
-    pr_config = on_block.get("pull_request", {}) or {}
-    branches = pr_config.get("branches", [])
-    if isinstance(branches, str):
-        branches = [branches]
-    required = {"main", "dev"}
-    assert required.issubset(set(branches)), (
-        f"branches must contain the full set; mutation detected: {branches}"
+# Classifier behaviours are exercised against the shared implementation in
+# test_check_changes.py; this file checks that the workflow uses that plan.
+
+def test_classifier_outputs_reach_each_required_surface():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    classifier = jobs["changed-surfaces"]
+    script = next(step["run"] for step in classifier["steps"] if step.get("id") == "classify")
+    assert "scripts/check_changes.py" in script
+    assert "--full --github-output" in script
+    for name, surface in {
+        "node-core-tests": "terminal", "node-widget-tests-1": "terminal",
+        "node-widget-tests-2a": "terminal", "node-widget-tests-2b": "terminal",
+        "node-widget-tests-3": "terminal", "rust-ticks-tests": "rust",
+        "electron-desktop-tests": "desktop", "terminal-e2e-infra-self-tests": "terminal",
+        "python-shards": "python",
+    }.items():
+        assert jobs[name]["needs"] == "changed-surfaces"
+        assert f"needs.changed-surfaces.outputs.{surface} == 'true'" in jobs[name]["if"]
+        assert "github.event.pull_request.draft != true" in jobs[name]["if"]
+        assert surface in classifier["outputs"]
+
+
+def test_required_python_context_retains_all_packages_and_root_invariants():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    aggregate = jobs["python-tests"]
+    assert set(aggregate["needs"]) == {"changed-surfaces", "python-invariants", "python-shards"}
+    assert "always()" in aggregate["if"]
+    assert "continue-on-error" not in aggregate
+    invariants = jobs["python-invariants"]
+    assert "changed-surfaces" not in str(invariants.get("if", ""))
+    runs = "\n".join(step.get("run", "") for step in invariants["steps"])
+    assert "pytest tests/ scripts/__tests__/" in runs
+    assert "ruff check packages/ tests/" in runs
+    assert "--offline --days 0" in runs
+    shards = jobs["python-shards"]
+    assert shards["strategy"]["matrix"]["shard"] == [0, 1, 2, 3]
+    assert shards["strategy"]["fail-fast"] is False
+    run = next(step["run"] for step in shards["steps"] if step.get("name") == "Run Python package shard")
+    for required in ("python -m pytest packages/*/*/tests/", "-p scripts.pytest_shard", "--ft-shard-count=4",
+                     "--ft-shard-index=${{ matrix.shard }}", "--timeout=60", "--timeout-method=thread"):
+        assert required in run
+    assert "--ignore" not in run and " -k " not in run and " -m " not in run.replace("python -m pytest", "pytest")
+
+
+def test_python_workers_do_not_multiply_native_numerical_threads():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    from scripts.ft import PYTEST_NATIVE_THREAD_ENV
+
+    assert len(PYTEST_NATIVE_THREAD_ENV) == 5
+    assert set(PYTEST_NATIVE_THREAD_ENV.values()) == {"1"}
+    for name in ("python-invariants", "python-shards"):
+        assert jobs[name]["env"] == PYTEST_NATIVE_THREAD_ENV
+    nightly = yaml.safe_load((_WORKFLOW_PATH.parent / "nightly-cross-platform.yml").read_text(encoding="utf-8"))
+    assert all(nightly["env"].get(name) == value for name, value in PYTEST_NATIVE_THREAD_ENV.items())
+
+
+@pytest.mark.parametrize("selected,invariants,shards,classification,expected", [
+    ("true", "success", "success", "success", 0),
+    ("false", "success", "skipped", "success", 0),
+    ("true", "success", "failure", "success", 1),
+    ("true", "success", "cancelled", "success", 1),
+    ("true", "success", "skipped", "success", 1),
+    ("true", "failure", "success", "success", 1),
+    ("false", "failure", "skipped", "success", 1),
+    ("true", "skipped", "success", "success", 1),
+    ("false", "success", "skipped", "failure", 1),
+    ("", "success", "skipped", "success", 1),
+    ("false", "success", "success", "success", 1),
+])
+def test_actual_python_summary_propagates_every_required_failure(selected, invariants, shards, classification, expected):
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    step = jobs["python-tests"]["steps"][0]
+    script = textwrap.dedent("\n".join(step["run"].splitlines()[1:-1]))
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False,
+        env=os.environ | {"PYTHON_REQUIRED": selected, "INVARIANTS_RESULT": invariants,
+                          "SHARDS_RESULT": shards, "CLASSIFIER_RESULT": classification},
     )
-    # Explicitly not 'any' — both required
-    assert len(set(branches) & required) == 2
+    assert result.returncode == expected, result.stdout + result.stderr

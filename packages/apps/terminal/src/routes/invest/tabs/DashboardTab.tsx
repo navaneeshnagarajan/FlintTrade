@@ -32,6 +32,7 @@ import {
   NET_WORTH_LABEL,
   netWorthFigureTitleForBook,
 } from "@/lib/accountNetWorth";
+import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
 import { maskValue, VALUE_MASK } from "@/lib/formatters";
@@ -80,6 +81,7 @@ export function DashboardTab() {
   // Count and rows come from InvestContext only — never a local sample
   // overlay that would disagree with the header badge (FT-TRADE-010).
   const isDemo = Boolean(isSampleData);
+  const isPracticeAccount = useModeStore((s) => s.mode === "practice") && !isDemo;
   const currentValue = liveSummary.currentValue;
   const totalInvested = liveSummary.totalInvested;
   const totalPnl = liveSummary.totalPnl;
@@ -205,6 +207,11 @@ export function DashboardTab() {
               >
                 {netWorthPublished ? netWorthLabel(netWorth) : "—"}
               </span>
+              {isPracticeAccount && netWorthPublished && (
+                <span className="text-xxs text-text-muted" data-testid="dashboard-charges-source">
+                  Practice account, after estimated charges
+                </span>
+              )}
               <span
                 className={cn(
                   "text-sm font-mono tabular-nums font-semibold",
@@ -266,7 +273,7 @@ export function DashboardTab() {
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-available-funds">
-          {netWorthLabel(availableCash)}
+          {maskValue(formatAccountNetWorth(availableCash), valuesHidden)}
         </div>
         <p className="text-xs text-text-muted">Withdrawable cash</p>
       </GlassCard>

@@ -77,6 +77,17 @@ vi.mock("@/hooks/usePositions", () => ({
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => false,
+  useAccountReadContext: () => ({
+    identity: {
+      mode: "explore",
+      scopeKey: "explore:mock:default",
+      brokerType: "mock",
+      accountId: "default",
+    },
+    enabled: false,
+    host: "",
+    apiKey: "",
+  }),
 }));
 
 const brokerConnected = vi.hoisted(() => ({ current: false }));

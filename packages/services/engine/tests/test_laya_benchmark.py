@@ -184,7 +184,7 @@ def test_down_is_not_a_wrong_admit() -> None:
     report = run_benchmark((_case(label="deny"), _case(id="ex-ok", label="admit")), _Down())
     assert [row.band for row in report.outcomes] == ["down", "down"]
     assert "wrong_admits=0" in report.render()
-    assert "wrong_admit_95_upper=3/1" in report.render()
+    assert "wrong_admit_95_upper=undefined" in report.render()
     assert "cannot_claim_under_1_percent=yes" in report.render()
 
 
@@ -302,3 +302,269 @@ def test_unknown_fields_are_ignored(tmp_path: Path) -> None:
     assert case.group == "unset"
     assert case.quantity == 20
     assert _HIDDEN not in state_for_case(case)
+
+
+class _Unavailable:
+    last_proof = ""
+
+    def decide(self, state: str, questions: object) -> dict[str, object]:
+        del state, questions
+        from flinttrade_engine.laya_decision import DecisionCallError
+
+        raise DecisionCallError("runtime_down")
+
+
+def _deny_cases(count: int, **overrides: object) -> tuple[BenchmarkCase, ...]:
+    return tuple(
+        _case(**{"id": f"ex-deny-{i}", "pair_id": f"ex-pair-{i}", "label": "deny", **overrides}) for i in range(count)
+    )
+
+
+def _metric(text: str, name: str) -> str:
+    return next(token.split("=", 1)[1] for token in text.split() if token.startswith(f"{name}="))
+
+
+@pytest.mark.unit
+def test_all_down_is_unavailable_not_a_model_score_or_latency_sample() -> None:
+    text = run_benchmark(_deny_cases(301), _Unavailable()).render()
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "model_score") == "no"
+    assert _metric(text, "n_model_scored_repeats") == "0"
+    assert _metric(text, "n_model_unavailable_repeats") == "301"
+    assert _metric(text, "n_qualifying_deny_pairs") == "0"
+    assert _metric(text, "wrong_admit_95_upper") == "undefined"
+    assert _metric(text, "latency_p50_ms") == "unavailable"
+    assert _metric(text, "latency_p95_within_bar") == "no"
+
+
+@pytest.mark.unit
+def test_down_heavy_run_cannot_hide_the_successful_model_latency(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _OneModelResult(_Client):
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            if not self.states:
+                return super().decide(state, questions)
+            return _Unavailable().decide(state, questions)
+
+    ticks = iter([0.0, 4.0, *[value for i in range(1, 301) for value in (10.0 * i, 10.0 * i + 0.001)]])
+    monkeypatch.setattr("flinttrade_engine.laya_benchmark.time.perf_counter", lambda: next(ticks))
+    text = run_benchmark(_deny_cases(301), _OneModelResult(0.95)).render()
+    assert _metric(text, "latency_p95_within_bar") == "no"
+    assert _metric(text, "latency_p95_ms") == "4000.000"
+    assert _metric(text, "n_model_scored_repeats") == "1"
+    assert _metric(text, "n_model_unavailable_repeats") == "300"
+    assert _metric(text, "n_qualifying_deny_pairs") == "1"
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "wrong_admit_95_upper") == "undefined"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("note", ["", " " * 2, "x" * 4001], ids=["empty", "whitespace", "too_long"])
+def test_deterministic_bypasses_never_supply_model_evidence(note: str) -> None:
+    client = _Client(0.95)
+    text = run_benchmark(_deny_cases(301, note=note, mode="live"), client).render()
+    assert not client.states
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "model_score") == "no"
+    assert _metric(text, "n_model_eligible_repeats") == "0"
+    assert _metric(text, "n_qualifying_deny_pairs") == "0"
+    assert _metric(text, "latency_p95_within_bar") == "no"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("boundary", ["load", "run"])
+def test_duplicate_case_ids_are_rejected_before_any_scoring(tmp_path: Path, boundary: str) -> None:
+    client = _Client(0.95)
+    with pytest.raises(BenchmarkCaseError, match="duplicate case id"):
+        if boundary == "run":
+            run_benchmark((_case(), _case(pair_id="another-pair")), client)
+        else:
+            first = _FIXTURE.read_text(encoding="utf-8").splitlines()[0]
+            path = tmp_path / "duplicate.jsonl"
+            path.write_text(f"{first}\n{first}\n", encoding="utf-8")
+            load_cases(path)
+    assert not client.states
+
+
+@pytest.mark.unit
+def test_pair_members_count_once_for_qualifying_deny_evidence() -> None:
+    text = run_benchmark(_deny_cases(301, pair_id="one-pair"), _Client(0.95), repeats=2).render()
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "n_qualifying_deny_cases") == "301"
+    assert _metric(text, "n_qualifying_deny_pairs") == "1"
+    assert _metric(text, "wrong_admit_95_upper") == "3/1"
+    assert "Pair IDs are bookkeeping, not proof of statistical independence." in text
+
+
+@pytest.mark.unit
+def test_later_repeat_wrong_admit_blocks_claim_but_preserves_first_repeat_tallies() -> None:
+    class _LaterAllow(_Client):
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            self.deny_p = 0.95 if len(self.states) % 2 == 0 else 0.1
+            return super().decide(state, questions)
+
+    report = run_benchmark(_deny_cases(301), _LaterAllow(), repeats=2)
+    assert all(row.band == "correct" for row in report.outcomes)
+    text = report.render()
+    assert "question overall n=301 n_admit=0 n_deny=301 n_clamp=0 wrong_admits=0" in text
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "repeat_wrong_admits") == "301"
+    assert _metric(text, "wrong_admit_95_upper") == "undefined"
+
+
+@pytest.mark.unit
+def test_later_unavailable_repeat_blocks_otherwise_sufficient_unique_pairs() -> None:
+    class _LastDown(_Client):
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            if len(self.states) == 603:
+                return _Unavailable().decide(state, questions)
+            return super().decide(state, questions)
+
+    text = run_benchmark(_deny_cases(302), _LastDown(0.95), repeats=2).render()
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "n_qualifying_deny_pairs") == "301"
+    assert _metric(text, "n_model_unavailable_repeats") == "1"
+    assert _metric(text, "wrong_admit_95_upper") == "undefined"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["proof_absent", "identity_absent", "malformed", "prompt_over_cap"])
+def test_unverified_or_invalid_repeats_cannot_qualify(failure: str) -> None:
+    class _Invalid(_Client):
+        last_proof = ""
+
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            from flinttrade_engine.laya_decision import DecisionCallError
+
+            if failure == "proof_absent":
+                self.last_proof = ""
+                return super().decide(state, questions)
+            if failure == "malformed":
+                return {"answers": {}}
+            raise DecisionCallError(failure)
+
+    text = run_benchmark(_deny_cases(301), _Invalid(0.95)).render()
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "model_score") == "no"
+    assert _metric(text, "n_model_unavailable_repeats") == "301"
+    assert _metric(text, "n_qualifying_deny_pairs") == "0"
+    assert _metric(text, "latency_p95_within_bar") == "no"
+
+
+@pytest.mark.unit
+def test_stub_never_qualifies_even_if_all_deny_answers_are_correct() -> None:
+    text = run_benchmark(_deny_cases(301), _Client(0.95), stub=True).render()
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "model_score") == "no"
+    assert _metric(text, "n_model_scored_repeats") == "0"
+    assert _metric(text, "n_qualifying_deny_pairs") == "0"
+    assert _metric(text, "latency_p95_within_bar") == "no"
+    assert _metric(text, "wrong_admit_95_upper") == "undefined"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("count,claim", [(300, "yes"), (301, "no")])
+def test_eligible_control_counts_unique_pairs_not_repeated_model_calls(count: int, claim: str) -> None:
+    text = run_benchmark(_deny_cases(count), _Client(0.95), repeats=2).render()
+    assert _metric(text, "n_qualifying_deny_pairs") == str(count)
+    assert _metric(text, "n_model_scored_repeats") == str(count * 2)
+    assert _metric(text, "n_model_unavailable_repeats") == "0"
+    assert _metric(text, "model_score") == "yes"
+    assert _metric(text, "wrong_admit_95_upper") == f"3/{count}"
+    assert _metric(text, "cannot_claim_under_1_percent") == claim
+    assert "Pair IDs are bookkeeping, not proof of statistical independence." in text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", ["", "example:unknown"])
+def test_cli_without_an_available_model_explicitly_reports_no_model_score(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], model: str
+) -> None:
+    import json
+
+    raw = {
+        "pair_id": "pair",
+        "split": "dev",
+        "question": "rationale",
+        "note": "Example note",
+        "order_context": {"side": "BUY"},
+        "label": "deny",
+    }
+    path = tmp_path / "deny.jsonl"
+    path.write_text(
+        "".join(json.dumps({**raw, "id": f"case-{i}", "pair_id": f"pair-{i}"}) + "\n" for i in range(301)),
+        encoding="utf-8",
+    )
+    assert main(["--cases", str(path), "--model", model, "--skip-drills"]) == 0
+    text = capsys.readouterr().out
+    assert _metric(text, "cannot_claim_under_1_percent") == "yes"
+    assert _metric(text, "model_score") == "no"
+    assert "No verified model inference is available" in text
+
+
+@pytest.mark.unit
+def test_known_stub_cannot_be_misreported_when_caller_omits_stub_flag() -> None:
+    from flinttrade_engine.laya_benchmark import _StubAllowClient
+
+    text = run_benchmark((_case(),), _StubAllowClient()).render()
+    assert _metric(text, "model_score") == "no"
+    assert _metric(text, "stub") == "yes"
+    assert _metric(text, "n_model_scored_repeats") == "0"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", ["chat", "systemone"])
+@pytest.mark.parametrize("owned_ready", [True, False])
+def test_cli_client_requires_owned_readiness_and_uses_its_version(
+    monkeypatch: pytest.MonkeyPatch, route: str, owned_ready: bool
+) -> None:
+    import json
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import flinttrade_engine.laya_ollama as ollama_mod
+    from flinttrade_engine.laya_benchmark import _cli_client
+
+    digest = "ab" * 32
+    tag = "example:bench"
+    locked = f"flinttrade/sha256-{digest}:locked"
+    monkeypatch.setattr(ollama_mod, "LAYA_OLLAMA_ALLOWLIST", (ollama_mod.LayaOllamaModel(tag, digest, route),))
+    posted: list[tuple[str, str]] = []
+
+    @contextmanager
+    def session(model: str):
+        assert model == tag
+        yield SimpleNamespace(digest=digest, model=locked, base_url="http://127.0.0.1:11435")
+
+    def poster(base: str, path: str, payload: dict[str, object], timeout: float) -> dict[str, object]:
+        assert base == "http://127.0.0.1:11435"
+        assert 0 < timeout <= 3.0
+        posted.append((path, str(payload["model"])))
+        answers = _payload(0.95)
+        return {"message": {"content": json.dumps(answers)}} if route == "chat" else answers
+
+    snapshot = (
+        {
+            "ready": True,
+            "state": "ready",
+            "model_present": True,
+            "reported_digest": digest,
+            "pinned_server_version": "0.35.0",
+            "port": 11435,
+        }
+        if owned_ready
+        else None
+    )
+    ollama_mod.set_laya_ollama_transport_for_tests(session=session, poster=poster, snapshot=lambda _tag: snapshot)
+    try:
+        report = run_benchmark((_case(label="deny"),), _cli_client(tag))
+    finally:
+        ollama_mod.reset_laya_ollama_transport_for_tests()
+    text = report.render()
+    if owned_ready:
+        assert report.outcomes[0].band == "correct"
+        assert _metric(text, "model_score") == "yes"
+        assert posted == [("/api/chat" if route == "chat" else "/v1/systemone", locked)]
+    else:
+        assert _metric(text, "model_score") == "no"
+        assert report.outcomes[0].band == "down"
+        assert not posted

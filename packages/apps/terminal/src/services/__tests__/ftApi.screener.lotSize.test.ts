@@ -22,6 +22,7 @@ vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => mockAuthState },
 }));
 
+import { lotSizeFromMaster } from "@/lib/instrumentLots";
 import { getLotSize } from "../ftApi.screener";
 
 function makeJsonResponse(body: unknown, status = 200): Response {
@@ -57,15 +58,31 @@ describe("getLotSize — is_sample_data flag survives end-to-end", () => {
     expect(result.is_sample_data).toBe(true);
   });
 
-  it("flags the demo-session fallback as sample data", async () => {
+  it("labels demo lots as Example and reads the instrument master", async () => {
     mockAuthState.token = "demo-user";
 
-    const result = await getLotSize("NIFTY", "NFO");
+    const nifty = await getLotSize("NIFTY", "NFO");
+    const bank = await getLotSize("BANKNIFTY", "NFO");
+    const sensex = await getLotSize("SENSEX", "BFO");
+    const finnifty = await getLotSize("FINNIFTY", "NFO");
+    const nxt = await getLotSize("NIFTYNXT50", "NFO");
 
-    // No network call — the demo fallback is fabricated on the client and
-    // must declare itself so no consumer mistakes it for the symbol master.
+    // No network call — demo rows are examples from the cached master.
     expect(fetch).not.toHaveBeenCalled();
-    expect(result.lot_size).toBe(75);
-    expect(result.is_sample_data).toBe(true);
+    expect(nifty.lot_size).toBe(lotSizeFromMaster("NIFTY"));
+    expect(nifty.lot_size).toBeGreaterThan(0);
+    expect(nifty.example_label).toBe("Example");
+    expect(nifty.is_sample_data).toBe(true);
+    expect(JSON.stringify(nifty)).not.toMatch(/expiry/i);
+    expect(bank.lot_size).toBe(lotSizeFromMaster("BANKNIFTY"));
+    expect(bank.example_label).toBe("Example");
+    expect(JSON.stringify(bank)).not.toMatch(/expiry/i);
+    expect(sensex.lot_size).toBe(lotSizeFromMaster("SENSEX"));
+    expect(sensex.example_label).toBe("Example");
+    expect(JSON.stringify(sensex)).not.toMatch(/expiry/i);
+    expect(finnifty.lot_size).toBe(0);
+    expect(finnifty.example_label).toBeUndefined();
+    expect(nxt.lot_size).toBe(0);
+    expect(nxt.example_label).toBeUndefined();
   });
 });

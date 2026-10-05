@@ -1397,7 +1397,7 @@ class FlowBuilder:
         start = fb.add_node(NodeType.START, config={"scheduleType": "daily", "time": "09:16"})
         quote = fb.add_node(NodeType.GET_QUOTE, config={"symbol": "NIFTY", "exchange": "NSE"})
         check = fb.add_node(NodeType.PRICE_CONDITION, config={"operator": "greater_than", "value": 24000})
-        order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY", "action": "BUY", "quantity": 75})
+        order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY", "action": "BUY", "quantity": 65})
 
         fb.connect(start, quote)
         fb.connect(quote, check)

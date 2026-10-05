@@ -63,7 +63,7 @@ class _Limiter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def acquire(self, adapter_id: str, kind: str) -> None:
+    async def acquire(self, adapter_id: str, kind: str, *, before_retry=None) -> None:
         self.calls.append((adapter_id, kind))
 
 
@@ -4228,3 +4228,208 @@ async def test_native_history_rejects_malformed_present_numeric_without_conversi
 
     assert outcome == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
     assert trap.calls == 0
+
+
+def _dhan_cash_resolver(*, symbol: str = "TCS", exchange: str = "NSE", token: str = "101",
+                        instrument_type: str = "EQUITY"):
+    return build_security_resolver([{
+        "SEM_SMST_SECURITY_ID": token, "SEM_EXM_EXCH_ID": exchange, "SEM_SEGMENT": "E",
+        "SEM_TRADING_SYMBOL": symbol, "SEM_INSTRUMENT_NAME": instrument_type,
+    }])
+
+
+def _dhan_depth_payload(*, exchange: str = "NSE", wrapped: bool = False) -> dict[str, Any]:
+    payload = {"status": "success", "data": {f"{exchange}_EQ": {"101": {"depth": {
+        "buy": [{"price": 99.5, "quantity": 2, "orders": 1}, {"price": 0, "quantity": 0, "orders": 0}],
+        "sell": [{"price": "100.5", "quantity": "1", "orders": "1"}],
+    }}}}}
+    return {"status": "success", "remarks": "", "data": payload} if wrapped else payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exchange", ["NSE", "BSE"])
+@pytest.mark.parametrize("wrapped", [False, True])
+async def test_dhan_depth_exact_cash_identity_and_quote_budget(bind_adapter, exchange, wrapped) -> None:
+    client = _DhanMarketClient()
+    client.responses["quote"] = _dhan_depth_payload(exchange=exchange, wrapped=wrapped)
+    adapter = DhanAdapter(client_factory=lambda _session: client,
+                          security_resolver=_dhan_cash_resolver(exchange=exchange))
+    bound = bind_adapter("dhan", adapter, client)
+    request = QuoteRequest(InstrumentRef("TCS", exchange, "101"))
+
+    result = await bound.port.depth(request)
+
+    assert isinstance(result, BrokerReadSuccess)
+    assert result.value.instrument == request.instrument
+    assert [(row.price, row.quantity, row.orders) for row in result.value.bids] == [(99.5, 2, 1), (0.0, 0, 0)]
+    assert [(row.price, row.quantity, row.orders) for row in result.value.asks] == [(100.5, 1, 1)]
+    assert result.provenance.selector == bound.selector
+    assert client.quote_requests == [{f"{exchange}_EQ": [101]}]
+    assert bound.limiter.calls == [("dhan", "quote")]
+    client.responses["quote"].clear()
+    assert result.value.bids[0].price == 99.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("symbol,exchange,token", [
+    ("OTHER", "NSE", None), ("TCS", "BSE", None), ("TCS", "NSE", "102"),
+    ("tcs", "NSE", None),
+])
+async def test_dhan_depth_identity_mismatch_never_calls_sdk(bind_adapter, symbol, exchange, token) -> None:
+    client = _DhanMarketClient()
+    adapter = DhanAdapter(client_factory=lambda _session: client, security_resolver=_dhan_cash_resolver())
+    bound = bind_adapter("dhan", adapter, client)
+
+    result = await bound.port.depth(QuoteRequest(InstrumentRef(symbol, exchange, token)))
+
+    assert result == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolver", [None, lambda _symbol, _exchange: "101",
+                                     _dhan_cash_resolver(instrument_type="OPTSTK"),
+                                     _dhan_cash_resolver(instrument_type=""),
+                                     _dhan_cash_resolver(token="00101")])
+async def test_dhan_depth_requires_canonical_cash_metadata_before_sdk(bind_adapter, resolver) -> None:
+    client = _DhanMarketClient()
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=resolver), client)
+    assert await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))) == (
+        BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    )
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [None, [], {}, {"data": {}}, {"status": True, "data": {}},
+    {"status": "unknown", "data": {}}, {"status": "success", "data": []},
+    {"status": "success", "data": {}}, {"status": "success", "data": {"BSE_EQ": {"101": {}}}},
+    {"status": "success", "data": {"NSE_EQ": {"102": {}}}},
+    {"status": "success", "data": {"NSE_EQ": {"101": {}}}},
+    {"status": "success", "data": {"NSE_EQ": {"101": {}, "102": {}}}},
+    {"status": "success", "data": {"NSE_EQ": {"101": {}}, "BSE_EQ": {"101": {}}}},
+    {"status": "success", "data": {"status": "success", "data": [], "NSE_EQ": {"101": {}}}},
+])
+async def test_dhan_depth_rejects_missing_wrong_or_ambiguous_envelope(bind_adapter, payload) -> None:
+    client = _DhanMarketClient()
+    client.responses["quote"] = payload
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+    assert await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))) == (
+        BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    )
+    assert client.calls == ["quote"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["buy", "sell"])
+@pytest.mark.parametrize("rows", [None, {}, "", [None], [{}], [{"price": 1, "quantity": 1}],
+                                  [{"price": 1, "orders": 1}], [{"quantity": 1, "orders": 1}]])
+async def test_dhan_depth_requires_complete_side_and_level_schema(bind_adapter, side, rows) -> None:
+    client = _DhanMarketClient()
+    payload = _dhan_depth_payload()
+    payload["data"]["NSE_EQ"]["101"]["depth"][side] = rows
+    client.responses["quote"] = payload
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+    assert await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))) == (
+        BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["price", "quantity", "orders"])
+@pytest.mark.parametrize("value", [-1, "-1e-999", True, None, "", "nan", float("inf"), [], {}, _MarketEvidenceTrap()])
+async def test_dhan_depth_rejects_invalid_numeric_evidence_without_hooks(bind_adapter, field, value) -> None:
+    client = _DhanMarketClient()
+    payload = _dhan_depth_payload()
+    payload["data"]["NSE_EQ"]["101"]["depth"]["buy"][0][field] = value
+    client.responses["quote"] = payload
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+    assert await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))) == (
+        BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    )
+    if isinstance(value, _MarketEvidenceTrap):
+        assert value.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["quantity", "orders"])
+async def test_dhan_depth_rejects_fractional_counts(bind_adapter, field) -> None:
+    client = _DhanMarketClient()
+    payload = _dhan_depth_payload()
+    payload["data"]["NSE_EQ"]["101"]["depth"]["sell"][0][field] = 1.5
+    client.responses["quote"] = payload
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+    assert await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))) == (
+        BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrapped", [False, True])
+async def test_dhan_depth_preserves_declared_provider_failure(bind_adapter, wrapped) -> None:
+    client = _DhanMarketClient()
+    payload = {"status": "failure", "data": "", "remarks": "synthetic failure"}
+    client.responses["quote"] = {"status": "success", "data": payload} if wrapped else payload
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+    assert await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE"))) == (
+        BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+    )
+    assert client.calls == ["quote"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row", [
+    {"SEM_SMST_SECURITY_ID": "101", "SEM_EXM_EXCH_ID": "NSE", "SEM_SEGMENT": "E",
+     "SEM_TRADING_SYMBOL": "TCS", "SEM_INSTRUMENT_NAME": "EQUITY", "SEM_EXCH_INSTRUMENT_TYPE": "ES"},
+    {"SECURITY_ID": "101", "EXCH_ID": "NSE", "SEGMENT": "E",
+     "SYMBOL_NAME": "TCS", "INSTRUMENT": "EQUITY", "INSTRUMENT_TYPE": "ES"},
+])
+async def test_dhan_depth_uses_documented_instrument_class_not_exchange_subtype(bind_adapter, row) -> None:
+    client = _DhanMarketClient()
+    client.responses["quote"] = _dhan_depth_payload()
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=build_security_resolver([row])), client)
+
+    result = await bound.port.depth(QuoteRequest(InstrumentRef("TCS", "NSE")))
+
+    assert isinstance(result, BrokerReadSuccess)
+    assert result.value.bids[0].price == 99.5
+    assert client.quote_requests == [{"NSE_EQ": [101]}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exchange", ["NFO", "BFO", "NSE_INDEX", "MCX", "CDS"])
+async def test_dhan_depth_outside_cash_scope_stays_unsupported_without_sdk(bind_adapter, exchange) -> None:
+    client = _DhanMarketClient()
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+
+    result = await bound.port.depth(QuoteRequest(InstrumentRef("OTHER", exchange)))
+
+    assert result == BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+    assert client.calls == []
+    assert bound.limiter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_dhan_depth_preserves_explicit_empty_sides_and_rejects_absent_side(bind_adapter) -> None:
+    client = _DhanMarketClient()
+    payload = _dhan_depth_payload()
+    payload["data"]["NSE_EQ"]["101"]["depth"] = {"buy": [], "sell": []}
+    client.responses["quote"] = payload
+    bound = bind_adapter("dhan", DhanAdapter(client_factory=lambda _session: client,
+                                            security_resolver=_dhan_cash_resolver()), client)
+    request = QuoteRequest(InstrumentRef("TCS", "NSE"))
+
+    result = await bound.port.depth(request)
+    assert isinstance(result, BrokerReadSuccess)
+    assert result.value.bids == result.value.asks == ()
+    del payload["data"]["NSE_EQ"]["101"]["depth"]["sell"]
+    assert await bound.port.depth(request) == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    assert client.calls == ["quote", "quote"]

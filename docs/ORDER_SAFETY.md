@@ -33,7 +33,9 @@ Settings → Practice does not place.
 
 1. The mode guard runs first. Example data stays HTTP 403 `mode_blocked`
    (`Orders are not available for Example. Switch to Practice or Live to trade.`)
-   and does not enter `Laya.admit`.
+   and does not enter `Laya.admit`. The `/trade` Order Pad records a sample
+   fill on the client for example data (`Example order placed`, id starting
+   `SAMPLE-`). This guard is the server path.
 2. `Laya.admit` then admits or refuses the proposal. A refusal
    (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
    SafetySystem on Live and before the native sandbox on Practice.
@@ -48,9 +50,14 @@ Settings → Practice does not place.
    ACL, and consumes the one-shot gate.
 
 An allowed Practice place is admitted, then goes to the native sandbox. It
-does not enter SafetySystem, `gate_order`, or `BrokerRouter`. The routed
-place route is Live only and uses the same Live admission. Modify and
-cancel are not this admission. `POST /api/v1/orders/cancel-all` only
+does not enter SafetySystem, `gate_order`, or `BrokerRouter`. When the
+order names a security id, the quantity must be a positive multiple of
+that contract's lot from the broker instrument master. If the master has
+no lot, the sandbox refuses the order and does not fill it:
+`Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized.`
+An expired future is named as the desk shows it, for example
+`NIFTY-OCT2026-FUT`. The routed place route is Live only and uses the same
+Live admission. Modify and cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 before Laya, SafetySystem, and any broker call, on place, routed place,
 exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.`
@@ -145,7 +152,7 @@ that request is already at the allowed quantity.
 
 Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `port_in_use` (`Port <n> in use`), `still_loading` (Still loading),
-`downloading` (Downloading the model · 1.2 of 3.4 GB), `download_failed`
+`downloading` (`Downloading the model · X of Y GB`), `download_failed`
 (Can't download the model), `unreachable` (Unreachable), `unverified`
 (Can't verify the model), `wrong_revision` (Wrong model version),
 `key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). A health check does not replace `key_missing` with Not started. `<n>` is the sidecar port. For
@@ -221,7 +228,7 @@ the sidecar. That download sets `HF_HOME` to
 `<workspace>/runtime/laya/hf-home` and `HF_HUB_DISABLE_XET=1`, so transfer
 logs stay out of the shared cache. The model is about 2.37 GB, and that
 size is reported once. While it runs, including a pin change, the chip is
-Downloading the model · 1.2 of 3.4 GB and the status word is Down. There
+`Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`) and the status word is Down. There
 is no Updating label. When no checkpoint is already there, a full match
 renames staging onto `<workspace>/runtime/laya/checkpoint`. When a
 checkpoint is already there, the current copy stays in place until the

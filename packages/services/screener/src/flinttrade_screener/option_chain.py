@@ -109,7 +109,7 @@ class OptionChainSnapshot:
 # Lot sizes for common underlyings
 LOT_SIZES: dict[str, int] = {
     # NFO — Index options
-    "NIFTY": 75,
+    "NIFTY": 65,
     "BANKNIFTY": 30,
     "FINNIFTY": 40,
     "MIDCPNIFTY": 50,

@@ -626,7 +626,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           >
             <ShoppingBasket size={11} />
             {basket.length > 0 && (
-              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-xxs font-bold rounded-full bg-accent text-white leading-none">
+              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-xxs font-bold rounded-full bg-accent text-accent-foreground leading-none">
                 {basket.length}
               </span>
             )}

@@ -79,11 +79,51 @@ class ManagedOllamaAdmission:
     digest: str
 
 
-_OLLAMA_VERSION = "v0.32.0"
+_OLLAMA_VERSION = "v0.35.0"
 _OLLAMA_SERVER_VERSION = _OLLAMA_VERSION.removeprefix("v")
-_OLLAMA_ROLLBACK_VERSIONS = ("v0.31.2",)
+# v0.32.0 stays so an install of the previous pin can roll back one release.
+# v0.31.2 remains the older rollback.
+_OLLAMA_ROLLBACK_VERSIONS = ("v0.32.0", "v0.31.2")
 _LIFECYCLE_LOCK_NAME = ".ollama-lifecycle.lock"
 _ASSETS_BY_VERSION: dict[str, dict[tuple[str, str], tuple[str, str, int, int]]] = {
+    "v0.35.0": {
+        ("darwin", "arm64"): (
+            "ollama-darwin.tgz",
+            "2608dbb0a0f0136a198db9d48b4f74ece55f452314a39452fca35b7cf20c2589",
+            160_167_937,
+            1024 * 1024 * 1024,
+        ),
+        ("darwin", "x86_64"): (
+            "ollama-darwin.tgz",
+            "2608dbb0a0f0136a198db9d48b4f74ece55f452314a39452fca35b7cf20c2589",
+            160_167_937,
+            1024 * 1024 * 1024,
+        ),
+        ("linux", "x86_64"): (
+            "ollama-linux-amd64.tar.zst",
+            "1c114a6b220c5efca2ef2b1e5f01d1e535e26f6cd6d1678c8489325d2835e525",
+            1_427_765_407,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64"): (
+            "ollama-linux-arm64.tar.zst",
+            "cb627d332b1fe5055bd5485ca10d595da8429e447648209e375390ec3bd09374",
+            1_550_231_393,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("windows", "x86_64"): (
+            "ollama-windows-amd64.zip",
+            "d6f7d3dd4f5d013553a78c1e78b2521fcf41d43dd2863e4596cdc046fe6036db",
+            1_461_196_158,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("windows", "arm64"): (
+            "ollama-windows-arm64.zip",
+            "99d061915a68fb563da0fb9316fd112cfc6fce0c9478601b2765b1f973cb715e",
+            208_072_407,
+            512 * 1024 * 1024,
+        ),
+    },
     "v0.32.0": {
         ("darwin", "arm64"): (
             "ollama-darwin.tgz",
@@ -165,6 +205,26 @@ _ACCELERATOR_ASSETS_BY_VERSION: dict[
     str,
     dict[tuple[str, str, str], tuple[str, str, int, int]],
 ] = {
+    "v0.35.0": {
+        ("linux", "x86_64", "rocm"): (
+            "ollama-linux-amd64-rocm.tar.zst",
+            "77b6ef06adf34b1fa5232d4372d0e988bcb862363e4b81002ed59a1d0b91bb4c",
+            1_051_878_032,
+            5 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64", "jetpack5"): (
+            "ollama-linux-arm64-jetpack5.tar.zst",
+            "f7f1a7e890f2a493014f01cf8de948b5aa4641f34c05d2cb61983649b9c20f5b",
+            297_201_571,
+            2 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64", "jetpack6"): (
+            "ollama-linux-arm64-jetpack6.tar.zst",
+            "609be1fb0f0d28ea3b10df7194508562da431200568157eef36de5745edd2753",
+            269_692_742,
+            2 * 1024 * 1024 * 1024,
+        ),
+    },
     "v0.32.0": {
         ("linux", "x86_64", "rocm"): (
             "ollama-linux-amd64-rocm.tar.zst",
@@ -351,19 +411,104 @@ def managed_ollama_session(model: str) -> Iterator[ManagedOllamaAdmission]:
         yield admission
 
 
-def managed_ollama_gate_snapshot(model: str = "") -> dict[str, Any] | None:
-    """Return chip fields for the owned runtime, or None when this process has none.
+def _gate_model_identity(runtime: Any, model: str) -> tuple[str, str] | None:
+    """Resolve an accepted source without relaxing immutable inference aliases."""
+    accepted, sources = runtime._read_model_trust_state()
+    aliases = set(_model_aliases(model))
+    if model in accepted and _is_locked_model_alias(model, accepted[model]):
+        locked = model
+    else:
+        mapped = {sources[name] for name in aliases if name in sources}
+        if len(mapped) != 1:
+            return None
+        locked = mapped.pop()
+    expected = accepted.get(locked)
+    if expected is None or not _is_locked_model_alias(locked, expected):
+        return None
+    identity = runtime._accepted_model_identity(locked)
+    if identity is None or identity != (locked, expected):
+        return None
+    if model != locked:
+        reported = {
+            _normalise_model_digest(row.get("digest"))
+            for row in runtime._raw_models()
+            if any(
+                aliases.intersection(_model_aliases(name))
+                for name in (row.get("name"), row.get("model"))
+                if isinstance(name, str)
+            )
+        }
+        if reported != {expected}:
+            current = next((value for value in reported if value and value != expected), None)
+            if current is not None:
+                with runtime._state_lock:
+                    runtime._model_digest_drift[model] = {"accepted": expected, "current": current}
+                raise OllamaRuntimeError("managed Ollama gate source digest changed")
+            return None
+    return identity
 
-    The place path rechecks the digest inside :class:`ManagedOllamaAdmission`.
-    This snapshot does not probe the listener, so a dead server can still look
-    ready until that admission fails closed.
-    """
+
+def _require_gate_integrity(runtime: Any) -> None:
+    """Known install or durable-state errors cannot authorise a gate call."""
+    try:
+        installed, install_error = runtime._installation_status()
+        runtime._read_model_trust_state()
+    except Exception as exc:
+        raise OllamaRuntimeError("managed Ollama gate integrity could not be verified") from exc
+    with runtime._state_lock:
+        error = install_error or runtime._runtime_state_error or runtime._operation_truth_error
+    if not installed or error:
+        raise OllamaRuntimeError("managed Ollama gate integrity verification failed")
+
+
+@contextmanager
+def managed_ollama_gate_session(model: str, digest: str) -> Iterator[ManagedOllamaAdmission]:
+    """Bind the reviewed source and pin inside the existing immutable admission."""
+    if _normalise_model_digest(digest) != digest:
+        raise OllamaRuntimeError("managed Ollama gate digest is invalid")
     with _MANAGED_RUNTIME_OWNER_LOCK:
         runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
     if runtime is None:
+        raise OllamaRuntimeError("managed Ollama runtime is not ready")
+    locked = _locked_model_alias(digest)
+    _require_gate_integrity(runtime)
+    try:
+        with runtime.inference_session(locked) as admission:
+            _require_gate_integrity(runtime)
+            if _gate_model_identity(runtime, model) != (locked, digest):
+                raise OllamaRuntimeError("managed Ollama gate source is not accepted")
+            yield admission
+            _require_gate_integrity(runtime)
+            if _gate_model_identity(runtime, model) != (locked, digest):
+                raise OllamaRuntimeError("managed Ollama gate source changed during inference")
+    except Exception:
+        # Shared admission cleanup can replace an inner error with its own
+        # identity failure. Preserve an observed integrity refusal after cleanup.
+        _require_gate_integrity(runtime)
+        raise
+
+
+def managed_ollama_gate_snapshot(model: str = "") -> dict[str, Any] | None:
+    """Return owned readiness or configured startup/failure display state.
+
+    A configured runtime without a published owner can explain progress, but
+    cannot establish readiness or an inference admission. Probe before asking
+    the existing status machinery to publish readiness; inference separately
+    rechecks the immutable model and source identity in its held admission.
+    """
+    with _MANAGED_RUNTIME_OWNER_LOCK:
+        runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
+    owned = runtime is not None
+    if runtime is None:
+        from flask import current_app, has_app_context  # noqa: PLC0415
+
+        runtime = current_app.config.get("OLLAMA_RUNTIME") if has_app_context() else None
+    if runtime is None:
         return None
     try:
-        snapshot = dict(runtime._status_snapshot(probe_server=False))
+        snapshot = dict(runtime._status_snapshot(probe_server=True))
+        if not owned or not snapshot.get("installed") or snapshot.get("integrity_error"):
+            snapshot["ready"] = False
         port = getattr(runtime, "_port", 0) or 0
         snapshot["port"] = port if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535 else 0
         snapshot["pinned_server_version"] = str(runtime.server_version)
@@ -371,12 +516,16 @@ def managed_ollama_gate_snapshot(model: str = "") -> dict[str, Any] | None:
         snapshot["reported_digest"] = None
         if model and snapshot.get("ready"):
             try:
-                identity = runtime._accepted_model_identity(model)
+                identity = _gate_model_identity(runtime, model)
             except Exception:
                 identity = None
             if identity is not None:
                 snapshot["model_present"] = True
                 snapshot["reported_digest"] = identity[1]
+            with runtime._state_lock:
+                snapshot["model_digest_drift"] = {
+                    name: dict(value) for name, value in runtime._model_digest_drift.items()
+                }
     except Exception:
         return None
     return snapshot
@@ -5634,6 +5783,7 @@ class OllamaRuntime:
             if self._runtime_state_error:
                 raise OllamaRuntimeError(self._runtime_state_error)
             if self._active_version == self.target_version:
+                self._prune_superseded_rollback_if_idle()
                 raise OllamaRuntimeError("managed Ollama runtime is already on the preferred release")
             self._require_stopped_runtime_mutation("runtime update")
             self._ensure_runtime_state_committed()
@@ -5645,9 +5795,58 @@ class OllamaRuntime:
                 self._raise_if_cancelled()
                 self._mark_operation_mutation_started()
                 self._write_runtime_state(self.target_version, previous)
+            self._prune_unreferenced_releases()
             self._phase = "installed"
             self._error = ""
             return self._status_snapshot()
+
+    def _prune_superseded_rollback_if_idle(self) -> None:
+        """Finish a prune that failed after a previous update already switched.
+
+        ``update`` raises once the preferred release is active. That retry is
+        the only way to remove a rollback generation the failed prune left
+        behind, and only when the runtime is stopped.
+        """
+        if self._runtime_state_error or not self._unreferenced_release_dirs():
+            return
+        self._require_stopped_runtime_mutation("runtime update")
+        self._prune_unreferenced_releases()
+
+    def _unreferenced_release_dirs(self) -> list[Path]:
+        """Return installed version directories that are neither active nor previous."""
+        retain = {version for version in (self._active_version, self._previous_version) if version}
+        try:
+            root = self._ensure_managed_directory(self.runtime_root, create=False)
+        except FileNotFoundError:
+            return []
+        unreferenced: list[Path] = []
+        for path in self._bounded_children(root):
+            if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", path.name) is None or path.name in retain:
+                continue
+            unreferenced.append(path)
+        return unreferenced
+
+    def _prune_unreferenced_releases(self) -> None:
+        """Delete the rollback generation this update no longer names.
+
+        One previous release is enough to roll back. Keeping the generation
+        before that permanently retains several gigabytes, and uninstall later
+        fails once a build no longer recognises that version.
+        """
+        for path in self._unreferenced_release_dirs():
+            try:
+                path_stat = path.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise OllamaRuntimeError("managed Ollama superseded rollback could not be inspected") from exc
+            if (
+                stat.S_ISLNK(path_stat.st_mode)
+                or self._path_is_reparse(path_stat)
+                or not stat.S_ISDIR(path_stat.st_mode)
+            ):
+                raise OllamaRuntimeError("managed Ollama superseded rollback path is unsafe")
+            _remove_path_without_following_root(path)
 
     def rollback(self) -> dict[str, Any]:
         """Switch to the one retained, fully rehashed release."""

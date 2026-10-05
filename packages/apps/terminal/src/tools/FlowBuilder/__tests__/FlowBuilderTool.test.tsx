@@ -197,6 +197,8 @@ describe("FlowBuilderTool", () => {
   it("shows empty state message when the backend has no flows", async () => {
     renderWithClient(<FlowBuilderTool />);
     expect(await screen.findByText("No flows yet")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "New Flow" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "From Template" })).toHaveLength(1);
     expect(mockListFlows).toHaveBeenCalled();
   });
 

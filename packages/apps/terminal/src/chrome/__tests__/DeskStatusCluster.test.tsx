@@ -1,10 +1,16 @@
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { DeskStatusCluster } from "../DeskStatusCluster";
+import { DeskStatusCluster, useDeskStatus } from "../DeskStatusCluster";
+import { OperatorIncidentProbes } from "../OperatorIncidentProbes";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
-import { resetOperatorSignals, useOperatorSignalStore } from "@/stores/operatorSignalStore";
+import {
+  resetOperatorSignals,
+  useOperatorSignalStore,
+  type OperatorSignalSnapshot,
+} from "@/stores/operatorSignalStore";
 import {
   LAYA_NOT_QUALIFIED_FOR_LIVE,
   LAYA_START_COMMAND,
@@ -13,6 +19,10 @@ import {
   OLLAMA_NOT_STARTED_MANAGED,
   OLLAMA_NOT_STARTED_UNMANAGED,
 } from "@/lib/layaStatus";
+
+vi.mock("@/hooks/useAdvisorLlmStatus", () => ({
+  useAdvisorLlmStatus: () => ({ chrome: "unconfigured" }),
+}));
 
 describe("DeskStatusCluster", () => {
   beforeEach(() => {
@@ -199,7 +209,9 @@ describe("DeskStatusCluster", () => {
     });
     render(<DeskStatusCluster />);
     const chip = screen.getByTestId("laya-surface");
-    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveTextContent("Laya Downloading");
+    expect(chip.textContent).not.toMatch(/Down\b/);
+    expect(chip.className).not.toMatch(/text-loss/);
     expect(chip.textContent).not.toMatch(/Still loading/);
     expect(chip.getAttribute("title") ?? "").not.toMatch(/Next:/);
     fireEvent.click(chip);
@@ -364,7 +376,77 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
   });
 
-  it("keeps the Ollama wrong-revision chip free of the digest sentence", () => {
+  describe("stacked Status rows", () => {
+    function openStacked(signals: Partial<OperatorSignalSnapshot>) {
+      useModeStore.setState({ mode: "practice" });
+      useOperatorSignalStore.setState(signals);
+      render(<DeskStatusCluster variant="stacked" />);
+    }
+
+    it("shows the Ready reason once, as the bold line", () => {
+      openStacked({ decisionStatus: "down", layaPracticeStatus: "ready", layaLiveQualified: false });
+      const panel = screen.getByTestId("desk-status");
+      expect(panel.textContent?.split(LAYA_NOT_QUALIFIED_FOR_LIVE)).toHaveLength(2);
+      const reason = screen.getByTestId("laya-reason");
+      expect(reason).toHaveTextContent(LAYA_NOT_QUALIFIED_FOR_LIVE);
+      expect(reason.className).toMatch(/font-medium/);
+      expect(screen.getByTestId("laya-start-docs")).toBeInTheDocument();
+    });
+
+    it("shows a failed download once, with the help line under it", () => {
+      openStacked({
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaLiveQualified: false,
+        layaReason: "download_failed",
+        layaPort: 8000,
+      });
+      const panel = screen.getByTestId("desk-status");
+      expect(panel.textContent?.split("Can't download the model")).toHaveLength(2);
+      expect(panel.textContent?.split("Check your connection, then Start Laya again.")).toHaveLength(2);
+      const reason = screen.getByTestId("laya-reason");
+      expect(reason).toHaveTextContent("Can't download the model");
+      expect(reason.className).toMatch(/font-medium/);
+      expect(reason.nextElementSibling).toBe(screen.getByTestId("laya-reason-tooltip"));
+    });
+
+    it("shows a model that cannot be verified once", () => {
+      openStacked({
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaLiveQualified: false,
+        layaReason: "unverified",
+        layaPort: 8000,
+      });
+      expect(screen.getByTestId("desk-status").textContent?.split("Can't verify the model")).toHaveLength(2);
+    });
+
+    it("shows Downloading in the neutral colour with the progress line once", () => {
+      openStacked({
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaLiveQualified: false,
+        layaReason: "downloading",
+        layaPort: 8000,
+        layaDownloadBytes: 1_200_000_000,
+        layaDownloadTotal: 3_400_000_000,
+      });
+      const row = screen.getByTestId("laya-surface");
+      expect(row).toHaveTextContent("Laya Downloading");
+      expect(row.textContent).not.toMatch(/Down\b/);
+      expect(row.querySelector(".text-loss")).toBeNull();
+      const panel = screen.getByTestId("desk-status");
+      expect(panel.textContent?.split("Downloading the model · 1.2 of 3.4 GB")).toHaveLength(2);
+    });
+
+    it("keeps the grey description only when there is no reason line", () => {
+      openStacked({ decisionStatus: "ready", layaPracticeStatus: "ready", layaLiveQualified: true });
+      expect(screen.queryByTestId("laya-reason")).not.toBeInTheDocument();
+      expect(screen.getByTestId("desk-status")).toHaveTextContent("Checks every order before it is placed.");
+    });
+  });
+
+  it.each(["inline", "stacked"] as const)("keeps the Ollama wrong-revision chip free of the digest sentence (%s)", (variant) => {
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({
       decisionStatus: "down",
@@ -373,17 +455,19 @@ describe("DeskStatusCluster", () => {
       layaRoute: "ollama",
       layaManaged: true,
     });
-    render(<DeskStatusCluster />);
+    render(<DeskStatusCluster variant={variant} />);
     const chip = screen.getByTestId("laya-surface");
     expect(chip).toHaveTextContent("Laya Down");
-    expect(chip).toHaveAttribute("aria-label", "Laya Down. Wrong model version");
-    expect(chip).toHaveAttribute("title", "Laya is running a different model than FlintTrade expects.");
-    for (const surface of [chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("title")]) {
-      expect(surface?.toLowerCase()).not.toContain("digest");
-      expect(surface?.toLowerCase()).not.toContain("ollama");
-      expect(surface?.toLowerCase()).not.toContain("tag");
+    if (variant === "inline") {
+      expect(chip).toHaveAttribute("aria-label", "Laya Down. Wrong model version");
+      expect(chip).toHaveAttribute("title", "Laya is running a different model than FlintTrade expects.");
     }
-    fireEvent.click(chip);
+    for (const surface of [chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("title")]) {
+      expect((surface ?? "").toLowerCase()).not.toContain("digest");
+      expect((surface ?? "").toLowerCase()).not.toContain("ollama");
+      expect((surface ?? "").toLowerCase()).not.toContain("tag");
+    }
+    if (variant === "inline") fireEvent.click(chip);
     const reason = screen.getByTestId("laya-reason");
     expect(reason).toHaveTextContent("Wrong model version");
     expect(reason.textContent?.toLowerCase()).not.toContain("digest");
@@ -393,7 +477,7 @@ describe("DeskStatusCluster", () => {
     expect(screen.queryByText(/sidecar/i)).not.toBeInTheDocument();
   });
 
-  it("offers Start on a managed Ollama install and names no sidecar command", () => {
+  it.each(["inline", "stacked"] as const)("offers Start on a managed Ollama install and names no sidecar command (%s)", (variant) => {
     useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({
@@ -403,11 +487,13 @@ describe("DeskStatusCluster", () => {
       layaRoute: "ollama",
       layaManaged: true,
     });
-    render(<DeskStatusCluster />);
+    render(<DeskStatusCluster variant={variant} />);
     const chip = screen.getByTestId("laya-surface");
-    expect(chip).toHaveAttribute("title", OLLAMA_NOT_STARTED_MANAGED);
-    expect(chip.getAttribute("title")).not.toContain(LAYA_START_COMMAND);
-    fireEvent.click(chip);
+    if (variant === "inline") {
+      expect(chip).toHaveAttribute("title", OLLAMA_NOT_STARTED_MANAGED);
+      expect(chip.getAttribute("title")).not.toContain(LAYA_START_COMMAND);
+    }
+    if (variant === "inline") fireEvent.click(chip);
     expect(screen.getByTestId("laya-reason")).toHaveTextContent("Not started");
     expect(screen.getByTestId("laya-status-detail")).toHaveTextContent(OLLAMA_NOT_STARTED_MANAGED);
     expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
@@ -416,7 +502,7 @@ describe("DeskStatusCluster", () => {
     expect(screen.queryByText(/laya_runtime/)).not.toBeInTheDocument();
   });
 
-  it("tells an unmanaged Ollama install how to start, with no Start action", () => {
+  it.each(["inline", "stacked"] as const)("tells an unmanaged Ollama install how to start, with no Start action (%s)", (variant) => {
     useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({
@@ -426,13 +512,233 @@ describe("DeskStatusCluster", () => {
       layaRoute: "ollama",
       layaManaged: false,
     });
-    render(<DeskStatusCluster />);
+    render(<DeskStatusCluster variant={variant} />);
     const chip = screen.getByTestId("laya-surface");
-    expect(chip).toHaveAttribute("title", OLLAMA_NOT_STARTED_UNMANAGED);
-    fireEvent.click(chip);
+    if (variant === "inline") expect(chip).toHaveAttribute("title", OLLAMA_NOT_STARTED_UNMANAGED);
+    if (variant === "inline") fireEvent.click(chip);
     expect(screen.getByTestId("laya-status-detail")).toHaveTextContent(OLLAMA_NOT_STARTED_UNMANAGED);
     expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
     expect(screen.queryByText(/sidecar/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/laya_runtime/)).not.toBeInTheDocument();
+  });
+});
+
+
+function LayaStatusMirror() {
+  const status = useDeskStatus();
+  return <span data-testid="mirrored-laya-status">{status.decision}</span>;
+}
+
+describe.each(["inline", "stacked"] as const)("Laya heartbeat identity in %s Status", (variant) => {
+  let client: QueryClient;
+  let heartbeat: () => Response | Promise<Response>;
+
+  function pingResponse(body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function ollamaHeartbeat(managed: boolean, reason: string | null = null) {
+    return {
+      status: "ok",
+      laya: reason ? "down" : "ready",
+      laya_practice: reason ? "down" : "ready",
+      laya_live_qualified: !reason,
+      laya_reason: reason,
+      laya_route: "ollama",
+      laya_managed: managed,
+      laya_checking: false,
+    };
+  }
+
+  beforeEach(() => {
+    resetOperatorSignals();
+    useBrokerStore.setState({ accounts: [], activeAccountId: null });
+    useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
+    useModeStore.setState({ mode: "practice" });
+    // Deliver query updates inside act, so stale-response assertions cannot
+    // pass merely because React Query has not notified its subscribers yet.
+    notifyManager.setScheduler((callback) => { callback(); });
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/ping")) return heartbeat();
+      // Keep health, public-site probes, and the Start request fully synthetic.
+      return pingResponse({ status: "ok" });
+    });
+  });
+
+  afterEach(() => {
+    client.clear();
+    notifyManager.setScheduler((callback) => { setTimeout(callback, 0); });
+    vi.restoreAllMocks();
+  });
+
+  async function renderHeartbeat(managed: boolean, reason: string | null = null) {
+    heartbeat = () => pingResponse(ollamaHeartbeat(managed));
+    render(
+      <QueryClientProvider client={client}>
+        <OperatorIncidentProbes />
+        <LayaStatusMirror />
+        <DeskStatusCluster variant={variant} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(useOperatorSignalStore.getState().layaRoute).toBe("ollama"));
+    expect(useOperatorSignalStore.getState().layaManaged).toBe(managed);
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Ready"));
+    if (reason !== null) {
+      await nextHeartbeat(() => pingResponse(ollamaHeartbeat(managed, reason)));
+      await waitFor(() => expect(useOperatorSignalStore.getState().layaReason).toBe(reason));
+    }
+    if (variant === "inline") fireEvent.click(screen.getByTestId("laya-surface"));
+  }
+
+  async function nextHeartbeat(response: () => Response) {
+    heartbeat = response;
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["operator", "ping"], exact: true });
+    });
+  }
+
+  const failedHeartbeats = [
+    ["HTTP failure", () => new Response("unavailable", { status: 503 })],
+    ["transport failure", () => { throw new Error("failed to fetch"); }],
+    ["invalid JSON", () => new Response("not json", { status: 200 })],
+    ["empty body", () => pingResponse({})],
+    ["missing heartbeat", () => pingResponse({ status: "ok" })],
+    ["invalid status", () => pingResponse({ status: "error", laya: "ready", laya_practice: "ready" })],
+    ["invalid backend", () => pingResponse({ status: "ok", laya: "ready", laya_route: "unknown" })],
+    ["invalid management", () => pingResponse({ ...ollamaHeartbeat(true), laya_managed: "true" })],
+  ] as const;
+
+  describe.each([false, true])("previously confirmed managed=%s", (managed) => {
+    it.each(failedHeartbeats)("keeps backend identity and reports Down after %s", async (_name, failure) => {
+      await renderHeartbeat(managed);
+      expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Ready");
+      await nextHeartbeat(failure);
+      await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down"));
+      expect(useOperatorSignalStore.getState()).toMatchObject({
+        layaRoute: "ollama",
+        layaManaged: managed,
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaChecking: false,
+        layaLiveQualified: false,
+      });
+      expect(screen.queryByTestId("laya-start-docs")).not.toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent(LAYA_START_COMMAND);
+      expect(document.body).not.toHaveTextContent(/sidecar|laya_runtime/i);
+      if (managed) expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
+      else expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("changes a confirmed Ollama backend to sidecar only after a valid sidecar heartbeat", async () => {
+    await renderHeartbeat(false);
+    await nextHeartbeat(() => pingResponse({
+      status: "ok",
+      laya: "down",
+      laya_practice: "down",
+      laya_reason: "not_started",
+    }));
+    await waitFor(() => expect(useOperatorSignalStore.getState().layaRoute).toBeNull());
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
+    expect(useOperatorSignalStore.getState().layaManaged).toBe(false);
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
+    expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
+  });
+
+  it.each(["unverified", "download_failed"])("settles Start when the next terminal heartbeat is still %s", async (reason) => {
+    await renderHeartbeat(true, reason);
+    fireEvent.click(screen.getByRole("button", { name: "Start Laya" }));
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Checking"));
+    if (reason === "download_failed") {
+      await nextHeartbeat(() => pingResponse({
+        ...ollamaHeartbeat(true, "still_loading"),
+        laya_checking: true,
+      }));
+      expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Checking");
+    }
+    await nextHeartbeat(() => pingResponse(ollamaHeartbeat(true, reason)));
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down"));
+    expect(screen.getByTestId("mirrored-laya-status")).toHaveTextContent("Down");
+    expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
+    expect(screen.queryByTestId("laya-start-docs")).not.toBeInTheDocument();
+  });
+
+  it("does not settle Start from an older in-flight heartbeat", async () => {
+    await renderHeartbeat(true, "unverified");
+    let resolveStale: (response: Response) => void = () => { throw new Error("No pending heartbeat"); };
+    heartbeat = () => new Promise<Response>((resolve) => { resolveStale = resolve; });
+    let staleQuery: Promise<void>;
+    act(() => {
+      staleQuery = client.refetchQueries({ queryKey: ["operator", "ping"], exact: true });
+    });
+    await waitFor(() => expect(client.isFetching({ queryKey: ["operator", "ping"], exact: true })).toBe(1));
+    fireEvent.click(screen.getByRole("button", { name: "Start Laya" }));
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Checking"));
+    await act(async () => {
+      resolveStale(pingResponse(ollamaHeartbeat(true, "download_failed")));
+      await staleQuery;
+    });
+    expect(useOperatorSignalStore.getState()).toMatchObject({
+      layaChecking: true,
+      layaReason: "unverified",
+    });
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Checking");
+    expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    await nextHeartbeat(() => pingResponse(ollamaHeartbeat(true, "unverified")));
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down"));
+    expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
+  });
+
+  it("preserves a newer Down decision against an older Ready heartbeat", async () => {
+    await renderHeartbeat(true);
+    let resolveStale: (response: Response) => void = () => { throw new Error("No pending heartbeat"); };
+    heartbeat = () => new Promise<Response>((resolve) => { resolveStale = resolve; });
+    let staleQuery: Promise<void>;
+    act(() => {
+      staleQuery = client.refetchQueries({ queryKey: ["operator", "ping"], exact: true });
+    });
+    await waitFor(() => expect(client.isFetching({ queryKey: ["operator", "ping"], exact: true })).toBe(1));
+    act(() => { useOperatorSignalStore.getState().noteLayaDown(); });
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
+    await act(async () => {
+      resolveStale(pingResponse({
+        ...ollamaHeartbeat(true),
+        laya: "down",
+        laya_live_qualified: false,
+      }));
+      await staleQuery;
+    });
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
+    expect(useOperatorSignalStore.getState().layaPracticeStatus).toBe("down");
+  });
+
+  it.each([
+    { status: "down", reason: "download_failed", label: "Down" },
+    { status: "ready", reason: null, label: "Ready" },
+    { status: "degraded", reason: null, label: "Degraded" },
+  ])("settles accepted Start on $status without another unrelated render", async ({ status, reason, label }) => {
+    await renderHeartbeat(true, "not_started");
+    fireEvent.click(screen.getByRole("button", { name: "Start Laya" }));
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Checking"));
+    expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    await nextHeartbeat(() => pingResponse({
+      ...ollamaHeartbeat(true, reason),
+      laya: status,
+      laya_practice: status,
+    }));
+    await waitFor(() => expect(screen.getByTestId("laya-surface")).toHaveTextContent(`Laya ${label}`));
+    expect(screen.getByTestId("mirrored-laya-status")).toHaveTextContent(label);
+    if (status === "down") {
+      expect(screen.getByTestId("laya-reason")).toHaveTextContent("Can't download the model");
+      expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByTestId("laya-start-docs")).not.toBeInTheDocument();
   });
 });

@@ -158,7 +158,7 @@ adjusts virtual capital and square-off times; it does not place.
 
 | Route | What it does |
 |---|---|
-| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` |
+| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data that calls this route is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` The `/trade` Order Pad records `Example order placed` (id starting `SAMPLE-`) on the client for that click. |
 | `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before admission, including when the variety spelling differs only by case or separators. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
 | `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before the live check, the reduce-only proof, and any broker call. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
 | `POST /api/v1/orders/bracket` | Live, PIN-unlocked. Entry plus exactly one of a stop-loss or a target. Each leg is admitted through Laya, then placed through SafetySystem, `gate_order`, and `BrokerRouter`. Success is HTTP 201. Practice is HTTP 403 `practice_unsupported`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. A broker-held variety is HTTP 422 `broker_held_unsupported` (`Not placed. Broker-held bracket legs aren't supported. Use one stop-loss or one target.`). A stop-loss and a target together are HTTP 422 `oco_unsupported`. A trailing stop is HTTP 422 `trailing_unsupported`. |
@@ -588,14 +588,14 @@ record covers the pin. `laya_reason` is one of `not_started`, `stopped`,
 `laya_reason`. While `laya_reason` is `downloading`, `laya_download_bytes`
 and `laya_download_total` are the live byte counts; otherwise both are
 `null`. Chip labels are Not started, Stopped, `Port <n> in use`,
-Still loading, Downloading the model · 1.2 of 3.4 GB, Can't download the
+Still loading, `Downloading the model · X of Y GB`, Can't download the
 model, Unreachable, Can't verify the model, Wrong model version,
 Can't reach Laya, and The Laya API key file is missing. A health check does not replace `key_missing` with Not started. `<n>` is `laya_port`. Tooltips for `not_started`,
 `stopped`, `port_in_use`, `still_loading`, and `unreachable` are the label
 followed by `. Next: python -m flinttrade_core.laya_runtime start`.
 `downloading` has no tooltip and no Next line. Its status word is Down,
 not Still loading, and the chip text is live progress such as
-"Downloading the model · 1.2 of 3.4 GB". `download_failed` uses the same
+`Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`). `download_failed` uses the same
 status word Down. Orders for both are refused with
 "Laya is Down. New orders are paused until it's Ready. You can still close positions." The `download_failed`
 tooltip is "Check your connection, then Start Laya again." The
@@ -642,7 +642,7 @@ the sidecar. That download sets `HF_HOME` to
 logs stay out of the shared cache. The model is about 2.37 GB, and that
 size is reported once. While it runs,
 including a pin change, the reason is
-`downloading` ("Downloading the model · 1.2 of 3.4 GB"), the status word
+`downloading` (`Downloading the model · X of Y GB`), the status word
 is Down, and there is no Updating label. When no checkpoint is already
 there, a full match renames staging onto `checkpoint`. When a checkpoint
 is already there, the current copy stays in place until the new files
@@ -968,7 +968,7 @@ the guard returns one of three verdicts:
 
 | Verdict | Behaviour |
 |---|---|
-| `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. |
+| `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. The `/trade` Order Pad records a sample fill on the client for that click (`Example order placed`, id starting `SAMPLE-`). This HTTP refusal is what the route returns when a client calls it. |
 | `practice` | Route supported single-leg order flows to the Practice fill path; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that path. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have Practice parity fail closed with `practice_unsupported`. A Practice close is an opposite order on `POST /api/v1/orders/place`. A Practice bracket is HTTP 403 `practice_unsupported`. |
 | `live` | Require a JWT with `live_mode_unlocked=true`. The submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, `POST /api/v1/positions/exit-all`, and `POST /api/v1/orders/bracket` when the body has exactly one stop-loss or one target. Both place routes, and each bracket leg, run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed, except a GTT body (`"variety": "gtt"`, any case or separator spelling), which is HTTP 422 `gtt_unsupported` on those submit routes before Laya, SafetySystem, and any broker call. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. |
 

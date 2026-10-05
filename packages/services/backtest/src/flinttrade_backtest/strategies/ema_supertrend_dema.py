@@ -50,8 +50,8 @@ logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 # Lot-size registry
 # ---------------------------------------------------------------------------
 
-# Contract sizes come from the screener's unified table (this file's private
-# copy pre-dated the 2024 SEBI lot revisions — NIFTY 25 vs the current 75).
+# Contract sizes come from the instrument master (this file's private copy
+# pre-dated the 2024 SEBI lot revisions, when its NIFTY figure was 25).
 # Historical backtests over pre-revision periods should override per run.
 LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
 

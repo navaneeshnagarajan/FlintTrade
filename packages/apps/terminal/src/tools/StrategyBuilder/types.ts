@@ -1,5 +1,7 @@
 // Types and constants for StrategyBuilder — extracted from StrategyBuilderTool.tsx
 
+import { lotSizeFromMaster } from "@/lib/instrumentLots";
+
 export type OptionType = "CE" | "PE";
 export type Direction = "BUY" | "SELL";
 
@@ -39,23 +41,40 @@ export interface PerfMetrics {
   sharpeApprox: number;
 }
 
+function listedUnderlying(
+  symbol: string,
+  exchange: string,
+  strikeGap: number,
+  seed: number | null = null,
+): Underlying {
+  return {
+    symbol,
+    exchange,
+    strikeGap,
+    get lotSize(): number | null {
+      return lotSizeFromMaster(symbol) ?? seed;
+    },
+  };
+}
+
 // Default underlyings for Indian F&O.
-// NOTE: lot sizes are the post-2024-revision values (the old 25/15/40/75/10
-// were pre-Nov-2024 and understated the margin estimate 2-3x). Exchanges
-// revise these periodically — the margin tab is an ESTIMATE (it says so) and
-// the operator confirms with the broker calculator; these are sensible seeds.
+// Nifty, Bank Nifty, and Sensex lot sizes come from the broker instrument
+// master. The margin tab is an estimate and the operator confirms with the
+// broker calculator. Finnifty and Midcap Nifty are not in the cached master,
+// so those rows keep their last published seeds. `lotSize` is read when the
+// builder uses it, so a later master refresh is visible.
 export const UNDERLYINGS = [
-  { symbol: "NIFTY",      exchange: "NSE_INDEX", lotSize: 75,  strikeGap: 50  },
-  { symbol: "BANKNIFTY",  exchange: "NSE_INDEX", lotSize: 35,  strikeGap: 100 },
-  { symbol: "FINNIFTY",   exchange: "NSE_INDEX", lotSize: 65,  strikeGap: 50  },
-  { symbol: "MIDCPNIFTY", exchange: "NSE_INDEX", lotSize: 140, strikeGap: 25  },
-  { symbol: "SENSEX",     exchange: "BSE_INDEX", lotSize: 20,  strikeGap: 100 },
+  listedUnderlying("NIFTY", "NSE_INDEX", 50),
+  listedUnderlying("BANKNIFTY", "NSE_INDEX", 100),
+  listedUnderlying("FINNIFTY", "NSE_INDEX", 50, 65),
+  listedUnderlying("MIDCPNIFTY", "NSE_INDEX", 25, 140),
+  listedUnderlying("SENSEX", "BSE_INDEX", 100),
 ];
 
 export type Underlying = {
   symbol: string;
   exchange: string;
-  lotSize: number;
+  lotSize: number | null;
   strikeGap: number;
 };
 

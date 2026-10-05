@@ -319,7 +319,7 @@ function TradeCopierWidget() {
                 <button
                   type="button"
                   className={`flex size-4 items-center justify-center rounded border ${
-                    selected ? "border-accent bg-accent text-white" : "border-border-default text-transparent"
+                    selected ? "border-accent bg-accent text-accent-foreground" : "border-border-default text-transparent"
                   } disabled:cursor-not-allowed disabled:opacity-40`}
                   onClick={() => toggleTarget(account.id)}
                   disabled={!enabled || status.active}

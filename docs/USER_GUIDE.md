@@ -3,7 +3,7 @@
 This guide walks you from a fresh install to local setup, sandbox workflows,
 and Live-mode safeguard verification. The default reading order is top-to-bottom
 — every section builds on the one before it. If you already have FlintTrade running, jump to the
-[Workspace tour](#workspace-tour) or use the section list in the sidebar.
+[Workspace tour](#5-workspace-tour) or use the section list in the sidebar.
 
 > **Beta software.** FlintTrade `v0.0.1` is not production ready and
 > does not provide financial advice. Read [disclaimer.md](../disclaimer.md)
@@ -11,7 +11,7 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 
 > **Multiple workflows, one local app.** FlintTrade has route groups for order
 > workflow testing, portfolio-style records, and guided learning. Pick `/trade`,
-> `/invest`, or `/learn` from the top bar to switch workspaces without losing
+> `/invest`, or `/learn` from the sidebar to switch workspaces without losing
 > context.
 
 ---
@@ -317,11 +317,11 @@ Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) 
 | **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
 | **Connected (read)** | Read-only posture on a Practice session after a broker is connected. Until then the menu item stays disabled and shows `Connect a broker first`. It is not a separate session claim. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
-| **Example** | Sample data. The chip reads **Example**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. |
+| **Example** | Sample data. The chip reads **Example**. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
 
 **Switching Mode.** Open the Mode chip. Its accessible name is the current
 label plus `mode. Open the mode menu.` Choose **Practice** for simulated
-fills. A sample-data session (`demo-user`) is sent to Setup instead of
+fills. A sample-data session, signed in as **Guest**, is sent to Setup instead of
 switching in place. Choose **Connected (read)** only when a broker is
 connected. Choose **Live** only when the item is enabled. Opening the menu
 does not open the Live dialog. An eligible Live choice opens **Switch to Live
@@ -353,6 +353,7 @@ banner. Where those chips sit is under [Invest](#invest).
 The confirm button reads **Confirm simulation** (accessible name
 `Confirm simulated Practice order`). Example data reads `Example only. Nothing is sent to a broker and no order is placed.`
 The confirm button reads **Continue** (accessible name `Confirm Example order`).
+**Continue** records a sample fill. The success line is `Example order placed` and the id starts with `SAMPLE-`.
 Both reviews offer **Back to edit**. While the confirm is in flight the
 button reads `Confirming…`.
 
@@ -362,15 +363,14 @@ AI and terminal surfaces read that Practice book. Practice never leaks a live
 broker order. Live stays fail-closed until native read smoke is trusted and
 funded unlock is explicit. OpenAlgo is a Settings fallback only — not the
 primary connect CTA. Setup's primary connect action is **Continue without
-a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn → Practice Trading
-never offers Neo Practice — Kotak Neo has no sandbox. Operator copy is
-`Live read only until funded unlock.`
+a broker**. Learn → Practice Trading explains this built-in simulated path;
+no broker connection or broker sandbox is required.
 
 **Mode, session, and sample data.** Practice and Live name the session Mode.
 **Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
 Post-close · Closed) are market-session status, never Live mode. Example data
-uses **Example Buy** / **Example Sell** and records an example fill after
-review. Practice keeps **Practice Buy** / **Practice Sell**. Live uses
+uses **Example Buy** / **Example Sell**. After review, **Continue** records
+a sample fill (`Example order placed`, id starting `SAMPLE-`). Practice keeps **Practice Buy** / **Practice Sell**. Live uses
 **Place BUY Order**. Connected / green is never shown for an unconfigured
 subsystem.
 
@@ -384,10 +384,10 @@ subsystem.
   market session is not unavailable and neither the WebSocket nor a fresh
   REST fallback is producing quotes. The link opens `/settings#brokers`.
   An unavailable session is never labelled last close.
-- **Broker** lives once, in the desk-status broker chip (**Broker Connected**,
-  **Broker Connected (read)**, or **Broker Unavailable**, plus a plain failure
-  when a money-path incident darkens the session). Account switching does not
-  add a second broker chip.
+- **Broker** lives once, as the **Broker** row in the TopBar **Status** menu:
+  **Connected**, **Connected (read)**, or **Unavailable**, plus a plain failure
+  when a money-path incident darkens the session. Account switching does not
+  add a second broker row. Laya and LLM are the other rows in that menu.
 - **Market** lives once, in the TopBar market-session chip. A confirmed
   closed cash session reads `Market closed · opens 09:15`. Unavailable
   timings read `Market unavailable`. Neither sentence is Live mode.
@@ -430,27 +430,36 @@ rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
-The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
-separate labels. Broker is **Connected**, **Connected (read)**, or
-**Unavailable**. The Laya chip is **Ready**, **Degraded**, **Down**,
-**Still loading**, or **Checking**. The label follows the active mode.
-Practice shows the sidecar. Live shows Live-facing status. During the
-first load the label is **Still loading** and does not read **Down**.
-**Checking** is the neutral colour, and it is not a stale **Ready**. In Practice the chip does not
-read **Down** while Practice orders are being admitted, when the sidecar is
-**Ready** or **Degraded** and Live-facing status is **Down** for missing
-qualification. **Not qualified for Live** is the chip tooltip, and the
-popover line, when the sidecar is up and Live is not qualified. It is not
-painted as **Down** on the Practice chip. How to start the sidecar is
-[Start Laya](#start-laya). The desk ping
-still publishes Live-facing `laya`, sidecar `laya_practice`, and
-`laya_live_qualified`. Laya starts **Down**, including before a heartbeat
-and when the ping omits `laya`. Missing status is never painted **Ready**.
-The ping does not invent Ready. A base checkpoint leaves Live unqualified,
-so Live-facing status stays **Down** until that exact revision, weight
-digest, and policy version are qualified with LIVE_DECISION evidence. Only
-Live-facing **Down** opens the Laya Blocked strip and mutes Live place
-and Position Mirror start. Practice is not muted by that strip.
+The TopBar **Status** menu is the one home for **Broker**, **Laya**, and
+**LLM**. Each row has its own label, value, and one-line description.
+Broker's line is `Your broker account for live orders and holdings.`
+Laya's line is the current reason, or `Checks every order before it is placed.`
+LLM's line is `Optional AI model for chat and suggestions.` The same three
+rows sit in the More sheet on a narrow window. Feed provenance stays on the
+ticker.
+
+The button's dot is the worst state. Example data is neutral and reads
+`Example data only`, including when Laya is **Down**. After that, Laya
+**Down** is red, a broker failure that marks the path unavailable is red,
+and Live with no broker connected is red (`No broker connected`). Laya
+**Degraded**, a degraded broker path, and an LLM of **Error** or
+**Disconnected** are amber. **Checking** (the summary reads `Checking Laya`),
+**Still loading** (`Laya still loading`) and **Downloading** (`Laya starting`)
+stay neutral. In Practice, broker **Unavailable** with Laya **Ready** is
+neutral and reads `Broker unavailable`. `All systems ready` appears only when
+no row is worse than Ready.
+
+Broker's value is **Connected**, **Connected (read)**, or **Unavailable**.
+Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**,
+**Downloading**, or **Checking**. Laya starts **Down**, including before a heartbeat and when
+the ping omits `laya`. Missing status is never painted **Ready**. While the
+value is **Checking**, the row reads `Checking Laya…`. Download and model
+lines, and how to start the sidecar, are in [Start Laya](#start-laya):
+`Downloading the model · X of Y GB`, `Can't download the model`,
+`Wrong model version`, and `Can't verify the model`. The refusal while
+orders are paused is `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+Only Live-facing **Down** opens the Laya Blocked strip and mutes Live place
+and Position Mirror start. Practice place follows the Practice chip.
 Live-facing **Degraded** leaves Live open, shows **Laya Degraded — tighter
 limits**, and does not look Blocked. LLM is **Not configured**, or
 **Connected (suggest only)** when Chat is ready.
@@ -458,7 +467,7 @@ limits**, and does not look Blocked. LLM is **Not configured**, or
 Install-host disk, RAM, CPU, GPU, and network stay on Settings → Monitoring
 (`/settings#monitoring`). That page is its own Settings section. See
 [Monitoring](#monitoring). It is not folded into this Broker / Laya / LLM
-cluster.
+menu.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
@@ -529,7 +538,7 @@ The popover prints the chip label, not the raw code. For `download_failed`,
 `unverified`, `wrong_revision`, and `key_rejected` it also prints the tooltip, because
 that sentence does not start with the label. The status word on the chip
 is **Down**, except during the first load, when the chip says **Still
-loading**. A download in progress stays **Down** and is not **Still loading**.
+loading**. A download in progress reads **Downloading** in the neutral colour and is not **Still loading**.
 `<n>` in the port label is the sidecar port.
 
 | Code | Chip label | Tooltip |
@@ -538,7 +547,7 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `stopped` | Stopped | `Stopped. Next: python -m flinttrade_core.laya_runtime start` |
 | `port_in_use` | `Port <n> in use` | `Port <n> in use. Next: python -m flinttrade_core.laya_runtime start` |
 | `still_loading` | Still loading | `Still loading. Next: python -m flinttrade_core.laya_runtime start` |
-| `downloading` | Downloading the model · 1.2 of 3.4 GB | (none) |
+| `downloading` | `Downloading the model · X of Y GB` | (none) |
 | `download_failed` | Can't download the model | `Check your connection, then Start Laya again.` |
 | `unreachable` | Unreachable | `Unreachable. Next: python -m flinttrade_core.laya_runtime start` |
 | `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` Applies when this start did not download. A failed download shows **Can't download the model** instead. |
@@ -546,11 +555,11 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
 | `key_missing` | The Laya API key file is missing. | `The Laya API key file is missing.` A health check does not replace this with Not started. |
 
-`downloading` and `download_failed` use the status word **Down**. Neither
-is **Still loading**. Orders are refused with
+`downloading` uses the status word **Downloading** (neutral colour) and
+`download_failed` uses **Down**. Neither is **Still loading**. Orders are refused with
 `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
 The `downloading` chip text is live progress, one decimal place, decimal
-gigabytes, as in `Downloading the model · 1.2 of 3.4 GB`. It has no
+gigabytes: `Downloading the model · X of Y GB`, for example `Downloading the model · 1.2 of 3.4 GB`. It has no
 tooltip and no Next line. A new model version uses that same chip and
 the same **Down** word. There is no separate Updating label.
 
@@ -690,7 +699,7 @@ launch directory and not in the shared Hugging Face cache. The download
 sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1`, so transfer logs stay in that folder and not in
 the shared cache. The model is about 2.37 GB, and that size is reported
-once. While that runs, the popover reads **Downloading the model · 1.2 of 3.4 GB** (live
+once. While that runs, the popover reads **Downloading the model · X of Y GB** (live
 progress, one decimal, decimal GB). Orders are refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. When no
 checkpoint is already there, a full match renames that directory onto
@@ -698,8 +707,8 @@ checkpoint is already there, a full match renames that directory onto
 boot. Hub access stays off for that launch.
 
 When FlintTrade pins a new model version, the next start downloads it the
-same way. The chip is the same **Downloading the model · 1.2 of 3.4 GB**
-line, with status **Down**. There is no Updating label. Your current copy
+same way. The chip is the same **Downloading the model · X of Y GB**
+line, with status **Downloading**. There is no Updating label. Your current copy
 stays in place until the new files match the pin. On a full match,
 FlintTrade renames `<workspace>/runtime/laya/checkpoint` aside to
 `checkpoint.old-<random>` in that same runtime directory, renames staging
@@ -755,7 +764,7 @@ place run Mode guard → Laya.admit → SafetySystem → gate_order →
 BrokerRouter. Laya does not place the order and does not replace those
 layers. A refusal or a quantity clamp stops before SafetySystem. Practice
 place is admitted before the sandbox and does not enter SafetySystem.
-A body with `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call, on place, routed place, exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.` Example data is HTTP 403 `mode_blocked` before admission: `Orders are not available for Example. Switch to Practice or Live to trade.` Chat is not an
+A body with `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call, on place, routed place, exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.` On the server, example data is HTTP 403 `mode_blocked` before admission: `Orders are not available for Example. Switch to Practice or Live to trade.` The Order Pad on example data records a sample fill instead (`Example order placed`, id starting `SAMPLE-`). Chat is not an
 admission source. The model can deny or clamp. It cannot raise a
 quantity or overturn a hard-rule refusal.
 
@@ -797,7 +806,7 @@ reaches the sandbox only after that admit. On Live, an admitted quantity
 continues to SafetySystem and gate_order. **Cancel** places nothing.
 
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
-**Laya Degraded — tighter limits** on the status cluster and under those
+**Laya Degraded — tighter limits** on the Status menu and under those
 place controls. That line is not the Blocked strip, and it does not mute
 Live place or Position Mirror start. The chip shows Degraded when Live
 itself is Degraded. Practice Degraded applies the tighter ceiling to a
@@ -888,14 +897,14 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    front-month future. Select it.
 5. Set Quantity to 1 lot. After you select the future, Order Pad
    auto-fills Quantity from that instrument's current lot size — do
-   not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
-   figures separately. Choose **MARKET**. Side = **BUY**.
+   not hardcode 50. Learn Glossary follows the loaded instrument master
+   rather than fixed example figures. Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
    The sandbox order appears in the **Positions** widget immediately; the
    **Orders** widget shows it as filled (simulated). **Example Buy** on
-   example data records an example fill after review. Review reads
-   `Example only. Nothing is sent to a broker and no order is placed.`
-   The example-data confirm button reads **Continue**. That fill does not
+   example data opens the example review (`Example only. Nothing is sent to a broker and no order is placed.`).
+   **Continue** records a sample fill on this pad: `Example order placed`,
+   with an id starting `SAMPLE-`. That fill stays on the pad and does not
    call the order API.
 7. Close the position from the Positions widget. Practice square-off
    posts an opposite order to `POST /api/v1/orders/place`. Confirm your
@@ -904,6 +913,10 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    place an order.
 
 A Practice place is admitted before the sandbox. When Practice itself is Down, a new place is refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** and nothing is filled. A close that only reduces an open position is still filled, and the success line is **Closed. Exits are allowed while Laya is Down.** A second exit on that contract, while one of yours is still unfilled, is refused with **Not placed. An exit for `<symbol>` is already pending. Wait for it to fill, or cancel it and try again.** and the row shows **Exit pending**. The label is the symbol, or **this contract** when the symbol is empty. The desk chip follows the current mode. When Practice can admit, the Practice chip shows **Ready** or **Degraded** from the sidecar and does not read **Down**. **Not qualified for Live** is the tooltip, not a Down label. Until a stop or a start is confirmed, the chip says **Checking** and the popover says **Checking Laya…**. When admission allows the quantity, the path is front-end → JWT guard → mode guard → Laya.admit → FlintTrade sandbox → simulated fill → REST refresh of Positions and Orders. No real money moved. A refusal or a quantity clamp stops before the sandbox. Example Buy never enters that path. Restoring a Practice backup marks those fills **Restored** (tooltip **Restored from backup. Not sent to a broker or checked by Laya.**). Performance shows **Excludes N restored fills** when N is at least 1, and hides that line when N is 0.
+
+**Estimated charges.** Every Practice fill runs through the same Indian statutory calculator the backtest uses: STT, the exchange transaction charge, the SEBI fee, stamp duty, and GST. The shared table records the exchange and the date each rate took effect. Brokerage is not in that table. Practice has no broker contract rate, so a fill never says Brokerage. The fill shows one line, `Charges ₹X (estimated)`, on its own line under the price. It expands to STT, the exchange transaction named from that fill (`NSE transaction` or `BSE transaction`), the SEBI fee, stamp duty, and GST. The `Simulated at last close` tag stays on its own line.
+
+Positions and Performance show net P&L. Gross P&L and the charges total sit in the tooltip only. Home and Invest subtract those estimated charges from net worth. In Practice the source line reads `Practice account, after estimated charges`. Net worth is ledger cash, including blocked margin, plus holdings at market value, plus each open position's contribution (options at signed market value, futures at unrealised P&L), minus those charges. Opening a future does not add its notional.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
@@ -957,28 +970,21 @@ BUY / Confirm SELL chrome. Practice and Live open Confirm only
 when the Mode allows it and a gateway is configured. The
 backend refuses an example-data order if the UI slips (FT-TRADE-009).
 
-### Learn → Practice Trading (OpenAlgo fallback)
+### Learn → Practice Trading
 
-This is a fallback path, not the primary Practice fills path. The
-shipped path is Practice on `/trade`, with simulated fills
-and no real money. With example data, `/learn` → **Practice
-Trading** still walks through optional OpenAlgo broker Practice /
-sandbox setup when you need that fallback. **Dhan Sandbox** remains
-optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
-“Neo Practice”. Operator copy is `Live read only until funded unlock.`
-The tab shows "How to start Practice Trading", helper
-text "Configure OpenAlgo in Settings → Broker Gateway.", and an
-**Open Settings → Broker Gateway** button that navigates to
-`/settings#api`. The CTA does not send operators to Settings →
-Brokers (`/settings#brokers`). Point the Broker Gateway at that
-OpenAlgo Practice instance only as fallback paper, then return to
-native Practice simulated fills for Practice and AI analysis.
+The tab explains: “Practice is built in. Open the Trade desk and place a
+simulated order, no broker needed.” Choose **Practice** from the Mode menu,
+then use **Open Trade desk** to open `/trade`. The link preserves the selected
+Mode; it does not silently switch to Practice or Live. Use the Order Pad to
+place a simulated order, then review simulated orders, positions and P&L.
+Practice uses virtual funds, and simulated fills do not guarantee the same
+results in Live trading. Broker sandbox setup is not a prerequisite.
 
-With example data, `/learn` → Glossary → Lot Size, the glossary teaches dated
-Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
-MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
-link to circular NSE/FAOP/70616. Learn market facts that exchanges
-revise must ship dated, not as forever hardcodes.
+Under `/learn` → Glossary → Lot Size, the index-lot line follows the loaded
+instrument master, with contract expiry months where available. When a
+newer master loads, the line updates with it. The **Verify on NSE** link remains available. Check
+the selected instrument's current lot size before placing an order; dated
+example figures are not a substitute for the current master.
 
 ### Learn → Resource Hub (local documents)
 
@@ -1077,22 +1083,40 @@ platform-specific workspace directory and sync across sessions:
 
 See [Settings reference](#11-settings-reference) for what else lives there.
 
+### Finding your way around
+
+- **Sidebar.** Home, Trade, Invest and Learn sit at the top; **Tools** holds
+  Strategy Lab, Automate and AI Centre; **Manage** holds Accounts; Settings is
+  pinned at the bottom. Each page opens with a header whose title matches its
+  sidebar label. Below 768px the sidebar becomes a drawer behind the menu
+  button at the top left.
+- **Top bar.** Search (symbols, pages and commands; also Ctrl+K or ⌘K), the
+  Mode menu, one market chip (NSE session and IST clock), the **Status**
+  menu (broker, Laya and LLM), **Ask AI**, **Tools** (Quick Settings and
+  Settings), full screen, notifications and your profile. The account
+  switcher appears once a broker account is connected. Feed provenance is
+  the chip at the start of the ticker.
+- **Trade desk toolbar.** The active workspace, **+ Widget** (opens **Add
+  Widget**), **Layouts** and, on a Compact desk, **Watchlist & tools**.
+- **Tips** appear under the page header and can be dismissed; Settings can
+  bring them back.
+
 ### The main routes
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. `/login` redirects here and opens sign-in. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
 | `/setup` | Required first-run path. The Practice desk is **Step 2 or 3**. With no operator yet, Setup starts at Create operator. When an operator already exists and Setup is unfinished, `/setup` resumes at **Step 2 or 3**. The count is fixed from the start, from whether this machine's vault is already secured: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"; an unfinished operator resumes on that Practice step). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk** (an unfinished operator resumes on the vault step, then the Practice desk). **Open Practice desk** affirms Practice and lands on `/trade`. Optional setup is a strip on that desk after the affirm and does not change the step count. On the open broker panel, **Continue without a broker** is the first control, above **FlintTrade Native** and **OpenAlgo Bridge**. Reloading `/setup` mid-flow resumes the unfinished setup and keeps the same step title (for example **Step 3 of 3 - Practice desk**). A fresh browser, or a reload on the vault step that needs a setup session, shows **Continue setup** and **This machine already has an operator. Sign in to finish setup.** **Start over (deletes this unfinished operator)** asks once (**Enter your password to delete this unfinished operator.**), then the red **Delete and start over** button or **Cancel**. A failed status check stays on **Retry** and does not open the fresh-install form: **FlintTrade is busy** on HTTP 429, **Can't check setup status** for any other HTTP error or an unreadable or incomplete response, and **FlintTrade backend unavailable** only when nothing answered. A second create while an operator already exists, including two creates that overlap, is refused: the account service raises `Account already set up`, and `POST /v1/auth/setup` answers HTTP 409 with `Request conflicts with the current state`. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
-| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
+| `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`; choose Practice in the Mode menu before placing a simulated order. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
-| `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
+| `/automate` | Automate — flows, schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Automate → Automation Settings. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
-| `/ditto` | Multi-account management — mirror, margin, risk. |
+| `/ditto` | Accounts — broker connections, Position Mirror, and the multi-account Risk Dashboard. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
 First-run Setup finishes on the Practice desk. That desk is **Step 2 or
@@ -1670,7 +1694,7 @@ two unlabelled ₹ on mixed bases.
 
 ---
 
-## 8. Automation Hub walkthrough
+## 8. Automate walkthrough
 
 Open `/automate`. Automate place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
@@ -1681,11 +1705,15 @@ quantity on its own. The hub has three sub-tools:
 
 Visual flow builder (drag-and-drop nodes) for "when X happens, do Y"
 automations. Nodes include market-data events, broker events, and actions such
-as sending a notification or running a local script.
+as sending a notification or running a local script. **New Flow** and
+**From Template** appear once in the toolbar, including when no flows are saved.
 
 ### Cron
 
-Time-based automations on the **Schedules** tab. Examples:
+Time-based automations on the **Schedules** tab. Jobs use readable names;
+**Show system jobs** reveals maintenance jobs such as connection health checks,
+backups and data cleanup. This checkbox only filters the list and never pauses
+or resumes a job. Custom jobs remain visible by default. Examples:
 
 - Run pre-market screener at 9:00 AM IST every weekday.
 - Snapshot positions to a CSV at 3:30 PM IST.
@@ -1767,9 +1795,15 @@ Practice is not muted by that strip. A Practice place is refused when
 Practice itself is Down. Kill All stays reachable. Chat being offline
 does not close Live.
 
+The sidebar has one **AI Centre** entry. Home’s **Chat with AI** and the
+Ctrl+K **Ask AI** tab open the same `/ai` conversation. TopBar **Ask AI** opens
+the contextual tutor using that same conversation history; its route and widget
+context are retained. The tutor does not float over app content when closed.
+The Settings tab is named **AI**, with the existing `/settings#llm` link.
+
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
-(including example data / `demo-user` and Practice), not a leftover local setting.
+(including example data, signed in as **Guest**, and Practice), not a leftover local setting.
 When Settings `#llm` is empty ("No LLM provider configured") or the stored
 provider is blank, Chat on example data and Practice shows **Not configured** /
 **LLM not configured** unless `advisor/status` reports an explicit
@@ -1779,7 +1813,7 @@ to Chat after you save Settings → AI re-checks readiness (advisor and
 Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
-When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
+When Settings → AI shows Managed Ollama **Not installed**, AI Centre `/ai`
 Chat does not show a green **Connected (suggest only)** badge (FT-AI-004). The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
@@ -1872,11 +1906,13 @@ startup.
 
 ---
 
-## 10. Ditto multi-account walkthrough
+## 10. Accounts walkthrough
 
-Open `/ditto`. Ditto is FlintTrade's multi-account orchestration module for
-testing account relationships, sizing rules, and risk overrides in one local
-workspace.
+Open **Accounts** (`/ditto`) for broker connections, mirroring and account-level
+risk. With no mirroring accounts registered, the page explains **Connect a broker
+to mirror accounts** and offers **Add Account** for an OpenAlgo-compatible account.
+Existing native broker status remains visible. A failed account-service request
+still shows an error and **Retry**; it is not presented as an empty account list.
 
 ### Three views
 
@@ -1942,7 +1978,7 @@ least 1). The Settings reminder has **Show** and **Hide**. It has no
 |---|---|---|
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); example data keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
@@ -1999,14 +2035,14 @@ the desk says **Sign in to reset this account. You'll need your password.**
 With an authenticator enrolled it says **Sign in to reset this account.
 You'll need your password and authenticator code.**
 
-With example data, `/settings` → **LLM Config**, an unconfigured session
+With example data, `/settings` → **AI**, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
 guidance `Example uses example data and cannot load or persist LLM secrets.` This is not a
 broken session; configure a provider in Live or Practice on this machine.
 Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
-shows **Not installed** — that is not a Connected advisor. AI Hub
+shows **Not installed** — that is not a Connected advisor. AI Centre
 `/ai` Chat follows that install state (FT-AI-004) and does not paint
 green **Connected (suggest only)** until the runtime is installed and configured.
 
@@ -2259,7 +2295,7 @@ Stop-Process -Id <pid>
 
 ### "No LLM provider configured" or "AI settings could not be loaded"
 
-With example data, `/settings` → LLM Config, the empty state "No LLM provider
+With example data, `/settings` → AI, the empty state "No LLM provider
 configured" is expected for an unconfigured session. Example data
 cannot load or persist LLM secrets. Use **Retry**, or configure a
 provider in Live or Practice on this machine.
@@ -2267,7 +2303,7 @@ provider in Live or Practice on this machine.
 On Live or Practice, "AI settings could not be loaded" disables editing
 to protect a saved configuration. Use **Retry**.
 
-On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
+On `/ai` Chat (AI Centre), an unconfigured LLM shows **LLM not configured**
 (badge **Not configured**) with **Open Settings → AI** and an outline
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
 Composer input and Send stay disabled. Example-data and Practice Chat both
@@ -2279,7 +2315,7 @@ The Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; they are aligned for readiness.
 
 When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
-AI Hub does not show a green **Connected (suggest only)** badge. The badge is
+AI Centre does not show a green **Connected (suggest only)** badge. The badge is
 **Not configured** / **Not installed**, the Settings CTA stays
 visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while
@@ -2333,14 +2369,19 @@ as a toast.
    show **Max quantity** and does not say to start the model. **Laya
    Degraded — tighter limits** means Live-facing Degraded: Live is open
    with a tighter ceiling. It is not a Blocked strip.
-3. Example data still refuses before admission. A safety-layer rejection names   the layer and is a separate message.
+3. On the Order Pad, example data records a sample fill. The success line is
+   `Example order placed` and the id starts with `SAMPLE-`. The server
+   refusal `Orders are not available for Example. Switch to Practice or Live to trade.`
+   is the HTTP path. A safety-layer rejection names the layer and is a separate message.
 
 ### Orders not arriving / silently dropped
 
-1. Check the Mode chip in the TopBar. **Example** is sample data: no broker
-   is connected and no orders are sent. Order Pad **Example Buy** on
-   `/trade` records an example fill after review
-   (`Example only. Nothing is sent to a broker and no order is placed.`).
+1. Check the Mode chip in the TopBar. **Example** is sample data, signed in
+   as **Guest**. The Mode line reads `Example data. No broker is connected and no orders are sent.`
+   Order Pad **Example Buy** on `/trade` opens a review that reads
+   `Example only. Nothing is sent to a broker and no order is placed.`
+   **Continue** then records a sample fill (`Example order placed`, id
+   starting `SAMPLE-`).
    Open the Mode menu and choose **Practice** for simulated fills, or
    unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.

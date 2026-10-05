@@ -4,7 +4,7 @@ Ollama can serve both advisory chat models and decision models. FlintTrade shoul
 
 The switch is `FLINTTRADE_LAYA_BACKEND`. Unset, blank, and `sidecar` use the sidecar. `ollama` uses the route in this note. Any other value is an error: the process logs it once and pauses new orders. It does not fall back to the sidecar. A typo must not keep admitting.
 
-This spike does not change the managed Ollama pin. That pin is v0.32.0. Decision-model calls need Ollama v0.35 or later, so a `systemone` entry stays fail-closed on the current pin.
+This spike does not change the managed Ollama pin. Current main pins v0.35.0. A `systemone` entry still requires an owned runtime reporting at least v0.35, a reviewed digest, and passing model qualification; the shipped allowlist remains empty.
 
 ## 1. What calls the model, and the seam
 
@@ -41,7 +41,7 @@ An allowlist entry is a tag, a pinned SHA-256 digest, and a route. The tag is no
 
 `tev1:4b` and `tev1:0.8b` stay off the allowlist. The fine-tuned weight licence is still being finalised upstream. `nimble:9b` is a `systemone` candidate and its licence is confirmed. The Hugging Face card for `bespokelabs/Bespoke-Nimble-9B` says Apache 2.0, and the Ollama licence blob says the adapter and the Qwen3.5-9B base (pinned at revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a`) are both Apache-2.0. It stays off the allowlist until a reviewed digest is pinned and the benchmark passes. A v2 adapter (`Bespoke-Nimble-9B-v2`) exists on Hugging Face, and the Ollama tag may not be v1, so whoever pins a digest must check which one they get. `qwen3:8b` is the advisory default and the `chat` candidate. It is not on the allowlist until a digest is reviewed and pinned. Its weights licence is Apache-2.0; that does not by itself admit it.
 
-On every admission the gate opens one `ManagedOllamaAdmission` and holds it for the whole inference. The digest Ollama reports for that call is compared with the pinned digest for the tag. A tag pulled again onto new weights fails the comparison. The chip shows Wrong model version. The response body is not allowed to vouch for itself.
+On every admission the gate resolves the accepted source-to-locked-alias mapping, then opens one `ManagedOllamaAdmission` for the digest-derived immutable alias and holds it for the whole inference. The source mapping and its live digest are checked inside that scope before and after inference; a mutable source tag is never passed as the inference model. The digest Ollama reports for that call is compared with the pinned digest for the tag. A tag pulled again onto new weights fails the comparison. The chip shows Wrong model version. The response body is not allowed to vouch for itself.
 
 Docs and the Status menu detail line use this sentence. The chip stays exactly "Wrong model version". It does not mention the digest, Ollama, or the model tag. The existing tooltip stays "Laya is running a different model than FlintTrade expects."
 
@@ -105,7 +105,7 @@ Later, after that bar is met and the default flips, the sidecar's start token, p
 
 The Ollama route must not become the default until an offline benchmark counts wrong admits and wrong denies separately and shows zero wrong admits. Abstains are a third count. They are not admits. Vendor numbers are unverified and do not satisfy this bar.
 
-The harness calls the same seam as the gate (`evaluate_free_text` and the decision client), not SafetySystem and not `gate_order`. It does not need a live broker.
+The harness calls the same seam as the gate (`evaluate_free_text` and the decision client), not SafetySystem and not `gate_order`. It does not need a live broker. A standalone CLI process has no published managed-runtime owner by default; without a supported owned runtime and allowlisted model it reports unavailable/non-qualifying. The synthetic fixture and `--stub` do not establish model quality.
 
 ```bash
 python -m flinttrade_engine.laya_benchmark --cases PATH --split dev --repeats N
@@ -125,9 +125,9 @@ python -m flinttrade_engine.laya_benchmark --cases PATH --split test --repeats N
 
 The 4,000-character cap applies after stripping. A note of exactly 4,000 characters reaches the model. A note of 4,001 is denied as `note_too_long` before any model call. An empty note is `note_absent` before any model call: Practice clamps, Live denies. Those rows are not abstains.
 
-The report prints, per question, per group (`core`, `hinglish`, `injection`, `empty_note`, `length`), per difficulty, and overall: `n`, `n` for each label, wrong admits, wrong denies, abstains, Down, correct, and other. It logs the raw A/B probabilities for each case. It prints p50 and p95 latency against the 3.0 second bar, and how many cases kept the same decision band across `N` repeats. Counts use the first repeat. It also prints the fail-closed drill results.
+The report prints, per question, per group (`core`, `hinglish`, `injection`, `empty_note`, `length`), per difficulty, and overall: `n`, `n` for each label, wrong admits, wrong denies, abstains, Down, correct, and other. It logs the raw A/B probabilities for each case. It prints p50 and p95 latency for successful verified model inferences against the 3.0 second bar, and how many cases kept the same decision band across `N` repeats. An unavailable model has unavailable latency, not a fast passing score. Display counts use the first repeat; the qualification guard checks every repeat, so a later wrong admit or unavailable result cannot be hidden. It also prints the fail-closed drill results.
 
-With zero wrong admits, `n` deny-labelled cases bound the true wrong-admit rate at about `3/n` at 95%. The report prints that `n` and that bound, and `cannot_claim_under_1_percent` when `3/n` is at least 0.01. The Researcher's draft has 59 deny cases, so it cannot support a claim under 1%. This repo does not contain that draft. It ships only a tiny synthetic fixture so the harness can run offline. Those rows are examples. They are not the benchmark. `--stub` forces an allow-all client and the report says that is not a model score.
+The report retains raw deny-labelled counts, but uses only distinct eligible deny-pair IDs with successful verified inference on every repeat for the provisional `3/n` calculation. Duplicate case IDs are rejected. Deterministic bypasses, Down/unverified calls, stubs, any repeat with a wrong admit, and unavailable inference cannot establish a qualifying bound. Pair IDs are conservative bookkeeping, not proof that cases are independent or representative; those statistical assumptions still need human review. The report prints raw and eligible counts separately and keeps `cannot_claim_under_1_percent` true when evidence is unusable or insufficient. The Researcher's draft has 59 deny cases, so it cannot support a claim under 1%. This repo does not contain that draft. It ships only a tiny synthetic fixture so the harness can run offline. Those rows are examples. They are not the benchmark. `--stub` forces an allow-all client and the report says that is not a model score.
 
 `--split` scores one split. `--tune` on anything other than `--split dev` exits with `refusing to tune on test`. `--tune --split dev` scores and does not edit thresholds. Test is scored once. The report prints the split and the SHA-256 of the file bytes. `--exclude` is an optional file of ids, one per line. The report is printed twice, with those ids and without them. Borderline draft ids that need a human review before anyone treats the draft as evidence: `rat-core-05`, `rat-core-09`, `rat-core-11`, `tilt-core-03`, `tilt-core-07`, `tilt-core-09`, `tilt-core-12`, `side-core-07`, `side-core-14`.
 
@@ -137,9 +137,9 @@ A wrong admit is a full allow when the label is `deny` or `clamp`. A wrong deny 
 
 One Ollama process serves advisory chat and this gate. A chat turn can occupy the single inference slot, evict the gate model, or change keep-alive. A person can delete or swap the tag from Settings. The gate then fails closed on the next admission. It must not follow the advisory model name.
 
-The runtime is local HTTP. The gate may call only the admitted loopback origin held by `ManagedOllamaAdmission`, with the proxy ignored, the same way the managed runtime already does. A response from any other host is not an admission.
+The runtime is local HTTP. The gate may call only the admitted loopback origin held by `ManagedOllamaAdmission`, with the proxy ignored, the same way the managed runtime already does. A response from any other host is not an admission. Redirects are rejected before another request. A monotonic decision budget includes admission verification and response handling; a result arriving after its deadline is refused. Network reads use the remaining budget. Existing synchronous runtime-proof cleanup may finish after the deadline, but cannot turn that result into an admission.
 
-The managed pin is v0.32.0, with pinned archive hashes. Moving it to v0.35 or later is a separate review of those hashes and of the install size. Until that lands, `systemone` cannot be Ready.
+The managed pin inherited from main is v0.35.0, with pinned archive hashes. This change does not update those hashes or install sizes. Runtime version alone does not qualify a model; no model is added to the allowlist here.
 
 Open:
 

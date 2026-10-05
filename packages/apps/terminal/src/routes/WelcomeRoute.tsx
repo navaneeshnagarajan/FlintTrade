@@ -347,7 +347,10 @@ export default function WelcomeRoute() {
         }
         if (!data.data?.is_setup) {
           useAuthStore.getState().setSetupRequired();
-        } else {
+        } else if (useAuthStore.getState().status !== "logged-out") {
+          // setLoggedOut purges the query cache, which remounts the app and
+          // this route; repeating it for an already logged-out visitor looped
+          // the auth probe until the backend rate-limited it.
           useAuthStore.getState().setLoggedOut();
         }
       })
@@ -611,6 +614,17 @@ export default function WelcomeRoute() {
       <h1 className="sr-only">Welcome to FlintTrade</h1>
       <ThemeToggle />
       <CinematicBackdrop particleColors={particleColors} />
+      {step < 5 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={skipToEnd}
+          className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-full border-border-default/70 bg-surface-card/70 px-4 text-xs text-text-secondary backdrop-blur-xl hover:text-text-primary"
+        >
+          Skip intro
+        </Button>
+      )}
 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-16 text-center">
         <motion.div

@@ -6,9 +6,10 @@
  *   • "table" (default) — the sortable book with the gated write verbs
  *     (per-row square-off, per-row convert, book-level exit-all) and the Excel
  *     export.
- *   • "net"             — the retired Net Position widget: same-symbol rows
- *     netted, flat symbols dropped, collapsible grouping by underlying, totals
- *     footer.
+ *   • "net"             — same-symbol rows netted while the net quantity is
+ *     still open. A symbol whose legs are all at quantity 0 is flat and
+ *     dropped. A symbol whose legs net to 0 but still has an open leg stays
+ *     as one row per leg (offset), each with its own margin.
  *   • "heat"            — the retired Position Heat Map widget: squarified
  *     treemap sized by exposure and coloured by P&L%, grouped by sector,
  *     exchange or flat, with click-to-open-a-chart.
@@ -101,6 +102,7 @@ import {
   runWithMatchingAccountAuthority,
 } from "@/lib/accountQueryState";
 import { isMarketHours } from "@/lib/market";
+import { useFunds } from "@/hooks/useFunds";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { totalPositionMtm } from "@/lib/pnl";
 import { cn } from "@/lib/utils";
@@ -136,12 +138,15 @@ import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
 import type { WidgetProps } from "@/types/widgets";
 import {
+  countSymbolClasses,
   fmtPnl,
   fmtPnlPct,
   fmtPrice,
   fmtUpdatedAt,
   netPositions,
   normalisePositions,
+  ltpMarker,
+  positionRowKey,
   type PositionRow,
 } from "./positionBook";
 import { SAMPLE_POSITION_BOOK } from "./sampleBook";
@@ -966,17 +971,21 @@ function PositionsWidget(props: WidgetProps) {
 
   const netRows = useMemo(() => netPositions(rows), [rows]);
   const heatRows = useMemo(() => rows.filter((row) => row.exposure > 0), [rows]);
+  const [highlightedKeys, setHighlightedKeys] = useState<ReadonlySet<string>>(() => new Set());
 
-  /** Whole-book mark-to-market — the one P&L figure, shown in every view. */
-  const totalPnl = useMemo(() => totalPositionMtm(rows), [rows]);
+  /** Whole-book mark-to-market. Practice shows this net of estimated charges. */
+  const grossPnl = useMemo(() => totalPositionMtm(rows), [rows]);
+  const fundsQuery = useFunds({ enabled: appMode === "practice" && accountReadsEnabled });
+  const estimatedCharges = appMode === "practice" ? (fundsQuery.data?.estimatedCharges ?? 0) : 0;
+  const totalPnl = grossPnl - estimatedCharges;
   const showPnl =
     isExplore || rows.length > 0 || (accountReadsEnabled && !queryUi.isPaused && isSuccess);
   const netExposure = useMemo(
     () => netRows.reduce((sum, row) => sum + row.exposure, 0),
     [netRows],
   );
-  /** Broker rows the net view drops because their symbol nets flat. */
-  const flatLegs = rows.length - netRows.reduce((sum, row) => sum + row.legs, 0);
+  /** Flat: every leg at quantity 0. Offset: legs net to 0 but stay open. */
+  const { flatSymbols, offsetSymbols } = useMemo(() => countSymbolClasses(rows), [rows]);
 
   const visibleCount =
     view === "net" ? netRows.length : view === "heat" ? heatRows.length : rows.length;
@@ -1004,6 +1013,26 @@ function PositionsWidget(props: WidgetProps) {
     },
     [props.api, view],
   );
+
+  const revealRows = useCallback(
+    (hidden: readonly PositionRow[]) => {
+      const keys = hidden.map((row) => positionRowKey(row));
+      setHighlightedKeys(new Set(keys));
+      setView("table");
+      props.api.updateParameters({ view: "table" });
+    },
+    [props.api],
+  );
+
+  useEffect(() => {
+    if (view !== "table" || highlightedKeys.size === 0) return;
+    const root = containerRef.current;
+    if (!root) return;
+    const first = [...highlightedKeys][0];
+    const target = [...root.querySelectorAll<HTMLElement>("[data-position-key]")]
+      .find((node) => node.dataset.positionKey === first);
+    target?.scrollIntoView({ block: "center" });
+  }, [containerRef, highlightedKeys, view]);
 
   const handleGroupChange = useCallback(
     (next: GroupMode) => {
@@ -1185,18 +1214,21 @@ function PositionsWidget(props: WidgetProps) {
   ]);
 
   const narrowCards = useMemo(
-    () => rows.map((row) => ({
-      id: `${row.symbol}-${row.exchange}-${row.product}-${
-        row.quantity > 0 ? "long" : row.quantity < 0 ? "short" : "flat"
-      }`,
-      symbol: row.symbol,
-      detail: `Qty ${row.quantity} · LTP ${fmtPrice(row.ltp)}`,
-      pnl: fmtPnl(row.mtm),
-      pnlPercent: fmtPnlPct(row.pnlPercent),
-      pnlPositive: row.mtm >= 0,
-      actions: renderRowActions(row),
-    })),
-    [renderRowActions, rows],
+    () => rows.map((row) => {
+      const key = positionRowKey(row);
+      return {
+        id: key,
+        positionKey: key,
+        highlighted: highlightedKeys.has(key),
+        symbol: row.symbol,
+        detail: `Qty ${row.quantity} · LTP ${fmtPrice(row.ltp)}`,
+        pnl: fmtPnl(row.mtm),
+        pnlPercent: fmtPnlPct(row.pnlPercent),
+        pnlPositive: row.mtm >= 0,
+        actions: renderRowActions(row),
+      };
+    }),
+    [highlightedKeys, renderRowActions, rows],
   );
 
   const columns = useMemo<ColumnDef<SortedTableFeatures, PositionRow>[]>(
@@ -1242,11 +1274,19 @@ function PositionsWidget(props: WidgetProps) {
       {
         accessorKey: "ltp",
         header: "LTP",
-        cell: ({ row }) => (
-          <span className="font-mono tabular-nums text-text-secondary">
-            {fmtPrice(row.original.ltp)}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const marker = ltpMarker(row.original);
+          return (
+            <span className="inline-flex items-center gap-1 font-mono tabular-nums text-text-secondary">
+              {fmtPrice(row.original.ltp)}
+              {marker ? (
+                <span className="text-xxs text-text-muted" title={marker.title}>
+                  {marker.label}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "mtm",
@@ -1350,6 +1390,11 @@ function PositionsWidget(props: WidgetProps) {
             className={`font-mono tabular-nums font-medium ${
               showPnl ? (totalPnl >= 0 ? "text-profit" : "text-loss") : "text-text-muted"
             }`}
+            title={
+              appMode === "practice" && showPnl
+                ? `Gross ${fmtPnl(grossPnl)} · Charges ${fmtPnl(estimatedCharges).replace(/^[+−-]/, "")} (estimated)`
+                : undefined
+            }
           >
             P&L: {showPnl ? fmtPnl(totalPnl) : "—"}
           </span>
@@ -1514,7 +1559,8 @@ function PositionsWidget(props: WidgetProps) {
           rows={netRows}
           totalPnl={totalPnl}
           totalExposure={netExposure}
-          flatLegs={flatLegs}
+          flatSymbols={flatSymbols}
+          offsetSymbols={offsetSymbols}
         />
       ) : view === "heat" ? (
         <HeatMapView
@@ -1523,6 +1569,7 @@ function PositionsWidget(props: WidgetProps) {
           emptyMessage={emptyMessage}
           emptyHint={emptyHint}
           onOpenChart={handleOpenChart}
+          onRevealRows={revealRows}
         />
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
@@ -1584,13 +1631,16 @@ function PositionsWidget(props: WidgetProps) {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map((row, idx) => (
+              {table.getRowModel().rows.map((row, idx) => {
+                const key = positionRowKey(row.original);
+                const highlighted = highlightedKeys.has(key);
+                return (
                 <TableRow
-                  key={`${row.original.symbol}-${row.original.exchange}-${row.original.product}-${
-                    row.original.quantity > 0 ? "long" : row.original.quantity < 0 ? "short" : "flat"
-                  }`}
+                  key={row.id}
+                  data-position-key={key}
+                  data-highlighted={highlighted ? "true" : undefined}
                   className={`border-t border-border-subtle hover:bg-surface-hover/50 ${
-                    idx % 2 === 1 ? "bg-surface-stripe" : ""
+                    highlighted ? "bg-accent/20" : idx % 2 === 1 ? "bg-surface-stripe" : ""
                   }`}
                 >
                   {row.getVisibleCells().map((cell) => (
@@ -1602,7 +1652,8 @@ function PositionsWidget(props: WidgetProps) {
                     </TableCell>
                   ))}
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
           </div>

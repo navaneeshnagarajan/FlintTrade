@@ -17,7 +17,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Added
+
+- **Estimated charges on Practice fills.** Every Practice fill runs through the shared Indian statutory calculator and stores the breakdown and the day's charges total. Fills show `Charges ₹X (estimated)`. Positions and Performance show net P&L, with gross and charges in the tooltip. Home and Invest subtract those charges from net worth. The Practice source line is `Practice account, after estimated charges`.
+
 ### Fixed
+
+- **Desk routes, one Practice place path, and desk polling.** `/positions`,
+  `/holdings`, `/monitoring`, `/schedules`, and `/glossary` open the screen
+  that owns that book. `/login` opens sign-in. Practice places go through
+  the admitted order route only; Settings does not place. A missing price
+  says so plainly, or fills at the last stored close. The Trade book starts
+  open. Desk reads pause while the tab is hidden and back off after HTTP 429.
 
 - **Laya chip, runtime key, and snapshot launch.** The desk polls
   `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the pid
@@ -80,8 +91,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   renamed onto `checkpoint`, and the old copy is deleted. If that second
   rename fails, the old checkpoint is renamed back, the chip is
   `download_failed`, and the sidecar does not start. While the download
-  runs, including a pin change, the status word is Down, not Still
-  loading, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
+  runs, including a pin change, the status word is Downloading (neutral
+  colour), not Still loading or Down, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
   The model is about 2.37 GB, and that size is reported once.
   There is no separate Updating label. Orders are refused with
   "Laya is Down. New orders are paused until it's Ready. You can still close positions." A dropped

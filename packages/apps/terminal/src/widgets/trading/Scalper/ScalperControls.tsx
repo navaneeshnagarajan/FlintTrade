@@ -12,7 +12,7 @@ import {
 import { NumberInput, Stepper, StatusPill, ToggleGroup } from "./ScalperPrimitives";
 import { EXPLORE_ONE_CLICK_TITLE, EXPLORE_SCALPER_ORDER_HELPER } from "./exploreGate";
 import type { IntervalValue, OrderTypeValue, ProductType, StatusState } from "./types";
-import { SYMBOLS } from "./types";
+import { LOT_SIZE_MASTER_HINT, SYMBOLS } from "./types";
 
 export interface ScalperControlsProps {
   // Row 1
@@ -34,9 +34,13 @@ export interface ScalperControlsProps {
 
   // Row 2
   lots: number;
-  lotSize: number;
-  /** False until the backend confirms the lot size — orders stay blocked. */
-  lotSizeVerified: boolean;
+  /**
+   * Near-month lot from the instrument master, with its expiry. Both months
+   * when they differ. Null when the master has no row.
+   */
+  lotLabel: string | null;
+  /** Confirmed multiplier for this order. Null until a live master names the contract. */
+  lotSize: number | null;
   onLotsDec: () => void;
   onLotsInc: () => void;
   product: ProductType;
@@ -86,8 +90,8 @@ export function ScalperControls({
   status,
   focused,
   lots,
+  lotLabel,
   lotSize,
-  lotSizeVerified,
   onLotsDec,
   onLotsInc,
   product,
@@ -199,8 +203,9 @@ export function ScalperControls({
         {/* Lot spinner — large. Unverified lot sizes block orders (fail closed). */}
         <Stepper
           label="Lot"
-          sublabel={lotSizeVerified ? `×${lotSize}` : `×${lotSize} (unverified)`}
-          value={`${lots} (${lots * lotSize})`}
+          sublabel={lotLabel ?? "—"}
+          sublabelTitle={lotLabel == null ? LOT_SIZE_MASTER_HINT : undefined}
+          value={lotSize == null ? `${lots} (—)` : `${lots} (${lots * lotSize})`}
           onDec={onLotsDec}
           onInc={onLotsInc}
           large
@@ -282,7 +287,7 @@ export function ScalperControls({
             }
             className={`flex items-center gap-1.5 px-4 h-8 font-semibold text-sm transition-colors ${
               oneClick
-                ? "bg-accent text-white shadow-sm hover:bg-accent/90"
+                ? "bg-accent text-accent-foreground shadow-sm hover:bg-accent/90"
                 : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary"
             }`}
           >

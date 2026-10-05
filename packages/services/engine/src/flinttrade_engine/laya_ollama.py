@@ -12,15 +12,19 @@ and maps choice or noul probabilities onto the existing thresholds. The
 
 from __future__ import annotations
 
+import http.client
+import io
 import json
 import logging
 import math
 import os
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from flinttrade_engine.laya import (
@@ -94,8 +98,8 @@ class LayaOllamaModel:
 
     Do not add an entry without a confirmed licence. ``tev1`` stays off this
     tuple while its fine-tuned weight licence is still being finalised
-    upstream. ``nimble`` stays off until its Hugging Face licence card has
-    been checked.
+    upstream. ``nimble`` stays off until its digest has been reviewed and
+    benchmark qualification is complete.
     """
 
     tag: str
@@ -287,6 +291,8 @@ def surface_from_ollama_snapshot(
     port, port_known = _ports(snapshot)
     if snapshot is None:
         return LayaOllamaSurface(DecisionStatus.DOWN, LAYA_REASON_NOT_STARTED, None, False, port)
+    if snapshot.get("integrity_error"):
+        return LayaOllamaSurface(DecisionStatus.DOWN, LAYA_REASON_UNVERIFIED, None, False, port)
     state = str(snapshot.get("state") or "")
     if state == "starting":
         return LayaOllamaSurface(DecisionStatus.DOWN, LAYA_REASON_NOT_STARTED, None, True, port)
@@ -306,8 +312,6 @@ def surface_from_ollama_snapshot(
             port,
         )
     if state == "failed":
-        if snapshot.get("integrity_error"):
-            return LayaOllamaSurface(DecisionStatus.DOWN, LAYA_REASON_UNVERIFIED, None, False, port)
         error = str(snapshot.get("error") or "").lower()
         reason = LAYA_REASON_DOWNLOAD_FAILED if "download" in error else LAYA_REASON_UNREACHABLE
         return LayaOllamaSurface(DecisionStatus.DOWN, reason, None, False, port)
@@ -371,6 +375,22 @@ def bind_ollama_gate(engine: Any) -> OllamaDecisionClient | None:
     return OllamaDecisionClient(entry, server_version=version)
 
 
+def ready_ollama_client(tag: str) -> OllamaDecisionClient | None:
+    """Return a configured client only after an owned snapshot proves readiness.
+
+    This is an availability check, not an admission. Every decision still
+    holds and verifies its own immutable model admission.
+    """
+    entry = allowlist_entry(tag) if tag else None
+    if entry is None:
+        return None
+    snapshot = _load_snapshot(tag)
+    surface = surface_from_ollama_snapshot(snapshot, tag=tag, entry=entry)
+    if surface.status is not DecisionStatus.READY or not isinstance(snapshot, Mapping):
+        return None
+    return OllamaDecisionClient(entry, server_version=str(snapshot.get("pinned_server_version") or ""))
+
+
 def apply_ollama_surface(engine: Any, surface: LayaOllamaSurface) -> None:
     """Write one surface onto the process gate. Live stays unqualified."""
     engine.set_gate_checking(surface.checking)
@@ -387,8 +407,10 @@ def apply_ollama_surface(engine: Any, surface: LayaOllamaSurface) -> None:
 class OllamaDecisionClient:
     """One admission, one call, digest checked before the body is trusted.
 
-    ``last_proof`` is ``runtime`` when the admission digest matched the pin.
-    The response body does not carry that proof.
+    ``last_proof`` is ``runtime`` only after both identity proofs and the
+    response finish within one deadline. The response body does not carry
+    that proof. Synchronous runtime verification may unwind after expiry;
+    an expired call can never provide a verdict.
     """
 
     def __init__(
@@ -398,8 +420,8 @@ class OllamaDecisionClient:
         timeout: float = DECISION_TIMEOUT_SECONDS,
         server_version: str = "",
     ) -> None:
-        if timeout <= 0:
-            raise ValueError("decision timeout must be positive")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("decision timeout must be finite and positive")
         self._entry = entry
         self._timeout = timeout
         self._server_version = server_version.strip()
@@ -417,21 +439,28 @@ class OllamaDecisionClient:
             DecisionCallError: The runtime, digest, timeout, or body cannot be used.
         """
         self._last_proof = ""
+        deadline = time.monotonic() + self._timeout
         if set(questions) != set(_QUESTION_IDS):
             raise DecisionCallError("malformed")
         if self._entry.route == "systemone" and not version_at_least(self._server_version, 0, 35):
             raise DecisionCallError("runtime_too_old")
         try:
-            with _open_session(self._entry.tag) as admission:
+            _remaining(deadline)
+            with _open_session(self._entry.tag, self._entry.digest) as admission:
+                _remaining(deadline)
                 _require_admission(admission, self._entry)
                 payload, path = _request_for(self._entry.route, admission.model, state, questions)
                 encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
                 if estimate_tokens(encoded) > PROMPT_TOKEN_CAP:
                     raise DecisionCallError("prompt_over_cap")
-                raw = _post(admission.base_url, path, payload, self._timeout)
+                raw = _post(admission.base_url, path, payload, _remaining(deadline), deadline=deadline)
+                _remaining(deadline)
                 _reject_oversized_usage(raw)
                 _reject_advisory_body(raw)
                 normalised = normalise_decision_payload(raw, self._entry.route, deny_options=_deny_options())
+                _remaining(deadline)
+            # Admission exit performs the final identity proof. A late proof is not usable.
+            _remaining(deadline)
         except DecisionCallError:
             raise
         except Exception as exc:
@@ -490,24 +519,109 @@ def _load_snapshot(model: str) -> Mapping[str, Any] | None:
 
 
 @contextmanager
-def _open_session(model: str) -> Iterator[Any]:
+def _open_session(model: str, digest: str) -> Iterator[Any]:
     if _session_override is not None:
         with _session_override(model) as admission:
             yield admission
         return
-    from flinttrade_core.ollama_runtime import managed_ollama_session  # noqa: PLC0415
+    from flinttrade_core.ollama_runtime import managed_ollama_gate_session  # noqa: PLC0415
 
-    with managed_ollama_session(model) as admission:
+    with managed_ollama_gate_session(model, digest) as admission:
         yield admission
 
 
-def _post(base_url: str, path: str, payload: Mapping[str, Any], timeout: float) -> Any:
+def _post(
+    base_url: str, path: str, payload: Mapping[str, Any], timeout: float, *, deadline: float,
+) -> Any:
     if _poster_override is not None:
         return _poster_override(base_url, path, payload, timeout)
-    return _post_loopback(base_url, path, payload, timeout)
+    return _post_loopback(base_url, path, payload, timeout, deadline=deadline)
 
 
-def _post_loopback(base_url: str, path: str, payload: Mapping[str, Any], timeout: float) -> Any:
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or remaining <= 0:
+        raise DecisionCallError("timeout")
+    return remaining
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Even a same-origin redirect is outside this admitted endpoint contract.
+        fp.close()
+        raise DecisionCallError(f"http_{code}")
+
+
+class _DeadlineReader(io.RawIOBase):
+    """Renew the socket timeout from one deadline for every underlying read.
+
+    Wrapping before HTTPResponse.begin covers status lines and headers as well
+    as fixed-length and chunked bodies. BufferedReader alone can perform many
+    socket reads inside read/readline, each restarting an inactivity timeout.
+    """
+
+    def __init__(self, stream: Any, sock: Any, deadline: float) -> None:
+        self._stream = stream
+        self._sock = sock
+        self._deadline = deadline
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        self._sock.settimeout(_remaining(self._deadline))
+        data = self._stream.read1(len(buffer))
+        _remaining(self._deadline)
+        buffer[:len(data)] = data
+        return len(data)
+
+    def close(self) -> None:
+        try:
+            self._stream.close()
+        finally:
+            super().close()
+
+
+class _DeadlineHTTPResponse(http.client.HTTPResponse):
+    def __init__(self, sock: Any, *args: Any, deadline: float, **kwargs: Any) -> None:
+        super().__init__(sock, *args, **kwargs)
+        self.fp = io.BufferedReader(_DeadlineReader(self.fp, sock, deadline))
+
+
+class _DeadlineHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args: Any, deadline: float, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._deadline = deadline
+        self.response_class = partial(_DeadlineHTTPResponse, deadline=deadline)
+
+    def connect(self) -> None:
+        self.timeout = _remaining(self._deadline)
+        super().connect()
+        _remaining(self._deadline)
+
+    def send(self, data: Any) -> None:
+        if self.sock is None:
+            self.connect()
+        self.sock.settimeout(_remaining(self._deadline))
+        super().send(data)
+        _remaining(self._deadline)
+
+
+class _DeadlineHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, deadline: float) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def http_open(self, request: Any) -> Any:
+        return self.do_open(partial(_DeadlineHTTPConnection, deadline=self._deadline), request)
+
+
+def _post_loopback(
+    base_url: str, path: str, payload: Mapping[str, Any], timeout: float, *, deadline: float | None = None,
+) -> Any:
+    if deadline is None:
+        deadline = time.monotonic() + timeout
+    _remaining(deadline)
     if path not in {"/api/chat", "/v1/systemone"}:
         raise DecisionCallError("malformed")
     url = _loopback_url(base_url, path)
@@ -522,12 +636,17 @@ def _post_loopback(base_url: str, path: str, payload: Mapping[str, Any], timeout
             "User-Agent": "FlintTrade/LayaOllama",
         },
     )
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), _NoRedirect(), _DeadlineHTTPHandler(deadline),
+    )
     try:
-        with opener.open(request, timeout=timeout) as response:  # noqa: S310
+        with opener.open(request, timeout=_remaining(deadline)) as response:  # noqa: S310
             status = getattr(response, "status", 200)
+            _remaining(deadline)
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
+            _remaining(deadline)
     except urllib.error.HTTPError as exc:
+        exc.close()
         raise DecisionCallError(f"http_{exc.code}") from exc
     except TimeoutError as exc:
         raise DecisionCallError("timeout") from exc
@@ -545,6 +664,7 @@ def _post_loopback(base_url: str, path: str, payload: Mapping[str, Any], timeout
         decoded = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise DecisionCallError("malformed") from exc
+    _remaining(deadline)
     return decoded
 
 
@@ -576,6 +696,9 @@ def _require_admission(admission: Any, entry: LayaOllamaModel) -> None:
     model = str(getattr(admission, "model", "") or "")
     if not base_url or not model:
         raise DecisionCallError("runtime_down")
+    if model != f"flinttrade/sha256-{entry.digest}:locked":
+        raise DecisionCallError("digest_mismatch")
+    _loopback_url(base_url, "/api/chat")
 
 
 def _request_for(
@@ -701,6 +824,8 @@ def _code_for_foreign(exc: BaseException) -> str:
     text = str(exc).lower()
     if isinstance(exc, TimeoutError):
         return "timeout"
+    if "integrity" in text:
+        return "unverified"
     if "digest" in text:
         return "digest_mismatch"
     if "not accepted" in text:

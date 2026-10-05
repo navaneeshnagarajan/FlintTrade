@@ -25,14 +25,15 @@ interface Props {
 export function MarginTab({ legs, underlying }: Props) {
   const { valid } = validateLegs(legs);
   const premiumUnset = hasUnsetPremium(legs);
+  const lotSize = underlying.lotSize;
   const margin = useMemo(
-    () => (valid && !premiumUnset ? estimateMargin(legs, underlying) : 0),
+    () => (valid && !premiumUnset ? estimateMargin(legs, underlying) : null),
     [legs, valid, underlying, premiumUnset],
   );
   const netPremium = calculateNetPremium(legs);
-  const premiumCollected = netPremium != null && netPremium < 0 ? Math.abs(netPremium) * underlying.lotSize : 0;
-  const premiumPaid = netPremium != null && netPremium > 0 ? netPremium * underlying.lotSize : 0;
-  const effectiveMargin = margin - premiumCollected;
+  const premiumCollected = netPremium != null && netPremium < 0 && lotSize != null ? Math.abs(netPremium) * lotSize : 0;
+  const premiumPaid = netPremium != null && netPremium > 0 && lotSize != null ? netPremium * lotSize : 0;
+  const effectiveMargin = margin == null ? null : margin - premiumCollected;
 
   if (!valid || legs.length === 0 || premiumUnset) {
     return (
@@ -51,14 +52,14 @@ export function MarginTab({ legs, underlying }: Props) {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">SPAN Margin (est.)</div>
-            <div className="text-xl font-bold font-mono tabular-nums text-text-primary">{formatINR(margin)}</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-text-primary">{margin == null ? "—" : formatINR(margin)}</div>
             <div className="text-xs text-text-muted mt-0.5">Selling positions only</div>
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Effective Margin</div>
-            <div className="text-xl font-bold font-mono tabular-nums text-emerald-400">{formatINR(effectiveMargin)}</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-emerald-400">{effectiveMargin == null ? "—" : formatINR(effectiveMargin)}</div>
             <div className="text-xs text-text-muted mt-0.5">After premium credit/debit</div>
           </CardContent>
         </Card>
@@ -87,11 +88,13 @@ export function MarginTab({ legs, underlying }: Props) {
                 // Same per-leg formula as utils.estimateMargin: ~15% of the
                 // leg's REAL notional (its strike × lot size) when sold.
                 const legMargin =
-                  leg.action === "SELL"
-                    ? 0.15 * leg.strike * underlying.lotSize * leg.lots
-                    : isPricedPremium(leg.premium)
-                      ? leg.premium * leg.lots * underlying.lotSize
-                      : 0;
+                  lotSize == null
+                    ? null
+                    : leg.action === "SELL"
+                      ? 0.15 * leg.strike * lotSize * leg.lots
+                      : isPricedPremium(leg.premium)
+                        ? leg.premium * leg.lots * lotSize
+                        : 0;
                 return (
                   <TableRow key={leg.id} className="border-border-subtle hover:bg-surface-base">
                     <TableCell className="py-1 pl-3 text-xs text-text-muted">{idx + 1}</TableCell>
@@ -106,7 +109,7 @@ export function MarginTab({ legs, underlying }: Props) {
                     <TableCell className="py-1 text-xs text-text-secondary">{leg.optionType}</TableCell>
                     <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{leg.strike}</TableCell>
                     <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{leg.lots}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-right pr-3 text-text-primary">{formatINR(legMargin)}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-right pr-3 text-text-primary">{legMargin == null ? "—" : formatINR(legMargin)}</TableCell>
                   </TableRow>
                 );
               })}
@@ -120,7 +123,7 @@ export function MarginTab({ legs, underlying }: Props) {
           {[
             { label: "Premium Paid",      value: formatINR(premiumPaid),      color: "text-red-400"     },
             { label: "Premium Collected", value: formatINR(premiumCollected), color: "text-emerald-400" },
-            { label: "Lot Size",          value: String(underlying.lotSize),  color: "text-text-primary" },
+            { label: "Lot Size",          value: lotSize == null ? "—" : String(lotSize),  color: "text-text-primary" },
             { label: "Total Lots",        value: String(legs.reduce((s, l) => s + l.lots, 0)), color: "text-text-primary" },
           ].map(({ label, value, color }) => (
             <div key={label} className="flex justify-between items-center">
@@ -130,7 +133,7 @@ export function MarginTab({ legs, underlying }: Props) {
           ))}
           <div className="border-t border-border-default pt-1.5 flex justify-between items-center">
             <span className="text-xs text-text-secondary font-medium">Total Capital Required</span>
-            <span className="text-sm font-mono font-bold text-text-primary">{formatINR(effectiveMargin)}</span>
+            <span className="text-sm font-mono font-bold text-text-primary">{effectiveMargin == null ? "—" : formatINR(effectiveMargin)}</span>
           </div>
           <p className="text-xxs text-text-muted mt-1">
             Estimate only. Actual SPAN margin may differ. Use broker margin calculator for exact values.

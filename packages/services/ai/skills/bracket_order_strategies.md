@@ -23,11 +23,13 @@ Use CO when you want margin benefit but do not have a clear target level. Use BO
 
 ## Margin Benefit of BO
 
-SEBI SPAN margin for Nifty futures = approximately ₹1.1L per lot. With a BO that has a 50-point SL (₹3,750 max loss):
+SEBI SPAN margin for Nifty futures is approximately ₹1.1L per lot.
+
+Example: a Nifty futures bracket with quantity 65 and a 50-point SL. Max loss = 50 × 65 = ₹3,250. The margin sketch uses the same example quantity:
 
 ```
-BO margin ≈ SL value × lot size × margin multiplier
-         ≈ 50 × 75 × 1.1 = ~₹4,125 per lot (approx)
+BO margin ≈ SL value × example quantity × margin multiplier
+         ≈ 50 × 65 × 1.1 = ~₹3,575 per lot (approx)
 ```
 
 Actual values vary by broker; always verify via `/api/v1/margin` before deploying. The margin benefit is only active while both BO legs are live.
@@ -61,13 +63,13 @@ Example: Buy Nifty at 22,000. Initial SL = 21,980 (20 points). Trail step = 10 p
 ## BO Placement via OpenAlgo
 
 ```python
-# Bracket order: Buy Nifty with 20-pt SL, 40-pt target, 10-pt trail
+# Example: Buy Nifty with quantity 65, 20-pt SL, 40-pt target, 10-pt trail
 placeorder(
     symbol="NIFTY",
     exchange="NFO",
     action="BUY",
     product="MIS",
-    quantity=75,
+    quantity=65,
     price_type="LIMIT",
     price=22000,
     stoploss=20,
