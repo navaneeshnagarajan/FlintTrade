@@ -278,8 +278,10 @@ class TestGEXEndpoint:
             {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
         )
 
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
         assert body["is_sample_data"] is True
-        assert body["lot_size"] == 75
+        assert body["lot_size"] == lot_size_from_master("NIFTY")
         assert body["data"]["available"] is True
         assert body["data"]["strikes"]
 

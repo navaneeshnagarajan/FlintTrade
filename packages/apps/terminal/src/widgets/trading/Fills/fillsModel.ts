@@ -22,6 +22,7 @@
 
 import { fmtIstClock, fmtIstDate, isIstDateInRange } from "@/lib/ist";
 import type { JournalTrade } from "@/services/ftApi";
+import type { EstimatedCharges } from "@/types/api";
 import type { RawTrade } from "@/types/rawApi";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,7 @@ export interface RawFillSource extends RawTrade {
   tradeid?: string | number;
   trade_id?: string | number;
   tradeId?: string | number;
+  estimatedCharges?: EstimatedCharges;
 }
 
 export interface FillRow {
@@ -68,6 +70,8 @@ export interface FillRow {
   /** Realised P&L. The auto-journal records it on the closing leg only. */
   pnl: number | null;
   fees: number | null;
+  /** Practice statutory estimate. Absent on a broker fill that has no breakdown. */
+  estimatedCharges?: EstimatedCharges;
   strategy: string | null;
   /**
    * Stable screenshot key (``timestamp|symbol|orderid-or-na``) — set only for
@@ -197,6 +201,7 @@ export function tradebookToFills(raw: RawFillSource[]): FillRow[] {
       exitPrice: null,
       pnl: null,
       fees: null,
+      estimatedCharges: t.estimatedCharges,
       strategy: null,
       tradeKey: null,
       journalTimestamp: null,

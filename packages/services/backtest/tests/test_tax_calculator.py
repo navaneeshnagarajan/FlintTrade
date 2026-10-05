@@ -145,7 +145,7 @@ class TestExchangeCharges:
     """Exchange transaction charge rates."""
 
     def test_nse_charge_rate(self):
-        """NSE: 0.00325% = 3.25 per 100,000."""
+        """NSE cash client total: ₹307 per crore = 3.07 per 100,000."""
         from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange, TradeType
         calc = IndianTaxCalculator(
             instrument_type="equity_delivery",
@@ -153,8 +153,7 @@ class TestExchangeCharges:
             brokerage_per_order=Decimal("0"),
         )
         bd = calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=True)
-        # 0.00325% of 100,000 = 3.25
-        assert bd.exchange_charges == Decimal("3.25")
+        assert bd.exchange_charges == Decimal("3.07")
 
     def test_bse_charge_rate(self):
         """BSE: 0.00375% = 3.75 per 100,000."""
@@ -168,7 +167,7 @@ class TestExchangeCharges:
         assert bd.exchange_charges == Decimal("3.75")
 
     def test_nse_fo_charge_rate(self):
-        """NSE F&O: 0.005% = 5 per 100,000."""
+        """NSE futures client total: ₹183 per crore = 1.83 per 100,000."""
         from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange, TradeType
         calc = IndianTaxCalculator(
             instrument_type="fo",
@@ -176,7 +175,7 @@ class TestExchangeCharges:
             brokerage_per_order=Decimal("0"),
         )
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
-        assert bd.exchange_charges == Decimal("5.00")
+        assert bd.exchange_charges == Decimal("1.83")
 
 
 # ---------------------------------------------------------------------------

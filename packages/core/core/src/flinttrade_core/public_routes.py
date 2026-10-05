@@ -67,6 +67,8 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/v1/native/oauth/callback"),
     # Broker server postback. The broker cannot send a FlintTrade session.
     ("POST", "/api/v1/native/postbacks/<adapter_id>"),
+    # Scrip lots for Explore, Learn, and the desk. No account data.
+    ("GET", "/api/v1/instrument-lots"),
 )
 
 PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(_PUBLIC_ROUTE_ENTRIES)

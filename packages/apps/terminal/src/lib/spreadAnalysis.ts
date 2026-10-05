@@ -280,9 +280,10 @@ export type VerticalSpreadCheck =
  * the option type and the leg order — which is why the builder can never fail
  * the leg-order rule: it is classified, not asserted.
  *
- * `contractLotSize` is the exchange lot size for the underlying (NIFTY = 75
- * post-Nov-2024), so per-unit premiums scale to rupees the same way the
- * builder's own margin estimate does.
+ * `contractLotSize` is the exchange lot size for the underlying. Example
+ * callers pass 65 for a NIFTY contract; that figure is not a live master
+ * read. Per-unit premiums then scale to rupees the same way the builder's
+ * own margin estimate does.
  */
 export function asVerticalSpread(
   legs: readonly VerticalSpreadLeg[],

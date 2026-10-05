@@ -382,6 +382,7 @@ def test_reset_backs_up_and_clears_the_complete_practice_ledger() -> None:
             "current": 200_000.0,
             "available": 200_000.0,
             "used_margin": 0.0,
+            "estimated_charges": 0.0,
         }
         assert engine.config.equity_leverage == 2
     finally:
@@ -500,7 +501,14 @@ def test_config_update_is_atomic_and_keeps_capital_consistent() -> None:
             engine.update_config(equity_leverage=1)
 
         assert engine.config.equity_leverage == 2
-        assert engine.get_capital() == {
+        capital = engine.get_capital()
+        assert capital["estimated_charges"] >= 0
+        assert {
+            "initial": capital["initial"],
+            "current": capital["current"],
+            "available": capital["available"],
+            "used_margin": capital["used_margin"],
+        } == {
             "initial": 1_000.0,
             "current": 1_000.0,
             "available": 250.0,
@@ -508,7 +516,13 @@ def test_config_update_is_atomic_and_keeps_capital_consistent() -> None:
         }
 
         engine.update_config(starting_capital=2_000.0)
-        assert engine.get_capital() == {
+        capital = engine.get_capital()
+        assert {
+            "initial": capital["initial"],
+            "current": capital["current"],
+            "available": capital["available"],
+            "used_margin": capital["used_margin"],
+        } == {
             "initial": 2_000.0,
             "current": 2_000.0,
             "available": 1_250.0,

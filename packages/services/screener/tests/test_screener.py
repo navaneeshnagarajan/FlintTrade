@@ -376,7 +376,7 @@ class TestPortfolioGreeks:
 
     def test_portfolio_lot_size_lookup(self):
         from flinttrade_screener.greeks import PortfolioGreeks
-        assert PortfolioGreeks.from_lot_size("NIFTY", 2) == 150
+        assert PortfolioGreeks.from_lot_size("NIFTY", 2) == 65 * 2
         assert PortfolioGreeks.from_lot_size("BANKNIFTY", 1) == 30
 
     def test_local_greeks_fallback(self):
@@ -620,7 +620,7 @@ class TestOptionChainHelpers:
 
     def test_lot_sizes(self):
         from flinttrade_screener.option_chain import LOT_SIZES
-        assert LOT_SIZES["NIFTY"] == 75
+        assert LOT_SIZES["NIFTY"] == 65
         assert LOT_SIZES["BANKNIFTY"] == 30
         assert LOT_SIZES["SENSEX"] == 20
         assert LOT_SIZES["CRUDEOIL"] == 100

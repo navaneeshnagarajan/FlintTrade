@@ -8,12 +8,14 @@ export function StatCard({
   sub,
   positive,
   icon,
+  title,
 }: {
   label: string;
   value: string;
   sub?: string;
   positive?: boolean;
   icon?: React.ReactNode;
+  title?: string;
 }) {
   return (
     <Card className="bg-surface-card border-border-default">
@@ -34,6 +36,7 @@ export function StatCard({
                 ? "text-profit"
                 : "text-loss"
           }`}
+          title={title}
         >
           {value}
         </div>

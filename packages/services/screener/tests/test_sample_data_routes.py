@@ -266,7 +266,9 @@ def test_lot_size_known_symbol_returns_real_value(client):
     data = resp.get_json()
     assert data["symbol"] == "NIFTY"
     assert data["exchange"] == "NFO"
-    assert data["lot_size"] == 75  # Current NIFTY lot size (post-2024 reset)
+    from flinttrade_core.instrument_lots import lot_size_from_master
+
+    assert data["lot_size"] == lot_size_from_master("NIFTY")
 
 
 def test_lot_size_is_flagged_as_sample_data_without_a_live_source(client):
@@ -372,7 +374,9 @@ def test_lot_size_fetch_failure_falls_back_flagged():
     resp = c.get("/api/v1/screener/lot-size?symbol=NIFTY&exchange=NFO")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["lot_size"] == 75
+    from flinttrade_core.instrument_lots import lot_size_from_master
+
+    assert data["lot_size"] == lot_size_from_master("NIFTY")
     assert data["is_sample_data"] is True
 
 

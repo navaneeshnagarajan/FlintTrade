@@ -87,6 +87,8 @@ export interface LiveViewProps {
   loading: boolean;
   riskLimits: { mtmTarget: number; mtmStoploss: number };
   accountReadsEnabled?: boolean;
+  /** Practice statutory charges already subtracted from ``netPnL``. */
+  estimatedCharges?: number;
 }
 
 export function LiveView({
@@ -103,6 +105,7 @@ export function LiveView({
   loading,
   riskLimits,
   accountReadsEnabled = true,
+  estimatedCharges = 0,
 }: LiveViewProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -305,6 +308,11 @@ export function LiveView({
         <span
           data-testid="net-pnl"
           className={`font-mono tabular-nums font-bold text-2xl ${netColor}`}
+          title={
+            estimatedCharges > 0
+              ? `Gross ${fmtSigned(netPnL + estimatedCharges)} · Charges ${fmtSigned(estimatedCharges).replace(/^[+−-]/, "")} (estimated)`
+              : undefined
+          }
         >
           {fmtSigned(netPnL)}
         </span>

@@ -28,6 +28,7 @@ from typing import Any, Callable, Literal
 
 import httpx
 
+from flinttrade_core.indian_charges import statutory_mirror_defaults
 from flinttrade_core.models import Order, OrderResponse
 from flinttrade_gateway.log_safety import account_ref
 from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
@@ -35,6 +36,11 @@ from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
 from .account_manager import BrokerAccount
 
 logger = logging.getLogger("flinttrade.ditto.mirror")
+
+
+def _statutory(name: str) -> float:
+    """One statutory mirror field, generated from the shared charges table."""
+    return statutory_mirror_defaults()[name]
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -184,22 +190,10 @@ class BrokerCostMetadata:
     This metadata is attached to a mirror config so the orchestration layer
     can route cost-sensitive orders to the cheapest execution venue.
 
-    Example (Kotak Neo post-April 2026)::
-
-        BrokerCostMetadata(
-            broker_key="kotak",
-            brokerage_frac=0.0,          # ₹0 brokerage
-            stt_futures_sell=0.0005,     # 0.05% from April 2026
-            stt_options_sell=0.0015,     # 0.15% from April 2026
-            exchange_charge_futures=1.73e-5,
-            exchange_charge_options=3.503e-4,
-            gst_rate=0.18,
-            sebi_charge_per_crore=10.0,
-            stamp_duty_buy_futures=2e-5,
-            stamp_duty_buy_options=3e-5,
-            demat_amc_annual=600.0,
-            notes="Zero brokerage on all API orders from Nov 2025",
-        )
+    Statutory fields default from ``flinttrade_core.indian_charges``. NSE and
+    BSE transaction totals differ: BSE futures are nil, and Sensex options
+    have their own premium rate. Brokerage stays on this object because it is
+    a broker setting, not a statutory rate.
     """
 
     broker_key: str = ""
@@ -209,19 +203,24 @@ class BrokerCostMetadata:
     brokerage_frac: float = 0.0002          # fraction of trade value
     brokerage_flat_per_order: float = 0.0   # flat ₹ per order (if applicable)
 
-    # STT (Securities Transaction Tax)
-    stt_futures_sell: float = 0.0005        # fraction of futures sell-side value
-    stt_options_sell: float = 0.0015        # fraction of options sell-side premium
-
-    # Exchange transaction charges (NSE defaults)
-    exchange_charge_futures: float = 1.73e-5    # ₹1.73 per lakh
-    exchange_charge_options: float = 3.503e-4   # ₹35.03 per lakh premium
-
-    # Regulatory
-    gst_rate: float = 0.18                  # 18% on brokerage + exchange + SEBI
-    sebi_charge_per_crore: float = 10.0     # ₹10 per crore
-    stamp_duty_buy_futures: float = 2e-5    # 0.002% buy-side futures
-    stamp_duty_buy_options: float = 3e-5    # 0.003% buy-side options
+    # Statutory fields are generated from the shared Indian charges table.
+    stt_futures_sell: float = field(default_factory=lambda: _statutory("stt_futures_sell"))
+    stt_options_sell: float = field(default_factory=lambda: _statutory("stt_options_sell"))
+    exchange_charge_futures: float = field(default_factory=lambda: _statutory("exchange_charge_futures"))
+    exchange_charge_options: float = field(default_factory=lambda: _statutory("exchange_charge_options"))
+    exchange_charge_futures_bse: float = field(
+        default_factory=lambda: _statutory("exchange_charge_futures_bse")
+    )
+    exchange_charge_sensex_options: float = field(
+        default_factory=lambda: _statutory("exchange_charge_sensex_options")
+    )
+    exchange_charge_bse_stock_options: float = field(
+        default_factory=lambda: _statutory("exchange_charge_bse_stock_options")
+    )
+    gst_rate: float = field(default_factory=lambda: _statutory("gst_rate"))
+    sebi_charge_per_crore: float = field(default_factory=lambda: _statutory("sebi_charge_per_crore"))
+    stamp_duty_buy_futures: float = field(default_factory=lambda: _statutory("stamp_duty_buy_futures"))
+    stamp_duty_buy_options: float = field(default_factory=lambda: _statutory("stamp_duty_buy_options"))
 
     # Annual fixed costs (not per-trade, but tracked for cost modelling)
     demat_amc_annual: float = 0.0           # Annual maintenance charge ₹

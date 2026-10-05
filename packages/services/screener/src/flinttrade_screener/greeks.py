@@ -4,7 +4,7 @@ Adapts openalgo-portfoliogreeks patterns. Supports:
 - Fetching Greeks via OpenAlgo /api/v1/optiongreeks and /api/v1/multioptiongreeks
 - Position-aware signs: BUY CE = +delta, SELL CE = -delta, BUY PE = -delta, SELL PE = +delta
 - Aggregate Delta, Gamma, Theta, Vega across entire portfolio
-- Lot-based calculations (NIFTY=75, BANKNIFTY=30, etc.)
+- Lot-based calculations. Example snippets below use quantity 65 for a NIFTY contract.
 - Local Black-Scholes via py_vollib_vectorized when API is slow
 - Exchange-specific expiry times: MCX 23:30, CDS 12:30 PM
 """
@@ -32,7 +32,7 @@ class OptionPosition:
     option_type: str = "CE"         # "CE" or "PE"
     action: str = "BUY"             # "BUY" or "SELL"
     lots: int = 1
-    lot_size: int = 75              # Per lot
+    lot_size: int = 65              # Example quantity. Pass the contract's own lot.
     underlying: str = ""            # e.g. "NIFTY" for lot size lookup
 
     @property
@@ -125,12 +125,12 @@ EXPIRY_TIMES: dict[str, tuple[int, int]] = {
 class PortfolioGreeks:
     """Portfolio-level Greeks aggregator.
 
-    Usage::
+    Example::
 
         pg = PortfolioGreeks(client)
         positions = [
-            OptionPosition(symbol="NIFTY26MAR2524000CE", action="SELL", lots=2, lot_size=75),
-            OptionPosition(symbol="NIFTY26MAR2524000PE", action="SELL", lots=2, lot_size=75),
+            OptionPosition(symbol="NIFTY26MAR2524000CE", action="SELL", lots=2, lot_size=65),
+            OptionPosition(symbol="NIFTY26MAR2524000PE", action="SELL", lots=2, lot_size=65),
         ]
         result = pg.calculate(positions)
         print(f"Net delta: {result.net_delta}, Net theta: {result.net_theta}")

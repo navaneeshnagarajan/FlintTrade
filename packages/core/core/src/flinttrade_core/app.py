@@ -3656,6 +3656,14 @@ def create_flask_app(
     except Exception as exc:
         logger.warning("workspace.json override failed (%s)", type(exc).__name__)
 
+    if runtime_ready and not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
+            from flinttrade_core.instrument_lot_master import start_instrument_master_refresh  # noqa: PLC0415
+
+            start_instrument_master_refresh()
+        except Exception as exc:  # noqa: BLE001 - the shipped excerpt remains usable
+            logger.warning("Instrument master refresh did not start (%s)", type(exc).__name__)
+
     # ------------------------------------------------------------------
     # Static frontend — serve the built React bundle from
     # packages/apps/terminal/dist/ with SPA fallback for client-side routes.
@@ -4944,6 +4952,12 @@ def create_flask_app(
     from .chart_prefs_routes import chart_prefs_bp  # noqa: PLC0415
 
     app.register_blueprint(chart_prefs_bp)
+
+    # Public scrip lots. Cache first, then the shipped excerpt. Explore and
+    # Learn read this without a session; it is not an order path.
+    from .instrument_lot_routes import instrument_lots_bp  # noqa: PLC0415
+
+    app.register_blueprint(instrument_lots_bp)
 
     # Register Bracket Order blueprint (/api/v1/orders/bracket*) and construct
     # the service it delegates to. Every bracket leg WRITE traverses the same

@@ -26,7 +26,7 @@ Example::
         "symbol": "NIFTY",
         "exchange": "NFO",
         "side": "BUY",
-        "quantity": "75",
+        "quantity": "65",
     }
     payload = receiver.parse_custom(raw)
     import asyncio

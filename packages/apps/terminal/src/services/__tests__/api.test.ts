@@ -3175,6 +3175,67 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).not.toContain("/v1/sandbox/orders");
   });
 
+  it("names Practice fill charges from the fill exchange, never a stored brokerage line", async () => {
+    mockConnectionState.apiKey = "";
+    mockConnectionState.status = "disconnected";
+    mockModeState.mode = "live";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success",
+      data: {
+        trades: [
+          {
+            trade_id: "TR-N",
+            order_id: "SB-N",
+            symbol: "NIFTY24APR23000CE",
+            exchange: "NFO",
+            action: "BUY",
+            quantity: 65,
+            price: 150,
+            traded_at: "2026-04-08T10:30:00+05:30",
+            charges_breakdown: {
+              total: 12.5,
+              stt: 4,
+              exchange_charges: 3.5,
+              exchange_label: "BSE transaction",
+              sebi_fee: 0.1,
+              stamp_duty: 1.2,
+              gst: 3.7,
+              brokerage: 40,
+            },
+          },
+          {
+            trade_id: "TR-S",
+            order_id: "SB-S",
+            symbol: "SENSEX24APR75000CE",
+            exchange: "BFO",
+            action: "BUY",
+            quantity: 20,
+            price: 400,
+            traded_at: "2026-04-08T10:40:00+05:30",
+            charges_breakdown: {
+              total: 8.25,
+              stt: 2,
+              exchange_charges: 2.6,
+              exchange_label: "NSE transaction",
+              sebi_fee: 0.05,
+              stamp_duty: 0.8,
+              gst: 2.8,
+              brokerage: 40,
+            },
+          },
+        ],
+      },
+    }));
+
+    const trades = await getTradebook(PRACTICE_READ_CONTEXT);
+    expect(trades.map((trade) => trade.estimatedCharges?.exchangeLabel)).toEqual([
+      "NSE transaction",
+      "BSE transaction",
+    ]);
+    expect(JSON.stringify(trades)).not.toMatch(/Brokerage/i);
+    expect(trades[0]?.estimatedCharges).not.toHaveProperty("brokerage");
+  });
+
   it("POST sends extra params merged with apikey", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ status: "success", data: { ltp: 22500 } }),
