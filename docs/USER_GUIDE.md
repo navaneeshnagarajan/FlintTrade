@@ -897,8 +897,8 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    front-month future. Select it.
 5. Set Quantity to 1 lot. After you select the future, Order Pad
    auto-fills Quantity from that instrument's current lot size — do
-   not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
-   figures separately. Choose **MARKET**. Side = **BUY**.
+   not hardcode 50. Learn Glossary follows the loaded instrument master
+   rather than fixed example figures. Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
    The sandbox order appears in the **Positions** widget immediately; the
    **Orders** widget shows it as filled (simulated). **Example Buy** on
@@ -980,11 +980,11 @@ place a simulated order, then review simulated orders, positions and P&L.
 Practice uses virtual funds, and simulated fills do not guarantee the same
 results in Live trading. Broker sandbox setup is not a prerequisite.
 
-With example data, `/learn` → Glossary → Lot Size, the glossary teaches dated
-Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
-MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
-link to circular NSE/FAOP/70616. Learn market facts that exchanges
-revise must ship dated, not as forever hardcodes.
+Under `/learn` → Glossary → Lot Size, the index-lot line follows the loaded
+instrument master, with contract expiry months where available. When a
+newer master loads, the line updates with it. The **Verify on NSE** link remains available. Check
+the selected instrument's current lot size before placing an order; dated
+example figures are not a substitute for the current master.
 
 ### Learn → Resource Hub (local documents)
 
