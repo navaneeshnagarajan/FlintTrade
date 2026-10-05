@@ -58,7 +58,7 @@ peerDependencyRules:
     '@napi-rs/wasm-runtime>@emnapi/core': '1'
     '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
 
-# These twenty entries are now the only copy: the duplicate "pnpm.overrides"
+# These entries are now the only copy: the duplicate "pnpm.overrides"
 # block in package.json was removed in the pnpm 10 migration, so this block is
 # what pnpm actually resolves against. Nothing cross-checks it any more - the
 # lockfile's own `overrides:` header is the audit trail, and an entry deleted
