@@ -329,9 +329,7 @@ def _check_node(report: Report, requirements: dict[str, str], pinned_node: str |
     lts_lines = sorted(
         major
         for major, dates in lifecycles.items()
-        if dates["lts"] is not None
-        and dates["lts"] <= today
-        and (dates["end"] is None or dates["end"] > today)
+        if dates["lts"] is not None and dates["lts"] <= today and (dates["end"] is None or dates["end"] > today)
     )
     band = lts_lines[-(_LINES_BACK_ALLOWED + 1) :] if lts_lines else []
 
@@ -389,7 +387,9 @@ def _check_node(report: Report, requirements: dict[str, str], pinned_node: str |
     line_releases = [
         entry["version"]
         for entry in releases
-        if isinstance(entry, dict) and isinstance(entry.get("version"), str) and _major(entry["version"]) == pinned_major
+        if isinstance(entry, dict)
+        and isinstance(entry.get("version"), str)
+        and _major(entry["version"]) == pinned_major
     ]
     if not line_releases:
         return
