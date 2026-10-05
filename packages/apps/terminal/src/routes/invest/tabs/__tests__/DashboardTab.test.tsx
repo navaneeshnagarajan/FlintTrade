@@ -305,6 +305,8 @@ describe("DashboardTab", () => {
     expect(screen.getByTestId("invest-net-worth").textContent).toBe(formatAccountNetWorth(452_300, true));
     expect(screen.getByTestId("invest-net-worth")).toHaveAccessibleName(accountNetWorthAccessibleName(452_300));
     expect(screen.getByRole("list", { name: "Portfolio allocation values" })).not.toHaveTextContent("≈");
+    expect(screen.getByTestId("invest-available-funds").textContent).toBe(formatAccountNetWorth(50_000));
+    expect(screen.getByTestId("invest-available-funds")).not.toHaveTextContent("≈");
   });
 
   it("labels the sample XIRR with one Example chip and no sample banner in Explore", () => {

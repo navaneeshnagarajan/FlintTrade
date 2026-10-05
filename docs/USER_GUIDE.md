@@ -3,7 +3,7 @@
 This guide walks you from a fresh install to local setup, sandbox workflows,
 and Live-mode safeguard verification. The default reading order is top-to-bottom
 — every section builds on the one before it. If you already have FlintTrade running, jump to the
-[Workspace tour](#workspace-tour) or use the section list in the sidebar.
+[Workspace tour](#5-workspace-tour) or use the section list in the sidebar.
 
 > **Beta software.** FlintTrade `v0.0.1` is not production ready and
 > does not provide financial advice. Read [disclaimer.md](../disclaimer.md)
@@ -443,14 +443,15 @@ The button's dot is the worst state. Example data is neutral and reads
 **Down** is red, a broker failure that marks the path unavailable is red,
 and Live with no broker connected is red (`No broker connected`). Laya
 **Degraded**, a degraded broker path, and an LLM of **Error** or
-**Disconnected** are amber. **Checking** (the summary reads `Checking Laya`)
-and **Still loading** (the summary reads `Laya still loading`) stay neutral.
-In Practice, broker **Unavailable** with Laya **Ready** and an LLM of **Not
-configured** leaves the dot green (`All systems ready`).
+**Disconnected** are amber. **Checking** (the summary reads `Checking Laya`),
+**Still loading** (`Laya still loading`) and **Downloading** (`Laya starting`)
+stay neutral. In Practice, broker **Unavailable** with Laya **Ready** is
+neutral and reads `Broker unavailable`. `All systems ready` appears only when
+no row is worse than Ready.
 
 Broker's value is **Connected**, **Connected (read)**, or **Unavailable**.
-Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**, or
-**Checking**. Laya starts **Down**, including before a heartbeat and when
+Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**,
+**Downloading**, or **Checking**. Laya starts **Down**, including before a heartbeat and when
 the ping omits `laya`. Missing status is never painted **Ready**. While the
 value is **Checking**, the row reads `Checking Laya…`. Download and model
 lines, and how to start the sidecar, are in [Start Laya](#start-laya):
@@ -537,7 +538,7 @@ The popover prints the chip label, not the raw code. For `download_failed`,
 `unverified`, `wrong_revision`, and `key_rejected` it also prints the tooltip, because
 that sentence does not start with the label. The status word on the chip
 is **Down**, except during the first load, when the chip says **Still
-loading**. A download in progress stays **Down** and is not **Still loading**.
+loading**. A download in progress reads **Downloading** in the neutral colour and is not **Still loading**.
 `<n>` in the port label is the sidecar port.
 
 | Code | Chip label | Tooltip |
@@ -554,8 +555,8 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
 | `key_missing` | The Laya API key file is missing. | `The Laya API key file is missing.` A health check does not replace this with Not started. |
 
-`downloading` and `download_failed` use the status word **Down**. Neither
-is **Still loading**. Orders are refused with
+`downloading` uses the status word **Downloading** (neutral colour) and
+`download_failed` uses **Down**. Neither is **Still loading**. Orders are refused with
 `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
 The `downloading` chip text is live progress, one decimal place, decimal
 gigabytes: `Downloading the model · X of Y GB`, for example `Downloading the model · 1.2 of 3.4 GB`. It has no
@@ -707,7 +708,7 @@ boot. Hub access stays off for that launch.
 
 When FlintTrade pins a new model version, the next start downloads it the
 same way. The chip is the same **Downloading the model · X of Y GB**
-line, with status **Down**. There is no Updating label. Your current copy
+line, with status **Downloading**. There is no Updating label. Your current copy
 stays in place until the new files match the pin. On a full match,
 FlintTrade renames `<workspace>/runtime/laya/checkpoint` aside to
 `checkpoint.old-<random>` in that same runtime directory, renames staging

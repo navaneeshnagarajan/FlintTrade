@@ -4,7 +4,11 @@ import { DeskStatusCluster } from "../DeskStatusCluster";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
-import { resetOperatorSignals, useOperatorSignalStore } from "@/stores/operatorSignalStore";
+import {
+  resetOperatorSignals,
+  useOperatorSignalStore,
+  type OperatorSignalSnapshot,
+} from "@/stores/operatorSignalStore";
 import { LAYA_NOT_QUALIFIED_FOR_LIVE, LAYA_START_COMMAND, LAYA_START_DOCS_HREF } from "@/lib/layaStatus";
 
 describe("DeskStatusCluster", () => {
@@ -192,7 +196,9 @@ describe("DeskStatusCluster", () => {
     });
     render(<DeskStatusCluster />);
     const chip = screen.getByTestId("laya-surface");
-    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveTextContent("Laya Downloading");
+    expect(chip.textContent).not.toMatch(/Down\b/);
+    expect(chip.className).not.toMatch(/text-loss/);
     expect(chip.textContent).not.toMatch(/Still loading/);
     expect(chip.getAttribute("title") ?? "").not.toMatch(/Next:/);
     fireEvent.click(chip);
@@ -355,5 +361,75 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-reason")).toHaveTextContent("Not started");
     expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
+  });
+
+  describe("stacked Status rows", () => {
+    function openStacked(signals: Partial<OperatorSignalSnapshot>) {
+      useModeStore.setState({ mode: "practice" });
+      useOperatorSignalStore.setState(signals);
+      render(<DeskStatusCluster variant="stacked" />);
+    }
+
+    it("shows the Ready reason once, as the bold line", () => {
+      openStacked({ decisionStatus: "down", layaPracticeStatus: "ready", layaLiveQualified: false });
+      const panel = screen.getByTestId("desk-status");
+      expect(panel.textContent?.split(LAYA_NOT_QUALIFIED_FOR_LIVE)).toHaveLength(2);
+      const reason = screen.getByTestId("laya-reason");
+      expect(reason).toHaveTextContent(LAYA_NOT_QUALIFIED_FOR_LIVE);
+      expect(reason.className).toMatch(/font-medium/);
+      expect(screen.getByTestId("laya-start-docs")).toBeInTheDocument();
+    });
+
+    it("shows a failed download once, with the help line under it", () => {
+      openStacked({
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaLiveQualified: false,
+        layaReason: "download_failed",
+        layaPort: 8000,
+      });
+      const panel = screen.getByTestId("desk-status");
+      expect(panel.textContent?.split("Can't download the model")).toHaveLength(2);
+      expect(panel.textContent?.split("Check your connection, then Start Laya again.")).toHaveLength(2);
+      const reason = screen.getByTestId("laya-reason");
+      expect(reason).toHaveTextContent("Can't download the model");
+      expect(reason.className).toMatch(/font-medium/);
+      expect(reason.nextElementSibling).toBe(screen.getByTestId("laya-reason-tooltip"));
+    });
+
+    it("shows a model that cannot be verified once", () => {
+      openStacked({
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaLiveQualified: false,
+        layaReason: "unverified",
+        layaPort: 8000,
+      });
+      expect(screen.getByTestId("desk-status").textContent?.split("Can't verify the model")).toHaveLength(2);
+    });
+
+    it("shows Downloading in the neutral colour with the progress line once", () => {
+      openStacked({
+        decisionStatus: "down",
+        layaPracticeStatus: "down",
+        layaLiveQualified: false,
+        layaReason: "downloading",
+        layaPort: 8000,
+        layaDownloadBytes: 1_200_000_000,
+        layaDownloadTotal: 3_400_000_000,
+      });
+      const row = screen.getByTestId("laya-surface");
+      expect(row).toHaveTextContent("Laya Downloading");
+      expect(row.textContent).not.toMatch(/Down\b/);
+      expect(row.querySelector(".text-loss")).toBeNull();
+      const panel = screen.getByTestId("desk-status");
+      expect(panel.textContent?.split("Downloading the model · 1.2 of 3.4 GB")).toHaveLength(2);
+    });
+
+    it("keeps the grey description only when there is no reason line", () => {
+      openStacked({ decisionStatus: "ready", layaPracticeStatus: "ready", layaLiveQualified: true });
+      expect(screen.queryByTestId("laya-reason")).not.toBeInTheDocument();
+      expect(screen.getByTestId("desk-status")).toHaveTextContent("Checks every order before it is placed.");
+    });
   });
 });

@@ -634,7 +634,8 @@ checkpoint already on disk is left in place. An extra loadable file in a
 complete download is `unverified`. A dropped connection, a partial or
 missing file, or a read error is `download_failed` ("Can't download the
 model"; tooltip "Check your connection, then Start Laya again."). The
-status word for `downloading` and `download_failed` is Down, not Still
+status word for `downloading` is Downloading (neutral colour) and for
+`download_failed` it is Down, never Still
 loading, and orders use "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
 model cache alone. The sidecar does not start on files that do not match
 the pin. If the download does not finish, the reason is `download_failed`, not
