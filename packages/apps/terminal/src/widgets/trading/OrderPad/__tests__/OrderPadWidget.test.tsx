@@ -136,14 +136,9 @@ describe("OrderPadWidget", () => {
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
     mockGetSymbol.mockReset();
-    mockGetSymbol.mockResolvedValue({
-      symbol: "NIFTY",
-      name: "Nifty 50",
-      exchange: "NSE",
-      instrumenttype: "INDEX",
-      lotsize: 1,
-      tick_size: 0.05,
-    });
+    mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
+      symbol, name: symbol, exchange, instrumenttype: "INDEX", lotsize: 1, tick_size: 0.05,
+    }));
     // Default: no LTP available
     vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
   });
@@ -869,7 +864,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
     mockGetSymbol.mockReset();
-    // An empty lookup keeps the symbol-info lot. A seeded NIFTY row would win.
+    // Selected-contract metadata controls the lot, regardless of underlying rows.
     setInstrumentLotRows([]);
   });
 
@@ -915,7 +910,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("uses the instrument master lot when the symbol lookup disagrees", async () => {
+  it("uses selected-contract metadata rather than another master contract", async () => {
     setInstrumentLotRows([
       {
         SEM_SMST_SECURITY_ID: "CACHE-NIFTY",
@@ -932,8 +927,69 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     });
     renderNfoPad();
 
+    await screen.findByText("Lot: 75");
+    expect(screen.queryByText("Lot: 65")).not.toBeInTheDocument();
+    expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO");
+  });
+
+  it("uses the selected later expiry's lot during a revision window", async () => {
+    setInstrumentLotRows([
+      {
+        SEM_SMST_SECURITY_ID: "SYNTHETIC-OCT", SEM_CUSTOM_SYMBOL: "NIFTY",
+        SEM_INSTRUMENT_NAME: "FUTIDX", SEM_TRADING_SYMBOL: "NIFTY-OCT2099-FUT",
+        SEM_EXPIRY_DATE: "2099-10-27", SEM_LOT_UNITS: "75",
+      },
+      {
+        SEM_SMST_SECURITY_ID: "SYNTHETIC-NOV", SEM_CUSTOM_SYMBOL: "NIFTY",
+        SEM_INSTRUMENT_NAME: "FUTIDX", SEM_TRADING_SYMBOL: "NIFTY-NOV2099-FUT",
+        SEM_EXPIRY_DATE: "2099-11-24", SEM_LOT_UNITS: "65",
+      },
+    ]);
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-NOV2099-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-NOV2099-FUT", exchange: "NFO" },
+    })} />);
     await screen.findByText("Lot: 65");
+    expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY-NOV2099-FUT", "NFO");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    expect(qtyInput).toHaveValue(65);
+    fireEvent.change(qtyInput, { target: { value: "75" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect((await screen.findAllByText(/positive multiple of the lot size \(65\)/i)).length).toBeGreaterThanOrEqual(1);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an underlying row as proof when contract lookup fails", async () => {
+    setInstrumentLotRows([
+      { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "75" },
+    ]);
+    mockGetSymbol.mockRejectedValue(new Error("selected contract unavailable"));
+    renderNfoPad();
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { symbol: "NIFTY25APR2422000CE", exchange: "NFO" },
+    { symbol: "NIFTY28MAR2422000CE", exchange: "BFO" },
+    { symbol: "", exchange: "NFO" },
+    { symbol: "NIFTY28MAR2422000CE", exchange: "" },
+  ])("refuses lot metadata for a different or missing identity: $symbol / $exchange", async (identity) => {
+    mockGetSymbol.mockResolvedValue({
+      ...identity, name: "NIFTY", instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await waitFor(() => expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO"));
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Lot: 75")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
   it("submits when the quantity is an exact lot multiple", async () => {
@@ -981,10 +1037,9 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "OP001" });
     mockGetSymbol.mockReset();
-    mockGetSymbol.mockResolvedValue({
-      symbol: "RELIANCE", name: "Reliance", exchange: "NSE",
-      instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
-    });
+    mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
+      symbol, name: symbol, exchange, instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
+    }));
     mockMode.current = "practice";
   });
 
@@ -1069,14 +1124,9 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "PRAC001" });
     mockGetSymbol.mockReset();
-    mockGetSymbol.mockResolvedValue({
-      symbol: "NIFTY",
-      name: "Nifty",
-      exchange: "NSE",
-      instrumenttype: "EQ",
-      lotsize: 1,
-      tick_size: 0.05,
-    });
+    mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
+      symbol, name: symbol, exchange, instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
+    }));
     mockMode.current = "practice";
   });
 
