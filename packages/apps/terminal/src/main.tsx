@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
+import { initialiseGlitchtip } from "./lib/glitchtip";
 import { getColdStartPath } from "@/lib/personaDefaultRoute";
 import { createBrowserRouter, Navigate } from "react-router";
 import { DESK_ROUTE_ALIASES, PUBLIC_ENTRY_REDIRECTS } from "./routes/deskAliases";
@@ -52,17 +53,8 @@ function ExplorePathElement() {
 // ---------------------------------------------------------------------------
 const glitchtipDsn = import.meta.env.VITE_GLITCHTIP_DSN as string | undefined;
 if (glitchtipDsn) {
-  // Dynamic import so the Sentry bundle is excluded entirely when no DSN is set.
-  import("@sentry/react").then((Sentry) => {
-    Sentry.init({
-      dsn: glitchtipDsn,
-      integrations: [Sentry.browserTracingIntegration()],
-      tracesSampleRate: 0.1,
-      environment: import.meta.env.DEV ? "development" : "production",
-    });
-  }).catch(() => {
-    // Silently ignore — error tracking must never break the app.
-  });
+  // Keep the build-time guard so an unconfigured build can omit the SDK.
+  void initialiseGlitchtip(glitchtipDsn, import.meta.env.DEV ? "development" : "production");
 }
 
 const HomeRoute = lazy(() => import("./routes/HomeRoute"));
