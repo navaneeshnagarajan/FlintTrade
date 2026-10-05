@@ -1109,6 +1109,229 @@ class TestAuditLogger:
 # ======================================================================
 
 
+class TestIdempotentAuditReceipt:
+    """Stable-ID acknowledgements require one exact, complete chained record."""
+
+    EVENT_ID = "24f523c6-b510-44ab-a80c-da6940438325"
+    EVENT_TYPE = "ACCOUNT_MUTATION_TERMINAL"
+
+    def _write_receipt(self, tmp_path, *, predecessor=False):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        fields = {"phase": "committed", "epoch": 1, "enabled": True,
+                  "roles": ["quotes", "ticks"], "nested": {"count": 2}, "absent": None}
+        audit = AuditLogger(str(tmp_path))
+        if predecessor:
+            audit.log_event("PREDECESSOR", value="original")
+        assert audit.log_idempotent_event(self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields) == self.EVENT_ID
+        audit.close()
+        return AuditLogger(str(tmp_path)), next(tmp_path.glob("audit_*.jsonl")), fields
+
+    @staticmethod
+    def _rehash(record):
+        import hashlib
+
+        payload = {key: value for key, value in record.items() if key != "hash"}
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        record["hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def test_exact_receipt_survives_restart_and_field_order_is_irrelevant(self, tmp_path):
+        from types import MappingProxyType
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit, _, fields = self._write_receipt(tmp_path, predecessor=True)
+        audit.log_event("FOLLOWING", value="unchanged")
+        audit.close()
+        reopened = AuditLogger(str(tmp_path))
+        reordered = MappingProxyType(dict(reversed(list(fields.items()))))
+        assert reopened.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=reordered
+        ) is True
+        assert reopened.verify_chain()["checked"] == 3
+
+    @pytest.mark.parametrize("change", ["missing", "extra", "changed", "bool-int", "int-float", "list-order"])
+    def test_receipt_binds_every_field_and_exact_json_types(self, tmp_path, change):
+        audit, _, fields = self._write_receipt(tmp_path)
+        if change == "missing":
+            fields.pop("absent")
+        elif change == "extra":
+            fields["unrecorded"] = None
+        elif change == "changed":
+            fields["nested"] = {"count": 3}
+        elif change == "bool-int":
+            fields["enabled"] = 1
+        elif change == "int-float":
+            fields["epoch"] = 1.0
+        else:
+            fields["roles"].reverse()
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+    @pytest.mark.parametrize("identity", [
+        "wrong-type", "different-id", "uppercase", "urn", "braces", "compact", "version-one", "wrong-variant",
+        "missing-id", "non-string-id", "empty-type", "non-string-type",
+    ])
+    def test_receipt_requires_exact_canonical_v4_identity(self, tmp_path, identity):
+        audit, _, fields = self._write_receipt(tmp_path)
+        event_type, event_id = self.EVENT_TYPE, self.EVENT_ID
+        if identity == "wrong-type":
+            event_type = "ANOTHER_EVENT"
+        elif identity == "different-id":
+            event_id = "68e05e48-f6c0-4ee4-bd28-d1bff69f0cef"
+        elif identity == "uppercase":
+            event_id = event_id.upper()
+        elif identity == "urn":
+            event_id = "urn:uuid:" + event_id
+        elif identity == "braces":
+            event_id = "{" + event_id + "}"
+        elif identity == "compact":
+            event_id = event_id.replace("-", "")
+        elif identity == "version-one":
+            event_id = "24f523c6-b510-14ab-a80c-da6940438325"
+        elif identity == "wrong-variant":
+            event_id = "24f523c6-b510-44ab-780c-da6940438325"
+        elif identity == "missing-id":
+            event_id = ""
+        elif identity == "non-string-id":
+            event_id = None
+        elif identity == "empty-type":
+            event_type = ""
+        else:
+            event_type = 1
+        assert audit.verify_idempotent_event_receipt(event_type, event_id=event_id, fields=fields) is False
+
+    @pytest.mark.parametrize("invalid", ["reserved", "object", "nan", "infinity", "tuple", "set", "large", "cycle"])
+    def test_receipt_rejects_unsafe_or_unbounded_input_without_raising(self, tmp_path, invalid):
+        audit, _, fields = self._write_receipt(tmp_path)
+        if invalid == "reserved":
+            fields["hash"] = "not-a-field"
+        elif invalid == "object":
+            fields["bad"] = object()
+        elif invalid == "nan":
+            fields["bad"] = float("nan")
+        elif invalid == "infinity":
+            fields["bad"] = float("inf")
+        elif invalid == "tuple":
+            fields["bad"] = ("a", "b")
+        elif invalid == "set":
+            fields["bad"] = {"a", "b"}
+        elif invalid == "large":
+            fields["bad"] = "x" * (64 * 1024)
+        else:
+            fields["bad"] = fields
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+    @pytest.mark.parametrize("duplicate", ["same", "different-type", "different-fields"])
+    def test_any_second_claim_to_the_id_is_ambiguous_even_in_a_valid_chain(self, tmp_path, duplicate):
+        audit, _, fields = self._write_receipt(tmp_path)
+        duplicate_fields = dict(fields)
+        if duplicate == "different-fields":
+            duplicate_fields["epoch"] = 2
+        event_type = "ANOTHER_EVENT" if duplicate == "different-type" else self.EVENT_TYPE
+        audit.log_event(event_type, event_id=self.EVENT_ID, **duplicate_fields)
+        audit.close()
+        assert audit.verify_chain()["ok"] is True
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+    @pytest.mark.parametrize("corruption", ["ancestor", "detached", "tail", "target"])
+    def test_receipt_requires_the_whole_present_chain_anchored_at_genesis(self, tmp_path, corruption):
+        audit, path, fields = self._write_receipt(tmp_path, predecessor=True)
+        lines = path.read_text().splitlines()
+        if corruption == "ancestor":
+            record = json.loads(lines[0])
+            record["value"] = "tampered"
+            lines[0] = json.dumps(record)
+        elif corruption == "detached":
+            lines.pop(0)
+        elif corruption == "tail":
+            lines.append('{"incomplete":')
+        else:
+            record = json.loads(lines[1])
+            record["epoch"] = 2
+            lines[1] = json.dumps(record)
+        path.write_text("\n".join(lines) + "\n")
+        before = path.read_bytes()
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+        assert path.read_bytes() == before, "verification must never repair or truncate evidence"
+
+    @pytest.mark.parametrize("metadata", ["bool-seq", "float-seq", "string-seq", "missing-seq", "missing-prev",
+                                         "wrong-prev", "non-object", "non-json-fields"])
+    def test_valid_rehash_does_not_make_malformed_chain_metadata_acceptable(self, tmp_path, metadata):
+        audit, path, fields = self._write_receipt(tmp_path)
+        record = json.loads(path.read_text())
+        if metadata == "non-object":
+            encoded = "[]"
+        else:
+            if metadata == "bool-seq":
+                record["seq"] = False
+            elif metadata == "float-seq":
+                record["seq"] = 0.0
+            elif metadata == "string-seq":
+                record["seq"] = "0"
+            elif metadata == "missing-seq":
+                record.pop("seq")
+            elif metadata == "missing-prev":
+                record.pop("prev_hash")
+            elif metadata == "wrong-prev":
+                record["prev_hash"] = "f" * 64
+            else:
+                record["unrelated"] = float("nan")
+            self._rehash(record)
+            encoded = json.dumps(record)
+        path.write_text(encoded + "\n")
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+    @pytest.mark.parametrize("duplicate", ["top-level", "nested"])
+    def test_duplicate_json_keys_are_ambiguous_even_when_values_agree(self, tmp_path, duplicate):
+        audit, path, fields = self._write_receipt(tmp_path)
+        encoded = path.read_text()
+        if duplicate == "top-level":
+            encoded = encoded.replace('"seq": 0', '"seq": 0,"seq": 0')
+        else:
+            encoded = encoded.replace('"count": 2', '"count": 2,"count": 2')
+        assert encoded != path.read_text()
+        path.write_text(encoded)
+        assert audit.verify_chain()["ok"] is True, "the existing parser collapses duplicate keys"
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+    def test_compressed_retained_receipt_is_verified_and_corrupt_older_file_is_not_skipped(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        _, path, fields = self._write_receipt(tmp_path)
+        path.replace(tmp_path / "audit_2020-01-01.jsonl")
+        audit = AuditLogger(str(tmp_path))
+        assert audit.compress_old_files(older_than_days=1) == 1
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is True
+        (tmp_path / "audit_2019-12-31.jsonl.gz").write_bytes(b"not a gzip stream")
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+    def test_absent_receipt_and_non_utf8_evidence_fail_closed(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        assert audit.verify_idempotent_event_receipt(self.EVENT_TYPE, event_id=self.EVENT_ID, fields={}) is False
+        audit, path, fields = self._write_receipt(tmp_path)
+        path.write_bytes(path.read_bytes() + b"\xff\n")
+        assert audit.verify_idempotent_event_receipt(
+            self.EVENT_TYPE, event_id=self.EVENT_ID, fields=fields
+        ) is False
+
+
 class TestAuditHashChain:
     """The audit log is a real SHA-256 hash chain, not just JSONL."""
 

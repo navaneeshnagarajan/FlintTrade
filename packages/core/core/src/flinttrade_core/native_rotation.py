@@ -52,21 +52,28 @@ class _RotationAdmissionRevoked(RuntimeError):
 class NativeRotationAdmission:
     """Generation-fence refresh admission and shared publication during shutdown."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, publication_lock: Any | None = None,
+                 publication_admission: Callable[[], bool] | None = None,
+                 refresh_admission: Callable[[], bool] | None = None) -> None:
         self._condition = threading.Condition()
-        self._publication_lock = threading.Lock()
+        self._publication_lock = publication_lock or threading.Lock()
+        self._publication_admission = publication_admission
+        self._refresh_admission = refresh_admission
         self._generation = 0
         self._accepting = True
         self._active = 0
 
     def acquire(self) -> int:
         """Admit one refresh and return its publication generation."""
-        with self._condition:
-            if not self._accepting:
-                raise RuntimeError("native session rotation is shutting down")
-            generation = self._generation
-            self._active += 1
-            return generation
+        with self._publication_lock:
+            if self._refresh_admission is not None and not self._refresh_admission():
+                raise _RotationAdmissionRevoked("account lifecycle admission lane is owned")
+            with self._condition:
+                if not self._accepting:
+                    raise RuntimeError("native session rotation is shutting down")
+                generation = self._generation
+                self._active += 1
+                return generation
 
     def release(self, generation: int) -> None:
         """Release one admitted refresh, including a generation revoked in flight."""
@@ -89,6 +96,8 @@ class NativeRotationAdmission:
     ) -> Any:
         """Run one shared mutation only while the admitted generation is current."""
         with self._publication_lock:
+            if self._publication_admission is not None and not self._publication_admission():
+                raise _RotationAdmissionRevoked("account lifecycle publication lane is owned")
             self.assert_current(generation)
             return operation()
 
@@ -120,7 +129,14 @@ def _rotation_admission(app: Any) -> NativeRotationAdmission:
     with _ROTATION_ADMISSION_CONFIG_LOCK:
         admission = app.config.get(_NATIVE_ROTATION_ADMISSION_CONFIG)
         if admission is None:
-            admission = NativeRotationAdmission()
+            from .app import _account_publication_allowed  # noqa: PLC0415
+            admission = NativeRotationAdmission(
+                publication_lock=app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock()),
+                publication_admission=lambda: _account_publication_allowed(app),
+                refresh_admission=lambda: (
+                    app.extensions.get("flinttrade.broker_account_lifecycle_owner") is None
+                    or app.extensions["flinttrade.broker_account_lifecycle_owner"].legacy_mutation_admission_allowed()),
+            )
             app.config[_NATIVE_ROTATION_ADMISSION_CONFIG] = admission
         if not isinstance(admission, NativeRotationAdmission):
             raise RuntimeError("native session rotation admission owner is invalid")

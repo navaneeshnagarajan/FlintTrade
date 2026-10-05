@@ -19,6 +19,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
+- **Native broker account transaction foundation.** Strict mutation contracts,
+  encrypted durable claims, witnessed workspace recovery and retained worker
+  custody underpin the synthetic account coordinator. Read generations verify
+  durable enrolment and workspace coherence. Terminal receipts retain redacted
+  audit events with stable identities and verified retryable delivery. Native
+  account HTTP mutations remain `503` and native reads remain `409` until their
+  separate production cutovers. Refs #328.
+
 - **Estimated charges on Practice fills.** Every Practice fill runs through the shared Indian statutory calculator and stores the breakdown and the day's charges total. Fills show `Charges ₹X (estimated)`. Positions and Performance show net P&L, with gross and charges in the tooltip. Home and Invest subtract those charges from net worth. The Practice source line is `Practice account, after estimated charges`.
 
 ### Fixed
