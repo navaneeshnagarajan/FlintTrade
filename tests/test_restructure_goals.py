@@ -403,7 +403,7 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "Distribution-signed macOS releases require the complete Apple notarisation secret trio." in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
-    assert "prerelease: ${{ contains(inputs.tag, '-') }}" in workflow
+    assert "prerelease: ${{ fromJSON(steps.release_metadata.outputs.prerelease) }}" in workflow
     assert "target_commitish: ${{ needs.validate.outputs.source_sha }}" in workflow
     assert 'overwrite_files: false' in workflow
     assert 'overwrite_files: true' not in workflow
