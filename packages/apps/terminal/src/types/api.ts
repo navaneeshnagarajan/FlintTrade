@@ -51,6 +51,16 @@ export interface Position {
   ltp: number;
   pnl: number;
   pnlPercent: number;
+  /** True when every fill on this contract was restored from a backup. */
+  restored?: boolean;
+  /** How the mark was chosen. Absent when the figure is a live quote. */
+  ltpBasis?: "ltp" | "last_close" | "fill_price";
+  priceSource?: "ltp" | "last_close";
+  priceAgeS?: number;
+  priceLabel?: string;
+  /** Futures mark base. `fallback` means the figure is approximate. */
+  markSource?: "avg" | "fallback";
+  settlementPrice?: number;
 }
 
 export interface Order {
@@ -78,6 +88,8 @@ export interface Trade {
   quantity: number;
   price: number;
   timestamp: string;
+  /** Present when the fill carries a strategy label, including the restore marker. */
+  strategy?: string;
 }
 
 export interface Holding {
@@ -94,6 +106,10 @@ export interface Funds {
   availableCash: number;
   usedMargin: number;
   totalBalance: number;
+  /** Ledger cash including blocked margin, when an adapter has normalised it. */
+  ledgerBalance?: number;
+  /** True when earlier days' futures MTM are already in that ledger. */
+  futuresMtmInLedger?: boolean;
 }
 
 // --- Options ---
@@ -182,6 +198,16 @@ export interface PlaceOrderParams {
    * the backend as `disclosed_quantity`.
    */
   disclosedQuantity?: number;
+  /**
+   * Free-text plan for admission. Empty is a normal case: Practice clamps
+   * and Live denies. It is not a broker instruction.
+   */
+  rationale?: string;
+  /**
+   * Marks `price` as a live LTP. Practice ignores an unmarked number so a
+   * typed price cannot bypass the shared fill rule.
+   */
+  priceBasis?: "ltp";
 }
 
 export interface SmartOrderParams extends PlaceOrderParams {

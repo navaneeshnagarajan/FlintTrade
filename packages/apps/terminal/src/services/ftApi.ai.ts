@@ -850,9 +850,8 @@ export const searchObsidianNotes = (query: string) =>
   get<ObsidianSearchHit[]>("ai/obsidian/search?q=" + encodeURIComponent(query));
 
 // ---------------------------------------------------------------------------
-// Autonomous agent control plane (/ai/agent/*) — live mode, gated, OFF by
-// default (workspace ai.autonomous_agent.enabled). The agent runs as its own
-// ACL'd principal; every order traverses the full gated execution path.
+// Autonomous agent control plane (/ai/agent/*). The signed session selects
+// Practice or Live; every order traverses its canonical admission path.
 // ---------------------------------------------------------------------------
 
 export interface AgentPositionDetails {
@@ -870,6 +869,10 @@ export interface AgentSnapshot {
   params: Record<string, unknown>;
   actor_id: string;
   agent_status?: string;
+  status?: string;
+  mode?: "practice" | "live";
+  run_id?: string;
+  error?: string | null;
   daily_pnl?: number;
   cycle_count?: number;
   active_positions?: Record<string, number>;
@@ -878,10 +881,27 @@ export interface AgentSnapshot {
   last_signals?: Record<string, string>;
   squared_off?: boolean;
   stop_loss_hit?: boolean;
+  stop_failure?: string;
+  shutdown_complete?: boolean;
+  /** Backend-recorded Practice usage; omitted when no model evidence is available. */
+  model_usage?: {
+    model_call_limit: number;
+    /** Maximum output tokens per response, not an input-token or monetary cap. */
+    model_output_limit: number;
+    model_calls_used: number;
+    model_calls_remaining: number;
+    status: "available" | "exhausted" | "evidence_unavailable";
+  };
 }
 
 export interface AgentStartParams {
   symbols: string[];
+  /** Optional operator-authored Practice session plan; never grants execution authority. */
+  entry_rationale?: string;
+  /** Practice analysis/reflection call limit, 1–10,000; defaults to 500. */
+  model_call_limit?: number;
+  /** Practice output tokens per response, 16–4,096; defaults to 512. */
+  model_output_limit?: number;
   exchange?: string;
   product?: string;
   max_position_size?: number;
@@ -909,7 +929,7 @@ function withAgentBrokerTarget(params: AgentStartParams): AgentStartParams {
   return params;
 }
 
-/** Live agent/session snapshot — honest `{running: false}` shape when idle. */
+/** Mode-specific agent snapshot; `running` denotes a supervised worker, including waiting. */
 export const getAgentStatus = () => get<AgentSnapshot>("ai/agent/status");
 
 /** Start a trading session (202). Backend refusals carry actionable messages. */
@@ -919,3 +939,37 @@ export const startAgent = (params: AgentStartParams) =>
 /** Request a stop; squares off tracked positions unless squareOff is false. */
 export const stopAgent = (squareOff = true) =>
   post<AgentSnapshot>("ai/agent/stop", { square_off: squareOff });
+
+
+export interface PracticeAgentRun {
+  run_id: string;
+  mode: "practice";
+  status: string;
+  config: Record<string, unknown>;
+  snapshot: Partial<AgentSnapshot>;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PracticeAgentEvent {
+  seq: number;
+  run_id: string;
+  kind: string;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
+/** Durable Practice history, newest runs first, bounded by the server. */
+export const getPracticeAgentRuns = () =>
+  get<PracticeAgentRun[]>("ai/agent/practice/runs");
+
+/** Ordered evidence after a sequence cursor; each request is bounded. */
+export const getPracticeAgentEvents = (runId: string, after = 0, limit = 100) =>
+  get<PracticeAgentEvent[]>(
+    `ai/agent/practice/runs/${encodeURIComponent(runId)}/events?after=${after}&limit=${limit}`,
+  );
+
+/** Acknowledge interruption only after server-side flatness checks; never replay writes. */
+export const resolvePracticeAgentRun = (runId: string) =>
+  post<AgentSnapshot>(`ai/agent/practice/runs/${encodeURIComponent(runId)}/resolve`);

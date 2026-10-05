@@ -5,6 +5,7 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { Globe } from "lucide-react";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 interface GlobalIndex {
   name: string;
@@ -31,6 +32,7 @@ export function GlobalCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Global
           </p>
+          <ExampleLabel testId="global-example-label" />
         </div>
 
         <div className="flex-1 space-y-2">

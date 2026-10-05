@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_HOTKEYS,
@@ -49,7 +50,7 @@ import {
 async function fetchServerShortcuts(): Promise<Record<string, string[]> | null> {
   try {
     const res = await fetch("/ft-api/v1/shortcuts", {
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(false),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { overrides?: Record<string, string[]> };
@@ -65,7 +66,7 @@ async function pushServerShortcuts(
   try {
     await fetch("/ft-api/v1/shortcuts", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(true),
       body: JSON.stringify({ overrides }),
     });
   } catch {
@@ -77,7 +78,7 @@ async function resetServerShortcuts(): Promise<void> {
   try {
     await fetch("/ft-api/v1/shortcuts/reset", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(true),
     });
   } catch {
     // noop

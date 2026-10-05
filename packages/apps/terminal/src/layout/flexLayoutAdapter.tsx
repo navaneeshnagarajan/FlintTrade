@@ -311,6 +311,11 @@ export interface AddPanelOptions {
  */
 export interface WorkspaceApi {
   addPanel(options: AddPanelOptions): void;
+  /**
+   * Point the existing Order Pad at a new instrument. Returns false when
+   * the desk has no Order Pad yet, so the caller can add the first one.
+   */
+  retargetOrderPad(params: Record<string, unknown>, title?: string): boolean;
   panelCount(): number;
   toJSON(): Record<string, unknown>;
   /** Replace the whole model with a preset document. */
@@ -337,6 +342,31 @@ export function createWorkspaceApi(
         // Degenerate model with no tabset at all — rebuild around the tab.
         loadModel(createWorkspaceModel(workspaceJson(rowJson(100, [tabsetJson(100, [tab])]))));
       }
+    },
+    retargetOrderPad: (params, title) => {
+      const model = getModel();
+      let tabId: string | undefined;
+      model.visitNodes((node) => {
+        if (tabId || node.getType() !== "tab") return;
+        const tab = node as TabNode;
+        if (tab.getComponent() === "orderpad") tabId = tab.getId();
+      });
+      if (!tabId) return false;
+      const node = model.getNodeById(tabId) as TabNode | undefined;
+      const current = (node?.getConfig() as Record<string, unknown> | undefined) ?? {};
+      model.doAction(Actions.updateNodeAttributes(tabId, {
+        config: { ...current, ...params },
+        ...(title ? { name: title } : {}),
+      }));
+      model.doAction(Actions.selectTab(tabId));
+      // FlexLayout memoises tab content and skips a redraw when the tab node
+      // object is unchanged, so the pad would keep the previous symbol.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+          detail: { tabId, params, nonce: crypto.randomUUID() },
+        }));
+      }
+      return true;
     },
     panelCount: () => countTabs(getModel()),
     toJSON: () => getModel().toJson() as unknown as Record<string, unknown>,

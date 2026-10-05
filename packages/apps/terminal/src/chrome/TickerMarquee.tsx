@@ -307,14 +307,16 @@ export default function TickerMarquee({
         }
       `}</style>
 
-      {/* Track: contains two identical copies for seamless wrap */}
-      <div
-        className="ticker-track flex items-center whitespace-nowrap"
-        aria-hidden="true"
-      >
+      {/* Track: the first copy is the accessible tape. The clone is visual only. */}
+      <div className="ticker-track flex items-center whitespace-nowrap">
         <TickerStrip symbols={symbols} />
-        {/* Duplicate for seamless loop */}
-        <TickerStrip symbols={symbols} />
+        <span
+          data-testid="ticker-marquee-clone"
+          aria-hidden="true"
+          className="inline-flex items-center"
+        >
+          <TickerStrip symbols={symbols} />
+        </span>
       </div>
 
       {announce ? (

@@ -282,7 +282,7 @@ export function BacktestConfigPanel({
               <Button
                 onClick={onRun}
                 disabled={isRunning || !selectedStrategy}
-                className="w-full bg-accent text-white hover:bg-accent/90 font-sans text-sm"
+                className="w-full bg-accent text-accent-foreground hover:bg-accent/90 font-sans text-sm"
               >
                 {isRunning ? (
                   <>

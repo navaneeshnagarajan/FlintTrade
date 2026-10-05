@@ -325,7 +325,7 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
 
     await expect(fetchJson(page, "GET", ADVISOR_STATUS_PATH)).resolves.toEqual({
       status: "success",
-      data: { configured: false, provider: "none", model: "none" },
+      data: { configured: false, provider: "", model: "", source: "default" },
     });
     expect(registry.callCount("GET", ADVISOR_STATUS_PATH)).toBe(1);
     await expect(registry.dispose()).resolves.toBeUndefined();
@@ -336,7 +336,6 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     const registry = await createRegistry(page, "operator status probes");
     registerOperatorStatusProbes(registry, { expectedCalls: { minimum: 1, maximum: 2 } });
     await expect(fetchJson(page, "GET", "/ft-api/api/v1/ping")).resolves.toEqual({ status: "ok" });
-    await expect(fetchJson(page, "GET", "/ft-api/health")).resolves.toEqual({ status: "healthy" });
     await expect(fetchJson(page, "GET", "/ft-api/v1/config/llm")).resolves.toMatchObject({
       status: "success",
     });
@@ -650,7 +649,7 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     const registry = await createRegistry(page, "invalid bounded calls");
 
     for (const [name, expectedCalls] of [
-      ["zero minimum", { minimum: 0, maximum: 1 }],
+      ["negative minimum", { minimum: -1, maximum: 1 }],
       ["fractional maximum", { minimum: 1, maximum: 1.5 }],
       ["inverted range", { minimum: 3, maximum: 2 }],
     ] as const) {
@@ -662,8 +661,16 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
           expectedCalls,
           handler: () => ({ json: { unreachable: true } }),
         });
-      }).toThrow(/expectedCalls range requires positive integer minimum\/maximum with minimum <= maximum/i);
+      }).toThrow(/expectedCalls range requires a non-negative integer minimum/i);
     }
+
+    registry.register({
+      name: "optional unread handler",
+      method: "GET",
+      path: "/api/optional-unread",
+      expectedCalls: { minimum: 0, maximum: 1 },
+      handler: () => ({ json: { unread: true } }),
+    });
 
     await expect(registry.dispose()).resolves.toBeUndefined();
   });

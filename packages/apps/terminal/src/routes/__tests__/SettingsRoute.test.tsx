@@ -214,7 +214,8 @@ describe("SettingsRoute", () => {
   it("renders the Settings heading", () => {
     render(<SettingsRoute />);
 
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("shows settings sections sidebar navigation", () => {
@@ -329,7 +330,7 @@ describe("SettingsRoute", () => {
     render(<SettingsRoute />);
 
     const panel = screen.getByRole("tabpanel");
-    const selectedTab = screen.getByRole("tab", { name: "LLM Config" });
+    const selectedTab = screen.getByRole("tab", { name: "AI" });
     expect(selectedTab).toHaveAttribute("aria-controls", panel.id);
     for (const tab of screen.getAllByRole("tab")) {
       if (tab !== selectedTab) expect(tab).not.toHaveAttribute("aria-controls");
@@ -345,7 +346,7 @@ describe("SettingsRoute", () => {
     expect(llmSurface).toBeInTheDocument();
     expect(llmSurface).not.toBeVisible();
 
-    fireEvent.click(screen.getByRole("tab", { name: "LLM Config" }));
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
     expect(screen.getByTestId("llm-section")).toBe(llmSurface);
     expect(llmSurface).toBeVisible();
   });

@@ -5,36 +5,16 @@ name: Supply Chain
 # drift, install enforcement, Windows ACL hardening, cross-platform smoke, lockfile
 # drift, and the CLA GPG binding (external forks only).
 #
-# CI right-sizing: the Linux audits run per-push/PR; the expensive cross-platform jobs
-# (windows-acl-test, cross-platform-smoke) run ONLY on the weekly cron + workflow_dispatch,
-# never on push/pull_request. Every job carries timeout-minutes as a runaway guard.
+# Linux audits run on dependency or installation changes in PRs, and in full on
+# protected-branch pushes, the weekly schedule and manual runs. Cross-platform
+# jobs remain scheduled/manual. Test owns Electron package verification.
 
 on:
   pull_request:
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'flinttrade-design/**'   # ME35
-      - '.local/**'              # ME35
-      # NB: no ignore for 'notice'/'notice.generated' — a notice-only commit MUST
-      # still run the NOTICE-drift gate below (a hand-edited notice has to fail CI).
-      - '.gitignore'
-      - '.gitattributes'
-      - '.editorconfig'
-      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main, dev]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'flinttrade-design/**'   # ME35
-      - '.local/**'              # ME35
-      - '.gitignore'
-      - '.gitattributes'
-      - '.editorconfig'
-      - '.github/ISSUE_TEMPLATE/**'
   schedule:
     - cron: "0 3 * * 1"          # weekly Monday 03:00 UTC = 08:30 IST (per §3.4)
   workflow_dispatch:
@@ -81,6 +61,32 @@ env:
   ZERODHA_ACCESS_TOKEN: ""
 
 jobs:
+  # Shared fail-open classification includes locks, NOTICE/licences, installers,
+  # guard scripts and build workflows; unknown paths select all checks.
+  changed-surfaces:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      dependencies: ${{ steps.classify.outputs.dependencies }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: '3.12' }
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FORCE_FULL: ${{ github.event_name != 'pull_request' }}
+        run: |
+          if [ "$FORCE_FULL" = "true" ]; then
+            python scripts/check_changes.py --full --github-output
+          else
+            python scripts/check_changes.py --base "$BASE_SHA" --head "$HEAD_SHA" --github-output
+          fi
+
   # Consolidated Linux Python gate — pip-audit + brokers.lock integrity + broker SDK
   # licences + NOTICE drift + provenance + install enforcement + uv.lock drift, as
   # ordered steps sharing a single checkout/setup. Previously eight separate jobs.
@@ -88,7 +94,8 @@ jobs:
     name: Python audit (pip-audit + lock/licence/provenance/install gates)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Remove stale pip-audit evidence from checkout
@@ -133,7 +140,8 @@ jobs:
     name: Rust audit (cargo audit)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
@@ -153,7 +161,8 @@ jobs:
     name: Node audit (pnpm audit)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -166,47 +175,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - name: HTTP cache dependency contract (offline)
+        run: node --test scripts/__tests__/http-cache-semantics.test.mjs
       - name: pnpm audit (allowlist)
         run: python scripts/pnpm-audit-with-allowlist.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with: { name: pnpm-audit-report, path: pnpm-audit-report.json }
 
-  electron-package-verification:
-    name: Electron Linux directory verification
-    # ubuntu-24.04, matching flint.toml [requirements].os_requires. Same
-    # reasoning as test.yml's electron-desktop-tests: this lane packages `--dir`
-    # and verifies the security contract, publishing nothing, so the build host's
-    # glibc never reaches a user. desktop-release.yml's Linux build legs stay on
-    # 22.04 deliberately - they ship a compiled native addon inside the AppImage.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Verify bootstrap resource manifest
-        run: pnpm --filter @flinttrade/desktop verify:bootstrap-manifest
-      - name: Bundle Electron main and preload
-        run: pnpm --filter @flinttrade/desktop bundle
-      - name: Exercise native POSIX no-replace promotion
-        run: pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
-      - name: Package Linux Electron directory
-        run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
-      - name: Verify packaged Electron security contract
-        run: pnpm --filter @flinttrade/desktop verify:package
-
   transitive-licences:
     name: transitive dependency licence sweep
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
     continue-on-error: true       # informational; does not block merge in v1.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

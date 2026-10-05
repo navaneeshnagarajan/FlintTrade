@@ -58,6 +58,73 @@ def test_openalgo_config_pre_setup_status_never_returns_raw_key(monkeypatch, tmp
     assert "pre-setup-bridge-secret" not in response.get_data(as_text=True)
 
 
+def test_openalgo_config_api_key_does_not_read_or_change_existing_account(
+    monkeypatch, tmp_path, backend_lease_factory,
+):
+    """After setup, an API key is not a session and must not read or write."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
+    app.config["TESTING"] = True
+    app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
+    Workspace().set("openalgo.api_key", "operator-bridge-secret")
+    Workspace().set("openalgo.host", "http://127.0.0.1")
+
+    denied = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": "replaced-secret", "host": "http://10.0.0.8"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+    assert denied.status_code == 401
+    assert Workspace().get("openalgo.api_key") == "operator-bridge-secret"
+    assert Workspace().get("openalgo.host") == "http://127.0.0.1"
+
+    leaked = app.test_client().get(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key", "Authorization": "Bearer not-a-session"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+    assert leaked.status_code == 401
+    body = leaked.get_data(as_text=True)
+    assert "operator-bridge-secret" not in body
+    assert "replaced-secret" not in body
+
+
+def test_openalgo_config_session_can_update_after_setup(monkeypatch, tmp_path, backend_lease_factory):
+    """A session JWT can still save the connection after the account exists."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core import auth_routes
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
+    app.config["TESTING"] = True
+    app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
+    Workspace().set("openalgo.api_key", "operator-bridge-secret")
+    monkeypatch.setattr(auth_routes, "decode_token", lambda _token: {"type": "session", "setup_session": True})
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"Authorization": "Bearer setup-session"},
+        json={"telegram_username": "wizard-trader"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+    assert response.status_code == 200
+    assert Workspace().get("openalgo.telegram_username") == "wizard-trader"
+    assert Workspace().get("openalgo.api_key") == "operator-bridge-secret"
+
+
 def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)

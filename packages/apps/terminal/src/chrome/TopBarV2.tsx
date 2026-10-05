@@ -1,9 +1,18 @@
 /**
- * TopBarV2 — redesigned glass chrome bar (38px, single row).
+ * TopBarV2 — the app bar (44px, single row), in three zones:
  *
- * Layout (left → right):
- *   [FlintLogo] | [SearchBtn Ctrl+K] [Tools overflow] [Bell] [Account]
- *   [Workspace] [ModeIndicator] [FeedFreshness] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
+ *   [Menu*] [F FlintTrade] | [Search symbols, pages, commands…  Ctrl K]
+ *                                  [Account*] [Mode] [Market · IST] [Status]
+ *                                  | [Ask AI] [Tools] [Fullscreen] [Bell] [Avatar]
+ *
+ *   * Menu appears below 768px and opens the navigation drawer; Account
+ *     appears once a broker account exists.
+ *
+ * Each status has one home. Broker, Laya and LLM live in the Status menu:
+ * one worst-first dot on the bar, plain words in its popover. Feed
+ * provenance lives once, at the start of the ticker. The market session has
+ * one label from one source (useOperatorMarketSession). The Workspace
+ * switcher lives on the Trade desk toolbar, where workspaces apply.
  *
  * FT-UX-002: TopBar is not a quote rail. The dedicated scrolling ticker
  * lives under this bar (TickerBar / TickerStrip). There is no Settings gear.
@@ -11,17 +20,8 @@
  * place. Tools → Settings opens the full Settings route. Compact Trade
  * hides the tool ribbon but keeps Quick Settings on this bar.
  *
- * Design:
- *   - Background: rgba(12, 12, 20, 0.85) + backdrop-filter: blur(16px)
- *   - Border-bottom: 1px solid rgba(255,255,255,0.05)
- *   - Sticky top, z-index 100
- *   - 1px × 18px rgba dividers between groups
- *
- * NO AI pill — that is a separate persistent overlay at bottom-right.
- * NO route tabs — those move to the sidebar in Phase 2.
- *
- * Click fires flinttrade:open-command-palette; keyboard handling is owned by
- * the active route's global shortcut layer.
+ * Click on Search fires flinttrade:open-command-palette; keyboard handling is
+ * owned by the active route's global shortcut layer.
  *
  * Skinny windows (FT-MOBILE-002): ticker hides under ~480px; at ~390px
  * Workspace and secondary chrome move into a More sheet so Mode stays
@@ -31,40 +31,75 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
-import { Search, Maximize2, Minimize2, MoreHorizontal, SlidersHorizontal, Wrench } from "lucide-react";
+import {
+  Menu,
+  Search,
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
+  SlidersHorizontal,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
+import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
+import { useSidebarStore } from "@/stores/sidebarStore";
+import { useSkillStore } from "@/stores/skillStore";
 import { DeskStatusCluster } from "@/chrome/DeskStatusCluster";
 import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { brokerSessionDarkened } from "@/lib/operatorIncident";
 import { useSkillContent } from "@/hooks/useSkillContent";
-import {
-  MARKET_TIMINGS_MAX_AGE_MS,
-  useTimings,
-} from "@/hooks/useMarketStatus";
+import { useOperatorMarketSession } from "@/hooks/useOperatorMarketSession";
 import { ping } from "@/services/api";
 import {
-  getNseCashSessionStatus,
+  operatorMarketLabel,
   type MarketSessionInfo,
 } from "@/lib/market";
+import { cn } from "@/lib/utils";
 import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
-import FeedFreshnessChip from "@/components/FeedFreshnessChip";
 import AccountSwitcher from "./AccountSwitcher";
 import ModeIndicator from "./ModeIndicator";
 import type { TickerMode } from "./TickerMarquee";
 import ToolsDropdown from "./ToolsDropdown";
 import QuickAccessPanel from "./QuickAccessPanel";
+import SystemStatusMenu from "./SystemStatusMenu";
 import TopBarMoreSheet, { MoreRow } from "./TopBarMoreSheet";
 import { useChromeCollapse } from "./useChromeCollapse";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { TOGGLE_AI_TUTOR_EVENT } from "@/lib/aiTutorEvents";
+
+const NAV_DRAWER_MAX_WIDTH = 767;
+
+function useNavDrawerViewport(): boolean {
+  const query = `(max-width: ${NAV_DRAWER_MAX_WIDTH}px)`;
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(query).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(query);
+    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches);
+    setMatches(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
+/** Shared look for every icon-and-label control on the bar. */
+const barButton =
+  "h-8 shrink-0 gap-1.5 px-2.5 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary";
 
 // ---------------------------------------------------------------------------
 // ISTClock
@@ -103,92 +138,62 @@ function ISTClock() {
 // MarketStatus — explicit NSE session state, separate from Live execution mode
 // ---------------------------------------------------------------------------
 
-function compactSessionLabel(info: MarketSessionInfo): string {
-  if (info.status === "unavailable") return "N/A";
-  return info.label;
-}
-
 function sessionChipTone(info: MarketSessionInfo): "green" | "amber" | "muted" {
   if (info.isGreenOpen) return "green";
-  if (info.status === "unavailable") return "amber";
-  if (info.status === "closed") return "muted";
+  if (info.status === "unavailable" || info.status === "closed") return "muted";
   return "amber";
 }
 
-function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
-  const { data: timings, dataUpdatedAt, isError, isLoading } = useTimings();
-  const currentStatus = useCallback(() => {
-    const timingIsTrustworthy =
-      !isError &&
-      !isLoading &&
-      dataUpdatedAt > 0 &&
-      Date.now() - dataUpdatedAt <= MARKET_TIMINGS_MAX_AGE_MS;
-    return getNseCashSessionStatus(timingIsTrustworthy ? timings : undefined);
-  }, [dataUpdatedAt, isError, isLoading, timings]);
-  const [statusInfo, setStatusInfo] = useState<MarketSessionInfo>(() =>
-    currentStatus(),
-  );
-
-  useEffect(() => {
-    const update = () => setStatusInfo(currentStatus());
-    update();
-    const id = setInterval(update, 30_000);
-    return () => clearInterval(id);
-  }, [currentStatus]);
-
+function MarketSessionStatus() {
+  const statusInfo = useOperatorMarketSession();
+  const label = operatorMarketLabel(statusInfo);
   const tone = sessionChipTone(statusInfo);
 
   return (
     <div className="flex items-center gap-1 shrink-0">
       <div
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded"
-        style={{
-          background: tone === "green" ? "var(--color-bullish-bg)" : "var(--glass-l2-bg)",
-          border: tone === "green"
-            ? "1px solid var(--color-bullish-border)"
-            : "1px solid var(--glass-l2-border)",
-        }}
-        aria-label={`Market status: ${statusInfo.label}`}
-        title={statusInfo.title}
+        className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5"
+        aria-label={`Market status: ${label}`}
+        title={
+          statusInfo.status === "closed" || statusInfo.status === "unavailable"
+            ? label
+            : statusInfo.title
+        }
         data-testid="market-session-status"
       >
         <div
-          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
             tone === "green"
               ? "bg-profit animate-[pulse-glow_2s_ease-in-out_infinite]"
               : tone === "amber"
                 ? "bg-amber-400"
-                : "bg-text-muted/50"
-          }`}
+                : "bg-text-muted",
+          )}
           aria-hidden="true"
         />
         <span
-          className={`text-xs font-medium tabular-nums whitespace-nowrap ${
+          className={cn(
+            "whitespace-nowrap text-xs font-medium tabular-nums",
             tone === "green"
               ? "text-profit"
-              : tone === "amber" && statusInfo.status === "unavailable"
-                ? "text-amber-400"
-                : tone === "amber"
-                  ? "text-warning"
-                  : "text-text-muted"
-          }`}
+              : tone === "amber"
+                ? "text-[var(--color-warning-text,var(--color-warning))]"
+                : "text-text-secondary",
+          )}
         >
-          {compact ? compactSessionLabel(statusInfo) : statusInfo.label}
+          {label}
         </span>
       </div>
       {statusInfo.foSecondary ? (
         <div
-          className="flex items-center px-1.5 py-0.5 rounded"
-          style={{
-            background: "var(--glass-l2-bg)",
-            border: "1px solid var(--glass-l2-border)",
-          }}
+          className="flex items-center rounded-md border border-border-default px-1.5 py-0.5"
           aria-label={statusInfo.foSecondary}
           title={statusInfo.foSecondary}
           data-testid="fo-session-status"
         >
-          <span className="text-xs font-medium tabular-nums whitespace-nowrap text-text-secondary">
-            {compact ? "F&O 15:40" : statusInfo.foSecondary}
+          <span className="whitespace-nowrap text-xs font-medium tabular-nums text-text-secondary">
+            {statusInfo.foSecondary}
           </span>
         </div>
       ) : null}
@@ -196,18 +201,32 @@ function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
   );
 }
 
+/** Market session and IST clock share one chip: both answer "can I trade now?". */
+function MarketChip({ showClock }: { showClock: boolean }) {
+  return (
+    <div
+      className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-border-default bg-surface-base/60 pl-1 pr-2"
+      data-testid="market-chip"
+    >
+      <MarketSessionStatus />
+      {showClock ? (
+        <>
+          <span aria-hidden="true" className="h-3.5 w-px bg-border-default" />
+          <span className="pl-1">
+            <ISTClock />
+          </span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Divider — 1px × 18px rgba separator
+// Divider
 // ---------------------------------------------------------------------------
 
 function Divider() {
-  return (
-    <div
-      className="w-px shrink-0"
-      style={{ height: 18, background: "var(--glass-chrome-border, rgba(255,255,255,0.08))" }}
-      aria-hidden="true"
-    />
-  );
+  return <div className="mx-1 h-5 w-px shrink-0 bg-border-default" aria-hidden="true" />;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,15 +260,16 @@ function FullscreenButton() {
     <Button
       variant="ghost"
       size="sm"
-      className="h-7 w-7 p-0 text-text-muted hover:text-text-primary"
+      className="h-8 w-8 p-0 text-text-secondary hover:text-text-primary"
       onClick={toggle}
       aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen (F11)"}
+      title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen (F11)"}
       data-testid="fullscreen-btn"
     >
       {isFullscreen ? (
-        <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+        <Minimize2 className="h-4 w-4" aria-hidden="true" />
       ) : (
-        <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+        <Maximize2 className="h-4 w-4" aria-hidden="true" />
       )}
     </Button>
   );
@@ -267,8 +287,9 @@ function Avatar() {
   return (
     <button
       type="button"
-      className="w-6 h-6 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center text-accent text-xs font-bold shrink-0 hover:bg-accent/30 transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+      className="ml-1 flex size-8 shrink-0 items-center justify-center rounded-full border border-accent/30 bg-accent/15 text-xs font-bold text-accent transition-colors hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       aria-label="Open profile and settings"
+      title="Profile and settings"
       data-testid="avatar-btn"
       onClick={() => navigate("/settings#profile")}
     >
@@ -278,36 +299,79 @@ function Avatar() {
 }
 
 // ---------------------------------------------------------------------------
-// SearchButton
+// Search — looks and reads like a search field; opens the command palette
 // ---------------------------------------------------------------------------
 
 const isMac =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-function SearchButton() {
+function SearchButton({ variant = "field" }: { variant?: "field" | "row" }) {
   const handleClick = useCallback(() => {
     window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
   }, []);
 
   const shortcutHint = isMac ? "⌘K" : "Ctrl+K";
 
+  if (variant === "row") {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 gap-1.5 px-2 text-text-secondary hover:text-text-primary"
+        onClick={handleClick}
+        aria-label={`Search (${shortcutHint})`}
+        data-testid="search-btn"
+      >
+        <Search className="h-4 w-4" aria-hidden="true" />
+        <span className="text-xs">Search</span>
+      </Button>
+    );
+  }
+
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
+    <button
+      type="button"
       onClick={handleClick}
       aria-label={`Search (${shortcutHint})`}
       data-testid="search-btn"
+      className={cn(
+        "group flex h-8 w-full min-w-0 max-w-md items-center gap-2 rounded-md border border-border-default bg-surface-base/70 px-2.5 text-left transition-colors",
+        "hover:border-border-strong hover:bg-surface-hover",
+      )}
     >
-      <Search className="h-3.5 w-3.5" aria-hidden="true" />
-      <span className="text-xs hidden sm:inline">Search</span>
+      <Search className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-xs text-text-muted group-hover:text-text-secondary">
+        Search symbols, pages, commands…
+      </span>
       <kbd
-        className="hidden sm:inline-flex items-center rounded border border-border-default px-1 text-xxs text-text-muted/60 font-mono leading-none"
+        className="hidden shrink-0 items-center rounded border border-border-default px-1.5 py-px font-mono text-xxs text-text-muted sm:inline-flex"
         aria-hidden="true"
       >
         {shortcutHint}
       </kbd>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Ask AI — launches the shared AI tutor panel
+// ---------------------------------------------------------------------------
+
+function AskAIButton() {
+  const aiTutorEnabled = useSkillStore((s) => s.helpPrefs.aiTutor);
+  if (!aiTutorEnabled) return null;
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className={barButton}
+      onClick={() => window.dispatchEvent(new CustomEvent(TOGGLE_AI_TUTOR_EVENT))}
+      aria-label="Ask AI"
+      data-testid="ask-ai-btn"
+    >
+      <Sparkles className="h-4 w-4 text-accent" aria-hidden="true" />
+      <span className="hidden lg:inline">Ask AI</span>
     </Button>
   );
 }
@@ -327,11 +391,15 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const directBrokerConnected = useDirectBrokerConnected();
   const operatorIncident = useOperatorIncident();
   const moneyPathClosed = brokerSessionDarkened(operatorIncident);
+  const hasBrokerAccounts = useBrokerStore((s) => s.accounts.length > 0);
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
   const setTickerMode = useSettingsStore((s) => s.setTickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
   const { collapseOverflow } = useChromeCollapse();
+  const navDrawer = useNavDrawerViewport();
+  const mobileNavOpen = useSidebarStore((s) => s.mobileOpen);
+  const setMobileNavOpen = useSidebarStore((s) => s.setMobileOpen);
   const {
     showToolRibbon,
     setToolsExpanded,
@@ -384,8 +452,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   const barStyle: React.CSSProperties = {
     background: "var(--glass-chrome-bg, rgba(12,12,20,0.85))",
-    backdropFilter: "blur(16px)",
-    WebkitBackdropFilter: "blur(16px)",
     borderBottom: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.05))",
   };
 
@@ -398,43 +464,54 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   return (
     <div
-      className="sticky top-0 z-100 flex items-center min-h-9.5 px-3 shrink-0 select-none animate-fade-in overflow-x-hidden"
+      className="sticky top-0 z-100 flex h-11 shrink-0 select-none items-center gap-2 overflow-x-hidden px-3"
       style={barStyle}
       data-testid="topbar-v2"
     >
-      {/* ── GROUP 1: Logo ─────────────────────────────────────────────────── */}
+      {/* ── Brand (and the navigation drawer toggle on narrow screens) ─────── */}
+      {navDrawer ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 shrink-0 p-0 text-text-secondary hover:text-text-primary"
+          onClick={() => setMobileNavOpen(!mobileNavOpen)}
+          aria-label="Open navigation"
+          aria-expanded={mobileNavOpen}
+          data-testid="nav-drawer-btn"
+        >
+          <Menu className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      ) : null}
       <Link
         to="/home"
-        aria-label="Flint home"
-        className="flex items-center gap-1.5 shrink-0 mr-2"
+        aria-label="FlintTrade home"
+        className="flex shrink-0 items-center gap-2 rounded-md pr-1"
         data-testid="logo-link"
       >
-        <LogoIcon size={18} aria-hidden />
+        <LogoIcon size={20} aria-hidden />
         {!collapseOverflow && (
-          <span className="font-heading font-bold text-sm text-text-primary tracking-tight leading-none">
-            Flint
+          <span className="font-heading text-sm font-bold leading-none tracking-tight text-text-primary">
+            FlintTrade
           </span>
         )}
       </Link>
 
-      <Divider />
+      {/* ── Search ─────────────────────────────────────────────────────────── */}
+      <div className="flex min-w-0 flex-1 items-center px-1 md:px-3">
+        {!collapseOverflow && !hideDeskRibbon ? <SearchButton /> : null}
+      </div>
 
-      {/* ── GROUP 2: Spacer — ticker lives under TopBar (FT-UX-002) ───────── */}
-      <div className="flex-1 min-w-0 mx-2" aria-hidden="true" />
-
-      <Divider />
-
-      {/* ── GROUP 3: Right controls ───────────────────────────────────────── */}
-      <div className="flex items-center gap-1 ml-2 shrink-0">
+      {/* ── Context and actions ───────────────────────────────────────────── */}
+      <div className="flex shrink-0 items-center gap-1">
         {collapseOverflow ? (
           <>
             <ModeIndicator />
-            <FeedFreshnessChip />
-            <MarketSessionStatus compact />
+            <MarketSessionStatus />
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 gap-1 text-text-muted hover:text-text-primary shrink-0"
+              className="h-8 px-2 text-text-secondary hover:text-text-primary shrink-0"
               onClick={() => {
                 setMoreOpen((open) => !open);
                 setToolsOpen(false);
@@ -444,18 +521,25 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
               aria-haspopup="dialog"
               data-testid="topbar-more-btn"
             >
-              <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+              <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
             </Button>
           </>
         ) : (
           <>
-            {!hideDeskRibbon && <SearchButton />}
+            {hasBrokerAccounts ? <AccountSwitcher /> : null}
+            <ModeIndicator />
+            <div className="hidden md:block">
+              <MarketChip showClock={!hideDeskRibbon} />
+            </div>
+            <SystemStatusMenu />
+            <Divider />
+            <AskAIButton />
             {!hideDeskRibbon && (
               <Button
                 ref={toolsRef}
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
+                className={barButton}
                 onClick={() => {
                   setQuickSettingsOpen(false);
                   setToolsOpen((open) => !open);
@@ -465,8 +549,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 aria-haspopup="menu"
                 data-testid="tools-btn"
               >
-                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="text-xs hidden md:inline">Tools</span>
+                <Wrench className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden lg:inline">Tools</span>
               </Button>
             )}
             {hideDeskRibbon && (
@@ -475,7 +559,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 gap-1 text-text-muted hover:text-text-primary shrink-0"
+                className={barButton}
                 onClick={() => {
                   if (quickSettingsOpen) {
                     setQuickSettingsOpen(false);
@@ -488,8 +572,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 aria-haspopup="dialog"
                 data-testid="quick-settings-btn"
               >
-                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="text-xs">Quick Settings</span>
+                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+                <span>Quick Settings</span>
               </Button>
             )}
             {hideDeskRibbon && (
@@ -497,31 +581,17 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 gap-1 text-text-muted hover:text-text-primary shrink-0"
+                className={barButton}
                 onClick={() => setToolsExpanded(true)}
                 aria-label="Watchlist and desk tools"
                 data-testid="topbar-desk-tools-btn"
               >
-                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="text-xs">Desk tools</span>
+                <Wrench className="h-4 w-4" aria-hidden="true" />
+                <span>Desk tools</span>
               </Button>
             )}
-            <DeskStatusCluster />
-            <NotificationBell />
-            <AccountSwitcher />
-            {!hideDeskRibbon && <WorkspaceSwitcher />}
-            <ModeIndicator />
-            <FeedFreshnessChip />
-            <Divider />
             {!hideDeskRibbon && <FullscreenButton />}
-            <div className={hideDeskRibbon ? undefined : "hidden lg:block"}>
-              <MarketSessionStatus />
-            </div>
-            {!hideDeskRibbon && (
-              <div className="hidden xl:block">
-                <ISTClock />
-              </div>
-            )}
+            <NotificationBell />
             <Avatar />
           </>
         )}
@@ -532,22 +602,24 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
           <span className="w-20 shrink-0 text-xs text-text-muted">Workspace</span>
           <WorkspaceSwitcher />
         </MoreRow>
-        <MoreRow>
-          <span className="w-20 shrink-0 text-xs text-text-muted">Account</span>
-          <AccountSwitcher />
+        {hasBrokerAccounts ? (
+          <MoreRow>
+            <span className="w-20 shrink-0 text-xs text-text-muted">Account</span>
+            <AccountSwitcher />
+          </MoreRow>
+        ) : null}
+        <MoreRow className="flex-col items-stretch py-1">
+          <DeskStatusCluster variant="stacked" />
         </MoreRow>
         <MoreRow>
-          <DeskStatusCluster />
-        </MoreRow>
-        <MoreRow>
-          <SearchButton />
+          <SearchButton variant="row" />
         </MoreRow>
         <MoreRow>
           <Button
             ref={toolsRef}
             variant="ghost"
             size="sm"
-            className="min-h-11 px-2 gap-1.5 text-text-muted hover:text-text-primary"
+            className="min-h-11 px-2 gap-1.5 text-text-secondary hover:text-text-primary"
             onClick={() => {
               setQuickSettingsOpen(false);
               setToolsOpen((open) => !open);
@@ -557,7 +629,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
             aria-haspopup="menu"
             data-testid="tools-btn"
           >
-            <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+            <Wrench className="h-4 w-4" aria-hidden="true" />
             <span className="text-xs">Tools</span>
           </Button>
         </MoreRow>
@@ -576,7 +648,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
           <Button
             variant="ghost"
             size="sm"
-            className="min-h-11 px-2 text-text-muted hover:text-text-primary"
+            className="min-h-11 px-2 text-text-secondary hover:text-text-primary"
             onClick={() => {
               if (tickerForcedOnNarrow) {
                 setTickerForcedOnNarrow(false);

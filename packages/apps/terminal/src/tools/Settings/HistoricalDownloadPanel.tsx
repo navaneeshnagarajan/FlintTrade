@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, AlertTriangle, CheckCircle2, Loader2, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { SectionTitle } from "./shared";
 
 const BASE = "/ft-api/v1/historify";
@@ -32,7 +33,7 @@ interface DownloadJob {
 async function startDownload(): Promise<DownloadJob> {
   const res = await fetch(`${BASE}/download`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify({}),
   });
   const json = (await res.json().catch(() => null)) as { data?: DownloadJob; message?: string } | null;
@@ -42,7 +43,9 @@ async function startDownload(): Promise<DownloadJob> {
 }
 
 async function fetchStatus(jobId: string): Promise<DownloadJob> {
-  const res = await fetch(`${BASE}/download/status?job_id=${encodeURIComponent(jobId)}`);
+  const res = await fetch(`${BASE}/download/status?job_id=${encodeURIComponent(jobId)}`, {
+    headers: buildHeaders(false),
+  });
   const json = (await res.json()) as { data: DownloadJob };
   return json.data;
 }

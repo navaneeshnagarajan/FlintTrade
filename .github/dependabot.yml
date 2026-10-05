@@ -1,7 +1,7 @@
 # Dependabot version updates. Security updates are enabled separately in the
 # repository security settings; this file adds scheduled version-bump PRs for the
-# monorepo's four ecosystems. Updates are grouped to keep PR volume low, and the
-# Conventional-Commit prefix keeps release-please's changelog accurate.
+# monorepo's four ecosystems. Staggered weekdays and grouped version updates
+# reduce simultaneous CI runs. Security updates remain managed separately.
 version: 2
 updates:
   # Pinned GitHub Actions (all workflows pin by commit SHA) — keep them current.
@@ -10,7 +10,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "ci"
     groups:
@@ -22,8 +22,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
+      day: "tuesday"
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore"
       include: "scope"
@@ -36,8 +36,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
+      day: "wednesday"
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore"
       include: "scope"
@@ -50,8 +50,8 @@ updates:
     directory: "/packages/core/ticks"
     schedule:
       interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
+      day: "thursday"
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore"
       include: "scope"

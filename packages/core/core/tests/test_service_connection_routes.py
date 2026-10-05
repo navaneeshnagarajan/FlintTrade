@@ -1251,6 +1251,18 @@ def test_verified_invalid_identity_is_never_recast_as_same_bearer_key(tmp_path, 
         ({}, None, "{", "application/json", 400, "invalid_request"),
         ({}, None, "{\"padding\":\"" + "x" * (32 * 1024) + "\"}", "application/json", 413, "request_too_large"),
     ],
+    # Pytest publishes node IDs in PYTEST_CURRENT_TEST; Windows environment
+    # values cannot contain the oversized body used by the final case.
+    ids=(
+        "missing-revision",
+        "missing-idempotency-key",
+        "wildcard-revision",
+        "weak-revision",
+        "multiple-revisions",
+        "unsupported-media-type",
+        "invalid-json",
+        "oversized-body",
+    ),
 )
 def test_mutation_http_boundary_errors_are_closed(
     headers, json_body, raw_body, content_type, status, error, tmp_path, monkeypatch
@@ -1297,7 +1309,9 @@ def test_repeated_if_match_fields_are_rejected_as_a_list(tmp_path, monkeypatch):
     assert response.get_json() == {"error": "invalid_request"}
 
 
-@pytest.mark.parametrize("tag", ['"' + "a" * 4095 + '"', '"snowman\u2603"'])
+@pytest.mark.parametrize(
+    "tag", ['"' + "a" * 4095 + '"', '"snowman\u2603"'], ids=("over-limit", "non-latin1")
+)
 def test_over_limit_or_non_latin1_if_match_is_rejected(tag, tmp_path, monkeypatch):
     app = _unit_app(tmp_path / "workspace", monkeypatch)
 

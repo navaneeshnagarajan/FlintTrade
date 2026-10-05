@@ -92,7 +92,7 @@ class GatedStrategyDispatcher:
         if (selected_adapter, selected_account) != (self._adapter_id, self._account_id):
             raise RuntimeError("Live strategy dispatch target does not match the request selector")
 
-        blocked = _laya_place_block(order)
+        blocked = await asyncio.to_thread(_laya_place_block, order)
         if blocked is not None:
             raise RuntimeError(str(blocked["message"]))
 
@@ -156,6 +156,7 @@ def _laya_place_block(order: Order) -> dict[str, object] | None:
             "product": order.product,
             "price": order.price,
             "trigger_price": order.trigger_price,
+            "rationale": order.admission_note,
         },
         mode="live",
         source="automate",

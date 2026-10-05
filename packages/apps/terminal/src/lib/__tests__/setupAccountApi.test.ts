@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { enableFlintTradeTotp, openFlintTradeVault, setupFlintTradeAccount } from "../setupAccountApi";
+import {
+  AccountSetupError,
+  completeFlintTradeSetup,
+  enableFlintTradeTotp,
+  fetchSetupServerState,
+  openFlintTradeVault,
+  resumeFlintTradeSetup,
+  setupFlintTradeAccount,
+} from "../setupAccountApi";
 
 describe("setupAccountApi", () => {
   beforeEach(() => {
@@ -31,8 +39,8 @@ describe("setupAccountApi", () => {
     ).resolves.toEqual({
       totpUri: "otpauth://totp/FlintTrade:alice",
       backupCodes: ["ABCD-1234"],
-      // The setup response now mints an explore session so the rest of the
-      // wizard (broker connect, mode select) is authenticated (audit fix).
+      // The setup response mints a Practice session so the rest of the
+      // wizard (broker connect, mode select) is authenticated.
       token: "setup-session-jwt",
     });
 
@@ -48,12 +56,38 @@ describe("setupAccountApi", () => {
     });
   });
 
-  it("keeps account-exists errors distinct from backend connectivity errors", async () => {
+  it("keeps a plain conflict distinct from an operator that already exists", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           status: "error",
-          message: "An account already exists on this machine.",
+          message: "Request conflicts with the current state",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      setupFlintTradeAccount({
+        username: "alice",
+        email: "alice@example.com",
+        password: "Secret123!",
+      }),
+    ).rejects.toMatchObject({
+      name: "AccountSetupError",
+      kind: "server",
+      status: 409,
+      message: "Request conflicts with the current state",
+    });
+  });
+
+  it("marks a lost setup-create as an existing operator", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "error",
+          code: "operator_exists",
+          message: "Request conflicts with the current state",
         }),
         { status: 409, headers: { "Content-Type": "application/json" } },
       ),
@@ -69,7 +103,8 @@ describe("setupAccountApi", () => {
       name: "AccountSetupError",
       kind: "account-exists",
       status: 409,
-      message: "An account already exists on this machine.",
+      code: "operator_exists",
+      message: "Request conflicts with the current state",
     });
   });
 
@@ -145,6 +180,82 @@ describe("setupAccountApi", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ master_password: "VaultKey123!" }),
+    });
+  });
+
+  it("reads vault and finished flags without treating a missing flag as open", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { is_setup: true, is_locked: false, vault_open: true, setup_finished: false },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(fetchSetupServerState()).resolves.toEqual({
+      isSetup: true,
+      vaultOpen: true,
+      vaultPresecured: null,
+      setupFinished: false,
+      migrationBlocked: null,
+    });
+  });
+
+  it("classifies a rejecting status body as an unreadable server response", async () => {
+    const response = new Response("", {
+      status: 200,
+      headers: { "Content-Length": "400" },
+    });
+    vi.spyOn(response, "text").mockRejectedValue(new TypeError("body stream truncated"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    try {
+      await fetchSetupServerState();
+      expect.fail("truncated status body should reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AccountSetupError);
+      expect(error).toMatchObject({ kind: "server", status: 200 });
+      expect(error).not.toMatchObject({ kind: "network" });
+    }
+  });
+
+  it("resumes a setup session with the operator password", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { token: "resumed-setup-jwt", username: "operator" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(resumeFlintTradeSetup("Secret123!")).resolves.toEqual({
+      token: "resumed-setup-jwt",
+      username: "operator",
+    });
+    expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "Secret123!" }),
+    });
+  });
+
+  it("records that setup has finished", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "success", data: { setup_finished: true } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(completeFlintTradeSetup()).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
   });
 });

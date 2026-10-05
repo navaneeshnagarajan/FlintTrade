@@ -43,12 +43,9 @@ def _create_live_token() -> str:
 # All order endpoints and their FlintTrade route suffixes
 _ORDER_ENDPOINTS = [
     "/api/v1/orders/place",
-    "/api/v1/orders/place-smart",
     "/api/v1/orders/modify",
     "/api/v1/orders/cancel",
     "/api/v1/orders/cancel-all",
-    "/api/v1/orders/close-position",
-    "/api/v1/orders/open-position",
     "/api/v1/orders/options",
     "/api/v1/orders/options-multi",
 ]
@@ -79,9 +76,12 @@ def monkeypatch_module():
 
 
 @pytest.fixture(scope="module")
-def flask_app(monkeypatch_module):
+def flask_app(monkeypatch_module, tmp_path_factory):
     """Create a Flask app with OPENALGO_API_KEY set for auth."""
     monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    # This API-only suite must not inherit a local build's GET-only SPA fallback.
+    frontend = tmp_path_factory.mktemp("order_routes_frontend") / "absent"
+    monkeypatch_module.setenv("FLINTTRADE_FRONTEND_DIST", str(frontend))
     from flinttrade_core.app import create_flask_app
     app = create_flask_app()
     app.config["TESTING"] = True
@@ -101,16 +101,19 @@ def _laya_ready_for_open_place() -> None:
 def _reset_rate_limiter(flask_app):
     """Refill the order-route token buckets before each test.
 
-    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10).
-    ``flask_app`` is module-scoped, so its single RateLimiter accumulates state
-    across every test in this file — dozens of order POSTs share one bucket
-    keyed by the test client's remote_addr and would 429 after the 10-token
-    burst. Production keys per operator and never fires 10 orders/s from a UI;
-    tests just need a clean bucket per case.
+    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10)
+    and Flask-Limiter's default 50/s. ``flask_app`` is module-scoped, so both
+    limiters accumulate state across every test in this file — dozens of order
+    POSTs share one bucket keyed by the test client's remote_addr and would 429
+    after the burst. Production keys per operator and never fires that many
+    orders in one second; tests just need a clean bucket per case.
     """
     limiter = flask_app.config.get("RATE_LIMITER")
     if limiter is not None:
         limiter.reset()
+    flask_limiter = flask_app.config.get("LIMITER")
+    if flask_limiter is not None:
+        flask_limiter.reset()
     yield
 
 
@@ -199,12 +202,16 @@ def test_app_startup_binds_safety_gate_secret(flask_app):
 
 
 # ---------------------------------------------------------------------------
-# 1. Mode enforcement — Explore mode blocks all orders
+# 1. Mode enforcement — the explore claim blocks all orders
 # ---------------------------------------------------------------------------
+
+_EXAMPLE_ORDERS_REFUSAL = (
+    "Orders are not available for Example. Switch to Practice or Live to trade."
+)
 
 
 class TestExploreModeBlocked:
-    """Explore mode must return 403 for every order endpoint."""
+    """The explore claim must return 403 for every order endpoint."""
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
     def test_explore_mode_returns_403(self, client, endpoint):
@@ -216,7 +223,7 @@ class TestExploreModeBlocked:
         assert resp.status_code == 403
         data = resp.get_json()
         assert data["status"] == "error"
-        assert "Explore mode" in data["message"]
+        assert data["message"] == _EXAMPLE_ORDERS_REFUSAL
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
     def test_explore_mode_upper_case_jwt_normalised(self, client, endpoint):
@@ -263,7 +270,7 @@ class TestExploreModeBlocked:
         data = resp.get_json()
         assert data["status"] == "error"
         assert data["code"] == "mode_blocked"
-        assert "Explore mode" in data["message"]
+        assert data["message"] == _EXAMPLE_ORDERS_REFUSAL
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +498,129 @@ class TestPracticeMode:
             "message": "A market order needs a live price (LTP) to fill",
         }
 
+    def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "",
+            "status": "REJECTED",
+            "message": "A market fill needs a positive live price; no LTP was available",
+        }
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == (
+            "No price for NIFTY right now. Practice needs a live price or a recent close."
+        )
+        assert "no LTP was available" not in resp.get_json()["message"]
+
+    def test_unmarked_practice_price_is_not_a_fill(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "price": 812.4},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert "No price for NIFTY" in resp.get_json()["message"]
+        mock_sandbox.place_order.assert_not_called()
+
+    def test_marked_live_price_is_the_practice_fill(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-LTP",
+            "status": "COMPLETE",
+            "message": "Paper order filled",
+        }
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "price": 812.4, "price_basis": "ltp"},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        mock_sandbox.place_order.assert_called_once()
+        assert mock_sandbox.place_order.call_args.kwargs["price"] == 812.4
+        assert mock_sandbox.place_order.call_args.kwargs["price_source"] == "ltp"
+
+    def test_last_stored_close_fills_and_is_labelled(self, flask_app, client, monkeypatch):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                assert symbol == "SBIN"
+                return [{
+                    "ts": now - timedelta(days=2),
+                    "prev_close": 812.40,
+                    "close": 810.0,
+                }]
+
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-CLOSE",
+            "status": "COMPLETE",
+            "message": "Paper order executed",
+        }
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "symbol": "SBIN", "price": 1.0},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["price"] == 812.40
+        assert body["price_source"] == "last_close"
+        assert body["message"] == "Simulated at last close ₹812.40 (2 days old)"
+        assert "0.00" not in body["message"]
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == 812.40
+        assert kwargs["price_source"] == "last_close"
+
+    def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
+        class Closed:
+            def is_market_open(self, exchange, symbol=None):
+                return False
+
+        monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Closed())
+        mock_sandbox = MagicMock()
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "NIFTY24APR25500CE",
+                "exchange": "NFO",
+                "price": 12.5,
+                "price_basis": "ltp",
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == (
+            "Option prices go stale outside market hours. Try again when the market opens."
+        )
+        mock_sandbox.place_order.assert_not_called()
+
     def test_pending_order_requires_a_running_tick_source(
         self, flask_app, client, monkeypatch
     ):
@@ -554,22 +684,24 @@ class TestPracticeMode:
         )
         recorder.request_reconnect.assert_called_once_with()
 
-    def test_practice_place_smart_order(self, flask_app, client):
+    def test_removed_position_routes_are_unmounted(self, flask_app, client):
+        """place-smart, open-position and close-position are not order writers."""
         mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-002",
-            "status": "COMPLETE",
-            "message": "Smart paper order filled",
-        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
-
-        resp = client.post(
+        rules = {rule.rule for rule in flask_app.url_map.iter_rules()}
+        for path in (
             "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="practice"),
-        )
-        assert resp.status_code == 200
-        mock_sandbox.place_order.assert_called_once()
+            "/api/v1/orders/open-position",
+            "/api/v1/orders/close-position",
+        ):
+            assert path not in rules
+            resp = client.post(
+                path,
+                json=_SAMPLE_ORDER_BODY,
+                headers=_auth_headers(mode="practice"),
+            )
+            assert resp.status_code == 404
+        mock_sandbox.place_order.assert_not_called()
 
     def test_practice_cancel_order_reaches_pending_order(self, flask_app, client):
         mock_sandbox = MagicMock()
@@ -646,70 +778,71 @@ class TestPracticeMode:
         )
         recorder.add_symbols.assert_not_called()
 
-    def test_practice_close_position(self, flask_app, client):
-        mock_sandbox = MagicMock()
-        mock_sandbox.get_positions.return_value = [
-            {"symbol": "NIFTY", "exchange": "NSE", "product": "MIS", "net_qty": 50},
-        ]
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-003",
-            "status": "COMPLETE",
-            "message": "Position closed",
-        }
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+    def test_practice_place_closes_long_and_short_and_squares_off(self, flask_app, client):
+        """Opposite /place orders flatten a long and a short and book net P&L.
 
-        resp = client.post(
-            "/api/v1/orders/close-position",
-            json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
-            headers=_auth_headers(mode="practice"),
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "COMPLETE"
-        # Should sell to close long position
-        mock_sandbox.place_order.assert_called_once_with(
-            symbol="NIFTY",
-            exchange="NSE",
-            action="SELL",
-            quantity=50,
-            price=0.0,
-            product="MIS",
-            order_type="MARKET",
-            trigger_price=0.0,
-            strategy="",
-        )
+        Square-off of two open positions is the same place route, once per row.
+        """
+        import json
 
-    def test_practice_close_position_no_matching(self, flask_app, client):
-        """Closing a position that does not exist returns REJECTED."""
-        mock_sandbox = MagicMock()
-        mock_sandbox.get_positions.return_value = []
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        from flinttrade_data.sandbox_engine import SandboxEngine
 
-        resp = client.post(
-            "/api/v1/orders/close-position",
-            json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
-            headers=_auth_headers(mode="practice"),
-        )
-        assert resp.status_code == 400
-        data = resp.get_json()
-        assert data["status"] == "error"
+        engine = SandboxEngine(db_path=":memory:")
+        flask_app.config["DATA_SANDBOX_ENGINE"] = engine
+        headers = _auth_headers(mode="practice")
 
-    def test_practice_open_position(self, flask_app, client):
-        mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-004",
-            "status": "COMPLETE",
-            "message": "Position opened",
-        }
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        def place(symbol: str, action: str, quantity: int, price: float) -> None:
+            resp = client.post(
+                "/api/v1/orders/place",
+                json={
+                    "symbol": symbol,
+                    "exchange": "NSE",
+                    "action": action,
+                    "quantity": quantity,
+                    "price": price,
+                    "price_basis": "ltp",
+                    "product": "MIS",
+                    "order_type": "MARKET",
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200, resp.get_json()
+            assert resp.get_json()["status"] == "COMPLETE"
 
-        resp = client.post(
-            "/api/v1/orders/open-position",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="practice"),
-        )
-        assert resp.status_code == 200
-        mock_sandbox.place_order.assert_called_once()
+        place("INFY", "BUY", 10, 100.0)
+        place("INFY", "SELL", 10, 110.0)
+        assert engine.get_positions() == []
+        assert engine.get_pnl()["realised"] == pytest.approx(100.0)
+
+        engine.import_data(json.dumps({
+            "schema_version": 2,
+            "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
+            "positions": [{
+                "symbol": "TCS",
+                "exchange": "NSE",
+                "product": "MIS",
+                "net_qty": -8,
+                "avg_price": 200.0,
+                "sell_qty": 8,
+                "sell_value": 1600.0,
+            }],
+            "orders": [],
+            "trades": [],
+            "pnl_history": [],
+        }))
+        assert engine.get_positions()[0]["net_qty"] == -8
+        place("TCS", "BUY", 8, 190.0)
+        assert engine.get_positions() == []
+        assert engine.get_pnl()["realised"] == pytest.approx(80.0)
+
+        place("RELIANCE", "BUY", 5, 50.0)
+        place("SBIN", "BUY", 4, 80.0)
+        assert {row["symbol"] for row in engine.get_positions()} == {"RELIANCE", "SBIN"}
+        place("RELIANCE", "SELL", 5, 55.0)
+        place("SBIN", "SELL", 4, 70.0)
+        assert engine.get_positions() == []
+        # 5 * (55 - 50) + 4 * (70 - 80) added to the short cover.
+        assert engine.get_pnl()["realised"] == pytest.approx(65.0)
 
     def test_practice_sandbox_not_configured_returns_500(self, flask_app, client):
         """If SandboxEngine is missing from config, return 500."""
@@ -857,9 +990,6 @@ class TestLiveModeForwarding:
     @pytest.mark.parametrize(
         "endpoint",
         [
-            "/api/v1/orders/place-smart",
-            "/api/v1/orders/close-position",
-            "/api/v1/orders/open-position",
             "/api/v1/orders/options",
             "/api/v1/orders/options-multi",
         ],

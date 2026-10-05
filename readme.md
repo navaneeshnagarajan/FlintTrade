@@ -28,7 +28,7 @@ connecting a broker or enabling Live mode.
   OpenAlgo-compatible bridge (the working operator broker path on this line),
   and evidence-gated native adapter paths whose HTTP connect and read
   surfaces are frozen until Task 9D and Task 7C.2.
-- **Safety model** — Explore, Practice, and Live modes with server-side checks,
+- **Safety model** — Practice, Connected (read), and Live, with Example for sample data, server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
   backtest services, and a Rust/PyO3 tick-processing engine.
@@ -291,9 +291,10 @@ python scripts/ft.py dev
 `make <target>` is the POSIX alias:
 
 - `python scripts/ft.py test` runs the Python pytest suites.
+- `python scripts/ft.py check` runs affected checks while editing;
+  `python scripts/ft.py check --full` runs the exhaustive local gate before pushing.
 - `python scripts/ft.py lint` runs Ruff over Python packages and tests.
-- `make full-check` runs a compact test, lint, and terminal typecheck pass
-  (POSIX only — it needs bash).
+- `make full-check` is the POSIX alias for `python scripts/ft.py check --full`.
 - `pnpm --filter @flinttrade/terminal build` runs the terminal typecheck
   and Vite build.
 - `pnpm --filter @flinttrade/terminal test` runs Vitest.
@@ -385,7 +386,7 @@ each dependency does, exact-version sources, and the terminal's About screen.
 
 ### Three ways in
 
-- **Try it locally** — run the [self-hosted web app or a desktop convenience install](#quickstart) and explore in sandbox mode.
+- **Try it locally** — run the [self-hosted web app or a desktop convenience install](#quickstart) and open Practice.
 - **Build with it** — read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for repo layout, adding widgets, and adding broker adapters.
 - **Contribute** — see [contributing.md](contributing.md) for branch strategy, commit conventions, and good-first-issues.
 

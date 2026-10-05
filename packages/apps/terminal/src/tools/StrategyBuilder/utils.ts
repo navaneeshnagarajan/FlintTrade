@@ -9,7 +9,7 @@ import type { Leg, PayoffPoint, EquityPoint, PerfMetrics, Underlying } from "./t
 export const UNSET_PREMIUM_HELPER = "Enter premium to model payoff";
 
 /** Chip on Explore Long Call after seeding sample-chain LTP. */
-export const SAMPLE_PREMIUM_HELPER = "Sample premium — edit to model";
+export const SAMPLE_PREMIUM_HELPER = "Example premium — edit to model";
 
 /** Warning when the operator types an explicit ₹0. */
 export const ZERO_PREMIUM_WARNING = "Premium is ₹0 — payoff treats cost as free";

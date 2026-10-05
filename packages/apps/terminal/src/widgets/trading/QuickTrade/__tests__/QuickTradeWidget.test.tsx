@@ -243,6 +243,20 @@ describe("QuickTradeWidget", () => {
     });
   });
 
+  it("sends the admission note with the place", async () => {
+    renderQuickTrade({ symbol: "RELIANCE", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Planned breakout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /sell 1 lots/i }));
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "SELL", quantity: 1, rationale: "Planned breakout" }),
+      );
+    });
+  });
+
   it("requires confirmation for a 10-lot order (threshold is reachable)", async () => {
     renderQuickTrade({ symbol: "RELIANCE", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
@@ -303,16 +317,20 @@ describe("QuickTradeWidget", () => {
   });
 
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
-    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      403,
+      {
       code: "laya_denied",
-      reason: "Laya is Down. Live orders are blocked.",
-      message: "Laya is Down. Live orders are blocked.",
-      limits: { max_quantity: 100 },
+      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
     }));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
-    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
+    const denied = await screen.findByTestId("laya-denied");
+    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).not.toHaveTextContent("Max quantity");
     expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
 
     act(() => {

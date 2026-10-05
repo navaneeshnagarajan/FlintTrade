@@ -9,6 +9,8 @@
  *   - Export data as JSON download
  *   - Import data from .json file upload
  *
+ * Practice orders are placed through POST /api/v1/orders/place, not this panel.
+ *
  * Used in: Settings → Sandbox section, and TopBar dropdown.
  * All API calls go to /ft-api/v1/sandbox/* endpoints.
  */
@@ -151,36 +153,6 @@ async function importSandboxData(file: File): Promise<void> {
   if (!resp.ok) throw new Error("Failed to import Practice data.");
 }
 
-interface PlacedOrder {
-  order_id: string;
-  status: string; // "PENDING" | "COMPLETE" | "REJECTED"
-  message: string;
-}
-
-interface PlaceOrderInput {
-  symbol: string;
-  exchange: string;
-  action: "BUY" | "SELL";
-  quantity: number;
-  price: number;
-}
-
-async function placeSandboxOrder(input: PlaceOrderInput): Promise<PlacedOrder> {
-  const resp = await fetch(`${BASE}/order`, {
-    method: "POST",
-    headers: buildHeaders(true),
-    body: JSON.stringify({ ...input, product: "MIS" }),
-  });
-  const json = (await resp.json().catch(() => null)) as
-    | { message?: string; data?: { order?: PlacedOrder } }
-    | null;
-  // A REJECTED order (e.g. insufficient capital) is a valid business outcome the
-  // backend returns with HTTP 400 but a populated data.order — surface it rather
-  // than throwing a generic error. Only a malformed request lacks data.order.
-  if (json?.data?.order) return json.data.order;
-  throw new Error(json?.message ?? "Failed to place Practice order.");
-}
-
 // ---------------------------------------------------------------------------
 // Form schema
 // ---------------------------------------------------------------------------
@@ -196,20 +168,6 @@ const adjustSchema = z.object({
 });
 
 type AdjustForm = z.infer<typeof adjustSchema>;
-
-const orderSchema = z.object({
-  symbol: z.string().min(1, "Symbol is required."),
-  exchange: z.string().min(1, "Exchange is required."),
-  action: z.enum(["BUY", "SELL"]),
-  quantity: z
-    .string()
-    .refine((v) => Number.isInteger(Number(v)) && Number(v) > 0, "Quantity must be a positive whole number."),
-  price: z
-    .string()
-    .refine((v) => !isNaN(Number(v)) && Number(v) > 0, "Price must be a positive number."),
-});
-
-type OrderForm = z.infer<typeof orderSchema>;
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -232,7 +190,6 @@ export default function SandboxControls() {
   const importSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [importError, setImportError] = useState("");
   const [importSuccess, setImportSuccess] = useState(false);
-  const [orderResult, setOrderResult] = useState<PlacedOrder | null>(null);
 
   useEffect(() => {
     return () => {
@@ -319,20 +276,6 @@ export default function SandboxControls() {
     },
   });
 
-  // Place-order mutation. A REJECTED order resolves (not throws) so we can show
-  // the reason; only transport/validation failures hit onError.
-  const orderMutation = useMutation({
-    mutationFn: placeSandboxOrder,
-    onSuccess: (order) => {
-      setOrderResult(order);
-      void queryClient.invalidateQueries({ queryKey: ["sandboxStatus"] });
-      if (order.status === "COMPLETE") {
-        orderForm.reset({ action: "BUY", exchange: "NSE", symbol: "", quantity: "", price: "" });
-      }
-    },
-    onError: () => setOrderResult(null),
-  });
-
   // Capital adjustment form
   const {
     register,
@@ -344,22 +287,6 @@ export default function SandboxControls() {
     resolver: zodResolver(adjustSchema),
     defaultValues: { direction: "add" },
   });
-
-  // Paper-order form (separate react-hook-form instance).
-  const orderForm = useForm<OrderForm>({
-    resolver: zodResolver(orderSchema),
-    defaultValues: { action: "BUY", exchange: "NSE", symbol: "", quantity: "", price: "" },
-  });
-
-  const onPlaceOrder = (values: OrderForm) => {
-    orderMutation.mutate({
-      symbol: values.symbol.trim().toUpperCase(),
-      exchange: values.exchange.trim().toUpperCase(),
-      action: values.action,
-      quantity: Number(values.quantity),
-      price: Number(values.price),
-    });
-  };
 
   const onAdjustSubmit = (values: AdjustForm) => {
     const amount = Number(values.amount);
@@ -597,120 +524,6 @@ export default function SandboxControls() {
         )}
       </form>
 
-      <div className="border-t border-border-default" />
-
-      {/* Place Practice order against virtual capital (no broker). */}
-      <form onSubmit={orderForm.handleSubmit(onPlaceOrder)} className="space-y-3" aria-label="Place Practice Order">
-        <p className="text-xs font-medium text-text-secondary">Place Practice Order</p>
-
-        <div className="flex items-center gap-2">
-          <Controller
-            control={orderForm.control}
-            name="action"
-            render={({ field }) => (
-              <div
-                className="flex rounded-md border border-border-default overflow-hidden shrink-0"
-                role="group"
-                aria-label="Order side"
-              >
-                <button
-                  type="button"
-                  aria-pressed={field.value === "BUY"}
-                  onClick={() => field.onChange("BUY")}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    field.value === "BUY"
-                      ? "bg-profit/15 text-profit"
-                      : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
-                  }`}
-                >
-                  BUY
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={field.value === "SELL"}
-                  onClick={() => field.onChange("SELL")}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-border-default ${
-                    field.value === "SELL"
-                      ? "bg-loss/15 text-loss"
-                      : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
-                  }`}
-                >
-                  SELL
-                </button>
-              </div>
-            )}
-          />
-          <Input
-            {...orderForm.register("symbol")}
-            placeholder="Symbol"
-            aria-label="Order symbol"
-            className="flex-1 font-mono uppercase"
-          />
-          <Input
-            {...orderForm.register("exchange")}
-            placeholder="Exch"
-            aria-label="Order exchange"
-            className="w-20 font-mono uppercase"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Input
-            {...orderForm.register("quantity")}
-            type="text"
-            inputMode="numeric"
-            placeholder="Quantity"
-            aria-label="Order quantity"
-            className="flex-1 font-mono"
-          />
-          <Input
-            {...orderForm.register("price")}
-            type="text"
-            inputMode="decimal"
-            placeholder="Price (₹)"
-            aria-label="Order price"
-            className="flex-1 font-mono"
-          />
-          <Button type="submit" size="sm" disabled={orderMutation.isPending} className="shrink-0">
-            {orderMutation.isPending ? "Placing..." : "Place"}
-          </Button>
-        </div>
-
-        {(orderForm.formState.errors.symbol ||
-          orderForm.formState.errors.exchange ||
-          orderForm.formState.errors.quantity ||
-          orderForm.formState.errors.price) && (
-          <p className="text-xs text-loss" role="alert">
-            {orderForm.formState.errors.symbol?.message ??
-              orderForm.formState.errors.exchange?.message ??
-              orderForm.formState.errors.quantity?.message ??
-              orderForm.formState.errors.price?.message}
-          </p>
-        )}
-        {orderMutation.isError && (
-          <p className="text-xs text-loss" role="alert">{(orderMutation.error as Error).message}</p>
-        )}
-        {orderResult && (
-          <p
-            className={`text-xs ${
-              orderResult.status === "COMPLETE"
-                ? "text-profit"
-                : orderResult.status === "PENDING"
-                  ? "text-warning"
-                  : "text-loss"
-            }`}
-            role="status"
-          >
-            {orderResult.status === "COMPLETE"
-              ? "✓ Order filled"
-              : orderResult.status === "PENDING"
-                ? "Order pending"
-                : "Order rejected"} — {orderResult.message}
-          </p>
-        )}
-      </form>
-
-      {/* Divider */}
       <div className="border-t border-border-default" />
 
       {/* Data management */}

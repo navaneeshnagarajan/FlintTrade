@@ -1,7 +1,5 @@
 /**
- * LockScreen.test.tsx — Renders the lock screen UI with PIN input, and
- * verifies the Phase 1 G2 fix: idle PIN unlock is mode-preserving and never
- * silently escalates an Explore/Practice session to a Live-unlocked JWT.
+ * LockScreen.test.tsx — PIN unlock restores the session and never changes Mode.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -12,7 +10,7 @@ import "@testing-library/jest-dom";
 // Mocks — both stores, so the test can drive the current UI mode
 // ---------------------------------------------------------------------------
 
-const { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent } = vi.hoisted(() => {
+const { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent, setLoggedOut } = vi.hoisted(() => {
   const authState = {
     status: "pin-required",
     username: "testuser" as string | null,
@@ -43,13 +41,15 @@ const { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent } = vi.hoi
       return true;
     },
   );
-  return { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent };
+  const setLoggedOut = vi.fn();
+  return { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent, setLoggedOut };
 });
+const { setMode } = vi.hoisted(() => ({ setMode: vi.fn() }));
 let currentMode: "explore" | "practice" | "live" = "practice";
 
 vi.mock("@/stores/authStore", () => {
   const state = {
-    setLoggedOut: vi.fn(),
+    setLoggedOut,
     setLoggedInIfCurrent,
   };
   // modeAuth.unlockWithPin reads the session token via getState() — the PIN
@@ -65,8 +65,13 @@ vi.mock("@/stores/authStore", () => {
 });
 
 vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector: (s: { mode: string }) => unknown) =>
-    selector({ mode: currentMode }),
+  useModeStore: Object.assign(
+    (selector: (s: { mode: string; setMode: typeof setMode }) => unknown) =>
+      selector({ mode: currentMode, setMode }),
+    {
+      getState: () => ({ mode: currentMode, setMode }),
+    },
+  ),
 }));
 
 import { LockScreen } from "../LockScreen";
@@ -96,6 +101,55 @@ describe("LockScreen", () => {
     currentMode = "practice";
   });
 
+  function sessionJwt(mode: string): string {
+    const payload = btoa(JSON.stringify({ mode, type: "session" }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return `header.${payload}.sig`;
+  }
+
+  it("names the locked desk from the session Mode", () => {
+    // The Mode store says Live. The heading must follow the session claim.
+    currentMode = "live";
+    const named = [
+      ["practice", "Practice desk locked"],
+      ["live", "Live desk locked"],
+    ] as const;
+
+    for (const [mode, heading] of named) {
+      Object.assign(authState, { token: null, reauthToken: sessionJwt(mode) });
+      const view = render(<LockScreen />);
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /unlock/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+      view.unmount();
+    }
+
+    expect(setMode).not.toHaveBeenCalled();
+    expect(currentMode).toBe("live");
+  });
+
+  it("keeps the plain Locked heading for Explore, Connected (read), and an unknown Mode", () => {
+    // Connected (read) is a broker status. The heading reads the session
+    // mode claim, so that status never becomes a desk name.
+    currentMode = "live";
+    const claims = ["explore", "Connected (read)", "not-a-mode"];
+    for (const claim of claims) {
+      Object.assign(authState, { token: null, reauthToken: sessionJwt(claim) });
+      const view = render(<LockScreen />);
+      expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /unlock/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+      view.unmount();
+    }
+    expect(setMode).not.toHaveBeenCalled();
+    expect(currentMode).toBe("live");
+  });
+
   it("renders the lock screen dialog with user name", () => {
     render(<LockScreen />);
     expect(screen.getByRole("dialog", { name: /screen locked/i })).toBeInTheDocument();
@@ -107,12 +161,13 @@ describe("LockScreen", () => {
     expect(screen.getByLabelText(/enter your 6-digit pin/i)).toBeInTheDocument();
   });
 
-  it("unlocks preserving the current mode — a Practice session does NOT escalate to Live", async () => {
+  it("unlocks without sending or applying a mode — the Mode store stays unchanged", async () => {
     currentMode = "practice";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       jsonResponse({
         status: "success",
-        data: { token: "practice-jwt", mode: "practice", live_mode_unlocked: false },
+        // A mode on the response must not be written into the Mode store.
+        data: { token: "practice-jwt", mode: "live", live_mode_unlocked: true },
       }),
     );
 
@@ -122,24 +177,28 @@ describe("LockScreen", () => {
     });
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-    // The PIN request carries the current UI mode so the server mints a
-    // matching (non-live-unlocked) token — the G2 divergence fix.
     expect(fetchSpy).toHaveBeenCalledWith(
       "/ft-api/v1/auth/pin",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ pin: "123456", mode: "practice" }),
+        body: JSON.stringify({ pin: "123456" }),
       }),
     );
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("mode");
     await waitFor(() => expect(setLoggedInIfCurrent).toHaveBeenCalledWith(
       "practice-jwt",
       "testuser",
       "",
       { status: "pin-required", principal: "testuser", generation: 1 },
     ));
+    expect(setMode).not.toHaveBeenCalled();
+    expect(currentMode).toBe("practice");
   });
 
-  it("sends the live mode when the session was already Live", async () => {
+  it("still omits mode when the session was already Live", async () => {
     currentMode = "live";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       jsonResponse({
@@ -157,9 +216,20 @@ describe("LockScreen", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "/ft-api/v1/auth/pin",
       expect.objectContaining({
-        body: JSON.stringify({ pin: "654321", mode: "live" }),
+        body: JSON.stringify({ pin: "654321" }),
       }),
     );
+    expect(setMode).not.toHaveBeenCalled();
+    expect(currentMode).toBe("live");
+  });
+
+  it("Use password instead leaves the lock screen without changing Mode", () => {
+    currentMode = "practice";
+    render(<LockScreen />);
+    fireEvent.click(screen.getByRole("button", { name: /use password instead/i }));
+    expect(setLoggedOut).toHaveBeenCalledOnce();
+    expect(setMode).not.toHaveBeenCalled();
+    expect(currentMode).toBe("practice");
   });
 
   it("surfaces the server's error message on PIN failure (pin_not_set guidance)", async () => {

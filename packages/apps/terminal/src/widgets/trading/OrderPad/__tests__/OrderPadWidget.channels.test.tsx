@@ -35,6 +35,14 @@ vi.mock("@/hooks/useBrokerCapabilities", () => ({
   useBrokerCapabilities: () => ({ data: null }),
 }));
 
+vi.mock("@/hooks/usePositions", () => ({
+  usePositions: () => ({ data: [], isFetching: false }),
+}));
+
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: () => ({ data: [], isFetching: false }),
+}));
+
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) => selector({ mode: "practice" }),
 }));
@@ -139,6 +147,50 @@ describe("OrderPadWidget FDC3 channels", () => {
     act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "INFY", exchange: "NSE" }));
     expect(screen.getByDisplayValue("TCS")).toBeInTheDocument();
     expect(screen.queryByText("INFY")).not.toBeInTheDocument();
+  });
+
+  it("pins a reused preset pad after an explicit retarget until the symbol changes", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "TCS", exchange: "NSE" }]);
+    const store = createStore();
+    const props = makeWidgetPanelProps();
+    const { rerender } = render(
+      <Provider store={store}>
+        <OrderPadWidget {...props} />
+      </Provider>,
+    );
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, RELIANCE));
+    expect(await screen.findByDisplayValue("RELIANCE")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "test-panel",
+          nonce: "trade-1",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+
+    // A parent re-render still carrying the preset's empty params must not
+    // drop the explicit retarget, and neither must a later broadcast.
+    rerender(
+      <Provider store={store}>
+        <OrderPadWidget {...props} />
+      </Provider>,
+    );
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "INFY", exchange: "NSE" }));
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("INFY")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Symbol"), { target: { value: "TCS" } });
+    fireEvent.click(await screen.findByRole("button", { name: /TCS/ }));
+    expect(screen.getByDisplayValue("TCS")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("INFY")).not.toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, RELIANCE));
+    expect(await screen.findByDisplayValue("RELIANCE")).toBeInTheDocument();
   });
 
   it("a local pick from the search dropdown beats the stale channel instrument", async () => {

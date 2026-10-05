@@ -48,7 +48,7 @@ _WEBHOOK_REGISTRY_LOCK_TIMEOUT_SECONDS = 10.0
 # ------------------------------------------------------------------
 
 
-_EXPLORE_SCHEDULE_WRITE_BLOCKED = "Sample schedule — control unavailable in Explore"
+_EXPLORE_SCHEDULE_WRITE_BLOCKED = "Example schedule — control unavailable"
 
 
 def _explore_schedule_write_blocked() -> tuple[Any, int] | None:
@@ -1670,7 +1670,7 @@ def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
     )
     return jsonify({
         "status": "error",
-        "message": "Mirroring is blocked in Explore (sample-only).",
+        "message": "Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.",
         "code": "mode_blocked",
     }), 403
 
@@ -2738,13 +2738,18 @@ def positions_exit_all() -> tuple[Any, int]:
     from .order_routes import (  # noqa: PLC0415
         _gated_target,
         _gated_verb_write,
+        _gtt_contract_refusal,
+        _prove_exit_all_reduce_only,
         _require_live_payload,
     )
 
+    body = request.get_json(silent=True) or {}
+    gtt_refusal = _gtt_contract_refusal(body)
+    if gtt_refusal is not None:
+        return gtt_refusal
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
     if body.get("confirm") is not True:
         return jsonify(
             {
@@ -2761,6 +2766,9 @@ def positions_exit_all() -> tuple[Any, int]:
     if body.get("segment") is not None:
         fields["segment"] = str(body["segment"])
     adapter_id, account_id = _gated_target(body)
+    proof_block = _prove_exit_all_reduce_only(adapter_id, account_id)
+    if proof_block is not None:
+        return proof_block
     return _gated_verb_write(
         "exit_all_positions",
         fields,

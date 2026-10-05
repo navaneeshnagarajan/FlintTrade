@@ -93,6 +93,12 @@ export function useOperatorIncident(): OperatorIncident | null {
   const observedBackendUnreachable = useOperatorSignalStore((s) => s.observedBackendUnreachable);
   const llmChrome = useOperatorSignalStore((s) => s.llmChrome);
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
+  const layaPracticeStatus = useOperatorSignalStore((s) => s.layaPracticeStatus);
+  const layaLiveQualified = useOperatorSignalStore((s) => s.layaLiveQualified);
+  const layaReason = useOperatorSignalStore((s) => s.layaReason);
+  const layaPort = useOperatorSignalStore((s) => s.layaPort);
+  const layaDownloadBytes = useOperatorSignalStore((s) => s.layaDownloadBytes);
+  const layaDownloadTotal = useOperatorSignalStore((s) => s.layaDownloadTotal);
   const sessionClockClosed = cashSessionClockClosed();
 
   return useMemo(() => incidentFromSnapshot({
@@ -114,6 +120,14 @@ export function useOperatorIncident(): OperatorIncident | null {
       observedBackendUnreachable,
       llmChrome,
       decisionStatus,
+      layaPracticeStatus,
+      layaLiveQualified,
+      layaReason,
+      layaPort,
+      layaDownloadBytes,
+      layaDownloadTotal,
+      layaChecking: false,
+      layaEpoch: 0,
     },
     sessionClockClosed,
   }), [
@@ -122,6 +136,12 @@ export function useOperatorIncident(): OperatorIncident | null {
     brokerRateLimited,
     brokerReject,
     decisionStatus,
+    layaLiveQualified,
+    layaDownloadBytes,
+    layaDownloadTotal,
+    layaPort,
+    layaPracticeStatus,
+    layaReason,
     health,
     legacyStatus,
     llmChrome,

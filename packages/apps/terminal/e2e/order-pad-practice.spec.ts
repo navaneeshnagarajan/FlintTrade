@@ -172,9 +172,9 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     },
   });
   syntheticApi.register({
-    name: "read Practice sandbox capital",
+    name: "read Practice sandbox funds",
     method: "GET",
-    path: "/ft-api/v1/sandbox/capital",
+    path: "/ft-api/v1/sandbox/funds",
     expectedCalls: 2,
     handler: (request) => {
       expectAuthenticatedGet(request);
@@ -182,13 +182,14 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
         json: {
           status: "success",
           data: {
-            capital: {
-              initial: 100_000,
-              current: 100_000,
-              available: 100_000,
+            funds: {
+              starting_capital: 100_000,
+              available_balance: 100_000,
               used_margin: 0,
-              realised_pnl: 0,
-              unrealised_pnl: 0,
+              realized_pnl: 0,
+              current_balance: 100_000,
+              ledger_balance: 100_000,
+              futures_mtm_in_ledger: false,
             },
           },
         },
@@ -205,10 +206,48 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { status: "success", data: { positions: [] } } };
     },
   });
+  syntheticApi.register({
+    name: "read empty Practice sandbox orders",
+    method: "GET",
+    path: "/ft-api/v1/sandbox/orders",
+    // The paused mount reads the book three times. A visible-desk rearm
+    // may add one more read before the assertion.
+    expectedCalls: { minimum: 3, maximum: 4 },
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return { json: { status: "success", data: { orders: [] } } };
+    },
+  });
   // The desk mounts Chat readiness beside the tutor pill. Strict Mode can
   // invoke each read twice; the place handler below stays the JWT check.
   registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 6 } });
   registerOperatorStatusProbes(syntheticApi, { expectedCalls: { minimum: 1, maximum: 4 } });
+  // Welcome probes this before the synthetic session exists. The Mode menu
+  // reads it again once that session is installed.
+  syntheticApi.register({
+    name: "welcome and Mode menu Live-arm status",
+    method: "GET",
+    path: "/ft-api/v1/auth/status",
+    expectedCalls: { minimum: 1, maximum: 4 },
+    handler: (request) => {
+      expect(request.postData()).toBeNull();
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization).toBe(`Bearer ${LIVE_AUTHORITY_TOKEN}`);
+      }
+      return {
+        json: {
+          status: "success",
+          data: {
+            is_setup: true,
+            is_locked: false,
+            has_pin: false,
+            totp_enabled: false,
+          },
+        },
+      };
+    },
+  });
   syntheticApi.register({
     name: "read inactive safety configuration",
     method: "GET",
@@ -277,6 +316,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
         price: 123.45,
         triggerPrice: 0,
         strategy: "FlintOrderPad",
+        rationale: "",
         order_type: "LIMIT",
         trigger_price: 0,
       });

@@ -406,7 +406,7 @@ export function NotificationBell({ className }: NotificationBellProps) {
         {/* Unread badge */}
         {unread > 0 && (
           <span
-            className="absolute -top-1 -right-1 min-w-4 h-4 flex items-center justify-center rounded-full bg-accent text-white text-xxs font-bold px-1 leading-none"
+            className="absolute -top-1 -right-1 min-w-4 h-4 flex items-center justify-center rounded-full bg-accent text-accent-foreground text-xxs font-bold px-1 leading-none"
             aria-hidden="true"
           >
             {unread > 9 ? "9+" : unread}

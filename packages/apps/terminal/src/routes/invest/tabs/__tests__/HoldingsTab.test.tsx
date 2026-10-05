@@ -41,10 +41,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
-}));
-
 vi.mock("@/lib/exportUtils", () => ({
   exportToCSV: vi.fn(),
   printCurrentView: vi.fn(),
@@ -81,6 +77,7 @@ vi.mock("../../InvestContext", () => ({
 // ---------------------------------------------------------------------------
 
 import { HoldingsTab } from "../HoldingsTab";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -88,6 +85,7 @@ import { HoldingsTab } from "../HoldingsTab";
 
 describe("HoldingsTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
     investState.holdings = SAMPLE_ROWS;
     investState.isLoading = false;
     investState.isError = false;
@@ -152,7 +150,7 @@ describe("HoldingsTab", () => {
     expect(screen.getByText(`${SAMPLE_ROWS.length} stocks`)).toBeInTheDocument();
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     expect(screen.getByText("TCS")).toBeInTheDocument();
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("shows an honest empty state with no sample rows when the connected book is empty", () => {
@@ -165,7 +163,7 @@ describe("HoldingsTab", () => {
     expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
     expect(screen.queryByText("TCS")).not.toBeInTheDocument();
     expect(screen.queryByText(/stocks$/)).not.toBeInTheDocument();
-    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
@@ -181,7 +179,7 @@ describe("HoldingsTab", () => {
     expect(screen.queryByText("No holdings")).not.toBeInTheDocument();
     expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Refresh"));
     expect(investState.refetchHoldings).toHaveBeenCalledTimes(1);

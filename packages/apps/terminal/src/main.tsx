@@ -1,8 +1,10 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
+import { initialiseGlitchtip } from "./lib/glitchtip";
 import { getColdStartPath } from "@/lib/personaDefaultRoute";
 import { createBrowserRouter, Navigate } from "react-router";
+import { DESK_ROUTE_ALIASES, PUBLIC_ENTRY_REDIRECTS } from "./routes/deskAliases";
 // RouterProvider must come from react-router/dom: the root export is the
 // non-DOM variant without ReactDOM.flushSync wiring, so navigate/submit
 // flushSync opt-ins would silently degrade to transitions.
@@ -22,6 +24,7 @@ import {
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import ProtectedRoute from "./routes/ProtectedRoute";
+import { LoadingState } from "./components/ui/states";
 import "./index.css";
 
 /**
@@ -36,7 +39,7 @@ function ExplorePathElement() {
     return <Navigate to={policy.to} replace />;
   }
   return (
-    <RouteErrorBoundary routeName="Explore">
+    <RouteErrorBoundary routeName="Demo (example data)">
       <Suspense fallback={<Loading />}>
         <ExploreRoute />
       </Suspense>
@@ -50,17 +53,8 @@ function ExplorePathElement() {
 // ---------------------------------------------------------------------------
 const glitchtipDsn = import.meta.env.VITE_GLITCHTIP_DSN as string | undefined;
 if (glitchtipDsn) {
-  // Dynamic import so the Sentry bundle is excluded entirely when no DSN is set.
-  import("@sentry/react").then((Sentry) => {
-    Sentry.init({
-      dsn: glitchtipDsn,
-      integrations: [Sentry.browserTracingIntegration()],
-      tracesSampleRate: 0.1,
-      environment: import.meta.env.DEV ? "development" : "production",
-    });
-  }).catch(() => {
-    // Silently ignore — error tracking must never break the app.
-  });
+  // Keep the build-time guard so an unconfigured build can omit the SDK.
+  void initialiseGlitchtip(glitchtipDsn, import.meta.env.DEV ? "development" : "production");
 }
 
 const HomeRoute = lazy(() => import("./routes/HomeRoute"));
@@ -78,6 +72,11 @@ const DittoRoute = lazy(() => import("./routes/DittoRoute"));
 const AdminRoute = lazy(() => import("./routes/AdminRoute"));
 const ObservabilityDashboard = lazy(() => import("./admin/observability"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
+
+/** In-shell fallback: fills the content area under the app chrome. */
+function RouteLoading() {
+  return <LoadingState fill label="Loading…" />;
+}
 
 function Loading() {
   return (
@@ -118,6 +117,10 @@ const router = createBrowserRouter([
 
       /* Flow routes -- no chrome (TopBar/TickerBar) */
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
+      ...PUBLIC_ENTRY_REDIRECTS.map((alias) => ({
+        path: alias.path,
+        element: <Navigate to={alias.to} replace />,
+      })),
       { path: "explore", element: <ExplorePathElement /> },
       /* Canonical setup owns account creation and onboarding. The historical
          /setup-account URL remains an explicit compatibility alias. Public demo
@@ -129,20 +132,24 @@ const router = createBrowserRouter([
       {
         element: <ProtectedRoute><AppLayout /></ProtectedRoute>,
         children: [
-          { path: "home", element: <ProtectedRoute><RouteErrorBoundary routeName="Home"><Suspense fallback={<Loading />}><HomeRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "home", element: <ProtectedRoute><RouteErrorBoundary routeName="Home"><Suspense fallback={<RouteLoading />}><HomeRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<RouteLoading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "terminal", element: <Navigate to="/trade" replace /> },
-          { path: "invest", element: <ProtectedRoute><RouteErrorBoundary routeName="Invest"><Suspense fallback={<Loading />}><InvestRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "learn", element: <ProtectedRoute><RouteErrorBoundary routeName="Learn"><Suspense fallback={<Loading />}><LearnRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "lab", element: <ProtectedRoute><RouteErrorBoundary routeName="Lab"><Suspense fallback={<Loading />}><LabRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Account Manager"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "invest", element: <ProtectedRoute><RouteErrorBoundary routeName="Invest"><Suspense fallback={<RouteLoading />}><InvestRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "learn", element: <ProtectedRoute><RouteErrorBoundary routeName="Learn"><Suspense fallback={<RouteLoading />}><LearnRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "lab", element: <ProtectedRoute><RouteErrorBoundary routeName="Strategy Lab"><Suspense fallback={<RouteLoading />}><LabRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<RouteLoading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI Centre"><Suspense fallback={<RouteLoading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Accounts"><Suspense fallback={<RouteLoading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<RouteLoading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          ...DESK_ROUTE_ALIASES.map((alias) => ({
+            path: alias.path,
+            element: <Navigate to={alias.to} replace />,
+          })),
           ...(import.meta.env.DEV
             ? [
-                { path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<Loading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-                { path: "admin/observability", element: <ProtectedRoute><RouteErrorBoundary routeName="Observability"><Suspense fallback={<Loading />}><ObservabilityDashboard /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+                { path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<RouteLoading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+                { path: "admin/observability", element: <ProtectedRoute><RouteErrorBoundary routeName="Observability"><Suspense fallback={<RouteLoading />}><ObservabilityDashboard /></Suspense></RouteErrorBoundary></ProtectedRoute> },
               ]
             : []),
         ],

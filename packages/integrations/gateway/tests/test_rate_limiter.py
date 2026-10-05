@@ -118,21 +118,217 @@ def test_apply_override_updates_only_specified_kinds():
 
 @pytest.mark.asyncio
 async def test_override_takes_effect_on_the_next_acquire():
-    # Lowering a limit must change throttle behaviour live (acquire rebuilds the
-    # bucket when the configured rate changes).
-    t = {"now": 0.0}
-    slept: list[float] = []
-    rl = BrokerRateLimiter(
-        {"x": {"order": 100.0}},
-        clock=lambda: t["now"],
-        sleep=lambda s: slept.append(s) or _noop(),
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({"x": {"order": 100.0}}, clock=clock.time, sleep=clock.sleep)
+    await rl.acquire("x", "order")
+    rl.apply_override("x", order=1.0)
+    await rl.acquire("x", "order")  # Existing credit is capped to the new capacity.
+    await rl.acquire("x", "order")
+    assert clock.slept == [1.0]
+
+
+@pytest.mark.asyncio
+async def test_every_waiting_acquire_consumes_its_refilled_token():
+    clock = _FakeClock()
+    limiter = BrokerRateLimiter({"dhan": {"data": 1}}, clock=clock.time, sleep=clock.sleep)
+    admitted = []
+    for _ in range(4):
+        await limiter.acquire("dhan", "data")
+        admitted.append(clock.now)
+    assert admitted == [0, 1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_waiters_recompete_for_each_refilled_token():
+    import asyncio
+
+    from tests.mocks.rate_limit_clock import RateLimitClock
+
+    clock = RateLimitClock()
+    limiter = BrokerRateLimiter({"dhan": {"data": 1}}, clock=clock.time, sleep=clock.sleep)
+    await limiter.acquire("dhan", "data")
+
+    async def acquire():
+        await limiter.acquire("dhan", "data")
+        clock.admitted()
+
+    tasks = [asyncio.create_task(acquire()) for _ in range(3)]
+    try:
+        await asyncio.to_thread(clock.wait_for_settled, 3)
+        for expected in range(1, 4):
+            clock.advance(1)
+            await asyncio.to_thread(clock.wait_for_settled, 3)
+            assert clock.admissions == list(range(1, expected + 1))
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def test_concurrent_event_loops_share_one_token_budget():
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from tests.mocks.rate_limit_clock import RateLimitClock
+
+    clock = RateLimitClock()
+    limiter = BrokerRateLimiter({"dhan": {"order": 1}}, clock=clock.time, sleep=clock.sleep)
+    asyncio.run(limiter.acquire("dhan"))
+
+    async def acquire():
+        await asyncio.wait_for(limiter.acquire("dhan"), timeout=5)
+        clock.admitted()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(asyncio.run, acquire()) for _ in range(3)]
+        clock.wait_for_settled(3)
+        for expected in range(1, 4):
+            clock.advance(1)
+            clock.wait_for_settled(3)
+            assert clock.admissions == list(range(1, expected + 1))
+        for future in futures:
+            future.result(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_fractional_positive_rate_can_admit_one_call_then_spaces_refills():
+    clock = _FakeClock()
+    limiter = BrokerRateLimiter({"dhan": {"data": 0.5}}, clock=clock.time, sleep=clock.sleep)
+    admitted = []
+    for _ in range(3):
+        await limiter.acquire("dhan", "data")
+        admitted.append(clock.now)
+    assert admitted == [0, 2, 4]
+
+
+@pytest.mark.asyncio
+async def test_quote_consumes_both_quote_and_generic_data_budgets():
+    clock = _FakeClock()
+    limiter = BrokerRateLimiter(
+        {"dhan": {"data": 1, "quote": 2}}, clock=clock.time, sleep=clock.sleep
     )
-    await rl.acquire("x", "order")  # consumes from the 100/s bucket, no wait
-    rl.apply_override("x", order=1.0)  # throttle hard
-    await rl.acquire("x", "order")  # new 1/s bucket starts full → 1 token, no wait
-    await rl.acquire("x", "order")  # second within the same instant → must wait
-    assert slept and slept[-1] > 0
+    await limiter.acquire("dhan", "quote")
+    await limiter.acquire("dhan", "data")
+    assert clock.now == 1
+    await limiter.acquire("dhan", "quote")
+    assert clock.now == 2
 
 
-async def _noop() -> None:
-    return None
+def test_from_capabilities_retains_the_quote_limit():
+    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+
+    limiter = BrokerRateLimiter.from_capabilities({"dhan": DHAN_CAPABILITIES})
+    assert limiter.snapshot()["dhan"]["quote"] == 1
+
+
+@pytest.mark.asyncio
+async def test_override_does_not_mint_fresh_tokens_for_an_empty_bucket():
+    clock = _FakeClock()
+    limiter = BrokerRateLimiter({"dhan": {"data": 1}}, clock=clock.time, sleep=clock.sleep)
+    await limiter.acquire("dhan", "data")
+    limiter.apply_override("dhan", data=2)
+    await limiter.acquire("dhan", "data")
+    assert clock.now == 0.5
+
+
+@pytest.mark.asyncio
+async def test_waiter_uses_rate_override_after_its_original_sleep():
+    import asyncio
+
+    from tests.mocks.rate_limit_clock import RateLimitClock
+
+    clock = RateLimitClock()
+    limiter = BrokerRateLimiter({"dhan": {"data": 1}}, clock=clock.time, sleep=clock.sleep)
+    await limiter.acquire("dhan", "data")
+
+    async def acquire():
+        await limiter.acquire("dhan", "data")
+        clock.admitted()
+
+    task = asyncio.create_task(acquire())
+    try:
+        await asyncio.to_thread(clock.wait_for_settled, 1)
+        limiter.apply_override("dhan", data=0.5)
+        clock.advance(1)
+        await asyncio.to_thread(clock.wait_for_settled, 1)
+        assert clock.admissions == []
+        clock.advance(1)
+        await task
+        assert clock.admissions == [2]
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_quote_waiter_does_not_consume_partial_data_budget():
+    import asyncio
+
+    from tests.mocks.rate_limit_clock import RateLimitClock
+
+    clock = RateLimitClock()
+    limiter = BrokerRateLimiter(
+        {"dhan": {"data": 5, "quote": 1}}, clock=clock.time, sleep=clock.sleep
+    )
+    await limiter.acquire("dhan", "quote")
+    task = asyncio.create_task(limiter.acquire("dhan", "quote"))
+    await asyncio.to_thread(clock.wait_for_settled, 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(4):
+        await asyncio.wait_for(limiter.acquire("dhan", "data"), timeout=1)
+    assert clock.time() == 0
+
+
+@pytest.mark.asyncio
+async def test_quote_waiting_on_generic_budget_does_not_spend_its_quote_token_early():
+    import asyncio
+
+    from tests.mocks.rate_limit_clock import RateLimitClock
+
+    clock = RateLimitClock()
+    limiter = BrokerRateLimiter(
+        {"dhan": {"data": 1, "quote": 1}}, clock=clock.time, sleep=clock.sleep
+    )
+    await limiter.acquire("dhan", "data")
+
+    async def acquire():
+        await limiter.acquire("dhan", "quote")
+        clock.admitted()
+
+    tasks = [asyncio.create_task(acquire()) for _ in range(2)]
+    try:
+        await asyncio.to_thread(clock.wait_for_settled, 2)
+        for expected in range(1, 3):
+            clock.advance(1)
+            await asyncio.to_thread(clock.wait_for_settled, 2)
+            assert clock.admissions == list(range(1, expected + 1))
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("rate", [float("nan"), float("inf"), -float("inf")])
+def test_non_finite_rates_are_rejected_instead_of_bypassing_or_stalling(rate):
+    with pytest.raises(ValueError, match="finite"):
+        BrokerRateLimiter({"dhan": {"data": rate}})
+    limiter = BrokerRateLimiter({"dhan": {"data": 1}})
+    with pytest.raises(ValueError, match="finite"):
+        limiter.apply_override("dhan", data=rate)
+    assert limiter.snapshot()["dhan"]["data"] == 1
+
+
+@pytest.mark.parametrize("invalid", ["inf", "1e309", "nan", "not-a-rate", None, 10 ** 400])
+def test_invalid_persisted_override_keeps_capability_caps_and_other_overrides(invalid):
+    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+
+    limiter = BrokerRateLimiter.from_capabilities(
+        {"dhan": DHAN_CAPABILITIES},
+        overrides={"dhan": {"data": invalid, "order": 2}, "custom": {"data": 3, "quote": invalid}},
+    )
+    assert limiter.snapshot()["dhan"] == {"order": 2, "data": 5, "quote": 1}
+    assert limiter.snapshot()["custom"] == {"order": 0, "data": 3, "quote": 0}

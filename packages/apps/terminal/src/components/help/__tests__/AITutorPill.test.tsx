@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router";
@@ -84,15 +84,18 @@ vi.mock("@/services/advisorApi", () => ({
 }));
 
 import { AITutorPill } from "../AITutorPill";
+import { AITab } from "@/components/CommandPalette/AITab";
+import { AIPulseCard } from "@/routes/home/AIPulseCard";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
+import { TOGGLE_AI_TUTOR_EVENT } from "@/lib/aiTutorEvents";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function renderPill() {
+function renderPill(path = "/") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <AITutorPill />
     </MemoryRouter>,
   );
@@ -183,6 +186,54 @@ describe("AITutorPill", () => {
 
     expect(screen.getByRole("button", { name: "Open AI Tutor" })).toBeInTheDocument();
     expect(screen.getByText("Ask AI")).toBeInTheDocument();
+  });
+
+  it("keeps the floating pill off app routes, where the TopBar launches the tutor", () => {
+    renderPill("/home");
+
+    expect(screen.queryByRole("button", { name: "Open AI Tutor" })).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new CustomEvent(TOGGLE_AI_TUTOR_EVENT));
+    });
+    expect(screen.getByLabelText("Message input")).toBeInTheDocument();
+  });
+
+  it("shares palette and tutor history while Home opens the canonical AI chat", async () => {
+    const onNavigate = vi.fn();
+    window.addEventListener("flinttrade:navigate", onNavigate);
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/home"]}>
+        <AITab query="What is a limit order?" onClose={vi.fn()} />
+        <AIPulseCard />
+        <AITutorPill />
+      </MemoryRouter>,
+    );
+    try {
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Ask AI a question" }), { key: "Enter" });
+      expect(onNavigate.mock.calls[0]?.[0].detail).toEqual({ path: "/ai" });
+      act(() => window.dispatchEvent(new CustomEvent(TOGGLE_AI_TUTOR_EVENT)));
+      expect(screen.getByRole("dialog", { name: "AI Tutor" })).toHaveTextContent("What is a limit order?");
+      await user.type(screen.getByLabelText("Message input"), "Explain with an example");
+      await user.click(screen.getAllByRole("button", { name: "Send message" })[1]!);
+      expect(await screen.findByText("Namaste")).toBeInTheDocument();
+      expect(useAIConversationStore.getState().messages.map((message) => message.content)).toEqual([
+        "What is a limit order?", "Explain with an example", "Namaste",
+      ]);
+      await user.click(screen.getByRole("button", { name: "Minimize AI Tutor" }));
+      await user.click(screen.getByRole("button", { name: "Open AI chat" }));
+      expect(onNavigate.mock.calls.at(-1)?.[0].detail).toBe("/ai");
+      expect(useAIConversationStore.getState().messages).toHaveLength(3);
+    } finally {
+      unmount();
+      window.removeEventListener("flinttrade:navigate", onNavigate);
+    }
+  });
+
+  it("does not float over onboarding", () => {
+    renderPill("/welcome");
+
+    expect(screen.queryByRole("button", { name: "Open AI Tutor" })).not.toBeInTheDocument();
   });
 
   it("sends session_id on real auth sessions so tutor chats are captured server-side", async () => {

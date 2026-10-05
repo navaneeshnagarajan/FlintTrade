@@ -330,6 +330,19 @@ def cmd_status(args: argparse.Namespace) -> None:
         print("Run: python -m flinttrade_core.cli init")
 
 
+def cmd_operators(args: argparse.Namespace) -> None:
+    """List operator accounts, or keep one and continue the update."""
+    from .operators_cli import cmd_operators_keep, cmd_operators_list
+
+    if args.operators_command == "list":
+        cmd_operators_list()
+    elif args.operators_command == "keep":
+        cmd_operators_keep(args.operator_id, assume_yes=bool(args.yes))
+    else:
+        print("usage: flinttrade operators {list,keep}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="flinttrade",
@@ -350,11 +363,26 @@ def main() -> None:
     )
     sub.add_parser("status", help="Show workspace info")
 
+    operators = sub.add_parser("operators", help="List or keep one operator account")
+    operators_sub = operators.add_subparsers(dest="operators_command")
+    operators_sub.add_parser("list", help="Show operator id, username, and created time")
+    keep = operators_sub.add_parser(
+        "keep",
+        help="Keep one operator account and continue the update",
+    )
+    keep.add_argument("operator_id", type=int, help="Operator id to keep")
+    keep.add_argument(
+        "--yes",
+        action="store_true",
+        help="Remove the other operator accounts without asking.",
+    )
+
     args = parser.parse_args()
 
     commands = {
         "init": cmd_init,
         "status": cmd_status,
+        "operators": cmd_operators,
     }
 
     if args.command in commands:

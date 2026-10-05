@@ -32,6 +32,36 @@ import { StatusDot, StatusBadge } from "./shared";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// These identifiers come from CronManager.DEFAULT_JOBS. Unknown custom jobs
+// remain visible; this changes presentation only, never the scheduler or API IDs.
+const SYSTEM_JOBS = new Set([
+  "health_check_job", "health_check", "eod_logout_job", "backup",
+  "db_optimise_job", "tick_retention_job", "webhook_nonce_gc_job",
+]);
+
+const JOB_LABELS: Record<string, string> = {
+  health_check_job: "Broker session check",
+  health_check: "Connection health check",
+  square_off_warning_job: "Square-off warning",
+  eod_logout_job: "End-of-day logout",
+  backup: "Workspace backup",
+  post_market_analysis: "Post-market analysis",
+  mcx_close_check: "MCX closing position check",
+  db_optimise_job: "Database optimisation",
+  tick_retention_job: "Tick data cleanup",
+  overnight_optimise_job: "Overnight strategy optimisation",
+  eod_sync_job: "End-of-day data sync",
+  webhook_nonce_gc_job: "Webhook replay protection cleanup",
+  "pre-market-screener": "Pre-market screener",
+  "eod-position-snapshot": "End-of-day position snapshot",
+};
+
+function jobLabel(name: string): string {
+  if (Object.hasOwn(JOB_LABELS, name)) return JOB_LABELS[name]!;
+  const words = name.replace(/[_-]job$/, "").replace(/[_-]+/g, " ").trim();
+  return words ? words[0]!.toUpperCase() + words.slice(1) : name;
+}
+
 function formatLastRun(val: string | null): string {
   if (!val) return "Never";
   try {
@@ -53,6 +83,7 @@ export default function CronSection() {
   const queryClient = useQueryClient();
   const mode = useModeStore((state) => state.mode);
   const pauseGated = isExploreScheduleControlGated(mode);
+  const [showSystemJobs, setShowSystemJobs] = useState(false);
   const [pendingJob, setPendingJob] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -64,6 +95,7 @@ export default function CronSection() {
   const jobs: CronJob[] = pauseGated
     ? resolveExploreScheduleJobs(apiJobs, isLoading)
     : apiJobs;
+  const visibleJobs = jobs.filter((job) => showSystemJobs || !SYSTEM_JOBS.has(job.name));
 
   const pauseMutation = useMutation({
     mutationFn: (name: string) => pauseCronJob(name),
@@ -97,14 +129,15 @@ export default function CronSection() {
       <GlassCard className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="font-heading font-semibold text-lg text-text-primary">Cron Scheduler</h3>
+            <h3 className="font-heading font-semibold text-lg text-text-primary">Schedules</h3>
             <p className="text-sm text-text-secondary mt-0.5">
-              All registered automation schedules. Pause or resume individual jobs.
+              Your automation schedules. Pause or resume individual jobs.
             </p>
           </div>
           <Button
             size="sm"
             variant="ghost"
+            aria-label="Refresh schedules"
             onClick={() => void refetch()}
             disabled={isLoading}
             className="h-7 w-7 p-0 text-text-muted hover:text-text-primary"
@@ -112,6 +145,16 @@ export default function CronSection() {
             <RefreshCw size={13} className={isLoading ? "animate-spin" : ""} />
           </Button>
         </div>
+
+        <label className="mb-4 flex items-center gap-2 text-xs text-text-secondary">
+          <input
+            type="checkbox"
+            checked={showSystemJobs}
+            onChange={(event) => setShowSystemJobs(event.target.checked)}
+            className="accent-accent"
+          />
+          Show system jobs
+        </label>
 
         {isLoading && (
           <div className="flex items-center justify-center py-10">
@@ -121,19 +164,25 @@ export default function CronSection() {
 
         {!pauseGated && isError && (
           <p className="text-xs text-loss text-center py-6">
-            Failed to load cron jobs. Backend may be offline.
+            Could not load schedules. The backend may be offline.
           </p>
         )}
 
         {!isLoading && !isError && !pauseGated && jobs.length === 0 && (
           <p className="text-xs text-text-muted text-center py-8">
-            No cron jobs registered. Add schedules via the Python automation package.
+            No schedules registered. Add schedules via the Python automation package.
           </p>
         )}
 
-        {!isLoading && jobs.length > 0 && (
+        {!isLoading && !isError && jobs.length > 0 && visibleJobs.length === 0 && (
+          <p className="text-xs text-text-muted text-center py-8">
+            Only system jobs are registered. Select Show system jobs to view them.
+          </p>
+        )}
+
+        {!isLoading && visibleJobs.length > 0 && (
           <StaggeredList className="space-y-2">
-            {jobs.map((job) => {
+            {visibleJobs.map((job) => {
               const isWorking = pendingJob === job.name;
               const isPaused  = job.status.toLowerCase() === "paused";
               const displayStatus = exploreScheduleDisplayStatus(job.status, mode);
@@ -145,7 +194,7 @@ export default function CronSection() {
                   <StatusDot status={displayStatus} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <p className="text-xs font-semibold text-text-primary truncate">{job.name}</p>
+                      <p className="text-xs font-semibold text-text-primary truncate" title={job.name}>{jobLabel(job.name)}</p>
                       <StatusBadge status={displayStatus} />
                     </div>
                     <div className="flex items-center gap-3 text-xs text-text-muted">

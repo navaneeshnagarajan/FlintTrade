@@ -3435,22 +3435,19 @@ def test_prospective_greek_guard_rejects_broader_protected_call_bypass_matrix() 
 # is the SHRINKING debt allowlist: every remaining entry is a known-dormant
 # native strategy/agent path tracked in PLAN.md. L5 emergency actions are NOT an
 # exemption: they traverse gate_broker_write -> BrokerRouter.execute_gated.
-_RAW_ORDER_ALLOWLIST = {
-    # Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
-    # (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
-    #  go through an injected gated executor — SafetySystem → gate_order →
-    #  BrokerRouter — and it fails closed without one.)
-    # (flinttrade_engine/bracket_order.py REMOVED 2026-07-07: every bracket leg
-    #  now dispatches through the injected gated dispatchers — SafetySystem →
-    #  gate_order → BrokerRouter — and the service holds no raw client; the pin
-    #  test_bracket_order_writes_only_through_gated_router below keeps it out.)
-    # (flinttrade_engine/router.py REMOVED 2026-07-09: the legacy ungated
-    #  OrderRouter is deleted; the only live dispatch is gate_order → BrokerRouter.)
-    # Dormant automation service, not mounted by the FlintTrade core app. It
-    # accepts an arbitrary ``order_router`` object and must be folded into the
-    # canonical gated router before becoming reachable.
-    "packages/services/automation/src/flinttrade_automation/voice_order_bridge.py",
-}
+_RAW_ORDER_ALLOWLIST: set[str] = set()
+# Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
+# (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
+#  go through an injected gated executor — SafetySystem → gate_order →
+#  BrokerRouter — and it fails closed without one.)
+# (flinttrade_engine/bracket_order.py REMOVED 2026-07-07: every bracket leg
+#  now dispatches through the injected gated dispatchers — SafetySystem →
+#  gate_order → BrokerRouter — and the service holds no raw client; the pin
+#  test_bracket_order_writes_only_through_gated_router below keeps it out.)
+# (flinttrade_engine/router.py REMOVED 2026-07-09: the legacy ungated
+#  OrderRouter is deleted; the only live dispatch is gate_order → BrokerRouter.)
+# (flinttrade_automation/voice_order_bridge.py REMOVED: BUY/SELL and EXIT
+#  return before any router write. Orders go through /api/v1/orders/place.)
 
 # Legacy engine/AI stacks that dispatch through their own ``route_order`` API
 # instead of the canonical gate_order -> BrokerRouter surface. Keep this
@@ -3710,6 +3707,123 @@ def _is_gated_dispatch_lambda(
     )
 
 
+def _is_direct_practice_route_call(
+    call: ast.Call,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    """Prove the actual bare call uses one unshadowed, absolute local import.
+
+    A resolved receiver spelled ``flinttrade_core.order_routes`` is insufficient:
+    it can also be a caller-supplied object or a mutated module attribute.
+    """
+    if not isinstance(call.func, ast.Name):
+        return False
+    name = call.func.id
+    if name in _argument_names(function.args) or name in _assignment_sources(function):
+        return False
+    imports = [
+        node for node in _scope_nodes(function)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        and any((alias.asname or alias.name.split(".")[0]) == name for alias in node.names)
+    ]
+    if len(imports) != 1:
+        return False
+    imported = imports[0]
+    return (
+        imported in function.body
+        and isinstance(imported, ast.ImportFrom)
+        and imported.level == 0
+        and imported.module == "flinttrade_core.order_routes"
+        and any(alias.name == "place_order" and (alias.asname or alias.name) == name for alias in imported.names)
+        and not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name
+            or isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names
+            for node in _scope_nodes(function)
+        )
+    )
+
+
+def _practice_class_has_stable_delegation(owner: ast.ClassDef, parents: dict[int, ast.AST]) -> bool:
+    """Prove the concrete local method chain, rejecting class/instance rebinding."""
+    tree = parents.get(id(owner))
+    if not isinstance(tree, ast.Module) or owner.bases or owner.keywords or owner.decorator_list:
+        return False
+    protected = {"place_order", "_dispatch", "route_order", "__getattribute__", "__getattr__", "__setattr__"}
+    methods: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for node in owner.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in protected:
+            if node.name in methods or node.decorator_list or node.name.startswith("__"):
+                return False
+            positional = [*node.args.posonlyargs, *node.args.args]
+            if not positional or positional[0].arg != "self" or "self" in _assignment_sources(node):
+                return False
+            methods[node.name] = node
+    if set(methods) != {"place_order", "_dispatch", "route_order"}:
+        return False
+
+    class_scope = ast.Module(body=owner.body, type_ignores=[])
+    class_bindings = _with_import_sources(_module_assignment_sources(class_scope), _module_scope_nodes(class_scope))
+    if protected & class_bindings.keys():
+        return False
+    module_bindings = _with_import_sources(_module_assignment_sources(tree), _module_scope_nodes(tree))
+    if owner.name in module_bindings or sum(
+        isinstance(node, ast.ClassDef) and node.name == owner.name for node in _module_scope_nodes(tree)
+    ) != 1:
+        return False
+    # No protected method is legitimately overwritten in this module, including
+    # stores through type(self), class aliases, or foreign receiver expressions.
+    if any(isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
+           and node.attr in protected for node in ast.walk(tree)):
+        return False
+
+    # Reuse the same alias/vars()/__dict__/setattr/descriptor mutation analysis
+    # used by the portfolio-state guards, including nested and sibling methods.
+    # Treat explicit mutations of the class object like mutations of self too.
+    class_alias = {owner.name: [ast.Name(id="self", ctx=ast.Load())]}
+    module_body = ast.FunctionDef(
+        name="_module_bindings", args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[],
+                                                    kw_defaults=[], defaults=[]),
+        body=[node for node in tree.body if node is not owner], decorator_list=[],
+    )
+    scopes = [module_body, *(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))]
+    for scope in scopes:
+        inherited = {**module_bindings, **class_alias}
+        changes = _rebound_self_attributes(scope, inherited)
+        if "*" in changes or protected & changes:
+            return False
+        assignments = _function_resolution_assignments(scope, inherited)
+        for node in _scope_nodes(scope):
+            if not isinstance(node, ast.Call):
+                continue
+            if _resolves_builtin_member(node.func, frozenset({"setattr", "delattr"}), assignments):
+                name = _constant_string(node.args[1], assignments) if len(node.args) > 1 else None
+                if name is None or name in protected:
+                    return False
+            if any(isinstance(target, ast.Attribute) and target.attr in {"__setattr__", "__delattr__"}
+                   for target in _resolved_callable_values(node.func, assignments)):
+                return False
+            kind, _target, member, _args = _operator_factory_access(node, assignments)
+            if kind == "methodcaller" and member in {"__setattr__", "__delattr__"}:
+                return False
+    # Class-body reflective stores (locals()/vars()) are intentionally not an
+    # accepted definition mechanism for this concrete adapter.
+    if any(isinstance(node, ast.Call) for node in _module_scope_nodes(class_scope)):
+        return False
+
+    dispatch = methods["_dispatch"]
+    if not any(
+        isinstance(node, ast.Call) and _is_direct_practice_route_call(node, dispatch)
+        for node in _scope_nodes(dispatch)
+    ):
+        return False
+    return any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_dispatch" and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        for node in _scope_nodes(methods["place_order"])
+    )
+
+
 def _is_proven_gated_write(
     relative: str,
     function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | None,
@@ -3717,9 +3831,25 @@ def _is_proven_gated_write(
     method: str,
     assignments: dict[str, list[ast.AST]],
     parents: dict[int, ast.AST],
+    call: ast.Call,
 ) -> bool:
     if _binding_is_raw_broker(receiver, assignments):
         return False
+    if (
+        relative == "packages/core/core/src/flinttrade_core/practice_agent_adapter.py"
+        and method == "place_order"
+        and isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        owner = parents.get(id(function))
+        if isinstance(owner, ast.ClassDef) and owner.name == "PracticeAgentAdapter":
+            if function.name == "_dispatch" and _is_direct_practice_route_call(call, function):
+                return True
+            if (
+                function.name == "route_order" and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "place_order" and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "self"
+            ):
+                return _practice_class_has_stable_delegation(owner, parents)
     if isinstance(receiver, ast.Name) and _parameter_is_broker_router(function, receiver.id, assignments):
         return True
     if _is_gated_dispatch_lambda(function, method, parents):
@@ -3762,7 +3892,7 @@ def _raw_broker_write_details(tree: ast.Module, relative: str) -> list[tuple[ast
         for receiver, method in _write_call_targets(node, assignments):
             if _is_broker_free_execution_context(relative, receiver, assignments):
                 continue
-            if _is_proven_gated_write(relative, function, receiver, method, assignments, parents):
+            if _is_proven_gated_write(relative, function, receiver, method, assignments, parents, node):
                 continue
             offenders.append((node, method))
             break
@@ -3806,6 +3936,103 @@ def test_binding_aware_raw_write_guard_rejects_alias_and_indirect_calls() -> Non
         "    )\n"
     )
     assert _raw_broker_write_offenders(canonical, "fixture.py") == []
+
+
+def test_practice_agent_delegation_proves_only_canonical_request_route() -> None:
+    relative = "packages/core/core/src/flinttrade_core/practice_agent_adapter.py"
+    canonical = ast.parse(
+        "class PracticeAgentAdapter:\n"
+        "    def _dispatch(self):\n"
+        "        from flinttrade_core.order_routes import place_order\n"
+        "        return place_order()\n"
+        "    async def place_order(self, **fields):\n"
+        "        return self._dispatch(**fields)\n"
+        "    async def route_order(self, fields):\n"
+        "        return await self.place_order(**fields)\n"
+    )
+    assert _raw_broker_write_offenders(canonical, relative) == []
+    for source in (
+        "class PracticeAgentAdapter:\n    def _dispatch(self, client):\n        return client.place_order()\n",
+        "class PracticeAgentAdapter:\n    def _dispatch(self, sandbox):\n        return sandbox.place_order()\n",
+        "class PracticeAgentAdapter:\n    def _dispatch(self, order_routes):\n        return order_routes.place_order()\n",
+        "class PracticeAgentAdapter:\n    def _dispatch(self):\n        from provider import place_order\n        return place_order()\n",
+        "class PracticeAgentAdapter:\n    def other(self):\n        return self.place_order()\n",
+        "class RawAdapter:\n    def route_order(self):\n        return self.place_order()\n",
+        "class PracticeAgentAdapter:\n    def _dispatch(self, flinttrade_core):\n        return flinttrade_core.order_routes.place_order()\n",
+        "class PracticeAgentAdapter:\n    def _dispatch(self, client):\n        flinttrade_core = client\n        return flinttrade_core.order_routes.place_order()\n",
+        "class PracticeAgentAdapter:\n    def route_order(self, client):\n        self = client\n        return self.place_order()\n",
+        "class PracticeAgentAdapter:\n    def route_order(self, client):\n        self.place_order = client.place_order\n        return self.place_order()\n",
+    ):
+        assert _raw_broker_write_offenders(ast.parse(source), relative), source
+    assert _raw_broker_write_offenders(canonical, "untrusted.py")
+
+
+@pytest.mark.parametrize("source", [
+    "class PracticeAgentAdapter:\n"
+    "    place_order = raw_client.place_order\n"
+    "    def route_order(self):\n        return self.place_order()\n",
+    "class PracticeAgentAdapter:\n"
+    "    from provider import place_order\n"
+    "    def route_order(self):\n        return self.place_order()\n",
+    "import builtins\nclass PracticeAgentAdapter:\n"
+    "    def route_order(self, client):\n"
+    "        builtins.setattr(self, 'place_order', client.place_order)\n"
+    "        return self.place_order()\n",
+    "class PracticeAgentAdapter:\n"
+    "    def route_order(self, client):\n"
+    "        self.__dict__['place_order'] = client.place_order\n"
+    "        return self.place_order()\n",
+    "class PracticeAgentAdapter:\n"
+    "    def _dispatch(self, client):\n"
+    "        from flinttrade_core.order_routes import place_order\n"
+    "        flinttrade_core.order_routes = client\n"
+    "        return flinttrade_core.order_routes.place_order()\n",
+    "class PracticeAgentAdapter:\n"
+    "    def route_order(self):\n        return self.place_order()\n",
+])
+def test_practice_agent_delegation_rejects_rebound_dispatch(source: str) -> None:
+    relative = "packages/core/core/src/flinttrade_core/practice_agent_adapter.py"
+    assert _raw_broker_write_offenders(ast.parse(source), relative), source
+
+
+def test_practice_agent_delegation_accepts_real_adapter() -> None:
+    relative = "packages/core/core/src/flinttrade_core/practice_agent_adapter.py"
+    assert _raw_broker_write_offenders(_parse_source(_REPO_ROOT / relative), relative) == []
+
+
+@pytest.mark.parametrize("scope,source", [
+    ("class", "place_order = raw_client.place_order"),
+    ("class", "from provider import place_order"),
+    ("class", "locals()['place_order'] = raw_client.place_order"),
+    ("class", "def __getattribute__(self, name):\n    return raw_client.place_order"),
+    ("route_order", "import builtins\nbuiltins.setattr(self, 'place_order', raw_client.place_order)"),
+    ("route_order", "self.__dict__['place_order'] = raw_client.place_order"),
+    ("route_order", "self.__dict__.update({'_dispatch': raw_client.place_order})"),
+    ("route_order", "object.__setattr__(self, 'place_order', raw_client.place_order)"),
+    ("route_order", "self = raw_client"),
+    ("route_order", "type(self).place_order = raw_client.place_order"),
+    ("route_order", "setattr(type(self), 'place_order', raw_client.place_order)"),
+    ("module", "PracticeAgentAdapter.place_order = raw_client.place_order"),
+    ("module", "import builtins\nbuiltins.setattr(PracticeAgentAdapter, 'place_order', raw_client.place_order)"),
+    ("module", "alias = PracticeAgentAdapter\nalias.place_order = raw_client.place_order"),
+    ("module", "def replace():\n    PracticeAgentAdapter.place_order = raw_client.place_order"),
+    ("_dispatch", "from provider import place_order"),
+    ("_dispatch", "place_order = raw_client.place_order"),
+    ("_dispatch", "import flinttrade_core.order_routes\nflinttrade_core.order_routes.place_order = raw_client.place_order"),
+])
+def test_practice_agent_delegation_rejects_mutated_real_adapter(scope: str, source: str) -> None:
+    relative = "packages/core/core/src/flinttrade_core/practice_agent_adapter.py"
+    tree = _parse_source(_REPO_ROOT / relative)
+    owner = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "PracticeAgentAdapter")
+    if scope == "module":
+        target = tree
+    elif scope == "class":
+        target = owner
+    else:
+        target = next(node for node in owner.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and node.name == scope)
+    target.body[:0] = ast.parse(source).body
+    assert _raw_broker_write_offenders(tree, relative), source
 
 
 def test_binding_aware_raw_write_guard_rejects_containers_methodcaller_and_partial() -> None:

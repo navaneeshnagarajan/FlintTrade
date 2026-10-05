@@ -80,7 +80,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
             <h1 className="font-heading font-bold text-text-primary text-xl">
               {route} encountered an error
             </h1>
-            <p className="text-text-muted text-sm leading-relaxed">
+            <p className="text-text-secondary text-sm leading-relaxed">
               The rest of the app is still working. Try again or navigate to another page.
             </p>
           </div>
@@ -97,7 +97,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={this.handleReload}
-              className="w-full sm:w-auto px-6 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors cursor-pointer"
+              className="w-full sm:w-auto px-6 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors cursor-pointer"
             >
               Try Again
             </button>

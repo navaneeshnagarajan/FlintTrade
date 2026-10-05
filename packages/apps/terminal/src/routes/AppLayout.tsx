@@ -14,7 +14,6 @@ import { usePrevClose } from "@/hooks/usePrevClose";
 import { useOpenAlgoConfigHydration } from "@/hooks/useOpenAlgoConfigHydration";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { useNotificationFeed } from "@/components/NotificationCentre/useNotificationFeed";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
@@ -41,17 +40,18 @@ import { useSettingsStore } from "@/stores/settingsStore";
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
 
+/** Landmark names match the sidebar label and each page's H1. */
 const ROUTE_TITLES: Record<string, string> = {
   "/home": "Home",
-  "/trade": "Trading Workspace",
-  "/invest": "Investment Dashboard",
-  "/learn": "Learning Centre",
+  "/trade": "Trade",
+  "/invest": "Invest",
+  "/learn": "Learn",
   "/lab": "Strategy Lab",
-  "/automate": "Automation Hub",
+  "/automate": "Automate",
   "/ai": "AI Centre",
   "/settings": "Settings",
-  "/ditto": "Account Manager",
-  "/admin": "Admin Panel",
+  "/ditto": "Accounts",
+  "/admin": "Admin",
 };
 
 type NavigationEventDetail = string | { path?: unknown; context?: unknown };
@@ -123,9 +123,9 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
           <ArrowRight className="size-5" strokeWidth={2} />
         </div>
         <div className="space-y-2">
-          <h1 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
+          <h2 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
             FlintTrade is designed for desktop
-          </h1>
+          </h2>
           <p className="text-sm text-text-secondary leading-relaxed">
             For the best experience, use a screen wider than 768px. The workspace, charts, and data grids require more horizontal space.
           </p>
@@ -223,10 +223,6 @@ export default function AppLayout() {
       window.removeEventListener("keydown", onActivity);
     };
   }, []);
-
-  const [showWelcome, setShowWelcome] = useState(() => {
-    return sessionStorage.getItem("flinttrade:dailyWelcomeDismissed") !== "true";
-  });
 
   const [showSmallScreenWarning, setShowSmallScreenWarning] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -375,7 +371,12 @@ export default function AppLayout() {
         ? (detail as { path?: unknown }).path
         : null;
       if (typeof path === "string") {
-        navigate("/learn", { state: { selectedDocPath: path } });
+        const anchor = (detail as { anchor?: unknown }).anchor;
+        navigate("/learn", {
+          state: typeof anchor === "string" && anchor
+            ? { selectedDocPath: path, docAnchor: anchor }
+            : { selectedDocPath: path },
+        });
       }
     }
 
@@ -442,48 +443,18 @@ export default function AppLayout() {
     setShowSmallScreenWarning(false);
   }
 
-  const handleDismissWelcome = useCallback(() => {
-    sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
-    setShowWelcome(false);
-  }, []);
-
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
+
+  // The locked session leaves the desk. Panels and their data are not kept
+  // rendered behind the lock.
+  if (authStatus === "pin-required") {
+    return <LockScreen />;
+  }
 
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
-      <style>{`
-        @keyframes appStarDrift {
-          from { transform: translate3d(0, 0, 0); }
-          to { transform: translate3d(-42px, 24px, 0); }
-        }
-        .app-cinematic-stars {
-          background-image:
-            radial-gradient(circle, rgba(255,255,255,0.22) 0 1px, transparent 1.35px),
-            radial-gradient(circle, rgba(34,197,94,0.26) 0 1px, transparent 1.45px);
-          background-size: 116px 116px, 168px 168px;
-          background-position: 0 0, 58px 72px;
-          animation: appStarDrift 28s linear infinite alternate;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .app-cinematic-stars { animation: none; }
-        }
-      `}</style>
-      <div className="pointer-events-none absolute inset-0 z-0" aria-hidden="true">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_46%,rgba(34,197,94,0.10),transparent_32rem),radial-gradient(circle_at_55%_18%,rgba(56,189,248,0.06),transparent_28rem),linear-gradient(180deg,rgba(0,0,0,0.05),transparent_45%,rgba(0,0,0,0.16))]" />
-        <div className="app-cinematic-stars absolute inset-0 opacity-[0.16]" />
-      </div>
       {showSmallScreenWarning && (
         <SmallScreenOverlay onDismiss={handleDismissSmallScreen} />
-      )}
-      {/* Mode indicator — coloured top border per mode (Thinkorswim-inspired) */}
-      {mode === "explore" && (
-        <div className="h-0.75 bg-text-muted/40 shrink-0" aria-hidden="true" />
-      )}
-      {mode === "practice" && (
-        <div className="h-0.75 bg-amber-500 shrink-0" aria-hidden="true" />
-      )}
-      {mode === "live" && (
-        <div className="h-px bg-profit/60 shrink-0" aria-hidden="true" />
       )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
@@ -503,8 +474,8 @@ export default function AppLayout() {
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
       {/* Content area: DockSidebar + main panel side by side */}
-      {/* Issue #47: visually-hidden H1 for screen readers reflecting the current route */}
-      {/* Issue #54: aria-label on main landmark mirrors the route title */}
+      {/* Issue #54: aria-label on main landmark mirrors the route title. Each
+          route renders its own single H1 (PageHeader, or Trade's sr-only H1). */}
       <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
         <DockSidebar />
         <main
@@ -512,9 +483,8 @@ export default function AppLayout() {
           ref={mainRef}
           tabIndex={-1}
           aria-label={routeTitle}
-          className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden outline-none"
         >
-          <h1 className="sr-only">{routeTitle}</h1>
           <div
             data-testid="route-body"
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -525,11 +495,7 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
-      {showWelcome && mode !== "explore" && (
-        <DailyWelcome onDismiss={handleDismissWelcome} />
-      )}
       <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
-      {authStatus === "pin-required" && <LockScreen />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}
         onClose={handleCloseShortcuts}

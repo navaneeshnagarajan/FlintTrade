@@ -132,7 +132,7 @@ describe("authStore", () => {
       expect(window.localStorage.getItem("flinttrade:demo-session")).toBeNull();
 
       window.localStorage.setItem("flinttrade:demo-session", "active");
-      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      useAuthStore.getState().setLoggedIn("demo-user", "Guest", "");
       expect(window.localStorage.getItem("flinttrade:demo-session")).toBe("active");
     });
 

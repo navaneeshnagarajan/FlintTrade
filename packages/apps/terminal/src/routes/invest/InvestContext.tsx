@@ -16,9 +16,18 @@ import {
 } from "react";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
+import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
+import {
+  accountCharges,
+  accountLedgerCash,
+  accountNetWorth,
+  fundsFuturesMtmInLedger,
+  netWorthApproximation,
+  positionsNetWorthContribution,
+} from "@/lib/accountNetWorth";
 import { classifySector } from "@/lib/sectors";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
@@ -31,6 +40,23 @@ export interface PortfolioSummary {
   totalPnl: number;
   totalPnlPercent: number;
   availableCash: number;
+  /**
+   * Ledger cash used in net worth, including blocked margin.
+   * Absent on older snapshots; callers fall back to available cash.
+   */
+  ledgerCash?: number;
+  /** Open positions' contribution to net worth, separate from holdings. */
+  positionValue: number;
+  /** Ledger cash, holdings market value, and open positions. */
+  netWorth: number;
+  /** True while an open future uses the fallback mark. Not sticky. */
+  approximateNetWorth?: boolean;
+  /** Symbols of those fallback futures, one entry per open position. */
+  fallbackSymbols?: readonly string[];
+  /** Dhan futures whose average price was missing. */
+  missingAverageSymbols?: readonly string[];
+  /** Kotak Neo futures marked from the open-leg average. */
+  openLegSymbols?: readonly string[];
   sectorCount: number;
   holdingCount: number;
 }
@@ -40,12 +66,19 @@ export interface InvestContextValue {
   holdings: Holding[];
   /** Aggregated portfolio numbers derived from holdings + funds. */
   summary: PortfolioSummary;
-  /** True while either holdings or funds query is in-flight. */
+  /** True while holdings or funds are in-flight. */
   isLoading: boolean;
-  /** True when holdings query has errored. */
+  /** True when holdings or the account position book has errored. */
   isError: boolean;
+  /**
+   * False until the account position book has loaded successfully.
+   * Sample books are ready without one. Net worth stays unpublished until this is true.
+   */
+  positionBookReady: boolean;
   /** True when the exposed book is the labelled sample feed. */
   isSampleData: boolean;
+  /** True once Practice or Live has returned an account snapshot. */
+  hasAccountSnapshot: boolean;
   /** Force-refetch holdings from the active broker data source. */
   refetchHoldings: () => void;
 }
@@ -54,8 +87,11 @@ export interface InvestContextValue {
  * Resolve the Invest-route holdings book.
  *
  * Explore always uses the labelled sample feed (`getDemoHoldings`). Practice
- * with no broker uses the same sample only after the sandbox holdings query
- * has settled empty — a cold load must not flash sample over a pending book.
+ * with no broker uses the same sample only after holdings and funds have
+ * settled empty — a cold load must not flash sample over a pending book.
+ * A Practice or Live account snapshot (funds returned, even with an empty
+ * holdings book) keeps that book. The sample portfolio must not supply a
+ * second net-worth figure next to Practice cash (FT-UX-HOME-INVEST-001).
  * A connected broker keeps the live query result — an empty funded book
  * stays at 0 (FT-TRADE-010).
  */
@@ -64,9 +100,13 @@ export function resolveInvestHoldings(
   liveHoldings: Holding[],
   brokerConnected = false,
   holdingsQuerySettled = true,
+  hasAccountSnapshot = false,
 ): { holdings: Holding[]; isSampleData: boolean } {
   if (mode === "explore") {
     return { holdings: getDemoHoldings(), isSampleData: true };
+  }
+  if (hasAccountSnapshot) {
+    return { holdings: liveHoldings, isSampleData: false };
   }
   if (
     mode === "practice"
@@ -97,20 +137,43 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   } = useHoldings({ enabled: accountReadsEnabled });
 
   const { data: funds, isLoading: fundsLoading } = useFunds({ enabled: accountReadsEnabled });
+  const {
+    data: livePositions,
+    isLoading: positionsLoading,
+    isError: positionsError,
+    isSuccess: positionsSuccess,
+  } = usePositions({ enabled: accountReadsEnabled });
 
   // Practice sandbox reads are enabled with no broker. Do not treat the
   // default empty array as sample while the query is still pending or has
   // errored — that flash would overlay a real Practice book (or hide a
-  // failure) behind the labelled sample feed.
+  // failure) behind the labelled sample feed. A settled funds snapshot is
+  // the Practice account: keep it, even when holdings are empty.
   const holdingsQuerySettled = !holdingsLoading && !holdingsError;
+  const fundsQuerySettled = !fundsLoading;
+  const hasAccountSnapshot = mode !== "explore" && funds != null;
+  const readyForSampleFallback = holdingsQuerySettled && (mode !== "practice" || fundsQuerySettled);
   const { holdings, isSampleData } = resolveInvestHoldings(
     mode,
     liveHoldings,
     brokerConnected,
-    holdingsQuerySettled,
+    readyForSampleFallback,
+    hasAccountSnapshot,
   );
   const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
-  const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
+  const fundsBook = mode === "explore" ? getDemoFunds() : funds;
+  const availableCash = fundsBook?.availableCash ?? 0;
+  const ledgerCash = accountLedgerCash(fundsBook);
+  const futuresMtmInLedger = fundsFuturesMtmInLedger(fundsBook);
+  const charges = accountCharges(fundsBook);
+  // Funds and holdings can settle first. Publishing then would treat the
+  // still-loading position book as empty and understate net worth. A failed
+  // position book is not an empty one either.
+  const expectsPositionBook = accountReadsEnabled && !isSampleData && mode !== "explore";
+  const positionBookReady = !expectsPositionBook
+    || (positionsSuccess && !positionsError && !positionsLoading);
+  const positions = isSampleData || !positionBookReady ? [] : (livePositions ?? []);
+  const positionValue = positionsNetWorthContribution(positions, holdings, futuresMtmInLedger);
 
   // Derive portfolio totals — memoised so tabs get stable references
   const totalInvested = useMemo(
@@ -135,6 +198,14 @@ export function InvestProvider({ children }: { children: ReactNode }) {
     [holdings],
   );
 
+  const netWorth = accountNetWorth(holdings, ledgerCash, positions, charges, futuresMtmInLedger);
+  const {
+    approximate: approximateNetWorth,
+    fallbackSymbols,
+    missingAverageSymbols,
+    openLegSymbols,
+  } = netWorthApproximation(positions, futuresMtmInLedger);
+
   const summary: PortfolioSummary = useMemo(
     () => ({
       currentValue,
@@ -142,10 +213,32 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       totalPnl,
       totalPnlPercent,
       availableCash,
+      ledgerCash,
+      positionValue,
+      netWorth,
+      approximateNetWorth,
+      fallbackSymbols,
+      missingAverageSymbols,
+      openLegSymbols,
       sectorCount,
       holdingCount: holdings.length,
     }),
-    [currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash, sectorCount, holdings.length],
+    [
+      currentValue,
+      totalInvested,
+      totalPnl,
+      totalPnlPercent,
+      availableCash,
+      ledgerCash,
+      positionValue,
+      netWorth,
+      approximateNetWorth,
+      fallbackSymbols,
+      missingAverageSymbols,
+      openLegSymbols,
+      sectorCount,
+      holdings.length,
+    ],
   );
 
   const value: InvestContextValue = useMemo(
@@ -153,11 +246,24 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       holdings,
       summary,
       isLoading,
-      isError: holdingsError,
+      isError: holdingsError || (expectsPositionBook && positionsError),
+      positionBookReady,
       isSampleData,
+      hasAccountSnapshot,
       refetchHoldings,
     }),
-    [holdings, summary, isLoading, holdingsError, isSampleData, refetchHoldings],
+    [
+      holdings,
+      summary,
+      isLoading,
+      holdingsError,
+      expectsPositionBook,
+      positionsError,
+      positionBookReady,
+      isSampleData,
+      hasAccountSnapshot,
+      refetchHoldings,
+    ],
   );
 
   return <InvestContext.Provider value={value}>{children}</InvestContext.Provider>;

@@ -8,8 +8,9 @@ import { UpgradeSuggestionHost } from "@/components/help/UpgradeSuggestion";
 
 const ROUTE_TITLES: Record<string, string> = {
   "/welcome": "Welcome",
-  "/explore": "Explore",
+  "/explore": "Demo (example data)",
   "/setup": "Setup",
+  "/home": "Home",
   "/settings": "Settings",
   "/trade": "Trade",
   "/invest": "Invest",
@@ -17,6 +18,8 @@ const ROUTE_TITLES: Record<string, string> = {
   "/lab": "Strategy Lab",
   "/automate": "Automate",
   "/ai": "AI Centre",
+  "/ditto": "Accounts",
+  "/admin": "Admin",
 };
 
 function useDocumentTitle() {

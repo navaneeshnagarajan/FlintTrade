@@ -48,9 +48,9 @@ async function mockManagedOllamaConfig(page: Page, model = 'qwen3:8b') {
 
 function managedOllamaStatus(overrides: Record<string, unknown> = {}) {
   return {
-    version: 'v0.32.0',
-    active_version: 'v0.32.0',
-    target_version: 'v0.32.0',
+    version: 'v0.35.0',
+    active_version: 'v0.35.0',
+    target_version: 'v0.35.0',
     previous_version: null,
     update_available: false,
     rollback_available: false,
@@ -112,10 +112,11 @@ test.describe('Settings page', () => {
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('back button is present in settings header', async ({ page }) => {
-    // The slim header has a back button with aria-label="Go back"
-    const backBtn = page.getByRole('button', { name: 'Go back' });
-    await expect(backBtn).toBeVisible();
+  test('settings uses the shared page header', async ({ page }) => {
+    // Settings is reached from the sidebar like every page, so its header names
+    // the page and holds its action instead of a Back button.
+    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
   test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
@@ -238,7 +239,7 @@ test.describe('Settings page', () => {
           },
         });
         terminalAfterPoll = managedOllamaStatus({
-          active_version: 'v0.32.0',
+          active_version: 'v0.35.0',
           previous_version: 'v0.31.2',
           rollback_available: true,
           rollback_allowed: true,
@@ -313,7 +314,7 @@ test.describe('Settings page', () => {
 
     await page.getByRole('button', { name: 'Update runtime' }).click();
     await page.getByRole('button', { name: 'Download and update' }).click();
-    await expect(page.getByText('Runtime v0.32.0')).toBeVisible();
+    await expect(page.getByText('Runtime v0.35.0')).toBeVisible();
 
     await page.getByRole('button', { name: 'Rollback runtime' }).click();
     await page.getByRole('button', { name: 'Switch to v0.31.2' }).click();
@@ -322,7 +323,7 @@ test.describe('Settings page', () => {
     await page.getByRole('button', { name: 'Uninstall runtime' }).click();
     await expect(page.getByText(/Models and accepted-digest metadata will remain/i)).toBeVisible();
     await page.getByRole('button', { name: 'Remove runtime' }).click();
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     expect(retainedModels).toHaveLength(1);
 
     await page.getByRole('button', { name: 'Install runtime' }).click();
@@ -365,7 +366,7 @@ test.describe('Settings page', () => {
             state: 'ready',
             ready: true,
             managed_process: true,
-            server_version: '0.32.0',
+            server_version: '0.35.0',
           }),
         }),
       });
@@ -572,13 +573,13 @@ test.describe('Settings page', () => {
     const provider = page.getByRole('combobox', { name: 'LLM provider' });
     const refresh = page.getByRole('button', { name: 'Refresh runtime status' });
     await expect(installButton).toBeEnabled();
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     const freshRequestCount = statusRequests;
     failStatus = true;
     await refresh.click();
 
     await expect(page.getByRole('alert')).toContainText('runtime status is stale');
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     await expect(installButton).toBeDisabled();
     await expect(page.getByLabel('LLM model name')).toBeDisabled();
     await expect(provider).toBeEnabled();
@@ -634,7 +635,7 @@ test.describe('Settings page', () => {
     await expect(sectionTabs.getByRole('tab', { name: 'Report Bug' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('switch', { name: 'Include diagnostic summary in GitHub draft' })).not.toBeChecked();
     await expect(page.getByLabel('GitHub draft preview')).toContainText('Not included in this GitHub draft.');
-    await expect(page.getByText(/Diagnostics are unavailable in Explore demo/i)).toBeVisible();
+    await expect(page.getByText(/Diagnostics are unavailable for Example/i)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Download diagnostics' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Open AI Tutor' })).toHaveCount(0);
     expect(diagnosticsRequested).toBe(false);

@@ -123,25 +123,6 @@ export function FlowsTab({ onNew, onOpen, onFromTemplate }: FlowsTabProps) {
             Create your first automation flow. Start from a template or build from scratch using{" "}
             {getTotalNodeCount()} pre-built nodes.
           </p>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="h-8 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
-              onClick={onNew}
-            >
-              <Plus size={13} />
-              New Flow
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 bg-surface-card border-border-default text-text-secondary hover:text-text-primary text-xs gap-1"
-              onClick={onFromTemplate}
-            >
-              <Package size={13} />
-              From Template
-            </Button>
-          </div>
         </div>
       ) : (
         <div className="grid gap-2">

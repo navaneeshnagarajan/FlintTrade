@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
@@ -11,7 +12,6 @@ import {
   BarChart3,
   PlayCircle,
   Search,
-  ChevronRight,
   TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,6 +25,8 @@ import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
 import { motionConfig } from "@/lib/motion";
+import { Page, PageHeader } from "@/components/layout/Page";
+import { SectionNav } from "@/components/layout/SectionNav";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +38,6 @@ interface TabDef {
   id: TabId;
   label: string;
   icon: typeof BookOpen;
-  /** Progress 0–100 shown as a bar under the label */
   progress: number;
 }
 
@@ -68,6 +69,7 @@ interface SelectedDoc {
   path: string;
   title: string;
   snippet?: string;
+  anchor?: string;
 }
 
 interface BasicsSection {
@@ -80,8 +82,6 @@ interface BasicsSection {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const LEARN_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 const TABS: TabDef[] = [
   { id: "basics",     label: "Market Basics",    icon: BookOpen,     progress: 33 },
@@ -274,8 +274,22 @@ function titleFromDocPath(path: string): string {
     .join(" ");
 }
 
+function headingAnchor(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function docAnchorFromState(state: object): string | undefined {
+  const anchor = (state as { docAnchor?: unknown }).docAnchor;
+  return typeof anchor === "string" && anchor ? anchor : undefined;
+}
+
 function getSelectedDoc(state: unknown): SelectedDoc | null {
   if (!state || typeof state !== "object") return null;
+  const anchor = docAnchorFromState(state);
   const maybeDoc = (state as { selectedDoc?: unknown }).selectedDoc;
   if (maybeDoc && typeof maybeDoc === "object") {
     const doc = maybeDoc as { path?: unknown; title?: unknown; snippet?: unknown };
@@ -284,13 +298,14 @@ function getSelectedDoc(state: unknown): SelectedDoc | null {
         path: doc.path,
         title: typeof doc.title === "string" ? doc.title : titleFromDocPath(doc.path),
         snippet: typeof doc.snippet === "string" ? doc.snippet : undefined,
+        anchor,
       };
     }
   }
 
   const path = (state as { selectedDocPath?: unknown }).selectedDocPath;
   if (typeof path === "string") {
-    return { path, title: titleFromDocPath(path) };
+    return { path, title: titleFromDocPath(path), anchor };
   }
 
   return null;
@@ -298,7 +313,10 @@ function getSelectedDoc(state: unknown): SelectedDoc | null {
 
 async function fetchDocsDocument(path: string, signal?: AbortSignal): Promise<{ title: string; content: string }> {
   const params = new URLSearchParams({ path });
-  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, { signal });
+  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, {
+    signal,
+    headers: buildHeaders(false),
+  });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = (await response.json()) as { title?: unknown; content?: unknown };
   if (typeof body.title !== "string" || typeof body.content !== "string") {
@@ -309,15 +327,18 @@ async function fetchDocsDocument(path: string, signal?: AbortSignal): Promise<{ 
 
 function renderDocLine(line: string, key: number) {
   if (/^#\s/.test(line)) {
-    return <h2 key={key} className="text-base font-semibold text-text-primary mt-3">{line.replace(/^#\s+/, "")}</h2>;
+    const text = line.replace(/^#\s+/, "");
+    return <h2 key={key} id={headingAnchor(text)} className="text-base font-semibold text-text-primary mt-3">{text}</h2>;
   }
   if (/^##\s/.test(line)) {
-    return <h3 key={key} className="text-sm font-semibold text-text-primary mt-3">{line.replace(/^##\s+/, "")}</h3>;
+    const text = line.replace(/^##\s+/, "");
+    return <h3 key={key} id={headingAnchor(text)} className="text-sm font-semibold text-text-primary mt-3">{text}</h3>;
   }
   if (/^###\s/.test(line)) {
+    const text = line.replace(/^###\s+/, "");
     return (
-      <h4 key={key} className="text-xs font-semibold text-text-secondary uppercase tracking-wider mt-3">
-        {line.replace(/^###\s+/, "")}
+      <h4 key={key} id={headingAnchor(text)} className="text-xs font-semibold text-text-secondary uppercase tracking-wider mt-3">
+        {text}
       </h4>
     );
   }
@@ -575,54 +596,26 @@ function PaperTradingTab() {
           What is Practice Trading?
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4 break-words">
-          Practice trading lets you trade with virtual money. You execute the same strategies,
-          see the same market data, but don&apos;t risk real capital. It&apos;s the best way to learn
-          before going live.
+          Practice is built in. Open the Trade desk and place a simulated order, no broker needed.
         </p>
         <h4 className="font-heading font-semibold text-sm text-text-primary mb-2 break-words">
           How to start Practice Trading:
         </h4>
         <ol className="min-w-0 space-y-2 pl-5 text-sm text-text-secondary list-decimal list-outside break-words">
-          <li>
-            Set up OpenAlgo with your broker&apos;s <strong>Practice mode</strong>{" "}
-            (Dhan Sandbox provides ₹10L virtual capital)
-          </li>
-          <li>Configure FlintTrade&apos;s Broker Gateway to reach that OpenAlgo Practice instance</li>
-          <li>Trade normally — all orders execute against virtual funds</li>
-          <li>Review your P&L Dashboard to analyse performance</li>
-          <li>When confident, point OpenAlgo at your live broker credentials</li>
+          <li>Choose Practice from the Mode menu before placing an order.</li>
+          <li>Open the Trade desk and use the Order Pad to place a simulated order.</li>
+          <li>Review your simulated orders, positions and P&amp;L to learn from each trade.</li>
         </ol>
+        <p className="mt-4 text-sm text-text-secondary break-words">
+          Practice uses virtual funds. Simulated fills do not guarantee the same results in Live trading.
+        </p>
         <div className="mt-4 min-w-0">
-          <p className="mb-3 text-sm text-text-secondary break-words">
-            Configure OpenAlgo in Settings → Broker Gateway.
-          </p>
           <Button
             asChild
             className="h-auto w-full min-w-0 max-w-full shrink whitespace-normal break-words sm:w-auto"
           >
-            <Link to="/settings#api">Open Settings → Broker Gateway</Link>
+            <Link to="/trade">Open Trade desk</Link>
           </Button>
-        </div>
-      </GlassCard>
-
-      <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3 break-words">
-          Supported Sandboxes
-        </h3>
-        <div className="space-y-3">
-          <div
-            data-testid="practice-sandbox-row"
-            className="flex min-w-0 flex-wrap items-center gap-2"
-          >
-            <Badge className="shrink-0 bg-bullish-bg text-profit border-0">Active</Badge>
-            <span className="text-sm text-text-primary">Dhan Sandbox</span>
-            <span className="min-w-0 break-words text-xs text-text-muted">
-              — ₹10L virtual funds, 24/7, all instruments
-            </span>
-          </div>
-          <p className="min-w-0 break-words text-xs text-text-muted" data-testid="neo-no-practice">
-            Kotak Neo has no sandbox — never offer Neo Practice. Live read only until funded unlock.
-          </p>
         </div>
       </GlassCard>
     </div>
@@ -631,6 +624,7 @@ function PaperTradingTab() {
 
 function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
   const [activeDoc, setActiveDoc] = useState<SelectedDoc | null>(selectedDoc);
+  const docArticleRef = useRef<HTMLElement>(null);
   const [docContent, setDocContent] = useState<{ title: string; content: string } | null>(null);
   const [docStatus, setDocStatus] = useState<DocLoadStatus>("idle");
   const [loadGeneration, setLoadGeneration] = useState(0);
@@ -683,6 +677,16 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
 
   const retryDoc = () => setLoadGeneration((generation) => generation + 1);
 
+  useEffect(() => {
+    if (docStatus !== "ready" || !activeDoc?.anchor) return;
+    const root = docArticleRef.current;
+    if (!root) return;
+    const target = root.querySelector(`#${CSS.escape(activeDoc.anchor)}`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: "start" });
+    }
+  }, [activeDoc, docStatus]);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
       {activeDoc && (
@@ -721,7 +725,7 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
             </div>
           )}
           {docStatus === "ready" && docContent && (
-            <article className="max-h-[38rem] overflow-y-auto rounded-md border border-border-default bg-surface-base/70 p-4">
+            <article ref={docArticleRef} className="max-h-[38rem] overflow-y-auto rounded-md border border-border-default bg-surface-base/70 p-4">
               <DocMarkdown content={docContent.content} />
             </article>
           )}
@@ -751,114 +755,27 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar nav item with progress bar
-// ---------------------------------------------------------------------------
-
-interface SidebarItemProps {
-  tab: TabDef;
-  isActive: boolean;
-  collapsed: boolean;
-  onClick: () => void;
-}
-
-function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
-  const Icon = tab.icon;
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        role="tab"
-        id={`learn-tab-${tab.id}`}
-        aria-selected={isActive}
-        aria-controls={`learn-tabpanel-${tab.id}`}
-        tabIndex={isActive ? 0 : -1}
-        onClick={onClick}
-        title={collapsed ? tab.label : undefined}
-        className={`flex w-auto min-w-0 items-center gap-3 border-l-2 px-3 py-2.5 text-sm font-sans transition-colors md:w-full ${
-          isActive
-            ? "text-accent bg-accent/10 border-accent"
-            : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
-        }`}
-      >
-        <Icon className="w-4 h-4 shrink-0" />
-
-        {/* Label — hidden when collapsed */}
-        <AnimatePresence initial={false}>
-          {!collapsed && (
-            <motion.span
-              key="label"
-              initial={{ opacity: 0, width: 0 }}
-              animate={{ opacity: 1, width: "auto" }}
-              exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-              className="truncate flex-1 text-left"
-              style={{ overflow: "hidden", whiteSpace: "nowrap" }}
-            >
-              {tab.label}
-            </motion.span>
-          )}
-        </AnimatePresence>
-
-        {/* Active chevron — hidden when collapsed */}
-        {!collapsed && (
-          <ChevronRight
-            className={`w-3 h-3 ml-auto shrink-0 transition-opacity ${isActive ? "opacity-100" : "opacity-0"}`}
-          />
-        )}
-      </button>
-
-      {/* Progress bar — only visible when expanded */}
-      <AnimatePresence initial={false}>
-        {!collapsed && tab.progress > 0 && (
-          <motion.div
-            key="progress"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: motionConfig.duration.fast }}
-            className="mx-3 mb-1"
-          >
-            <div className="h-0.5 w-full rounded-full bg-border-default/50">
-              <motion.div
-                className="h-full rounded-full bg-accent/60"
-                initial={{ width: 0 }}
-                animate={{ width: `${tab.progress}%` }}
-                transition={{ duration: motionConfig.duration.slow, ease: motionConfig.ease.enter }}
-              />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
+
+function learnTabFromHash(hash: string): TabId | null {
+  const id = hash.replace(/^#/, "");
+  return TABS.some((tab) => tab.id === id) ? (id as TabId) : null;
+}
 
 export default function LearnRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("learn", "daysActive"); }, []);
 
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<TabId>("basics");
+  const [activeTab, setActiveTab] = useState<TabId>(() => learnTabFromHash(location.hash) ?? "basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [isDesktopTablist, setIsDesktopTablist] = useState(
-    () => window.matchMedia(LEARN_DESKTOP_MEDIA_QUERY).matches,
-  );
   const level = useSkillLevel("learn");
   const selectedDoc = useMemo(() => getSelectedDoc(location.state), [location.state]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia(LEARN_DESKTOP_MEDIA_QUERY);
-    const handleChange = (event: MediaQueryListEvent) => {
-      setIsDesktopTablist(event.matches);
-    };
-    setIsDesktopTablist(mediaQuery.matches);
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
+    const next = learnTabFromHash(location.hash);
+    if (next) setActiveTab(next);
+  }, [location.hash]);
 
   useEffect(() => {
     if (selectedDoc) setActiveTab("resources");
@@ -878,29 +795,6 @@ export default function LearnRoute() {
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
-  const tablistRef = useRef<HTMLDivElement>(null);
-
-  // Roving tabindex: arrow keys follow tablist orientation
-  const handleTablistKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const previousKey = isDesktopTablist ? "ArrowUp" : "ArrowLeft";
-      const nextKey = isDesktopTablist ? "ArrowDown" : "ArrowRight";
-      if (e.key !== previousKey && e.key !== nextKey) return;
-      e.preventDefault();
-      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
-      if (!tabs || tabs.length === 0) return;
-      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
-      const next =
-        e.key === nextKey
-          ? (idx + 1) % tabs.length
-          : (idx - 1 + tabs.length) % tabs.length;
-      const nextTab = tabs[next];
-      nextTab?.focus();
-      const tabId = visibleTabs[next]?.id;
-      if (tabId) setActiveTab(tabId);
-    },
-    [isDesktopTablist, visibleTabs],
-  );
 
   const tabContent = useMemo<Record<TabId, React.ReactNode>>(() => ({
     basics:     <BasicsTab />,
@@ -910,80 +804,73 @@ export default function LearnRoute() {
     resources:  <ResourceHubTab selectedDoc={selectedDoc} />,
   }), [selectedDoc]);
 
-  const desktopCollapsed = isDesktopTablist && sidebarCollapsed;
+  const navGroups = [
+    {
+      id: "learn",
+      items: visibleTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        icon: tab.icon,
+        progress: tab.progress,
+      })),
+    },
+  ];
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="min-w-0 border-b border-border-default bg-surface-card/80 px-4 py-4 backdrop-blur-sm sm:px-6" data-tour-target="course-list">
-          <div className="flex min-w-0 items-center gap-3">
-            <GraduationCap className="h-6 w-6 shrink-0 text-accent" />
-            <div className="min-w-0">
-              <h1 className="font-heading break-words font-bold text-lg text-text-primary">
-                {level === "beginner" ? "Getting Started" : "Learning Center"}
-              </h1>
-              <p className="break-words text-xxs text-text-muted">
-                {level === "beginner"
-                  ? "Learn market basics one lesson at a time"
-                  : "Market concepts, Practice workflows, and project resources"}
-              </p>
-            </div>
-          </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Learn"
+        tourTarget="course-list"
+        description={
+          level === "beginner"
+            ? "Market basics, one short lesson at a time."
+            : "Market concepts, Practice workflows and project resources."
+        }
+      />
 
       <div
         data-testid="learn-body"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row"
       >
-        {/* Section tabs: stacked/wrapping rail on narrow viewports, collapsible column on desktop */}
-        <motion.div
+        {/* Section tabs: a scrolling row on narrow viewports, a collapsible column on desktop */}
+        <SectionNav<TabId>
           data-testid="learn-sidebar"
-          animate={isDesktopTablist ? { width: sidebarCollapsed ? 48 : 224 } : { width: "100%" }}
-          transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-          className="flex w-full min-w-0 flex-col border-b border-border-default bg-surface-card md:border-b-0 md:border-r md:shrink-0"
-        >
-          {/* Collapse toggle — desktop column only */}
-          <div className={`hidden py-2 md:flex ${sidebarCollapsed ? "justify-center" : "justify-end px-2"}`}>
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed((v) => !v)}
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!sidebarCollapsed}
-              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-base hover:text-text-primary"
-            >
-              {sidebarCollapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-
-          {/* Nav items — filtered by skill level */}
-          <nav aria-label="Learning sections" className="min-w-0 md:flex-1 md:overflow-y-auto" data-tour-target="glossary">
-            <div
-              ref={tablistRef}
-              role="tablist"
-              aria-orientation={isDesktopTablist ? "vertical" : "horizontal"}
-              className="flex min-w-0 flex-row flex-wrap md:flex-col"
-              onKeyDown={handleTablistKeyDown}
-            >
-              {visibleTabs.map((tab) => (
-                <SidebarItem
-                  key={tab.id}
-                  tab={tab}
-                  isActive={activeTab === tab.id}
-                  collapsed={desktopCollapsed}
-                  onClick={() => setActiveTab(tab.id)}
-                />
-              ))}
+          tourTarget="glossary"
+          className="w-full min-w-0"
+          groups={navGroups}
+          value={activeTab}
+          onChange={setActiveTab}
+          label="Learning sections"
+          idPrefix="learn"
+          collapsed={sidebarCollapsed}
+          header={
+            <div className={`flex px-3 pt-3 ${sidebarCollapsed ? "justify-center px-2" : "justify-end"}`}>
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed((v) => !v)}
+                title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-expanded={!sidebarCollapsed}
+                className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+              >
+                {sidebarCollapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
             </div>
-          </nav>
-        </motion.div>
+          }
+        />
 
         {/* Content area — plain overflow-y pane so Radix ScrollArea cannot pin a min-content width */}
         <div className="min-w-0 flex-1 overflow-y-auto">
-          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="mx-auto min-w-0 max-w-4xl p-4 sm:p-6">
+          <div
+            role="tabpanel"
+            id={`learn-tabpanel-${activeTab}`}
+            aria-labelledby={`learn-tab-${activeTab}`}
+            className="mx-auto min-w-0 max-w-4xl px-[var(--ft-page-gutter)] pb-16 pt-6"
+          >
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>
@@ -998,6 +885,6 @@ export default function LearnRoute() {
           steps={TOUR_DEFINITIONS["learn-beginner"] ?? []}
         />
       )}
-    </div>
+    </Page>
   );
 }

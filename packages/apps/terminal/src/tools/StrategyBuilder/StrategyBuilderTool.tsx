@@ -141,7 +141,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
           <Brain size={16} className="text-primary" />
-          <h1 className="font-heading font-bold text-lg text-text-primary">Strategy Builder</h1>
+          <h2 className="font-heading font-bold text-lg text-text-primary">Strategy Builder</h2>
           <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
             {underlying.symbol}
           </Badge>

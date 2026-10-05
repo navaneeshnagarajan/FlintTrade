@@ -93,9 +93,10 @@ describe("LearnRoute", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the Learning Center heading", () => {
+  it("renders the Learn heading, matching its sidebar label", () => {
     renderLearnRoute();
-    expect(screen.getByText("Learning Center")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Learn" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("has sidebar sections for all tabs at advanced level", () => {
@@ -144,31 +145,16 @@ describe("LearnRoute", () => {
     );
   });
 
-  it("offers a Settings Broker Gateway CTA from Practice Trading", () => {
+  it("explains built-in Practice without requiring a broker or sandbox", () => {
     renderLearnRoute();
     fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
 
-    const cta = screen.getByRole("link", { name: /open settings.*broker gateway/i });
-    expect(cta).toHaveAttribute("href", "/settings#api");
-    expect(screen.getByText(/configure openalgo in settings/i)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /settings\s*→\s*brokers/i })).not.toBeInTheDocument();
-    expect(document.querySelector('a[href="/settings#brokers"]')).toBeNull();
-  });
-
-  it("wraps Practice Trading sandbox rows so a ~390px viewport does not clip", () => {
-    renderLearnRoute();
-    fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
-
-    const panel = screen.getByRole("tabpanel");
-    expect(panel).toHaveClass("min-w-0");
-
-    const dhanRow = screen.getByText("Dhan Sandbox").closest("[data-testid='practice-sandbox-row']");
-    expect(dhanRow).toHaveClass("flex-wrap", "min-w-0");
-
-    expect(screen.getByTestId("neo-no-practice")).toHaveTextContent(/no sandbox/i);
-    expect(screen.getByTestId("neo-no-practice")).toHaveTextContent(/never offer Neo Practice/i);
-    expect(screen.getByTestId("neo-no-practice")).toHaveTextContent(/Live read only until funded unlock/i);
-    expect(screen.queryByText("Kotak Neo Sandbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
+    expect(screen.getByText(/Choose Practice from the Mode menu/)).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveClass("min-w-0");
+    expect(screen.getByRole("tabpanel")).not.toHaveTextContent(/OpenAlgo|sandbox|Kotak|funded unlock/i);
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("stacks the Learn shell and wraps Practice Trading so a ~390px column cannot clip", () => {
@@ -182,14 +168,15 @@ describe("LearnRoute", () => {
     const sidebar = screen.getByTestId("learn-sidebar");
     expect(sidebar).toHaveClass("w-full", "min-w-0");
 
+    // Narrow screens scroll the section row sideways instead of clipping it.
     const tablist = screen.getByRole("tablist");
-    expect(tablist).toHaveClass("flex-wrap", "min-w-0");
+    expect(tablist).toHaveClass("overflow-x-auto", "min-w-0");
 
     const practice = screen.getByTestId("practice-trading");
     expect(practice).toHaveClass("min-w-0", "max-w-full");
 
-    const cta = screen.getByRole("link", { name: /open settings.*broker gateway/i });
-    expect(cta).toHaveAttribute("href", "/settings#api");
+    const cta = screen.getByRole("link", { name: "Open Trade desk" });
+    expect(cta).toHaveAttribute("href", "/trade");
     expect(cta).toHaveClass("whitespace-normal");
     expect(cta.className).not.toMatch(/(?:^|\s)whitespace-nowrap(?:\s|$)/);
 

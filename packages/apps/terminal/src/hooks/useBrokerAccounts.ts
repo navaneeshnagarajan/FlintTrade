@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { isDocumentHidden } from "@/lib/deskPolling";
+import { useRearmPollingWhenVisible } from "@/hooks/useRearmPollingWhenVisible";
 import { useEffect } from "react";
 import { listBrokerAccounts } from "@/services/brokerAccountsApi";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -15,12 +17,16 @@ export function useBrokerAccounts(enabled = true) {
   const setAccounts = useBrokerStore((s) => s.setAccounts);
 
   const brokerRateLimited = useOperatorSignalStore((s) => s.brokerRateLimited);
+  useRearmPollingWhenVisible(
+    BROKER_ACCOUNTS_QUERY_KEY,
+    () => enabled && !useOperatorSignalStore.getState().brokerRateLimited,
+  );
   const query = useQuery({
     queryKey: BROKER_ACCOUNTS_QUERY_KEY,
     queryFn: ({ signal }) => listBrokerAccounts(useBrokerStore.getState().accounts, signal),
     enabled,
     // A latched broker rate limit must not keep polling. The operator retries once.
-    refetchInterval: brokerRateLimited ? false : 10_000,
+    refetchInterval: () => (brokerRateLimited || isDocumentHidden() ? false : 10_000),
     staleTime: 5_000,
   });
 

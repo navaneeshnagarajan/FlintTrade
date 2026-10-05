@@ -17,16 +17,108 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Desk routes, one Practice place path, and desk polling.** `/positions`,
+  `/holdings`, `/monitoring`, `/schedules`, and `/glossary` open the screen
+  that owns that book. `/login` opens sign-in. Practice places go through
+  the admitted order route only; Settings does not place. A missing price
+  says so plainly, or fills at the last stored close. The Trade book starts
+  open. Desk reads pause while the tab is hidden and back off after HTTP 429.
+
+- **Laya chip, runtime key, and snapshot launch.** The desk polls
+  `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the pid
+  file, the key file, and the runtime record the same way an order
+  does, so the chip and the order gate read the same state. A
+  command-line stop or start shows on the chip by the next 1.5-second check.
+  After Start Laya, until that ping confirms the new state, the chip
+  says Checking in the neutral colour and the popover says Checking
+  Laya…. It does not show a stale Ready during that wait. An admitted
+  place while the chip is not Ready or Degraded also shows Checking
+  until the next ping. A confirmed
+  first load still says Still loading. A place refused with exactly
+  "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to
+  Down on that response. The refusal line is unchanged. When
+  `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`, `start`
+  replaces that file and does not treat it as missing. A different path
+  that is not there still refuses with "The Laya API key file is
+  missing." A model already in the standard Hugging Face cache is
+  accepted. When that file is the cache symlink
+  `snapshots/<revision>/model.safetensors`, the launch path is the
+  snapshot file, not the blob. A blob path is still refused. An admitted
+  Practice place with an empty note skips the model and writes one
+  decision-log line, `effect=clamp` with `failure=note_absent` and no
+  proof. When this run's record stood in, each model allow keeps its own
+  `effect=allow` `proof=runtime` line.
+
 ### Added
 
-- **Mode honesty bar.** One line under the TopBar for Explore, Practice,
-  and Live. Widgets no longer repeat a Sample chip. An incident, when
+- **Opt-in Laya decision sidecar for place admission (FT-LAYA-MODEL-001).**
+  After the hard rules, the sidecar may deny or clamp a place only. It
+  cannot raise a quantity or overturn a rule refusal, and it does not
+  place the order. Laya starts Down. A ping does not invent Ready.
+  Live stays fail-closed until a qualification record uses
+  LIVE_DECISION evidence for the exact model revision, weight digest,
+  and policy version. When Laya is actually Down, every mode is refused
+  with "Laya is Down. New orders are paused until it's Ready. You can still close positions." A Practice
+  refusal never says Live. A Live place without that qualification,
+  while Ready or Degraded, says "Laya isn't qualified for Live yet.
+  Practice orders are available." Opt in with
+  `python -m flinttrade_core.laya_runtime install` or `start`.
+  The CPU install pins `torch==2.14.0+cpu`, `laya==0.3.21`,
+  `huggingface_hub==1.33.0`, and `tqdm==4.70.1`
+  in `laya_sidecar_constraints.txt` (no extras; the install requirement
+  is still `laya[serve]==0.3.21`). The download progress class subclasses
+  that pinned `tqdm.auto.tqdm`. Torch is installed first from the CPU
+  index, and the sidecar can share the base interpreter with FlintTrade.
+  `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
+  It is not Ready by default. A first start with the checkpoint missing
+  or incomplete downloads the commit named by `[checkpoint] revision`
+  (not the model repository's default branch) into `runtime/laya/staging`.
+  That download sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
+  `HF_HUB_DISABLE_XET=1`, so transfer logs stay out of the shared cache.
+  FlintTrade hashes the files there against the `[checkpoint]` and
+  `[checkpoint.manifest]` pins, and on a full match moves that directory
+  onto `runtime/laya/checkpoint` before the offline launch. When a new
+  pin replaces a checkpoint already on disk, the next start downloads it
+  the same way and the current copy stays in place until the new files
+  match. On a full match that checkpoint is renamed aside to
+  `checkpoint.old-<random>` in the same runtime directory, staging is
+  renamed onto `checkpoint`, and the old copy is deleted. If that second
+  rename fails, the old checkpoint is renamed back, the chip is
+  `download_failed`, and the sidecar does not start. While the download
+  runs, including a pin change, the status word is Down, not Still
+  loading, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
+  The model is about 2.37 GB, and that size is reported once.
+  There is no separate Updating label. Orders are refused with
+  "Laya is Down. New orders are paused until it's Ready. You can still close positions." A dropped
+  connection, a partial download, or a failed swap is `download_failed`
+  ("Can't download the model"; tooltip "Check your connection, then
+  Start Laya again.") and deletes only the staging directory. That chip
+  stays `download_failed` even when an older snapshot is still on disk,
+  whether that snapshot would be `wrong_revision` or `unverified`.
+  `unverified` stays when this start did not download. `wrong_revision`
+  is only a complete download whose files
+  do not match the pin, a snapshot already on disk that this start is not
+  replacing, or a running sidecar that reports another revision or digest.
+  Leftover staging directories and `checkpoint.old-*` copies are removed
+  at the start of `start` once a checkpoint is in place, with no chip change and
+  no message. If `checkpoint` is missing after a crash between the two
+  renames, the last `checkpoint.old-*` name is restored and checked
+  against the pin.
+  The sidecar does not start on files that do not match the pin, including
+  that restored copy. The sidecar always runs offline. When its health
+  document leaves the revision empty, FlintTrade fills the pinned
+  revision from the verified manifest, so the chip leaves Still loading.
+
+- **Mode honesty bar.** One line under the TopBar for Example, and for
+  Practice and Live. Widgets no longer repeat a Sample chip. An incident, when
   one is showing, sits above that line and does not replace it.
 - **Practice `SandboxEngine` primary fills (FT-MONDAY-001).**
   Practice places and records native `SandboxEngine`
   fills end-to-end as the primary paper path. The terminal
-  and AI read that same Practice book. Explore stays
-  sample-only. Live stays fail-closed until MSI
+  and AI read that same Practice book. Example stays
+  sample data. Live stays fail-closed until MSI
   native read smoke is trusted and funded unlock. Practice
   never leaks a live broker order. OpenAlgo is
   Settings fallback only — not the primary
@@ -44,22 +136,169 @@ changelog rebuilds itself from the first release cut after this baseline.
   Selecting a symbol in `/trade` Watchlist retargets
   Chart, Option Chain, and Scalper to that symbol —
   no retype. Keyboard retarget is optional later.
-  Explore retarget is allowed. Disclosure stays the
+  Example retarget is allowed. Disclosure stays the
   Mode honesty line, not a widget Sample chip.
   An empty watchlist never silently retargets.
 
 - **Option Chain OI profile + PCR strip (FT-TRADE-012).**
   The Option Chain strip shows OI profile + PCR for
-  the selected expiry/symbol. Explore does not invent
+  the selected expiry/symbol. Example does not invent
   live OI. The Mode honesty line is the disclosure —
   there is no Sample chip on the chain strip. An empty
   expiry is an honest empty, not zeros-as-data.
 
 ### Changed
 
+- **Desk Laya chip follows the current mode (FT-LAYA-MODEL-001).**
+  Practice shows sidecar Ready, Degraded, Down, Still loading, or
+  Checking. Live shows Live-facing status. "Not qualified for Live" is the tooltip
+  and the popover line when Live lacks qualification. Ping
+  publishes Live-facing `laya`, sidecar `laya_practice`, and
+  `laya_live_qualified`, plus a reason code and port. During the first
+  load the chip says Still loading and does not read Down. Orders stay
+  refused with the Down sentence. A port clash says which port is in use.
+  The Live Blocked strip follows Live-facing
+  Down only. It mutes Live place and Position Mirror start. Practice
+  is not muted by that strip. Clicking the chip opens a popover with the
+  plain-words reason, the link "How to start Laya"
+  (`docs/USER_GUIDE.md#start-laya`), and an operator-only "Start Laya"
+  button. The chip tooltip carries
+  `python -m flinttrade_core.laya_runtime start`. Reason codes are
+  `not_started`, `stopped`, `port_in_use`, `still_loading`,
+  `downloading` (Downloading the model · 1.2 of 3.4 GB),
+  `download_failed` (Can't download the model),
+  `unreachable` (Unreachable), `wrong_revision` (Wrong model version),
+  `unverified` (Can't verify the model), `key_rejected` (Can't reach
+  Laya), and `key_missing` (The Laya API key file is missing.). A health
+  check does not replace `key_missing` with Not started. When
+  `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`, `start`
+  replaces that file and does not treat it as missing. A different path
+  that is not there still refuses with that same sentence.
+  `downloading` has no Next line. The `download_failed` tooltip is
+  "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
+  (`POST /api/v1/laya/start`); the chip then says Checking in the
+  neutral colour, and the popover says Checking Laya…, until the ping
+  confirms Ready, Degraded, or a reason other than `not_started`. A
+  confirmed first load still says Still loading. A dead sidecar is reaped
+  and reported Stopped. A clamp says "Not placed. Laya allows
+  up to N." with Place N and Cancel, and never auto-places. Place N
+  sends that quantity, and the Practice review panel shows it. A Down
+  refusal is "Laya is Down. New orders are paused until it's Ready. You can still close positions." and
+  does not show a quantity ceiling. A Live place that
+  is not qualified says "Laya isn't qualified for Live yet. Practice
+  orders are available." The Order Pad note is the collapsed line "Add a
+  reason (optional)" under Quantity. Once open, the field's accessible
+  name is the same. Under a denial, the server reason is named
+  "Laya decision" inside one alert (`role="alert"`). That alert is the
+  only live region. The reason line is not its own status. A place with
+  no note still gets
+  Laya's policy decision: Practice clamps and Live denies. It is not a
+  hard reject. Desk place
+  surfaces go through this admission.
+
+- **GTT is refused on every submit route.** `"variety": "gtt"`, in any
+  case or separator spelling, is HTTP 422 `gtt_unsupported` on place,
+  routed place, exit-all, and a bracket, before Laya, SafetySystem, and
+  any broker call. The message is `Not placed. GTT orders aren't supported right now.`
+  No submit route reaches a broker forever or super-order endpoint. The
+  Kotak Neo adapter refuses a `gtt` place. Order Pad keeps GTT visible and
+  disabled, with the tooltip `GTT orders aren't supported right now.`
+  `POST /api/v1/orders/forever` does not place: a valid body is HTTP 501
+  `Orders are placed through /api/v1/orders/place.` A Live bracket with
+  exactly one stop-loss or one target submits on
+  `POST /api/v1/orders/bracket` after admission. Practice on that route is
+  HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and
+  a target together, and a trailing stop are refused before admission. A
+  second exit on the same broker account, while this desk's exit on that
+  contract is unfilled, is HTTP 409 `exit_pending`: `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.`
+  The row keeps **Exit pending**. The Live hold is
+  for that broker account. When the broker
+  order book cannot be read, that refusal is HTTP 409
+  `exit_orders_unreadable`: `Not placed. One exit at a time for <symbol> until your broker's orders load.`
+  A signed-out reset with no
+  authenticator enrolled reads `Sign in to reset this account. You'll
+  need your password.` With an authenticator enrolled it reads `Sign in
+  to reset this account. You'll need your password and authenticator
+  code.` Recovery asks for an authenticator code only once one is
+  enrolled.
+
+- **Session auth and probes.** A session JWT on
+  `Authorization: Bearer` or `X-FlintTrade-Token` passes the global check.
+  An API key on `X-FlintTrade-Token` does not. A reduce-only close can be admitted while
+  new orders are paused. PIN unlock replaces the session token. Reset of
+  a finished account needs a session and the password. A wipe ends other sessions. Practice restore marks fills and leaves them out
+  of the Laya, strategy, benchmark, and training readers. `GET /healthz`
+  and `GET /readyz` are public and return status only.
+
+- **Home and Invest net worth, greeting, benchmark legend, and Example markers.**
+  Home and Invest share one total: ledger cash, including blocked
+  margin, plus holdings at market value, plus open positions. Opening
+  an F&O position does not reduce the total by its margin. A Practice
+  round trip at an unchanged price leaves it at the starting cash, for
+  example ₹10,00,000. Options add signed market value. Futures add
+  unrealised P&L. Dhan marks from the mark-to-market average, or from
+  `costPrice` when that average is absent. Kotak Neo marks an open
+  future from the open-leg average. Practice marks a future from the
+  entry price. An estimated futures mark shows `≈`. Dhan does this for
+  `costPrice`. Kotak Neo does this for an open future. Practice never
+  does. The mark clears when that position is flat or the average
+  arrives. The tooltip and `≈` sit on the Home Net Worth amount, the
+  Known Total amount, and the Open Positions value. The Invest
+  Dashboard label `Net Worth (Cash + Holdings + Positions)` carries
+  the tooltip, and `≈` sits on the amount under it. Available Funds
+  shows that `≈` with no tooltip. Dhan's tooltip, when the average was
+  missing, is
+  `Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+  Neo's is
+  `Approximate. The price for NIFTY25JUNFUT is estimated from the open position's average, so profit or loss from earlier days may be counted twice.`
+  Several positions of one kind say `N futures positions` instead of
+  the symbol. The screen-reader name is `Net Worth, approximately …`.
+  Allocation percentages are not marked. Home allocation stays on the
+  Example split until funds, holdings, and positions have all loaded.
+  Home and Invest both wait for the position book before they publish
+  the total. The sample book does not. While that book is pending or
+  has failed, Home shows `—` and does not draw cash alone. A negative
+  total is the number, for example `-₹50,000`, or `≈ -₹50,000` when
+  the mark is approximate. Home derives each open position's P&L
+  percent from cost, and shows `—` when cost is missing or not above
+  zero.
+  The greeting uses the saved display name, then the username, and
+  stays plain `Good morning` (or afternoon or evening) until a name
+  is known. It never uses `Trader`. On Benchmark, real holdings use
+  `Your holdings (unrealised)` instead of
+  `Your Portfolio (since first buy)`. An empty book stays
+  `Your Portfolio`. Example holdings stay `Your Portfolio` with an
+  Example label, and the hard-coded index returns keep the Example
+  chip. Dashboard Net Worth, Available Funds, Invested Value, and Day P&L
+  show the final formatted value on the first frame in every mode, with
+  no count-up from zero, including `≈`, `-₹50,000`, and `—`.
+  The sample Dashboard XIRR is the inline `XIRR` figure plus
+  one Example chip. Portfolio Allocation on that sample dashboard omits
+  its broker sentence and does not carry its own Example chip. There
+  is no Portfolio XIRR card. On sample figures, Net Worth reads
+  `Example equity and cash. Connect a broker to see yours.`; the
+  allocation label is `Allocation` with the Example chip. Equity
+  Holdings and Cash leave their notes blank, and those rows do not
+  carry their own Example chip. In Example, Baskets show one Example
+  chip while quotes are loading and after they have loaded. ETFs show
+  one Example chip and `Example prices. Connect a broker for live quotes.`;
+  Practice and Live keep the live quote wording. Sector's header reads
+  `Example sector split. Connect a broker to see yours.` and the footer
+  reads `Example data. Not from your holdings.` Social shows exactly one
+  Example chip. The sample XIRR chip and the Net Worth allocation chip
+  paint only on example data. The Benchmark chip stays in Practice and
+  Live. A connected
+  book keeps the live equity sentence,
+  `Allocation (live assets only)`, and `Live from broker`. Mutual
+  Funds on example data reads
+  `Example NAVs · as of 10-Sep-2026`. Example order review confirms
+  with **Continue**. Practice review keeps **Confirm simulation**.
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
-  The required path is Create operator, then Vault, then the Practice
-  desk (Step N of 3). Affirming Practice lands on `/trade`.
+  When the vault is not yet secured, the required path is Create
+  operator, then Vault, then the Practice desk (Step 3 of 3). When the
+  vault is already secured, that vault step is skipped and the Practice
+  desk is Step 2 of 2. The Practice desk is Step 2 or 3; see the
+  step-count note below. Affirming Practice lands on `/trade`.
   Authenticator, broker connect, LLM, Monitoring, trading defaults,
   and risk are Later or Skip on that desk. They do not change the
   step count and do not block Practice. On the broker Later path,
@@ -68,6 +307,23 @@ changelog rebuilds itself from the first release cut after this baseline.
   unlock. Live place stays fail-closed. Live still needs the
   authenticator and PIN later. Persona is not a required first-run
   gate. Refs #282.
+
+- **First-run Setup resume, Start over, and a fixed vault step count
+  (FT-SETUP-HARDEN-001).** Reloading `/setup` mid-flow resumes the
+  unfinished setup session. **Start over (deletes this unfinished
+  operator)** deletes that unfinished operator and restarts at step 1.
+  A workspace data wipe is not required for either path. When the vault
+  is already secured on this machine, the vault step is skipped and the
+  count is fixed from the start: **Step 1 of 2 - Create operator**, then
+  **Step 2 of 2 - Practice desk**. That path never shows "of 3". On that
+  Practice step only, **Your vault is set up and secured on this
+  machine.** appears above **Open Practice desk**. When the vault is not
+  yet secured, Setup still shows **Step 1 of 3 - Create operator**,
+  **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk**. After
+  Setup completes, `/setup` does not restart step 1. A signed-in
+  operator is sent to `/trade`. A signed-out operator sees **Setup is
+  complete. Sign in to open the desk.** with **Sign in** as the primary
+  button. Refs #297.
 
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
   The path is native Dhan + Neo on the MSI
@@ -109,15 +365,17 @@ changelog rebuilds itself from the first release cut after this baseline.
   status, and overflow — not a second quote rail. Three
   Settings/Tools entries collapse into one Tools overflow
   menu plus at most one primary Settings entry. App chrome
-  is a flex column: TopBar → TickerStrip → route body.
+  is a flex column: TopBar, then the operator status strip when
+  one is showing, then the Mode honesty line, then TickerStrip,
+  then the route body.
   Trade ships first; the same shell then rolls to Invest,
   Automate, Learn, and Ditto. Not a silent widen of
   FT-UX-001 Compact-only-on-Trade, and not a big-bang
   rewrite.
 
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
-  Explore / Practice / Live chips mean execution mode only.
-  Explore Order Pad uses Sample Buy / Sample Sell; Practice
+  Example is sample data. Practice and Live are the Modes.
+  Example Order Pad uses Example Buy / Example Sell; Practice
   keeps Practice Buy / Sell; Live uses Place BUY/SELL Order.
   TopBar session chips (Continuous · CAS · Matching ·
   Post-close · Closed) stay session status (FT-CORE-001).
@@ -126,12 +384,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   primary, with ticker, tool ribbon, and watchlist /
   indices collapsed behind one desk-tools toggle. Selecting Compact on Trade at ~1280 and wider always
   starts with that disclosure collapsed.
-  At most one primary banner (Explore sample > Practice sample >
+  At most one primary banner (Example sample > Practice sample >
   Live risk > feed disconnected). External-action gates stay fail-closed
-  in Explore. Phone product and the marketing site are unchanged.
+  for Example. Phone product and the marketing site are unchanged.
 
-- **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
-  Setup and daily login are password-only for Explore and Practice.
+- **OpenAlgo-style password-first Example; TOTP only before Live (FT-SETUP-002).**
+  Setup and daily login are password-only for Example and Practice.
   Authenticator enrolment is optional (“Set up later”) on day one.
   Confirming a live authenticator code enables TOTP for later logins.
   Live unlock still requires that enrolment plus the PIN. The mid-step
@@ -172,23 +430,24 @@ changelog rebuilds itself from the first release cut after this baseline.
   fails desk-first. Refs #279.
 
 - **Docs: correct GTT proxy, Practice walkthrough, and Live safety path.**
-  `USER_GUIDE` Practice walkthrough no longer treats Explore
-  Sample Buy as a sandbox Positions/Orders fill.
+  `USER_GUIDE` Practice walkthrough no longer treats Example
+  Buy as a sandbox Positions/Orders fill.
   `API.md` no longer claims `/orders/gtt-*` is gated like
-  regular Live place — those verbs 501 after unlock; gated
-  GTT is `/orders/forever`. `API.md` documents
+  regular Live place — those verbs return HTTP 501 after unlock
+  and do not place. `POST /api/v1/orders/forever` does not place.
+  `API.md` documents
   `GET /api/v1/advisor/status` `source` (`env` / `stored` /
   `default`). `ARCHITECTURE.md` mode-guards Practice to
   `SandboxEngine` and runs L1–L5 only on Live.
   `DEVELOPER_GUIDE.md` no longer says every order is checked
   by L1–L5: those layers are Live-only. Practice goes to
-  `SandboxEngine`. Explore placement is `mode_blocked`;
-  Sample Buy is a local fill.
+  `SandboxEngine`. Example placement is `mode_blocked`;
+  Example Buy is a local fill.
 
 - **Restore Connected honesty on `/ai` (FT-AI-004 regression).**
   LLM readiness is global config truth (stored Settings
   `#llm` plus explicit `advisor/status`), not Mode-derived.
-  Explore and Practice share one source. A blank stored
+  Example and Practice share one source. A blank stored
   provider plus the empty→ollama default is **Not
   configured** / **Not installed** — never green
   **Connected**. An explicit `LLM_PROVIDER` env-only
@@ -232,7 +491,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Kill All fail-closed when risk runtime unavailable (FT-DITTO-003).**
   Whenever the Ditto risk runtime is unavailable —
-  including Explore `/ditto` Risk — **Kill All
+  including Example `/ditto` Risk — **Kill All
   Positions** stays muted and disabled. Helper:
   `Risk runtime unavailable — Kill All disabled.`
   The control is never the armed red emergency CTA
@@ -248,32 +507,32 @@ changelog rebuilds itself from the first release cut after this baseline.
   workspace. Isolated callers (explicit-path TOTP
   stores) stay off the default pair.
 
-- **Explore Schedules Pause gated for sample jobs (FT-AUTO-004).**
-  Explore `/automate` → Schedules seeded jobs: the
+- **Example Schedules Pause gated for sample jobs (FT-AUTO-004).**
+  Example `/automate` → Schedules seeded jobs: the
   Mode honesty line owns disclosure — no extra
   Sample chip once Pause is gated. Seeded
-  Explore jobs show status Sample/Demo (or muted),
+  Example jobs show status Sample/Demo (or muted),
   not a production-looking Active badge. Pause on
-  those jobs is disabled, with title helper `Sample
-  schedule — control unavailable in Explore`.
+  those jobs is disabled, with title helper `Example
+  schedule — control unavailable`.
   Practice/Live jobs keep Pause/Resume. The backend
-  rejects Explore pause/resume with `mode_blocked`.
+  rejects Example pause/resume with `mode_blocked`.
 
-- **Explore Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
-  Explore `/invest#basket` seeded cards (NIFTY IT,
+- **Example Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
+  Example `/invest#basket` seeded cards (NIFTY IT,
   Banking, and any other sample set): the Mode
   honesty line owns disclosure — no card-level
   Sample chip. Bare ₹ / P&L under that banner is
   acceptable once actions cannot look live.
-  Edit and Delete on seeded Explore baskets are
-  disabled, with title helper `Sample basket —
-  editing unavailable in Explore`. User-created
+  Edit and Delete on seeded Example baskets are
+  disabled, with title helper `Example basket —
+  editing unavailable`. User-created
   Practice/Live baskets keep full Edit/Delete.
-  Empty Explore is an honest empty or a clearly
+  Empty Example is an honest empty or a clearly
   labelled sample set.
 
 - **Feed-freshness honesty (FT-CORE-002).**
-  Explore disclosure is the Mode honesty line.
+  Example disclosure is the Mode honesty line.
   Per-widget Sample chips are retired. Per-symbol
   ticker Sample chips are optional. The Market
   Clock freshness chip appears only when that
@@ -281,11 +540,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   TopBar or the ticker: Live · Delayed · Sample
   (and muted Stale / Unknown plus age when
   known). Silent-stale is a fail. Feed provenance
-  stays separate from Explore / Practice / Live
-  mode (Mode honesty).
+  stays separate from Example and from the Practice and Live
+  Modes (Mode honesty).
 
 - **Resource Hub User Guide first-open honesty (FT-LEARN-003).**
-  Explore `/learn` → Resource Hub → User Guide shows
+  Example `/learn` → Resource Hub → User Guide shows
   `Loading document…` while the local backend/doc
   settles — never a red backend error on a cold race.
   A timeout or race is a muted soft fail:
@@ -297,23 +556,21 @@ changelog rebuilds itself from the first release cut after this baseline.
   session does not mark User Guide permanently broken.
 
 - **Holdings badge matches the visible table (FT-TRADE-010).**
-  Practice/Explore `/invest` → Holdings with no broker
+  Practice/Example `/invest` → Holdings with no broker
   shows `N holdings` for the rows currently in the table
   — never `0 holdings` over a populated sample table.
   Dashboard and "N stocks" use the same N. Practice waits
   until the holdings query has settled empty before the
   sample fallback, so a cold load does not flash the
-  wrong N. Dashboard `Net Worth (Equity + Cash)` uses the
+  wrong N. Dashboard `Net Worth (Cash + Holdings + Positions)` uses the
   same shared demo book as Holdings. There is no Sample
   chip on the Holdings table or header. When the sample
-  book is shown — Explore always, and Practice after that
+  book is shown — Example always, and Practice after that
   empty settle — Holdings and Dashboard keep `DemoBanner`
   (`Showing sample data — connect a broker for live data`)
-  in Explore as well as Practice. Explore also has the
-  Mode honesty line (`Explore — sample data only. No
-  broker session, no live orders.`). The Practice Mode
-  line (`Practice — SandboxEngine fills. Not your funded
-  broker account.`) does not call that book sample;
+  in Example as well as Practice. Example also has the
+  Mode honesty line (`Example data. No broker is connected and no orders are sent.`). The Practice Mode
+  line (`Practice — simulated fills, no real money.`) does not call that book sample;
   `DemoBanner` is the required Practice disclosure for it.
   A broker read failure shows muted `Failed to load holdings`
   plus `Refresh` —
@@ -323,10 +580,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   (no sample table under a zero badge). Connected
   positions use the live count only.
 
-- **Explore Execution Logs mode honesty (FT-AUTO-003).**
-  Explore `/automate` → Execution Logs shows the muted
-  empty state `No execution logs in Explore (sample-only).
-  Switch to Practice or Live to see real run history.`
+- **Example Execution Logs mode honesty (FT-AUTO-003).**
+  Example `/automate` → Execution Logs shows the muted
+  empty state `No execution logs for Example. Switch to Practice or Live to see real run history.`
   and never the outage line on a healthy sample session.
   Practice/Live with a 200 OK and 0 rows use
   `No execution logs for this date.` — not an outage.
@@ -352,13 +608,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   stays out of the UI.
 
 - **Position Mirror Start fail-closed gate (FT-DITTO-002).**
-  Explore `/ditto` → Position Mirror Start stays
+  Example `/ditto` → Position Mirror Start stays
   muted and disabled when unavailable — never
-  the primary green armed CTA. Explore is
+  the primary green armed CTA. Example is
   always disarmed (sample-only). Helper:
-  `Mirroring blocked in Explore (sample-only).
-  Switch to Practice or Live with broker
-  accounts connected.` Practice stays disarmed
+  `Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.` Practice stays disarmed
   — the backend is Live-only. Helper:
   `Mirroring requires Live with broker accounts
   connected.` Live enables Start only with a
@@ -371,33 +625,31 @@ changelog rebuilds itself from the first release cut after this baseline.
   Pending and failed account fetches stay muted
   with `Loading accounts...` / `Could not load
   accounts.` and never look like an empty
-  connect state. The backend rejects Explore,
+  connect state. The backend rejects Example,
   Practice, or incomplete starts
   (`mode_blocked` or equivalent).
 
-- **Explore Scalper fail-closed order path (FT-TRADE-009).**
-  Explore `/trade` → Scalper is disarmed —
+- **Example Scalper fail-closed order path (FT-TRADE-009).**
+  Example `/trade` → Scalper is disarmed —
   Buy CE / Sell / 1-CLICK never open Confirm
   Order and never place. Buy/Sell stay disabled.
-  Helper: `Orders blocked in Explore
-  (sample-only). Switch to Practice or Live with
-  a broker connected to trade.` 1-CLICK stays
-  OFF / disabled; title `One-click unavailable
-  in Explore`. Sample quote preview is allowed;
+  Helper: `Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` 1-CLICK stays
+  OFF / disabled; title `One-click is unavailable
+  for Example`. Sample quote preview is allowed;
   Confirm BUY / Confirm SELL chrome is not.
   Practice and Live use Confirm only when the
   mode allows it and a gateway is configured.
-  The backend rejects Explore orders with
+  The backend rejects Example orders with
   `code: mode_blocked` if the UI slips.
 
 - **OI Chart shares Option Chain expiries (FT-TRADE-007).**
-  Explore `/trade` Analysis layout → maximize OI Chart
+  Example `/trade` Analysis layout → maximize OI Chart
   now shares Option Chain expiries for the
   symbol/exchange. A non-empty list shows the
   expiry control; charts and statistics cover
   only the selected expiry (the chain’s
   selection when both widgets are open;
-  otherwise the nearest listed). Explore sample
+  otherwise the nearest listed). Example sample
   expiries stay listed. The Mode honesty line is
   the disclosure — expiries are not badged Sample.
   No expiries or no OI is an honest empty —
@@ -406,11 +658,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   stats, never “No expiries” over fake charts.
 
 - **Watchlist LTP / % change use ticker sample quotes (FT-TRADE-008).**
-  Explore `/trade` → Watchlist with Sparkline + LTP +
+  Example `/trade` → Watchlist with Sparkline + LTP +
   % change checked now paints those column headers
   and cells. LTP and % change read the same sample
   quote source as the ticker tape (Jotai tick atoms
-  from the Explore demo feed) for NIFTY, BANKNIFTY,
+  from the Example demo feed) for NIFTY, BANKNIFTY,
   SBIN, RELIANCE, HDFCBANK, and any other symbol on
   that feed. The Mode honesty line is the disclosure.
   Missing quotes show `—` (or a brief `…` while the
@@ -419,7 +671,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   again shows the sample value or the honest empty.
 
 - **Options Builder Net Debit and Max Loss share a position ₹ basis (FT-LAB-005).**
-  Explore `/lab` Options Builder now shows Net
+  Example `/lab` Options Builder now shows Net
   Debit/Credit, Max Loss, and Max Profit on a
   shared position ₹ basis. Net Debit/Credit is
   the signed premium × lots × lot size. Max
@@ -439,7 +691,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Blank premiums still show `—` (FT-LAB-003).
 
 - **Backtest headline P&L vs trade-log (FT-LAB-004).**
-  Explore `/lab` backtest results now show labelled
+  Example `/lab` backtest results now show labelled
   dual metrics. **Total Return (%)** is initial
   capital → final equity (including a forced last-bar
   close), with subtitle `Initial capital → final
@@ -458,7 +710,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   chart matches the log.
 
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
-  Explore `/learn` → Glossary → Lot Size now teaches the
+  Example `/learn` → Glossary → Lot Size now teaches the
   Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,
   FINNIFTY 60, MIDCPNIFTY 120 — with an explicit “as of”
   date and a Verify on NSE link to circular NSE/FAOP/70616
@@ -481,7 +733,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   silently sliced.
 
 - **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
-  Explore `/trade` Positions → Heat → Group by Exchange (and
+  Example `/trade` Positions → Heat → Group by Exchange (and
   Group by Sector) now draws a labelled band per group: a
   name chip (`NSE`, `NFO`, …) plus an optional exposure
   sublabel, with a stronger gutter than the leaf-tile
@@ -490,26 +742,26 @@ changelog rebuilds itself from the first release cut after this baseline.
   positions` instead of an undifferentiated treemap. Flat
   stays leaf-only, with no group chrome.
 
-- **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
-  Explore `/invest#mutual-funds` now labels the fixture
-  `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily
+- **Example Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
+  Example data on `/invest#mutual-funds` labels the fixture
+  `Example NAVs · as of 10-Sep-2026` and drops “Updated daily
   after market close.” The sample date was refreshed once so
   the as-of is not months stale; it does not auto-update.
   Practice and Live keep the daily-update sentence when the
   live AMFI feed is in use.
 
-- **Options Builder Explore Long Call no longer looks zero-risk (FT-LAB-003).**
-  Explore `/lab` Options Builder now treats a blank premium as
+- **Options Builder Example Long Call no longer looks zero-risk (FT-LAB-003).**
+  Example `/lab` Options Builder now treats a blank premium as
   unknown: Payoff summary cards show `—` and
   `Enter premium to model payoff` instead of modelling ₹0.
-  The Long Call template seeds the Explore sample-chain ATM CE
+  The Long Call template seeds the Example sample-chain ATM CE
   LTP, labelled `Sample premium — edit to model`, so Max Loss
   and breakeven follow FT-LAB-001 maths on a non-zero cost.
   Typing an explicit ₹0 still uses that maths and warns
   `Premium is ₹0 — payoff treats cost as free`.
 
 - **Security PIN requires exactly six digits (FT-SET-003).**
-  Explore `/settings#security` keeps New and Confirm as digits-only
+  Example `/settings#security` keeps New and Confirm as digits-only
   fields with `maxLength` 6. Set/Change PIN stays disabled until the
   account password is present, both fields are exactly six digits,
   and they match. Blurring a field with 1–5 digits shows
@@ -520,8 +772,8 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Progressive TopBar collapse at ~390px (FT-MOBILE-002).**
   The terminal chrome no longer clips workspace, status, or ticker
-  behind a horizontal TopBar scroll at about 390px. Logo mark, Mode
-  (Explore / Practice / Live), and compact session/status stay
+  behind a horizontal TopBar scroll at about 390px. Logo mark, the chip
+  (Example, Practice, or Live), and compact session/status stay
   visible and tappable. The ticker strip hides first (default off
   under ~480px). Workspace, account, Tools, search, fullscreen, and
   clock move into a More overflow menu with hit targets of at least
@@ -529,7 +781,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   clipped and unreachable.
 
 - **Suggest recommendations refresh when mood changes (FT-AI-003).**
-  Explore `/ai` Suggest treats market mood as a filter, not a draft.
+  Example `/ai` Suggest treats market mood as a filter, not a draft.
   Changing mood (chip or **Next mood**) immediately replaces the
   recommendation list and the selected mood chip from one mood
   state. A previously focused strategy card is cleared, so a prior
@@ -538,7 +790,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   state with **Try another mood**.
 
 - **Honest unconfigured LLM state on `/ai` (FT-AI-002).**
-  `/ai` Chat probes `advisor/status` (including Explore /
+  `/ai` Chat probes `advisor/status` (including Example /
   `demo-user`) and aligns the badge and composer with Settings
   `#llm` hydration — not a stale local store, and not an
   env-default `configured: true` while Settings looks empty.
@@ -552,20 +804,19 @@ changelog rebuilds itself from the first release cut after this baseline.
   configured but broken probe shows **Error** / **Disconnected**
   with Retry — never a green Connected. Signals **Live** /
   **Polling** stay separate from Chat LLM readiness. Do not add a
-  fake Connected sample advisor in Explore; any later demo replies
+  fake Connected sample advisor in Example; any later demo replies
   must be labelled **Sample replies**.
 
-- **Telegram Send Test stays enabled in Explore (FT-AUTO-002).**
-  Explore `/automate#settings` Telegram Alerts now disables Send Test
+- **Telegram Send Test stays enabled in Example (FT-AUTO-002).**
+  Example `/automate#settings` Telegram Alerts now disables Send Test
   and keeps the prefilled message as a preview-only sample. Helper:
-  Telegram tests are blocked in Explore (sample-only). Switch to
-  Practice or Live with Telegram configured to send a real test.
+  `Telegram tests are blocked for Example. Switch to Practice or Live with Telegram configured to send a real test.`
   Practice and Live enable Send Test only when Telegram is configured;
   otherwise the control stays disarmed with "Configure Telegram first".
-  The backend rejects Explore-mode test sends with `mode_blocked`.
+  The backend rejects Example test sends with `mode_blocked`.
 
 - **Practice Trading has no OpenAlgo Gateway setup CTA (FT-LEARN-001).**
-  Explore `/learn` Practice Trading now links to Settings → Broker
+  Example `/learn` Practice Trading now links to Settings → Broker
   Gateway (`/settings#api`) so operators can configure OpenAlgo.
   On ~390px the Learn section tabs stack above the page instead of
   a 224px side column, and Practice copy, lists, sandbox rows and
@@ -573,7 +824,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   native Brokers.
 
 - **P&L columns unusable at ~390px (FT-MOBILE-001).**
-  Explore `/trade` Positions and Invest Holdings switch to stacked
+  Example `/trade` Positions and Invest Holdings switch to stacked
   cards below 480px, so each row shows symbol, quantity, LTP, P&L
   and P&L% on one screen. The wide nowrap table no longer clips
   those figures off-screen behind a tiny scrollbar.
@@ -584,57 +835,57 @@ changelog rebuilds itself from the first release cut after this baseline.
   URL no longer falls back to Dashboard.
 
 - **Duplicate Watchlist widgets from Add widget picker (FT-HOME-002).**
-  Explore `/home` Add widget no longer adds a second Watchlist when
+  Example `/home` Add widget no longer adds a second Watchlist when
   one is already on the dashboard. Already-present widget types are
   disabled or hidden in the picker; choosing Watchlist focuses the
   existing card instead of duplicating it.
 
 - **Broker Gateway and Ditto default URLs diverge (FT-SET-002).**
-  Explore `/settings#api` Broker Gateway and Explore `/ditto` Add
+  Example `/settings#api` Broker Gateway and Example `/ditto` Add
   Account now share the OpenAlgo default `http://127.0.0.1:5000`.
   Add Account prefills the saved Gateway host and REST port
   without retaining the bridge API key, so the two forms no
   longer silently default to ports 5000 and 5001.
 
 - **Home greeting uses local evening at noon IST (FT-HOME-001).**
-  Explore `/home` greets from the Asia/Kolkata clock, so ~12:01 IST
+  Example `/home` greets from the Asia/Kolkata clock, so ~12:01 IST
   is Good afternoon (or Good morning before noon), not Good evening
   from a non-IST browser clock.
 
 - **Market status closed during NSE regular hours (FT-TRADE-004).**
-  Explore `/trade` header treats OpenAlgo/Explore session timings
+  Example `/trade` header treats OpenAlgo/Example session timings
   as IST clock hours (09:15–15:30 on weekdays), not epoch
   milliseconds. Mid-session no longer shows a false
   “Market closed”. After hours and weekends stay closed.
 
 - **Chart stays stale when timeframe selector changes (FT-TRADE-003).**
-  Explore `/trade` timeframe buttons now refresh the chart
+  Example `/trade` timeframe buttons now refresh the chart
   series and visible range to match the selected interval.
   Switching 5m → 1D no longer leaves candles and intraday
   timestamps on the prior range, or a brief blank that stays
   stale.
 
 - **Empty Monitors has no Strategy Builder/Lab CTA (FT-AUTO-001).**
-  Explore `/automate` Monitors empty state now includes an
+  Example `/automate` Monitors empty state now includes an
   "Open Strategy Builder" link to `/lab`. Operators no longer
   have to find Strategy Lab independently from copy-only text.
 
 - **Settings `#llm` load failure with no recovery (FT-SET-001).**
-  Explore `/settings#llm` no longer treats a demo or unconfigured
+  Example `/settings#llm` no longer treats a demo or unconfigured
   session as a broken load. It shows an empty LLM state with Retry
-  and guidance that Explore cannot persist LLM secrets. Live still
+  and guidance that Example cannot persist LLM secrets. Live still
   fail-closes on a real load error to protect a saved configuration,
   and now offers Retry.
 
-- **Kill All Positions armed on empty Explore Ditto dashboard (FT-DITTO-001).**
-  Explore `/ditto` Risk Dashboard with ₹0 totals and no accounts
+- **Kill All Positions armed on empty Example Ditto dashboard (FT-DITTO-001).**
+  Example `/ditto` Risk Dashboard with ₹0 totals and no accounts
   listed now disables Kill All Positions and shows an empty
   state. The control is no longer a bright red armed emergency
   CTA on an empty dashboard. Live and Practice with managed
   accounts still keep the armed control.
 
-- **Practice orders in Explore without a live broker (FT-TRADE-002).**
-  Explore `/trade` Order Pad Practice Buy opens the Practice review and
+- **Practice orders in Example without a live broker (FT-TRADE-002).**
+  Example `/trade` Order Pad Practice Buy opens the Practice review and
   records a sample fill — no live broker is required. Live still
   uses the gated `placeOrder` path and still requires a broker
   connection. Native broker freeze is excluded.
@@ -646,14 +897,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   Enrolment still requires TOTP; Live still needs enrolment plus PIN.
 
 - **Duplicate zero placeholders on backtest metrics (FT-LAB-002).**
-  Explore `/lab` backtest headline metrics (Sharpe ratio, max
+  Example `/lab` backtest headline metrics (Sharpe ratio, max
   drawdown, win rate, profit factor) now show a single formatted
   value. The leftover count-up `0.00` / `0.00%` beside the real
   figure is gone.
 
-- **Explore Ctrl+K symbol search false unavailable error (FT-CMD-001).**
-  Explore `search` now uses the same sample-instrument catalogue as
-  Explore quotes and history. Ctrl+K → Symbols → NIFTY returns
+- **Example Ctrl+K symbol search false unavailable error (FT-CMD-001).**
+  Example `search` now uses the same sample-instrument catalogue as
+  Example quotes and history. Ctrl+K → Symbols → NIFTY returns
   sample hits (NIFTY, BANKNIFTY, FINNIFTY) instead of a false
   connection error. Live and Practice still use native / OpenAlgo
   search.
@@ -665,17 +916,17 @@ changelog rebuilds itself from the first release cut after this baseline.
   (₹0), and breakeven at the strike. Paid-premium long calls and
   other unbounded legs (short calls, straddles) use the same rule.
 
-- **Trade Review date filter and mangled timestamps in Explore (FT-TRADE-001).**
-  Explore `/trade` Trade Review now clips the Log to the committed IST
+- **Trade Review date filter and mangled timestamps in Example (FT-TRADE-001).**
+  Example `/trade` Trade Review now clips the Log to the committed IST
   date range (the same predicate as the sample-journal badge) and
   renders fill timestamps as `D Mon YYYY HH:MM:SS` with a literal
   space, so `13 Apr 26` can no longer glue onto `14:55:42`. Live and
   Practice still use the journal/tradebook path; only the shared IST
   format and range helpers changed there.
 
-- **Explore /ai chat produces no assistant reply (FT-AI-001).**
+- **Example /ai chat produces no assistant reply (FT-AI-001).**
   `/ai` and the floating tutor now share one advisor chat path:
-  a short status probe (including Explore/sample-data), SSE
+  a short status probe (including Example/sample-data), SSE
   streaming, then the non-streaming fallback. A missing LLM, an
   unreachable backend, an empty completion, or an SSE error
   becomes a visible assistant error instead of a blank bubble.
@@ -686,20 +937,13 @@ changelog rebuilds itself from the first release cut after this baseline.
   freeze is excluded. MF Optimizer and AI suggestions + deploy
   are unchanged.
 
-- **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
-  Setup Step 2/7 now has an obvious **Explore first — continue without
-  2FA** path so sample-data Explore/Practice is reachable without
-  finishing authenticator setup. The hatch marks the durable demo
-  session (same as **Try with sample data**) so `/home` survives
-  refresh and a `/welcome` remount instead of bouncing to the
-  password+TOTP wall. Sign-in still requires TOTP. Daily login still
-  requires password + TOTP, and Live still requires the PIN, as
-  designed. **Start over** wipes the unfinished account via the
-  account-create setup JWT so a lost QR seed is recoverable without the
-  TOTP secret. Daily-login session tokens cannot wipe the account. A
-  hard refresh of `/home` after Explore first restores the sample-data
-  session even when `flinttrade:mode` was never persisted; unfinished
-  setup progress stays so Start over / Delete account remain reachable.
+- **Unfinished Setup recovery without the authenticator (FT-SETUP-001).**
+  **Try with example data** marks a durable Example session so `/home`
+  survives a refresh. **Start over** wipes the unfinished account via
+  the account-create setup JWT, so a lost QR seed is recoverable
+  without the TOTP secret. Daily-login session tokens cannot wipe the
+  account. Daily login is password-only until an authenticator is
+  enrolled. Live still needs that authenticator and the PIN.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA
@@ -711,8 +955,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   is unchanged.
 
 - **Invest dashboard holdings count vs listed sample stocks (FT-DEMO-001).**
-  On `/demo-app/invest` the sample dashboard header now uses the Explore
-  demo holdings book (`getDemoHoldings`) as its count source, so the
+  On `/demo-app/invest` the sample dashboard header now uses the example-data
+  holdings book (`getDemoHoldings`) as its count source, so the
   badge matches the listed sample stocks and the Holdings tab. Live and
   Practice still read the live book — an empty funded account stays at
   0.
@@ -720,7 +964,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 - **Remaining homepage nav overflow at ~390px (FT-SITE-003).** After
   #180, the primary nav wrapped without clipping Contribute, but at
   about 390px four chips still packed onto the first row and left
-  “Explore demo” cramped against Docs/API. Below 480px the marketing
+  “Demo (example data)” cramped against Docs/API. Below 480px the marketing
   nav now uses two-across chips with slightly smaller type and tighter
   padding, so every primary label stays on one line with slack. The
   900px wrap from #180 is unchanged.

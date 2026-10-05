@@ -211,6 +211,8 @@ describe("HomeRoute", () => {
   it("renders the home route container", () => {
     renderHomeRoute();
     expect(screen.getByTestId("home-route")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
   });
 
   it("renders the bento grid", () => {

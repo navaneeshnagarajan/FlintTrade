@@ -158,7 +158,7 @@ describe("computePayoffSummary", () => {
 describe("premium honesty copy", () => {
   it("keeps the FT-LAB-003 helper strings stable", () => {
     expect(UNSET_PREMIUM_HELPER).toBe("Enter premium to model payoff");
-    expect(SAMPLE_PREMIUM_HELPER).toBe("Sample premium — edit to model");
+    expect(SAMPLE_PREMIUM_HELPER).toBe("Example premium — edit to model");
     expect(ZERO_PREMIUM_WARNING).toBe("Premium is ₹0 — payoff treats cost as free");
   });
 });
