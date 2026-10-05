@@ -580,13 +580,12 @@ describe("BrokersSection", () => {
     renderSection();
     expect(screen.getByRole("heading", { name: "Brokers" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
-    expect(screen.getByText(/never placeable Live orders/i)).toBeInTheDocument();
-    expect(screen.getByText(/Live read only until funded unlock/i)).toBeInTheDocument();
+    expect(screen.getByText("No connected broker accounts are listed.")).toBeInTheDocument();
+    expect(screen.getByText(/Connecting an account does not enable live orders/i)).toBeInTheDocument();
     await waitFor(() => {
-      const nativeWarning = screen.getByText(/never placeable Live orders/i);
-      expect(nativeWarning).toHaveTextContent("Dhan, Upstox, and Kotak Neo");
-      expect(nativeWarning).toHaveTextContent("INDmoney and Groww stay visible");
-      expect(nativeWarning).toHaveTextContent("Native order placement stays fail-closed");
+      const availability = screen.getByText(/Native connection options:/i);
+      expect(availability).toHaveTextContent("Dhan, Upstox, and Kotak Neo");
+      expect(availability).toHaveTextContent("INDmoney and Groww stay listed");
     });
   });
 
