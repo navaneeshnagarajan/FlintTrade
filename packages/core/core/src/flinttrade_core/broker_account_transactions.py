@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from uuid import UUID
 
 from flinttrade_gateway.account_transaction_store import AccountTransactionStore
 from flinttrade_gateway.broker_read_service import BrokerReadOwner
@@ -36,6 +37,7 @@ from .account_lifecycle_contracts import (
     broker_account_digest,
 )
 from .account_mutation_contracts import RegistrySelectorVersion, RegistryVersionConflict, SessionVersion
+from .broker_account_audit import AccountMutationAudit
 from .broker_account_cutover import require_broker_account_mutations
 from .broker_account_lifecycle import AccountMutationLease, BrokerAccountLifecycleOwner, CleanupTicket
 from .broker_account_workspace import BrokerAccountPatch, BrokerAccountWorkspace, BrokerAccountWorkspaceUnavailable
@@ -103,6 +105,11 @@ class BrokerAccountReadRuntime:
         """Expose only sealed current native records, with no write router."""
         if self.read_owner is not None or self._retiring:
             raise BrokerAccountWorkspaceUnavailable
+        verified = coherence_verifier()
+        if (type(verified) is not WorkspaceSnapshot or verified.version is None
+                or broker_workspace_version(verified) != broker_workspace_version(snapshot)):
+            raise BrokerAccountWorkspaceUnavailable
+        snapshot = verified
         provider = AuthenticatingSessionProvider(
             self.registry, snapshot.as_dict()["brokers"]["account_acls"], workspace_snapshot=snapshot,
             workspace_path=self.workspace_path, credential_version_for=self._credential_version_for,
@@ -146,12 +153,14 @@ class BrokerAccountTransactionCoordinator:
                  lifecycle: BrokerAccountLifecycleOwner, registry_owner: RegistryPublicationOwner,
                  candidate_driver: _CandidateDriver, runtime_builder: BrokerAccountReadRuntime,
                  mutation_admission: Callable[[], None] = require_broker_account_mutations, *,
+                 audit_sink: Callable[[AccountMutationAudit], UUID] | None = None,
                  verify_current_actor: Callable[[], AccountActorContext] | None = None) -> None:
         if (type(store) is not AccountTransactionStore or type(workspace) is not BrokerAccountWorkspace
                 or type(lifecycle) is not BrokerAccountLifecycleOwner
                 or type(registry_owner) is not RegistryPublicationOwner
                 or workspace._store is not store
-                or runtime_builder.registry is not registry_owner.registry):
+                or runtime_builder.registry is not registry_owner.registry
+                or audit_sink is not None and not callable(audit_sink)):
             raise BrokerAccountWorkspaceUnavailable
         lifecycle.assert_bound(store._workspace_path, store._proof)
         self.store = store
@@ -163,6 +172,7 @@ class BrokerAccountTransactionCoordinator:
         self.runtime = runtime_builder
         self._admission = mutation_admission
         self._verify_actor = verify_current_actor
+        self._audit_sink = audit_sink
         self._attempts: dict[object, _Attempt] = {}
 
     def _principal(self, request: AccountMutationRequest) -> None:
@@ -233,7 +243,17 @@ class BrokerAccountTransactionCoordinator:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return
-            await asyncio.sleep(min(0.01, remaining))
+            # A completed False bridge proves only that the earlier drain
+            # expired. Retry its exact owners before releasing either claim.
+            try:
+                drained = await self.lifecycle.retire_generations_async(attempt.lease, remaining)
+            except Exception:
+                return
+            if not drained:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(0.01, remaining))
 
     def _drop_preadmission(self, request: AccountMutationRequest, attempt: _Attempt) -> None:
         """Settle and forget a lease that never admitted a durable claim."""
@@ -310,9 +330,10 @@ class BrokerAccountTransactionCoordinator:
                         self.lifecycle.retain_retirement(attempt.lease, self.registry_owner, retired)
                 raise
             self.lifecycle.transfer_candidate_to_registry(attempt.lease, attempt.ticket, self.registry_owner)
-            self.runtime.rebuild(snapshot, coherence_verifier=self.workspace.assert_coherent)
+            return snapshot
 
-        self.workspace.with_current_authority(request.operation_id, publish)
+        snapshot = self.workspace.with_current_authority(request.operation_id, publish)
+        self.runtime.rebuild(snapshot, coherence_verifier=self.workspace.assert_coherent)
 
     def _commit_and_publish(self, request: AccountMutationRequest, attempt: _Attempt, patch: BrokerAccountPatch) -> AccountMutationReceipt:
         self._principal(request)
@@ -451,7 +472,9 @@ class BrokerAccountTransactionCoordinator:
         """Provider-free recovery; SDK objects are never rebuilt from receipts."""
         active = self.store.active_operation(self.store.owner_capability(self.store._proof))
         if active is None:
-            return self.workspace.recover()
+            receipts = self.workspace.recover()
+            self.reconcile_audit()
+            return receipts
         attempt = self._attempts.get(active.operation_id)
         if attempt is None:
             attempt = _Attempt(self.lifecycle.begin(
@@ -461,6 +484,30 @@ class BrokerAccountTransactionCoordinator:
             self._attempts[active.operation_id] = attempt
         receipts = self.lifecycle.with_disposition_fence(attempt.lease, self.workspace.recover)
         if receipts and receipts[0].state in (AccountOperationStage.COMMITTED, AccountOperationStage.REJECTED):
-            if self.lifecycle.settle(attempt.lease, durable_disposition=True):
+            try:
+                settled = self.lifecycle.settle(attempt.lease, durable_disposition=True)
+                if not settled:
+                    # Recovery may start an owned local retry, but never wait
+                    # for it or infer completion from its zero-time borrower.
+                    self.lifecycle.retire_generations(attempt.lease, 0.0)
+                    settled = self.lifecycle.settle(attempt.lease, durable_disposition=True)
+            except Exception:
+                settled = False
+            if settled:
                 attempt.settled = True
+        self.reconcile_audit()
         return receipts
+
+    def reconcile_audit(self, *, limit: int = 100) -> int:
+        """Deliver retained terminal evidence outside mutation/publication fences.
+
+        An explicit caller owns this bookkeeping operation. A bounded mutation
+        borrower never acquires an arbitrary audit sink callback, and replaying
+        these events never dispatches authentication or rebuilds sessions.
+        """
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("account_audit_limit_invalid")
+        if self._audit_sink is None:
+            return 0
+        capability = self.store.owner_capability(self.store._proof)
+        return self.store.export_audit_events(capability, self._audit_sink, limit=limit)

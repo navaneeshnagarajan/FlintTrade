@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from flinttrade_core.backend_instance import acquire_backend_instance_lease
+from flinttrade_core.backend_instance import BackendLeaseUnavailable, acquire_backend_instance_lease
 from flinttrade_core.broker_identity import INT64_MAX, BrokerSelector
 from flinttrade_core.secure_file import harden_directory
 from flinttrade_core.workspace_migrations import (
@@ -211,6 +211,9 @@ def maximum_width_head(owned, c, store, head):
         body["witness"] = maximum.to_dict()
         body["receipt"]["commit_workspace"] = maximum.to_dict()["commit_workspace"]
         body["receipt"]["commit_broker_workspace"] = maximum.to_dict()["commit_broker_workspace"]
+        # This signed boundary fixture changes receipt counters atomically.
+        # Production transitions never rewrite an existing terminal receipt.
+        db.execute("DELETE FROM account_audit_outbox WHERE operation_id=?", (str(prior.operation_id),))
         store._save(db, row, body)
         anchor = store._read_head(db)
         anchor["witness"] = maximum.to_dict()
@@ -291,7 +294,7 @@ def test_boundary_private_input_retains_terminal_receipts_and_abandonment(owned,
         assert len(body.encode("utf-8")) <= 65_536
 
 
-def test_schema_three_migration_preserves_all_original_cells(owned):
+def test_schema_two_to_four_migration_preserves_all_original_cells(owned):
     path, _, credentials = owned
     selector = BrokerSelector("dhan", "Synthetic")
     version = credentials.put_credentials(
@@ -301,7 +304,7 @@ def test_schema_three_migration_preserves_all_original_cells(owned):
     with closing(sqlite3.connect(path / "vault.db")) as db:
         # Reconstruct an authentic schema-2 source, retaining its exact rows.
         for (name,) in db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('account_operations','account_store_head','account_store_key')"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('account_operations','account_store_head','account_store_key','account_audit_outbox')"
         ).fetchall():
             db.execute(f'DROP TABLE "{name}"')
         db.execute("DROP TABLE credential_vault_metadata")
@@ -336,9 +339,9 @@ def test_schema_three_migration_preserves_all_original_cells(owned):
     reopened = vault.CredentialStore(path / "vault.db", "synthetic-password")
     try:
         with closing(sqlite3.connect(path / "vault.db")) as db:
-            assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 4
             assert db.execute("SELECT schema_version,vault_incarnation FROM credential_vault_metadata").fetchone() == (
-                3,
+                4,
                 str(version.vault_incarnation),
             )
             assert before == {name: db.execute(f"SELECT * FROM {name}").fetchall() for name in before}
@@ -517,6 +520,9 @@ def test_post_commit_exception_recovers_exact_receipt_without_extra_generation(o
     assert reopened.head() == witness
     assert reopened.apply(req.operation_id, witness) == receipt
     assert owned[2].selector_state(req.selector).version.generation == 1
+    cap = reopened.owner_capability(owned[1].proof)
+    assert len(reopened.pending_audit_events(cap)) == 1
+    assert reopened.pending_audit_events(cap)[0].credential_generation == 1
 
 
 def test_pre_commit_exception_rolls_back_credentials_head_and_receipt(owned, monkeypatch):
@@ -536,6 +542,7 @@ def test_pre_commit_exception_rolls_back_credentials_head_and_receipt(owned, mon
     assert owned[2].selector_state(req.selector).version.generation == 0
     assert store.head() == head
     assert store.operation(req.operation_id).state is c.AccountOperationStage.PLAN_READY
+    assert store.pending_audit_events(store.owner_capability(owned[1].proof)) == ()
     monkeypatch.setattr(owned[2], "_bump", original)
     assert store.apply(req.operation_id, witness).credential_version.generation == 1
 
@@ -776,7 +783,7 @@ def test_failed_schema_two_migration_preserves_entire_database(owned, monkeypatc
     credentials.close()
     with closing(sqlite3.connect(path / "vault.db")) as db:
         incarnation = db.execute("SELECT vault_incarnation FROM credential_vault_metadata").fetchone()[0]
-        for name in ("account_operations", "account_store_head", "account_store_key", "credential_vault_metadata"):
+        for name in ("account_operations", "account_store_head", "account_store_key", "account_audit_outbox", "credential_vault_metadata"):
             db.execute(f"DROP TABLE {name}")
         db.execute(vault._AUTHORITY_SCHEMA["credential_vault_metadata"])
         db.execute("INSERT INTO credential_vault_metadata VALUES(1,2,?)", (incarnation,))
@@ -862,3 +869,353 @@ def test_vault_apply_requires_durable_workspace_attempt_evidence(owned):
     with pytest.raises(vault.CredentialError):
         store.apply(req.operation_id, witness)
     assert owned[2].selector_state(req.selector).version.generation == 0
+
+
+def _database_row(owned, table, operation_id):
+    with closing(sqlite3.connect(owned[0] / "vault.db")) as db:
+        db.row_factory = sqlite3.Row
+        return dict(db.execute(f"SELECT * FROM {table} WHERE operation_id=?", (str(operation_id),)).fetchone())
+
+
+def _restore_database_row(owned, table, row):
+    with closing(sqlite3.connect(owned[0] / "vault.db")) as db:
+        names = tuple(row)
+        assignments = ",".join(f"{name}=?" for name in names if name != "operation_id")
+        db.execute(
+            f"UPDATE {table} SET {assignments} WHERE operation_id=?",
+            (*[row[name] for name in names if name != "operation_id"], row["operation_id"]),
+        )
+        db.commit()
+
+
+def test_authenticated_admitted_row_rewind_cannot_dispatch_authentication_again(owned):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    old = _database_row(owned, "account_operations", req.operation_id)
+    store.mark_authentication_started(req.operation_id)
+    store.settle(req.operation_id, state=c.AccountOperationStage.AUTHENTICATION_UNKNOWN, reason="auth_interrupted")
+    _restore_database_row(owned, "account_operations", old)
+    with pytest.raises(m.AccountTransactionError):
+        store.operation(req.operation_id)
+    with pytest.raises(m.AccountTransactionError):
+        store.mark_authentication_started(req.operation_id)
+    with pytest.raises(m.AccountTransactionError):
+        m.AccountTransactionStore(owned[2], workspace_path=owned[0], backend_proof=owned[1].proof)
+
+
+def test_authenticated_released_receipt_rewind_cannot_erase_conflict_fence(owned):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    witness = plan(store, req, head, c)
+    store.apply(req.operation_id, witness)
+    store.release_claim(req.operation_id)
+    old = _database_row(owned, "account_operations", req.operation_id)
+    store.mark_workspace_conflicted(req.operation_id)
+    _restore_database_row(owned, "account_operations", old)
+    with pytest.raises(m.AccountTransactionError):
+        store.head()
+
+
+def test_authenticated_pending_outbox_rewind_cannot_erase_acknowledgement(owned):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    cap = store.owner_capability(owned[1].proof)
+    old = _database_row(owned, "account_audit_outbox", req.operation_id)
+    assert store.export_audit_events(cap, lambda event: event.event_id) == 1
+    _restore_database_row(owned, "account_audit_outbox", old)
+    with pytest.raises(m.AccountTransactionError):
+        store.pending_audit_events(cap)
+
+
+@pytest.mark.parametrize("state", ["committed", "rejected", "authentication_unknown", "blocked"])
+def test_terminal_audit_is_stable_vault_bound_redacted_and_provider_free(owned, state):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    cap = store.owner_capability(owned[1].proof)
+    assert store.pending_audit_events(cap) == ()
+    if state == "committed":
+        witness = plan(store, req, head, c)
+        receipt = store.apply(req.operation_id, witness)
+        assert store.apply(req.operation_id, witness) == receipt
+    else:
+        if state == "authentication_unknown":
+            store.mark_authentication_started(req.operation_id)
+        receipt = store.settle(req.operation_id, state=c.AccountOperationStage(state), reason="synthetic_private_reason")
+        assert store.settle(req.operation_id, state=receipt.state, reason=receipt.reason) == receipt
+    events = store.pending_audit_events(cap)
+    assert type(events) is tuple and len(events) == 1
+    event = events[0]
+    assert event.event_id.version == 4 and event.event_id != req.operation_id
+    assert event.state is receipt.state and event.kind is req.kind
+    assert event.credential_generation == (1 if state == "committed" else None)
+    encoded = c.canonical_account_json(event.to_dict())
+    for secret in (
+        str(req.operation_id), str(head.vault_incarnation), req.actor.actor, req.actor.session_binding,
+        req.selector.adapter_id, req.selector.account_id, req.label, "PRIVATE-admission", "PRIVATE-replay",
+        "synthetic_private_reason",
+    ):
+        assert secret not in encoded
+    from dataclasses import FrozenInstanceError
+    with pytest.raises(FrozenInstanceError):
+        event.actor_ref = "0" * 64
+    reopened = m.AccountTransactionStore(owned[2], workspace_path=owned[0], backend_proof=owned[1].proof)
+    other_cap = reopened.owner_capability(owned[1].proof)
+    assert reopened.pending_audit_events(other_cap) == events
+    version = owned[2].selector_state(req.selector).version
+    assert reopened.export_audit_events(other_cap, lambda value: value.event_id) == 1
+    assert reopened.export_audit_events(other_cap, lambda value: pytest.fail("delivered event replayed")) == 0
+    assert owned[2].selector_state(req.selector).version == version
+    assert reopened.operation(req.operation_id).receipt == receipt
+
+
+@pytest.mark.parametrize("ack", ["missing", "wrong", "string", "version_one", "raise"])
+def test_unverified_or_failed_audit_delivery_keeps_exact_pending_event(owned, ack):
+    from uuid import uuid1
+    c, _, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    cap = store.owner_capability(owned[1].proof)
+    before = store.pending_audit_events(cap)
+
+    def sink(event):
+        assert event == before[0]
+        if ack == "raise":
+            raise RuntimeError("PRIVATE-sink-secret")
+        return {"missing": None, "wrong": uuid4(), "string": str(event.event_id), "version_one": uuid1()}[ack]
+
+    assert store.export_audit_events(cap, sink) == 0
+    assert store.pending_audit_events(cap) == before
+    assert store.export_audit_events(cap, lambda event: event.event_id) == 1
+
+
+def test_sink_runs_outside_sqlite_locks_and_ack_does_not_release_claim(owned):
+    c, _, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.BLOCKED, reason="synthetic_blocked")
+    cap = store.owner_capability(owned[1].proof)
+
+    def sink(event):
+        # A distinct connection can acquire the write reservation immediately.
+        # A callback under the ledger transaction would fail this probe.
+        with closing(sqlite3.connect(owned[0] / "vault.db", timeout=0.01)) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.rollback()
+        assert store.pending_audit_events(cap) == (event,)
+        return event.event_id
+
+    assert store.export_audit_events(cap, sink) == 1
+    assert store.active_operation(cap).operation_id == req.operation_id
+    assert owned[2].selector_state(req.selector).version.generation == 0
+
+
+def test_audit_ack_revalidates_exact_operation_source_after_unlocked_sink(owned):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.apply(req.operation_id, plan(store, req, head, c))
+    cap = store.owner_capability(owned[1].proof)
+    events = store.pending_audit_events(cap)
+
+    def sink(event):
+        store.mark_workspace_conflicted(req.operation_id)
+        return event.event_id
+
+    with pytest.raises(m.AccountTransactionError):
+        store.export_audit_events(cap, sink)
+    assert store.pending_audit_events(cap) == events
+    assert store.export_audit_events(cap, lambda event: event.event_id) == 1
+
+
+def test_audit_ack_revalidates_live_owner_after_unlocked_sink(owned):
+    c, _, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    cap = store.owner_capability(owned[1].proof)
+
+    def sink(event):
+        owned[1].release()
+        return event.event_id
+
+    with pytest.raises(BackendLeaseUnavailable):
+        store.export_audit_events(cap, sink)
+    assert _database_row(owned, "account_audit_outbox", req.operation_id)["delivered"] == 0
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.0, 10_001])
+def test_audit_limits_and_capabilities_cannot_bypass_owner_validation(owned, limit):
+    _, m, store, _ = enrolled(owned)
+    cap = store.owner_capability(owned[1].proof)
+    with pytest.raises(m.AccountTransactionError):
+        store.pending_audit_events(cap, limit)
+    with pytest.raises(m.AccountTransactionError):
+        store.pending_audit_events(object())
+    with pytest.raises(m.AccountTransactionError):
+        store.export_audit_events(object(), lambda event: event.event_id)
+
+
+@pytest.mark.parametrize("state", ["admitted", "committed", "rejected", "authentication_unknown", "blocked"])
+def test_schema_three_migration_authenticates_and_backfills_terminal_receipts_only(owned, state):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    if state == "committed":
+        store.apply(req.operation_id, plan(store, req, head, c))
+    elif state != "admitted":
+        if state == "authentication_unknown":
+            store.mark_authentication_started(req.operation_id)
+        store.settle(req.operation_id, state=c.AccountOperationStage(state), reason="synthetic_migration")
+    expected_operation = store.operation(req.operation_id)
+    expected_events = store.pending_audit_events(store.owner_capability(owned[1].proof))
+    path, lease, credentials = owned
+    credentials.close()
+    with closing(sqlite3.connect(path / "vault.db")) as db:
+        db.row_factory = sqlite3.Row
+        incarnation = db.execute("SELECT vault_incarnation FROM credential_vault_metadata").fetchone()[0]
+        db.execute("DROP TABLE account_audit_outbox")
+        db.execute("DROP TABLE credential_vault_metadata")
+        db.execute(vault._AUTHORITY_SCHEMA_THREE["credential_vault_metadata"])
+        db.execute("INSERT INTO credential_vault_metadata VALUES(1,3,?,1)", (incarnation,))
+        body = c.parse_account_json(db.execute("SELECT body FROM account_store_head").fetchone()[0])
+        body.pop("operations_digest")
+        encoded = c.canonical_account_json(body)
+        db.execute("UPDATE account_store_head SET body=?,mac=?", (encoded, store._mac("head", encoded)))
+        db.execute("PRAGMA user_version=3")
+        db.commit()
+        preserved = {
+            name: tuple(tuple(row) for row in db.execute(f"SELECT * FROM {name}"))
+            for name in (
+                "accounts", "credential_selector_versions", "broker_selector_setup", "credential_quarantine",
+                "account_store_key", "account_operations",
+            )
+        }
+    reopened_credentials = vault.CredentialStore(path / "vault.db", "synthetic-password")
+    try:
+        reopened = m.AccountTransactionStore(reopened_credentials, workspace_path=path, backend_proof=lease.proof)
+        assert reopened.operation(req.operation_id) == expected_operation
+        assert reopened.pending_audit_events(reopened.owner_capability(lease.proof)) == expected_events
+        with closing(sqlite3.connect(path / "vault.db")) as db:
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+            assert preserved == {name: tuple(db.execute(f"SELECT * FROM {name}")) for name in preserved}
+            assert "operations_digest" in c.parse_account_json(db.execute("SELECT body FROM account_store_head").fetchone()[0])
+    finally:
+        reopened_credentials.close()
+
+
+def test_failed_schema_three_audit_migration_preserves_entire_database(owned, monkeypatch):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    owned[2].close()
+    with closing(sqlite3.connect(owned[0] / "vault.db")) as db:
+        incarnation = db.execute("SELECT vault_incarnation FROM credential_vault_metadata").fetchone()[0]
+        db.execute("DROP TABLE account_audit_outbox")
+        db.execute("DROP TABLE credential_vault_metadata")
+        db.execute(vault._AUTHORITY_SCHEMA_THREE["credential_vault_metadata"])
+        db.execute("INSERT INTO credential_vault_metadata VALUES(1,3,?,1)", (incarnation,))
+        body = c.parse_account_json(db.execute("SELECT body FROM account_store_head").fetchone()[0])
+        body.pop("operations_digest")
+        encoded = c.canonical_account_json(body)
+        db.execute("UPDATE account_store_head SET body=?,mac=?", (encoded, store._mac("head", encoded)))
+        db.execute("PRAGMA user_version=3")
+        db.commit()
+        before = tuple(db.iterdump())
+    original = m._ensure_audit_event
+
+    def fail_after_insertion(conn, body, mac):
+        original(conn, body, mac)
+        raise RuntimeError("PRIVATE-backfill-secret")
+
+    monkeypatch.setattr(m, "_ensure_audit_event", fail_after_insertion)
+    with pytest.raises(vault.CredentialVaultInvalidError) as caught:
+        vault.CredentialStore(owned[0] / "vault.db", "synthetic-password")
+    assert str(caught.value) == "credential_vault_invalid"
+    with closing(sqlite3.connect(owned[0] / "vault.db")) as db:
+        assert tuple(db.iterdump()) == before
+
+
+def test_crash_after_audit_ack_commit_keeps_delivered_evidence_without_domain_replay(owned, monkeypatch):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    receipt = store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    cap = store.owner_capability(owned[1].proof)
+    original = owned[2]._validate_family
+    reported = []
+    delivered_ids = []
+
+    def fail_after_commit():
+        original()
+        if _database_row(owned, "account_audit_outbox", req.operation_id)["delivered"] and not reported:
+            reported.append(True)
+            raise vault.CredentialError
+
+    def sink(event):
+        delivered_ids.append(event.event_id)
+        return event.event_id
+
+    monkeypatch.setattr(owned[2], "_validate_family", fail_after_commit)
+    with pytest.raises(vault.CredentialError):
+        store.export_audit_events(cap, sink)
+    assert reported == [True] and len(delivered_ids) == 1
+    reopened = m.AccountTransactionStore(owned[2], workspace_path=owned[0], backend_proof=owned[1].proof)
+    other_cap = reopened.owner_capability(owned[1].proof)
+    assert reopened.pending_audit_events(other_cap) == ()
+    assert reopened.export_audit_events(other_cap, sink) == 0
+    assert len(delivered_ids) == 1
+    assert reopened.operation(req.operation_id).receipt == receipt
+    assert owned[2].selector_state(req.selector).version.generation == 0
+
+
+@pytest.mark.parametrize("damage", ["delete", "event_id", "body", "delivered", "schema", "index", "trigger"])
+def test_outbox_corruption_refuses_all_pending_and_export_reads(owned, damage):
+    c, _, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    cap = store.owner_capability(owned[1].proof)
+    with closing(sqlite3.connect(owned[0] / "vault.db")) as db:
+        statement = {
+            "delete": "DELETE FROM account_audit_outbox",
+            "event_id": "UPDATE account_audit_outbox SET event_id='not-a-uuid'",
+            "body": "UPDATE account_audit_outbox SET body='{}'",
+            "delivered": "UPDATE account_audit_outbox SET delivered=1",
+            "schema": "ALTER TABLE account_audit_outbox ADD COLUMN unexpected TEXT",
+            "index": "CREATE INDEX unexpected_audit_index ON account_audit_outbox(event_id)",
+            "trigger": "CREATE TRIGGER unexpected_audit_trigger AFTER UPDATE ON account_audit_outbox BEGIN SELECT 1; END",
+        }[damage]
+        db.execute(statement)
+        db.commit()
+    with pytest.raises(vault.CredentialError):
+        store.pending_audit_events(cap)
+    with pytest.raises(vault.CredentialError):
+        store.export_audit_events(cap, lambda event: pytest.fail("invalid source reached sink"))
+
+
+def test_signed_outbox_evidence_must_still_match_exact_terminal_source(owned):
+    c, m, store, head = enrolled(owned)
+    req = request(owned, c, head)
+    store.admit(req)
+    store.settle(req.operation_id, state=c.AccountOperationStage.REJECTED, reason="synthetic_rejection")
+    cap = store.owner_capability(owned[1].proof)
+    event = store.pending_audit_events(cap)[0]
+    # The source cross-check remains load-bearing even for a synthetic signed
+    # envelope and manifest; another terminal event must never be substituted.
+    wrong = replace(event, actor_ref="0" * 64)
+    with closing(sqlite3.connect(owned[0] / "vault.db")) as db:
+        db.row_factory = sqlite3.Row
+        row = dict(db.execute("SELECT * FROM account_audit_outbox").fetchone())
+        row["body"] = c.canonical_account_json(wrong.to_dict())
+        db.execute("UPDATE account_audit_outbox SET body=?,mac=?", (row["body"], m._audit_row_mac(row, store._mac)))
+        store._write_head(db, store._read_head(db))
+        db.commit()
+    with pytest.raises(m.AccountTransactionError):
+        store.pending_audit_events(cap)

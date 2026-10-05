@@ -187,7 +187,7 @@ def test_unrecognised_legacy_identity_is_preserved_only_in_quarantine(tmp_path, 
     assert len(metadata) == 1 and metadata[0].ref.row_generation == 1
     with closing(sqlite3.connect(path)) as conn:
         assert conn.execute("SELECT count(*) FROM credential_quarantine").fetchone()[0] == 1
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_primary_projection_captures_every_legacy_primary(tmp_path):

@@ -2235,6 +2235,8 @@ def _prepare_broker_dependencies(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    coherence_verifier: Callable | None = None,
+    enrollment_required: Callable[[], bool] | None = None,
 ) -> _BrokerRuntimeDependencies:
     """Prepare the single provider, adapter map and limiter shared by reads and writes.
 
@@ -2301,11 +2303,13 @@ def _prepare_broker_dependencies(
     def compatibility_authority():
         if owner is None or workspace_path is None:
             raise RegistrySessionUnavailable
-        return owner.seal_openalgo_default_compatibility_authority(read_workspace_snapshot(workspace_path))
+        current = coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(workspace_path)
+        return owner.seal_openalgo_default_compatibility_authority(current)
 
     session_provider = AuthenticatingSessionProvider(
         registry, config.account_acls, workspace_snapshot=workspace_snapshot, workspace_path=workspace_path,
         credential_version_for=credential_version_for, compatibility_authority_for=compatibility_authority,
+        coherence_verifier=coherence_verifier, enrollment_required=enrollment_required,
     )
     if owner is not None and workspace_snapshot is not None and workspace_snapshot.version is not None:
         owner.set_execution_default_projection(
@@ -2361,7 +2365,7 @@ def _prepare_broker_dependencies(
                 expected_registry=registry.snapshot_selector(BrokerSelector("openalgo", "default")),
                 authority=authority, client=openalgo_client, broker=None, label="OpenAlgo",
             )
-            current = read_workspace_snapshot(workspace_path)
+            current = coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(workspace_path)
             if not openalgo_client.matches_workspace_openalgo(current):
                 owner.abandon_prepared_candidate(receipt)
                 raise RegistrySessionUnavailable
@@ -2516,6 +2520,8 @@ def build_broker_router(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    coherence_verifier: Callable | None = None,
+    enrollment_required: Callable[[], bool] | None = None,
     backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Construct a router through exactly one shared dependency preparation."""
@@ -2533,6 +2539,8 @@ def build_broker_router(
         workspace_path=workspace_path,
         registry_publication_owner=registry_publication_owner,
         credential_version_for=credential_version_for,
+        coherence_verifier=coherence_verifier,
+        enrollment_required=enrollment_required,
     )
     if on_native_activated is not None:
         try:
@@ -3128,6 +3136,21 @@ def _configure_broker_router_locked(
             target_workspace = _workspace_dir()
             run_migrations(target_workspace)
             workspace_snapshot = read_workspace_snapshot(target_workspace)
+            enrollment_required = (
+                credential_store.account_protocol_enrolled if type(credential_store) is CredentialStore else None
+            )
+            coherence_verifier = None
+            if ("_broker_account_store" in workspace_snapshot.config
+                    or enrollment_required is not None and enrollment_required()):
+                from flinttrade_gateway.account_transaction_store import AccountTransactionStore  # noqa: PLC0415
+                from .broker_account_workspace import BrokerAccountWorkspace  # noqa: PLC0415
+
+                proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
+                account_store = AccountTransactionStore(
+                    credential_store, workspace_path=target_workspace, backend_proof=proof,
+                )
+                coherence_verifier = BrokerAccountWorkspace(target_workspace, account_store, proof).assert_coherent
+                workspace_snapshot = coherence_verifier()
             brokers_cfg = workspace_snapshot.as_dict().get("brokers")
             effective_brokers = brokers_cfg or default_workspace_config()["brokers"]
             native_attest_ok, native_has_credentials = _native_activation_checks(credential_store)
@@ -3159,6 +3182,8 @@ def _configure_broker_router_locked(
                 workspace_path=target_workspace,
                 registry_publication_owner=registry_publication_owner_for(app, registry),
                 credential_version_for=credential_version_reader(credential_store),
+                coherence_verifier=coherence_verifier,
+                enrollment_required=enrollment_required,
             )
             from flinttrade_gateway.broker_read_service import create_broker_read_owner  # noqa: PLC0415
 
@@ -3183,8 +3208,11 @@ def _configure_broker_router_locked(
         # broker authority. Do not publish if any workspace writer raced the build.
         try:
             broker_authority_unchanged = (
-                broker_workspace_version(read_workspace_snapshot(target_workspace))
+                broker_workspace_version(
+                    coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(target_workspace)
+                )
                 == broker_workspace_version(workspace_snapshot)
+                and (coherence_verifier is not None or enrollment_required is None or not enrollment_required())
             )
         except Exception:
             broker_authority_unchanged = False

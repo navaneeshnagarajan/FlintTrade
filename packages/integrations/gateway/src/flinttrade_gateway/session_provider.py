@@ -59,14 +59,17 @@ class AuthenticatingSessionProvider:
         credential_version_for: Callable[[BrokerSelector], CredentialVersion] | None = None,
         compatibility_authority_for: Callable[[], OpenAlgoDefaultCompatibilityAuthorityReceipt] | None = None,
         coherence_verifier: Callable[[], WorkspaceSnapshot] | None = None,
+        enrollment_required: Callable[[], bool] | None = None,
     ) -> None:
         self._registry = registry
         self._acls = account_acls
         self._credential_version_for = credential_version_for
         self._compatibility_authority_for = compatibility_authority_for
         self._coherence_verifier = coherence_verifier
+        self._enrollment_required = enrollment_required
         self._enrolled = (
-            workspace_snapshot is not None
+            coherence_verifier is not None
+            or workspace_snapshot is not None
             and "_broker_account_store" in workspace_snapshot.config
         )
         self._pinned_instance_id = (
@@ -102,8 +105,21 @@ class AuthenticatingSessionProvider:
             raise RegistrySessionUnavailable
         return ManagedLookupAuthority(version, current)
 
+    def _requires_coherence(self) -> bool:
+        """Latch trusted enrolment so an older legacy generation loses authority."""
+        if not self._enrolled and self._enrollment_required is not None:
+            try:
+                enrolled = self._enrollment_required()
+                if type(enrolled) is not bool:
+                    raise ValueError
+            except Exception:
+                raise RegistrySessionUnavailable from None
+            if enrolled:
+                self._enrolled = True
+        return self._enrolled
+
     def _current_snapshot(self) -> WorkspaceSnapshot:
-        if self._enrolled:
+        if self._requires_coherence():
             if self._coherence_verifier is None:
                 raise RegistrySessionUnavailable
             try:
@@ -120,7 +136,7 @@ class AuthenticatingSessionProvider:
 
     def __call__(self, request_ctx: RequestContext, adapter_id: str, account_id: str) -> ConnectedRegistrySession:
         selector = BrokerSelector(adapter_id, account_id)
-        if self._enrolled:
+        if self._requires_coherence():
             acls = self._current_snapshot().config["brokers"]["account_acls"]
         else:
             acls = self._acls

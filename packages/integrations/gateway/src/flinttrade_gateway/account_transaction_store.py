@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +41,7 @@ from flinttrade_core.account_lifecycle_contracts import (
     parse_account_json,
 )
 from flinttrade_core.backend_instance import BackendLeaseProof, require_backend_lease_proof
+from flinttrade_core.broker_account_audit import AccountMutationAudit
 from flinttrade_core.broker_identity import INT64_MAX, BrokerSelector, CredentialVersion
 from flinttrade_core.workspace_migrations import (
     BrokerWorkspaceVersion,
@@ -49,7 +50,7 @@ from flinttrade_core.workspace_migrations import (
     broker_workspace_version,
 )
 
-from .credentials import CredentialError, CredentialSelectorState, CredentialStore
+from .credentials import _ACCOUNT_AUDIT_SQL, CredentialError, CredentialSelectorState, CredentialStore
 
 
 class AccountTransactionError(CredentialError):
@@ -167,6 +168,269 @@ def _preflight_terminal_envelopes(request: AccountMutationRequest, body: dict) -
         )
 
 
+
+def _ledger_mac(key: bytes, domain: str, *parts: str | bytes | None) -> str:
+    result = hmac.new(key, ("account-ledger/v1/" + domain).encode(), hashlib.sha256)
+    for part in parts:
+        raw = b"" if part is None else part.encode() if type(part) is str else part
+        result.update(len(raw).to_bytes(8, "big"))
+        result.update(raw)
+    return result.hexdigest()
+
+
+def _operations_digest(conn: sqlite3.Connection, mac: Callable[..., str]) -> str:
+    """Bind every retained row, including released receipts and audit acknowledgements.
+
+    Fixed-width identities avoid the JSON envelope's 64 KiB limit at capacity.
+    Separate domain tags prevent operation/outbox substitutions.
+    """
+    parts = []
+    for row in conn.execute("SELECT operation_id,mac FROM account_operations ORDER BY operation_id COLLATE BINARY"):
+        parts.extend(("operation", row["operation_id"], row["mac"]))
+    for row in conn.execute(
+        "SELECT operation_id,event_id,mac FROM account_audit_outbox ORDER BY operation_id COLLATE BINARY"
+    ):
+        parts.extend(("audit", row["operation_id"], row["event_id"], row["mac"]))
+    return mac("retained-rows", *parts)
+
+
+def _audit_event(body: dict, mac: Callable[..., str]) -> AccountMutationAudit:
+    source = _operation_snapshot(body)
+    if source.state not in _TERMINAL or source.receipt is None:
+        raise AccountTransactionError
+    incarnation = str(source.expected_credential.vault_incarnation)
+    operation_id = str(source.operation_id)
+    receipt = source.receipt
+    return AccountMutationAudit(
+        event_id=UUID(bytes=bytes.fromhex(mac("audit-id", incarnation, operation_id))[:16], version=4),
+        operation_ref=mac("audit-operation", incarnation, operation_id),
+        selector_ref=mac("audit-selector", incarnation, source.selector.adapter_id, source.selector.account_id),
+        actor_ref=mac("audit-actor", incarnation, source.actor.actor),
+        session_ref=mac("audit-session", incarnation, source.actor.session_binding),
+        kind=source.kind,
+        state=source.state,
+        expected_credential_generation=source.expected_credential.generation,
+        credential_generation=None if receipt.credential_version is None else receipt.credential_version.generation,
+        expected_workspace_generation=source.expected_workspace.generation,
+        workspace_generation=None if receipt.commit_workspace is None else receipt.commit_workspace.generation,
+        expected_broker_generation=source.expected_broker_workspace.generation,
+        broker_generation=None if receipt.commit_broker_workspace is None else receipt.commit_broker_workspace.generation,
+    )
+
+
+def _audit_row_mac(row: Mapping, mac: Callable[..., str]) -> str:
+    return mac("audit-outbox", row["operation_id"], row["event_id"], row["body"], str(row["delivered"]))
+
+
+def _ensure_audit_event(conn: sqlite3.Connection, body: dict, mac: Callable[..., str]) -> None:
+    event = _audit_event(body, mac)
+    operation_id = body["identity"]["operation_id"]
+    encoded = canonical_account_json(event.to_dict())
+    existing = conn.execute("SELECT * FROM account_audit_outbox WHERE operation_id=?", (operation_id,)).fetchone()
+    if existing is not None:
+        if existing["body"] != encoded or existing["event_id"] != str(event.event_id):
+            raise AccountTransactionError
+        return
+    row = {"operation_id": operation_id, "event_id": str(event.event_id), "body": encoded, "delivered": 0}
+    conn.execute(
+        "INSERT INTO account_audit_outbox VALUES(?,?,?,?,?)",
+        (operation_id, row["event_id"], encoded, 0, _audit_row_mac(row, mac)),
+    )
+
+
+def _upgrade_account_ledger_v4(credentials: CredentialStore, conn: sqlite3.Connection, incarnation: UUID) -> None:
+    """One authenticated schema-3 upgrade inside the vault's owned transaction.
+
+    Migration grants no backend capability and contacts no provider. Legacy
+    head acceptance exists only here, never in a runtime schema-4 read.
+    """
+    row = conn.execute("SELECT * FROM account_store_key").fetchone()
+    secret = credentials._decrypt(row)
+    if (set(secret) != {"schema", "vault_incarnation", "mac_key"}
+            or type(secret["schema"]) is not int or secret["schema"] != 1
+            or secret["vault_incarnation"] != str(incarnation)):
+        raise AccountTransactionError
+    _digest(secret["mac_key"])
+    key = bytes.fromhex(secret["mac_key"])
+
+    def mac(domain: str, *parts: str | bytes | None) -> str:
+        return _ledger_mac(key, domain, *parts)
+
+    key_storage = (row["salt"], row["encrypted_creds"])
+    _validate_ledger(conn, key_storage=key_storage, incarnation=incarnation, mac=mac, legacy=True)
+    conn.execute(_ACCOUNT_AUDIT_SQL)
+    for operation in conn.execute("SELECT body FROM account_operations").fetchall():
+        body = parse_account_json(operation[0])
+        if AccountOperationStage(body["stage"]) in _TERMINAL:
+            _ensure_audit_event(conn, body, mac)
+    head = conn.execute("SELECT body FROM account_store_head").fetchone()
+    if head is not None:
+        body = canonical_account_json({**parse_account_json(head[0]), "operations_digest": _operations_digest(conn, mac)})
+        conn.execute("UPDATE account_store_head SET body=?,mac=? WHERE singleton=1", (body, mac("head", body)))
+    _validate_ledger(conn, key_storage=key_storage, incarnation=incarnation, mac=mac)
+
+
+def _operation_snapshot(body: dict) -> AccountOperationSnapshot:
+    identity = _request_from({**body["identity"], "credentials": None})
+    return AccountOperationSnapshot(
+        identity.operation_id,
+        identity.selector,
+        identity.kind,
+        identity.actor,
+        AccountOperationStage(body["stage"]),
+        identity.expected_workspace,
+        identity.expected_broker_workspace,
+        identity.expected_credential,
+        None if body["witness"] is None else BrokerAccountWitness.from_dict(body["witness"]),
+        None if body["receipt"] is None else _receipt_from(body["receipt"]),
+        body["abandoned"],
+        body["abandonment_committed"],
+        body["abandonment_reason"],
+        body["before_digest"],
+        body["after_digest"],
+        body["workspace_attempted"],
+        body["workspace_conflicted"],
+    )
+
+
+def _validate_ledger(
+    conn: sqlite3.Connection, *, key_storage: tuple[bytes, bytes], incarnation: UUID,
+    mac: Callable[..., str], legacy: bool = False,
+) -> None:
+    try:
+        key = conn.execute("SELECT salt,encrypted_creds FROM account_store_key").fetchone()
+        if tuple(key) != key_storage:
+            raise AccountTransactionError
+        heads = conn.execute("SELECT * FROM account_store_head").fetchall()
+        rows = conn.execute("SELECT * FROM account_operations").fetchall()
+        outbox = [] if legacy else conn.execute("SELECT * FROM account_audit_outbox").fetchall()
+        if not heads:
+            if rows or outbox:
+                raise AccountTransactionError
+            return
+        if len(heads) != 1 or not hmac.compare_digest(heads[0]["mac"], mac("head", heads[0]["body"])):
+            raise AccountTransactionError
+        head = parse_account_json(heads[0]["body"])
+        expected = {"intent", "witness", "claim", "operation_count"}
+        if not legacy:
+            expected.add("operations_digest")
+        if set(head) != expected:
+            raise AccountTransactionError
+        if not legacy and not hmac.compare_digest(head["operations_digest"], _operations_digest(conn, mac)):
+            raise AccountTransactionError
+        intent = AccountEnrolmentIntent.from_dict(head["intent"])
+        if intent.vault_incarnation != incarnation:
+            raise AccountTransactionError
+        witness = None if head["witness"] is None else BrokerAccountWitness.from_dict(head["witness"])
+        if witness is not None and (
+            witness.vault_incarnation != intent.vault_incarnation
+            or witness.workspace_instance != intent.workspace_instance
+        ):
+            raise AccountTransactionError
+        if (
+            type(head["operation_count"]) is not int
+            or head["operation_count"] != len(rows)
+            or not 0 <= len(rows) <= ACCOUNT_MAX_OPERATIONS
+            or (witness is None and rows)
+        ):
+            raise AccountTransactionError
+        snapshots = {}
+        for row in rows:
+            if not hmac.compare_digest(
+                row["mac"],
+                mac(
+                    "operation",
+                    *(
+                        row[name]
+                        for name in (
+                            "operation_id",
+                            "body",
+                            "request_mac",
+                            "private_salt",
+                            "private_cipher",
+                            "plan_salt",
+                            "plan_cipher",
+                        )
+                    ),
+                ),
+            ):
+                raise AccountTransactionError
+            _digest(row["request_mac"])
+            body = parse_account_json(row["body"])
+            if set(body) != {
+                "identity",
+                "stage",
+                "witness",
+                "receipt",
+                "abandoned",
+                "abandonment_committed",
+                "abandonment_reason",
+                "before_digest",
+                "after_digest",
+                "workspace_attempted",
+                "workspace_conflicted",
+            }:
+                raise AccountTransactionError
+            snapshot = _operation_snapshot(body)
+            if (
+                str(snapshot.operation_id) != row["operation_id"]
+                or snapshot.expected_workspace.instance_id != intent.workspace_instance
+                or snapshot.expected_credential.vault_incarnation != intent.vault_incarnation
+            ):
+                raise AccountTransactionError
+            terminal = snapshot.state in _TERMINAL
+            if (row["private_cipher"] is None) != terminal or (row["plan_cipher"] is not None) != (
+                snapshot.state is AccountOperationStage.PLAN_READY
+            ):
+                raise AccountTransactionError
+            if snapshot.state is AccountOperationStage.COMMITTED:
+                if (
+                    snapshot.witness is None
+                    or snapshot.receipt.commit_workspace != snapshot.witness.commit_workspace
+                    or snapshot.receipt.commit_broker_workspace != snapshot.witness.commit_broker_workspace
+                    or snapshot.receipt.credential_version.vault_incarnation != intent.vault_incarnation
+                    or snapshot.receipt.credential_version.generation != snapshot.expected_credential.generation + 1
+                ):
+                    raise AccountTransactionError
+            elif snapshot.witness is not None:
+                raise AccountTransactionError
+            snapshots[row["operation_id"]] = snapshot
+        if not legacy:
+            events = {}
+            for row in outbox:
+                if (
+                    type(row["delivered"]) is not int or row["delivered"] not in (0, 1)
+                    or row["operation_id"] not in snapshots
+                    or not hmac.compare_digest(row["mac"], _audit_row_mac(row, mac))
+                ):
+                    raise AccountTransactionError
+                event = AccountMutationAudit.from_dict(parse_account_json(row["body"]))
+                source = conn.execute(
+                    "SELECT body FROM account_operations WHERE operation_id=?", (row["operation_id"],)
+                ).fetchone()
+                if str(event.event_id) != row["event_id"] or event != _audit_event(parse_account_json(source[0]), mac):
+                    raise AccountTransactionError
+                events[row["operation_id"]] = event
+            if set(events) != {key for key, snapshot in snapshots.items() if snapshot.state in _TERMINAL}:
+                raise AccountTransactionError
+        if head["claim"] is not None:
+            if type(head["claim"]) is not str or head["claim"] not in snapshots:
+                raise AccountTransactionError
+        if any(snapshot.state not in _TERMINAL and key != head["claim"] for key, snapshot in snapshots.items()):
+            raise AccountTransactionError
+        if witness is not None:
+            if witness.epoch == 0:
+                if witness.operation_id != intent.operation_id or witness.before_digest != intent.before_digest:
+                    raise AccountTransactionError
+            elif (
+                str(witness.operation_id) not in snapshots
+                or snapshots[str(witness.operation_id)].witness != witness
+            ):
+                raise AccountTransactionError
+    except Exception:
+        raise AccountTransactionError from None
+
+
 class AccountTransactionStore:
     """Durable single-operation claim and atomic target plan application."""
 
@@ -248,19 +512,14 @@ class AccountTransactionStore:
             self._validate(conn)
 
     def _mac(self, domain: str, *parts: str | bytes | None) -> str:
-        result = hmac.new(self._key, ("account-ledger/v1/" + domain).encode(), hashlib.sha256)
-        for part in parts:
-            raw = b"" if part is None else part.encode() if type(part) is str else part
-            result.update(len(raw).to_bytes(8, "big"))
-            result.update(raw)
-        return result.hexdigest()
+        return _ledger_mac(self._key, domain, *parts)
 
     def _read_head(self, conn: sqlite3.Connection) -> dict | None:
         row = conn.execute("SELECT * FROM account_store_head").fetchone()
         return None if row is None else parse_account_json(row["body"])
 
     def _write_head(self, conn: sqlite3.Connection, value: dict) -> None:
-        body = canonical_account_json(value)
+        body = canonical_account_json({**value, "operations_digest": _operations_digest(conn, self._mac)})
         conn.execute(
             "INSERT INTO account_store_head VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET body=excluded.body,mac=excluded.mac",
             (body, self._mac("head", body)),
@@ -309,137 +568,19 @@ class AccountTransactionStore:
             ),
         )
 
+        if AccountOperationStage(body["stage"]) in _TERMINAL:
+            _ensure_audit_event(conn, body, self._mac)
+        head = self._read_head(conn)
+        if head is not None:
+            self._write_head(conn, head)
+
     def _snapshot(self, body: dict) -> AccountOperationSnapshot:
-        identity = _request_from({**body["identity"], "credentials": None})
-        return AccountOperationSnapshot(
-            identity.operation_id,
-            identity.selector,
-            identity.kind,
-            identity.actor,
-            AccountOperationStage(body["stage"]),
-            identity.expected_workspace,
-            identity.expected_broker_workspace,
-            identity.expected_credential,
-            None if body["witness"] is None else BrokerAccountWitness.from_dict(body["witness"]),
-            None if body["receipt"] is None else _receipt_from(body["receipt"]),
-            body["abandoned"],
-            body["abandonment_committed"],
-            body["abandonment_reason"],
-            body["before_digest"],
-            body["after_digest"],
-            body["workspace_attempted"],
-            body["workspace_conflicted"],
-        )
+        return _operation_snapshot(body)
 
     def _validate(self, conn: sqlite3.Connection) -> None:
-        try:
-            key = conn.execute("SELECT salt,encrypted_creds FROM account_store_key").fetchone()
-            if tuple(key) != self._key_storage:
-                raise AccountTransactionError
-            heads = conn.execute("SELECT * FROM account_store_head").fetchall()
-            rows = conn.execute("SELECT * FROM account_operations").fetchall()
-            if not heads:
-                if rows:
-                    raise AccountTransactionError
-                return
-            if len(heads) != 1 or not hmac.compare_digest(heads[0]["mac"], self._mac("head", heads[0]["body"])):
-                raise AccountTransactionError
-            head = parse_account_json(heads[0]["body"])
-            if set(head) != {"intent", "witness", "claim", "operation_count"}:
-                raise AccountTransactionError
-            intent = AccountEnrolmentIntent.from_dict(head["intent"])
-            if intent.vault_incarnation != self._credentials._incarnation:
-                raise AccountTransactionError
-            witness = None if head["witness"] is None else BrokerAccountWitness.from_dict(head["witness"])
-            if witness is not None and (
-                witness.vault_incarnation != intent.vault_incarnation
-                or witness.workspace_instance != intent.workspace_instance
-            ):
-                raise AccountTransactionError
-            if (
-                type(head["operation_count"]) is not int
-                or head["operation_count"] != len(rows)
-                or not 0 <= len(rows) <= ACCOUNT_MAX_OPERATIONS
-                or (witness is None and rows)
-            ):
-                raise AccountTransactionError
-            snapshots = {}
-            for row in rows:
-                if not hmac.compare_digest(
-                    row["mac"],
-                    self._mac(
-                        "operation",
-                        *(
-                            row[name]
-                            for name in (
-                                "operation_id",
-                                "body",
-                                "request_mac",
-                                "private_salt",
-                                "private_cipher",
-                                "plan_salt",
-                                "plan_cipher",
-                            )
-                        ),
-                    ),
-                ):
-                    raise AccountTransactionError
-                _digest(row["request_mac"])
-                body = parse_account_json(row["body"])
-                if set(body) != {
-                    "identity",
-                    "stage",
-                    "witness",
-                    "receipt",
-                    "abandoned",
-                    "abandonment_committed",
-                    "abandonment_reason",
-                    "before_digest",
-                    "after_digest",
-                    "workspace_attempted",
-                    "workspace_conflicted",
-                }:
-                    raise AccountTransactionError
-                snapshot = self._snapshot(body)
-                if (
-                    str(snapshot.operation_id) != row["operation_id"]
-                    or snapshot.expected_workspace.instance_id != intent.workspace_instance
-                    or snapshot.expected_credential.vault_incarnation != intent.vault_incarnation
-                ):
-                    raise AccountTransactionError
-                terminal = snapshot.state in _TERMINAL
-                if (row["private_cipher"] is None) != terminal or (row["plan_cipher"] is not None) != (
-                    snapshot.state is AccountOperationStage.PLAN_READY
-                ):
-                    raise AccountTransactionError
-                if snapshot.state is AccountOperationStage.COMMITTED:
-                    if (
-                        snapshot.witness is None
-                        or snapshot.receipt.commit_workspace != snapshot.witness.commit_workspace
-                        or snapshot.receipt.commit_broker_workspace != snapshot.witness.commit_broker_workspace
-                        or snapshot.receipt.credential_version.vault_incarnation != intent.vault_incarnation
-                        or snapshot.receipt.credential_version.generation != snapshot.expected_credential.generation + 1
-                    ):
-                        raise AccountTransactionError
-                elif snapshot.witness is not None:
-                    raise AccountTransactionError
-                snapshots[row["operation_id"]] = snapshot
-            if head["claim"] is not None:
-                if type(head["claim"]) is not str or head["claim"] not in snapshots:
-                    raise AccountTransactionError
-            if any(snapshot.state not in _TERMINAL and key != head["claim"] for key, snapshot in snapshots.items()):
-                raise AccountTransactionError
-            if witness is not None:
-                if witness.epoch == 0:
-                    if witness.operation_id != intent.operation_id or witness.before_digest != intent.before_digest:
-                        raise AccountTransactionError
-                elif (
-                    str(witness.operation_id) not in snapshots
-                    or snapshots[str(witness.operation_id)].witness != witness
-                ):
-                    raise AccountTransactionError
-        except Exception:
-            raise AccountTransactionError from None
+        _validate_ledger(
+            conn, key_storage=self._key_storage, incarnation=self._credentials._incarnation, mac=self._mac,
+        )
 
     def prepare_enrolment(self, workspace: WorkspaceSnapshot) -> AccountEnrolmentIntent:
         self._require_owner()
@@ -700,6 +841,75 @@ class AccountTransactionStore:
             if head is None or head["claim"] is None:
                 return None
             return self._snapshot(parse_account_json(self._row(conn, _uuid_from(head["claim"]))["body"]))
+
+    def _pending_audit_sources(
+        self, capability: object, limit: int,
+    ) -> tuple[tuple[AccountMutationAudit, str, str], ...]:
+        self._require_owner()
+        if capability is not self._capability or type(limit) is not int or not 1 <= limit <= ACCOUNT_MAX_OPERATIONS:
+            raise AccountTransactionError
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """SELECT audit.body,audit.operation_id,operation.mac AS source_mac
+                FROM account_audit_outbox AS audit JOIN account_operations AS operation
+                ON operation.operation_id=audit.operation_id WHERE audit.delivered=0
+                ORDER BY audit.operation_id COLLATE BINARY LIMIT ?""", (limit,),
+            ).fetchall()
+            return tuple(
+                (AccountMutationAudit.from_dict(parse_account_json(row["body"])), row["operation_id"], row["source_mac"])
+                for row in rows
+            )
+
+    def pending_audit_events(self, capability: object, limit: int = 100) -> tuple[AccountMutationAudit, ...]:
+        """Read immutable, vault-bound redacted terminal events without dispatching work."""
+        return tuple(event for event, _, _ in self._pending_audit_sources(capability, limit))
+
+    def export_audit_events(
+        self, capability: object, sink: Callable[[AccountMutationAudit], UUID], limit: int = 100,
+    ) -> int:
+        """Deliver outside locks; acknowledge only the exact unchanged owned source.
+
+        Sink failures or unverified acknowledgements retain pending evidence.
+        A crash after delivery retries the same stable ID; the sink is responsible
+        for verifying an idempotent durable receipt before returning that UUID.
+        No authentication, credential mutation or claim disposition is replayed.
+        """
+        if not callable(sink):
+            raise AccountTransactionError
+        pending = self._pending_audit_sources(capability, limit)
+        acknowledged = 0
+        for event, operation_id, source_mac in pending:
+            self._require_owner()
+            try:
+                acknowledgement = sink(event)
+                _uuid(acknowledgement)
+                if acknowledgement != event.event_id:
+                    continue
+            except Exception:
+                continue
+            # Re-enter only after the arbitrary sink has returned. Both the
+            # backend owner and the authenticated ledger are revalidated here.
+            with self._transaction(write=True) as conn:
+                operation = self._row(conn, _uuid_from(operation_id))
+                row = conn.execute(
+                    "SELECT * FROM account_audit_outbox WHERE operation_id=?", (operation_id,),
+                ).fetchone()
+                if (
+                    row is None or not hmac.compare_digest(operation["mac"], source_mac)
+                    or AccountMutationAudit.from_dict(parse_account_json(row["body"])) != event
+                    or row["event_id"] != str(event.event_id)
+                ):
+                    raise AccountTransactionError
+                if row["delivered"]:
+                    continue
+                delivered = {**dict(row), "delivered": 1}
+                conn.execute(
+                    "UPDATE account_audit_outbox SET delivered=1,mac=? WHERE operation_id=?",
+                    (_audit_row_mac(delivered, self._mac), operation_id),
+                )
+                self._write_head(conn, self._read_head(conn))
+                acknowledged += 1
+        return acknowledged
 
     def recovery_material(self, capability: object, operation_id: UUID) -> _RecoveryMaterial:
         """Read frozen private staging only with this store's opaque capability."""

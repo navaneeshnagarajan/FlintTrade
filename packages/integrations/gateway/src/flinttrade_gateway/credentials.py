@@ -146,7 +146,7 @@ paytm dhan aliceblue upstox compositedge rmoney angel fivepaisa zebu shoonya fir
 kotak kotakneo motilal nubra samco deltaexchange groww wisdom ibulls iifl iiflcapital jainamxts
 indmoney fivepaisaxts definedge dhan_sandbox""".split()
 )
-CREDENTIAL_DB_SCHEMA_VERSION = 3
+CREDENTIAL_DB_SCHEMA_VERSION = 4
 _CREATE_TABLE_SQL = """CREATE TABLE "accounts" (
     account_id TEXT NOT NULL, adapter_id TEXT NOT NULL,
     broker TEXT NOT NULL, label TEXT NOT NULL, salt BLOB NOT NULL,
@@ -233,6 +233,18 @@ _AUTHORITY_SCHEMA_THREE = {**_AUTHORITY_SCHEMA, **_ACCOUNT_LEDGER_SCHEMA}
 _AUTHORITY_SCHEMA_THREE["credential_vault_metadata"] = _AUTHORITY_SCHEMA["credential_vault_metadata"].replace(
     "schema_version=2", "schema_version=3"
 ).replace("vault_incarnation TEXT NOT NULL", "vault_incarnation TEXT NOT NULL,\n        account_enrolled INTEGER NOT NULL CHECK(typeof(account_enrolled)='integer' AND account_enrolled IN (0,1))")
+
+_ACCOUNT_AUDIT_SQL = """CREATE TABLE account_audit_outbox (
+    operation_id TEXT NOT NULL PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE,
+    body TEXT NOT NULL CHECK(typeof(body)='text'),
+    delivered INTEGER NOT NULL CHECK(typeof(delivered)='integer' AND delivered IN (0,1)),
+    mac TEXT NOT NULL CHECK(typeof(mac)='text' AND length(mac)=64)
+)"""
+_AUTHORITY_SCHEMA_FOUR = {**_AUTHORITY_SCHEMA_THREE, "account_audit_outbox": _ACCOUNT_AUDIT_SQL}
+_AUTHORITY_SCHEMA_FOUR["credential_vault_metadata"] = _AUTHORITY_SCHEMA_THREE["credential_vault_metadata"].replace(
+    "schema_version=3", "schema_version=4"
+)
 
 
 class _AccountVaultCapability:
@@ -745,10 +757,12 @@ class CredentialStore:
                 conn.execute("PRAGMA user_version=2")
             elif legacy or marker == 1:
                 self._migrate_composite(conn, marker)
-            elif marker not in (2, CREDENTIAL_DB_SCHEMA_VERSION):
+            elif marker not in (2, 3, CREDENTIAL_DB_SCHEMA_VERSION):
                 raise CredentialVaultInvalidError
             if conn.execute("PRAGMA user_version").fetchone()[0] == 2:
                 self._migrate_account_ledger(conn)
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 3:
+                self._migrate_account_audit(conn)
             incarnation = self._validate_authority(conn)
             self._validate_family()
             conn.commit()
@@ -773,6 +787,18 @@ class CredentialStore:
             conn.execute(sql)
         conn.execute("INSERT INTO account_store_key VALUES(1,?,?)", (salt, encrypted))
         conn.execute("PRAGMA user_version=3")
+
+    def _migrate_account_audit(self, conn: sqlite3.Connection) -> None:
+        """Authenticate schema 3 before atomically anchoring rows and audit evidence."""
+        from .account_transaction_store import _upgrade_account_ledger_v4
+
+        incarnation = self._validate_authority(conn, version=3)
+        _upgrade_account_ledger_v4(self, conn, incarnation)
+        conn.execute("DROP TABLE credential_vault_metadata")
+        conn.execute(_AUTHORITY_SCHEMA_FOUR["credential_vault_metadata"])
+        enrolled = int(conn.execute("SELECT 1 FROM account_store_head").fetchone() is not None)
+        conn.execute("INSERT INTO credential_vault_metadata VALUES(1,4,?,?)", (str(incarnation), enrolled))
+        conn.execute("PRAGMA user_version=4")
 
     def _migrate_composite(self, conn: sqlite3.Connection, marker: int) -> None:
         """One disjoint physical-row partition, verified before the owned swap."""
@@ -954,7 +980,7 @@ class CredentialStore:
 
     @staticmethod
     def _reject_authority_triggers(conn: sqlite3.Connection) -> None:
-        tables = ("accounts", *_AUTHORITY_SCHEMA_THREE)
+        tables = ("accounts", *_AUTHORITY_SCHEMA_FOUR)
         for schema in ("sqlite_master", "sqlite_temp_master"):
             if conn.execute(
                 f"SELECT 1 FROM {schema} WHERE type='trigger' AND lower(tbl_name) IN ({','.join('?' for _ in tables)}) LIMIT 1",
@@ -962,10 +988,13 @@ class CredentialStore:
             ).fetchone():
                 raise CredentialVaultInvalidError
 
-    def _validate_authority(self, conn: sqlite3.Connection, *, version: int = 3, reserved_source: bool = False) -> UUID:
+    def _validate_authority(self, conn: sqlite3.Connection, *, version: int = 4, reserved_source: bool = False) -> UUID:
         try:
             self._reject_authority_triggers(conn)
-            schema = {1: _AUTHORITY_SCHEMA_ONE, 2: _AUTHORITY_SCHEMA, 3: _AUTHORITY_SCHEMA_THREE}[version]
+            schema = {
+                1: _AUTHORITY_SCHEMA_ONE, 2: _AUTHORITY_SCHEMA,
+                3: _AUTHORITY_SCHEMA_THREE, 4: _AUTHORITY_SCHEMA_FOUR,
+            }[version]
             if {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")} != {
                 "accounts",
                 *schema,
@@ -1047,11 +1076,13 @@ class CredentialStore:
                 raise ValueError
             if version >= 2:
                 self._validate_quarantine(conn, incarnation)
-            if version == 3:
+            if version >= 3:
                 enrolled = metadata[0]["account_enrolled"]
                 heads = conn.execute("SELECT count(*) FROM account_store_head").fetchone()[0]
                 if (type(enrolled) is not int or enrolled not in (0, 1) or heads != enrolled
-                        or (not enrolled and conn.execute("SELECT 1 FROM account_operations LIMIT 1").fetchone())):
+                        or (not enrolled and conn.execute("SELECT 1 FROM account_operations LIMIT 1").fetchone())
+                        or (version >= 4 and not enrolled
+                            and conn.execute("SELECT 1 FROM account_audit_outbox LIMIT 1").fetchone())):
                     raise ValueError
                 for name in schema:
                     expected_indices = {
@@ -1059,6 +1090,9 @@ class CredentialStore:
                         "broker_selector_setup": {"sqlite_autoindex_broker_selector_setup_1"},
                         "credential_quarantine": {"sqlite_autoindex_credential_quarantine_1", "sqlite_autoindex_credential_quarantine_2"},
                         "account_operations": {"sqlite_autoindex_account_operations_1"},
+                        "account_audit_outbox": {
+                            "sqlite_autoindex_account_audit_outbox_1", "sqlite_autoindex_account_audit_outbox_2",
+                        },
                     }.get(name, set())
                     if {row[1] for row in conn.execute(f"PRAGMA index_list({name})")} != expected_indices:
                         raise ValueError
@@ -1307,6 +1341,13 @@ class CredentialStore:
         _selector(selector)
         with self._transaction() as conn:
             return self._state(conn, selector)
+
+    def account_protocol_enrolled(self) -> bool:
+        """Read validated durable enrolment independently of workspace JSON."""
+        with self._transaction() as conn:
+            return bool(conn.execute(
+                "SELECT account_enrolled FROM credential_vault_metadata WHERE singleton=1"
+            ).fetchone()[0])
 
     def account_for_selector(self, selector: BrokerSelector) -> CredentialAccount | None:
         _selector(selector)
