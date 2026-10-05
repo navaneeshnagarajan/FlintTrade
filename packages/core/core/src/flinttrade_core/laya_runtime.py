@@ -427,8 +427,14 @@ def refresh_process_laya_status() -> None:
 
     No sidecar leaves the stored status. When ``LAYA_API_KEY_FILE`` is set,
     an already-running backend attaches to that loopback sidecar first.
-    A dead child is reaped here and recorded Down.
+    A dead child is reaped here and recorded Down. ``FLINTTRADE_LAYA_BACKEND``
+    other than ``sidecar`` records the Ollama chip instead and does not attach.
     """
+    from flinttrade_engine.laya_ollama import laya_backend, publish_ollama_gate_status  # noqa: PLC0415
+
+    if laya_backend() != "sidecar":
+        publish_ollama_gate_status()
+        return
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 
     runtime = process_runtime()

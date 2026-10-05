@@ -5,7 +5,10 @@ from __future__ import annotations
 import base64
 import ctypes
 import hashlib
+import http.client
+import io
 import json
+import math
 import os
 import platform
 import re
@@ -24,6 +27,7 @@ import weakref
 import zipfile
 from collections.abc import Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator
@@ -322,6 +326,31 @@ _LOCKED_MODEL_SUFFIX = ":locked"
 _MANAGED_RUNTIME_OWNER_LOCK = threading.RLock()
 _MANAGED_RUNTIME_OWNER: weakref.ReferenceType[Any] | None = None
 _LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_GATE_REQUEST_DEADLINE: ContextVar[float | None] = ContextVar("ollama_gate_request_deadline", default=None)
+
+
+def _gate_request_remaining() -> float | None:
+    deadline = _GATE_REQUEST_DEADLINE.get()
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or remaining <= 0:
+        raise TimeoutError("managed Ollama gate exceeded its deadline")
+    return remaining
+
+
+@contextmanager
+def _gate_request_budget(deadline: float) -> Iterator[None]:
+    outer = _GATE_REQUEST_DEADLINE.get()
+    token = _GATE_REQUEST_DEADLINE.set(min(deadline, outer) if outer is not None else deadline)
+    try:
+        _gate_request_remaining()
+        yield
+        _gate_request_remaining()
+    finally:
+        _GATE_REQUEST_DEADLINE.reset(token)
+
+
 _OPERATION_ID = re.compile(r"op_[0-9a-f]{32}\Z")
 _ADMISSION_ID = re.compile(r"adm_[0-9a-f]{32}\Z")
 _OPERATION_OWNER_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
@@ -409,6 +438,149 @@ def managed_ollama_session(model: str) -> Iterator[ManagedOllamaAdmission]:
         raise OllamaRuntimeError("managed Ollama runtime is not ready")
     with runtime.inference_session(model) as admission:
         yield admission
+
+
+def _gate_model_identity(runtime: Any, model: str) -> tuple[str, str] | None:
+    """Resolve an accepted source without relaxing immutable inference aliases."""
+    accepted, sources = runtime._read_model_trust_state()
+    aliases = set(_model_aliases(model))
+    if model in accepted and _is_locked_model_alias(model, accepted[model]):
+        locked = model
+    else:
+        mapped = {sources[name] for name in aliases if name in sources}
+        if len(mapped) != 1:
+            return None
+        locked = mapped.pop()
+    expected = accepted.get(locked)
+    if expected is None or not _is_locked_model_alias(locked, expected):
+        return None
+    identity = runtime._accepted_model_identity(locked)
+    if identity is None or identity != (locked, expected):
+        return None
+    if model != locked:
+        reported = {
+            _normalise_model_digest(row.get("digest"))
+            for row in runtime._raw_models()
+            if any(
+                aliases.intersection(_model_aliases(name))
+                for name in (row.get("name"), row.get("model"))
+                if isinstance(name, str)
+            )
+        }
+        if reported != {expected}:
+            current = next((value for value in reported if value and value != expected), None)
+            if current is not None:
+                with runtime._state_lock:
+                    runtime._model_digest_drift[model] = {"accepted": expected, "current": current}
+                raise OllamaRuntimeError("managed Ollama gate source digest changed")
+            return None
+    return identity
+
+
+def _require_gate_integrity(runtime: Any) -> None:
+    """Known install or durable-state errors cannot authorise a gate call."""
+    _gate_request_remaining()
+    try:
+        installed, install_error = runtime._installation_status(verification_deadline=_GATE_REQUEST_DEADLINE.get())
+        runtime._read_model_trust_state()
+    except Exception as exc:
+        raise OllamaRuntimeError("managed Ollama gate integrity could not be verified") from exc
+    with runtime._state_lock:
+        error = install_error or runtime._runtime_state_error or runtime._operation_truth_error
+    if not installed or error:
+        raise OllamaRuntimeError("managed Ollama gate integrity verification failed")
+    _gate_request_remaining()
+
+
+@contextmanager
+def managed_ollama_gate_session(
+    model: str, digest: str, *, deadline: float | None = None,
+) -> Iterator[ManagedOllamaAdmission]:
+    """Use one decision budget for admission, identity checks and release."""
+    with _gate_request_budget(time.monotonic() + 3.0 if deadline is None else deadline):
+        with _managed_ollama_gate_session(model, digest) as admission:
+            yield admission
+
+
+@contextmanager
+def _managed_ollama_gate_session(model: str, digest: str) -> Iterator[ManagedOllamaAdmission]:
+    """Bind the reviewed source and pin inside the existing immutable admission."""
+    if _normalise_model_digest(digest) != digest:
+        raise OllamaRuntimeError("managed Ollama gate digest is invalid")
+    with _MANAGED_RUNTIME_OWNER_LOCK:
+        runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
+    if runtime is None:
+        raise OllamaRuntimeError("managed Ollama runtime is not ready")
+    locked = _locked_model_alias(digest)
+    _require_gate_integrity(runtime)
+    try:
+        with runtime.inference_session(locked) as admission:
+            _require_gate_integrity(runtime)
+            if _gate_model_identity(runtime, model) != (locked, digest):
+                raise OllamaRuntimeError("managed Ollama gate source is not accepted")
+            yield admission
+            _require_gate_integrity(runtime)
+            if _gate_model_identity(runtime, model) != (locked, digest):
+                raise OllamaRuntimeError("managed Ollama gate source changed during inference")
+    except Exception:
+        # Shared admission cleanup can replace an inner error with its own
+        # identity failure. Preserve an observed integrity refusal after cleanup.
+        _require_gate_integrity(runtime)
+        raise
+
+
+def managed_ollama_gate_snapshot(model: str = "") -> dict[str, Any] | None:
+    """Bound a liveness snapshot's network identity checks to half a second."""
+    try:
+        with _gate_request_budget(time.monotonic() + 0.5):
+            return _managed_ollama_gate_snapshot(model)
+    except TimeoutError:
+        return None
+
+
+def _managed_ollama_gate_snapshot(model: str) -> dict[str, Any] | None:
+    """Return owned readiness or configured startup/failure display state.
+
+    A configured runtime without a published owner can explain progress, but
+    cannot establish readiness or an inference admission. Probe before asking
+    the existing status machinery to publish readiness; inference separately
+    rechecks the immutable model and source identity in its held admission.
+    """
+    with _MANAGED_RUNTIME_OWNER_LOCK:
+        runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
+    owned = runtime is not None
+    if runtime is None:
+        from flask import current_app, has_app_context  # noqa: PLC0415
+
+        runtime = current_app.config.get("OLLAMA_RUNTIME") if has_app_context() else None
+    if runtime is None:
+        return None
+    try:
+        snapshot = dict(runtime._status_snapshot(
+            probe_server=True, verification_deadline=_GATE_REQUEST_DEADLINE.get(),
+        ))
+        if not owned or not snapshot.get("installed") or snapshot.get("integrity_error"):
+            snapshot["ready"] = False
+        port = getattr(runtime, "_port", 0) or 0
+        snapshot["port"] = port if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535 else 0
+        snapshot["pinned_server_version"] = str(runtime.server_version)
+        snapshot["model_present"] = False
+        snapshot["reported_digest"] = None
+        if model and snapshot.get("ready"):
+            try:
+                identity = _gate_model_identity(runtime, model)
+            except Exception:
+                identity = None
+            if identity is not None:
+                snapshot["model_present"] = True
+                snapshot["reported_digest"] = identity[1]
+            with runtime._state_lock:
+                snapshot["model_digest_drift"] = {
+                    name: dict(value) for name, value in runtime._model_digest_drift.items()
+                }
+    except Exception:
+        return None
+    return snapshot
 
 
 def _normalise_machine(machine: str) -> str:
@@ -1911,6 +2083,9 @@ def _read_loopback_http_json(
     probe_deadline = time.monotonic() + _PROBE_DEADLINE_SECONDS
     if deadline is not None:
         probe_deadline = min(probe_deadline, deadline)
+    gate_deadline = _GATE_REQUEST_DEADLINE.get()
+    if gate_deadline is not None:
+        probe_deadline = min(probe_deadline, gate_deadline)
     remaining = probe_deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("managed Ollama probe exceeded its deadline")
@@ -2008,7 +2183,69 @@ def _loopback_request_url(base_url: str, path: str) -> str:
     return f"http://127.0.0.1:{parsed.port}{path}"
 
 
+class _GateDeadlineReader(io.RawIOBase):
+    """Apply the gate's total budget to every header or body socket read."""
+
+    def __init__(self, stream: Any, sock: Any) -> None:
+        self._stream = stream
+        self._sock = sock
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        self._sock.settimeout(_gate_request_remaining())
+        data = self._stream.read1(len(buffer))
+        _gate_request_remaining()
+        buffer[:len(data)] = data
+        return len(data)
+
+    def close(self) -> None:
+        try:
+            self._stream.close()
+        finally:
+            super().close()
+
+
+class _GateDeadlineHTTPResponse(http.client.HTTPResponse):
+    def __init__(self, sock: Any, *args: Any, **kwargs: Any) -> None:
+        super().__init__(sock, *args, **kwargs)
+        self.fp = io.BufferedReader(_GateDeadlineReader(self.fp, sock))
+
+
+class _GateDeadlineHTTPConnection(http.client.HTTPConnection):
+    response_class = _GateDeadlineHTTPResponse
+
+    def connect(self) -> None:
+        self.timeout = _gate_request_remaining()
+        super().connect()
+        _gate_request_remaining()
+
+    def send(self, data: Any) -> None:
+        if self.sock is None:
+            self.connect()
+        self.sock.settimeout(_gate_request_remaining())
+        super().send(data)
+        _gate_request_remaining()
+
+
+class _GateDeadlineHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, request: Any) -> Any:
+        return self.do_open(_GateDeadlineHTTPConnection, request)
+
+
+class _GateNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        fp.close()
+        raise OllamaRuntimeError("managed Ollama gate identity request was redirected")
+
+
 def _open_loopback_request(request: urllib.request.Request, *, timeout: float) -> Any:
+    if _GATE_REQUEST_DEADLINE.get() is not None:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _GateNoRedirect(), _GateDeadlineHTTPHandler(),
+        )
+        return opener.open(request, timeout=min(timeout, _gate_request_remaining()))  # noqa: S310
     return _LOOPBACK_OPENER.open(request, timeout=timeout)  # noqa: S310
 
 
@@ -2028,16 +2265,20 @@ def _request_ollama_json(
         method=method,
         headers={"Content-Type": "application/json", "User-Agent": "FlintTrade/OllamaRuntime"},
     )
-    with _open_loopback_request(request, timeout=10) as response:
+    remaining = _gate_request_remaining()
+    with _open_loopback_request(request, timeout=min(10.0, remaining) if remaining is not None else 10) as response:
         with _interrupt_response_on_cancel(response, cancel_event):
             raw_response = response.read(_MAX_OLLAMA_API_RESPONSE_BYTES + 1)
             _raise_if_event_cancelled(cancel_event)
+            _gate_request_remaining()
     if len(raw_response) > _MAX_OLLAMA_API_RESPONSE_BYTES:
         raise OllamaRuntimeError("managed Ollama API response exceeded the size limit")
     if not raw_response.strip():
         return None
     try:
-        return json.loads(raw_response)
+        result = json.loads(raw_response)
+        _gate_request_remaining()
+        return result
     except (TypeError, ValueError) as exc:
         raise OllamaRuntimeError("managed Ollama API returned invalid JSON") from exc
 
@@ -4334,6 +4575,18 @@ class OllamaRuntime:
             return False, None
         return True, None
 
+    def install_present(self) -> bool:
+        """Return whether a FlintTrade-managed Ollama install is on disk.
+
+        A missing install is unmanaged. The desk then says how to start Ollama
+        and does not offer Start. This does not launch the server.
+        """
+        try:
+            installed, _error = self._installation_status()
+        except Exception:  # noqa: BLE001 - a broken install is not a managed Start
+            return False
+        return bool(installed)
+
     @staticmethod
     def _public_operation(operation: dict[str, Any] | None) -> dict[str, Any] | None:
         if operation is None:
@@ -5977,6 +6230,39 @@ class OllamaRuntime:
         self._phase = "installed"
         self._error = ""
         return result
+
+    def version_snapshot(self) -> dict[str, str | None]:
+        """Observe the configured tag and loopback server version without mutation.
+
+        This About-only snapshot does not reconcile operation journals, verify
+        installation receipts, inspect process ownership or call an injected
+        probe. A reply is a version observation, not managed-runtime readiness.
+        The existing raw HTTP probe never redirects and shares one absolute
+        deadline across connection, headers and response body.
+        """
+        from flinttrade_core.version_inventory import sanitise_version
+
+        deadline = time.monotonic() + 0.75
+        configured = sanitise_version(getattr(self, "target_version", None))
+        port = getattr(self, "_port", 0)
+        reported = None
+        status = "unavailable"
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
+            try:
+                payload = _read_loopback_http_json(f"http://127.0.0.1:{port}", "/api/version", deadline=deadline)
+            except OSError:
+                status = "not_responding"
+            except (ValueError, OllamaRuntimeError):
+                pass  # A malformed response cannot supply an observed version.
+            else:
+                reported = sanitise_version(payload.get("version")) if isinstance(payload, dict) else None
+                if reported is not None:
+                    status = "reported"
+        return {
+            "configured": configured,
+            "reported": reported,
+            "status": status,
+        }
 
     def status(self) -> dict[str, Any]:
         deadline = time.monotonic() + _SYNC_LIFECYCLE_WAIT_SECONDS

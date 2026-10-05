@@ -20,12 +20,18 @@ import { buildHeaders, getBase, isDemoAuthSession } from "@/services/ftApi.helpe
 import {
   LAYA_CHECKING_DETAIL,
   LAYA_START_DOCS_HREF,
+  OLLAMA_START_ACTION,
+  OLLAMA_STARTING_ACTION,
+  OLLAMA_START_FAILED,
   layaChipLabel,
   layaChipStatus,
   layaDisabledLiveReason,
   type LayaChipLabel,
   layaReasonPlain,
   layaReasonTooltip,
+  ollamaChipText,
+  ollamaRouteTooltip,
+  ollamaStatusMenuDetail,
 } from "@/lib/layaStatus";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +54,8 @@ interface LayaChipView {
   shownReason: string | null;
   plainReason: string | null;
   tooltip: string | undefined;
+  statusDetail: string | null;
+  ollamaRoute: boolean;
   liveReason: string | null;
   offerStart: boolean;
   starting: boolean;
@@ -77,6 +85,8 @@ function useLayaChip() {
   const layaDownloadBytes = useOperatorSignalStore((state) => state.layaDownloadBytes);
   const layaDownloadTotal = useOperatorSignalStore((state) => state.layaDownloadTotal);
   const layaChecking = useOperatorSignalStore((state) => state.layaChecking);
+  const layaRoute = useOperatorSignalStore((state) => state.layaRoute);
+  const layaManaged = useOperatorSignalStore((state) => state.layaManaged);
   const llmChrome = useOperatorSignalStore((state) => state.llmChrome);
   const authStatus = useAuthStore((state) => state.status);
   const authToken = useAuthStore((state) => state.token);
@@ -91,7 +101,8 @@ function useLayaChip() {
   const chipStatus = layaChipStatus({ mode, practice: practiceStatus, live: liveStatus });
   const liveReason = layaDisabledLiveReason({ practice: practiceStatus, liveQualified });
   const sidecarUp = practiceStatus === "ready" || practiceStatus === "degraded";
-  const shownReason = layaStartWatch.awaiting ? "still_loading" : layaReason;
+  const awaitingStart = layaStartWatch.awaiting;
+  const shownReason = awaitingStart ? "still_loading" : layaReason;
   const decision = layaChipLabel({
     mode,
     practice: practiceStatus,
@@ -99,31 +110,47 @@ function useLayaChip() {
     reason: shownReason,
     checking: layaChecking,
   });
+  const ollamaRoute = layaRoute === "ollama";
   const plainReason = layaChecking
     ? LAYA_CHECKING_DETAIL
-    : layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
+    : (ollamaRoute
+      ? ollamaChipText(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal)
+      : layaReasonPlain(shownReason, layaPort, layaDownloadBytes, layaDownloadTotal))
       ?? liveReason
       ?? (decision === "Down" ? "Not started" : null);
   const tooltip = layaChecking
     ? LAYA_CHECKING_DETAIL
-    : layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
+    : ollamaRoute
+      ? ollamaRouteTooltip(shownReason, layaPort, layaManaged) ?? liveReason ?? undefined
+      : layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
+  const statusDetail = layaChecking || !ollamaRoute
+    ? null
+    : ollamaStatusMenuDetail(shownReason, layaManaged);
 
   useEffect(() => {
-    if (!layaStartWatch.awaiting || !layaStartWatch.snapshot) return;
+    // Use the value this instance rendered: another mounted Status surface may
+    // already have settled the shared watcher before this effect runs.
+    if (!awaitingStart || !layaStartWatch.snapshot) return;
     const same = layaReason === layaStartWatch.snapshot.reason
       && practiceStatus === layaStartWatch.snapshot.practice;
-    if (same) return;
+    // Start makes Checking true. A current-epoch heartbeat can clear it even
+    // when a no-op start or failed retry ends at the exact previous status.
+    if (same && layaChecking) return;
     if (practiceStatus === "ready" || practiceStatus === "degraded") {
       layaStartWatch.awaiting = false;
       useOperatorSignalStore.getState().setLayaChecking(false);
+      // The ping may already have cleared Checking; redraw the settled watcher.
+      setWatchTick((tick) => tick + 1);
       return;
     }
     if (layaReason === "still_loading") return;
     if (layaReason && layaReason !== "not_started") {
       layaStartWatch.awaiting = false;
       useOperatorSignalStore.getState().setLayaChecking(false);
+      // The ping may already have cleared Checking; redraw the settled watcher.
+      setWatchTick((tick) => tick + 1);
     }
-  }, [layaReason, practiceStatus, watchTick]);
+  }, [awaitingStart, layaChecking, layaReason, practiceStatus, watchTick]);
 
   async function startLaya() {
     setStarting(true);
@@ -135,7 +162,7 @@ function useLayaChip() {
       });
       if (!response.ok) {
         layaStartWatch.awaiting = false;
-        setStartNote("Laya could not be started.");
+        setStartNote(OLLAMA_START_FAILED);
         return;
       }
       layaStartWatch.snapshot = { reason: layaReason, practice: practiceStatus };
@@ -144,7 +171,7 @@ function useLayaChip() {
       setWatchTick((tick) => tick + 1);
       setStartNote(null);
     } catch {
-      setStartNote("Laya could not be started.");
+      setStartNote(OLLAMA_START_FAILED);
     } finally {
       setStarting(false);
     }
@@ -156,8 +183,10 @@ function useLayaChip() {
     shownReason,
     plainReason,
     tooltip,
+    statusDetail,
+    ollamaRoute,
     liveReason,
-    offerStart: operator && !sidecarUp && !layaStartWatch.awaiting,
+    offerStart: operator && !sidecarUp && !layaStartWatch.awaiting && (!ollamaRoute || layaManaged),
     starting,
     startNote,
     startLaya,
@@ -256,16 +285,21 @@ function LayaActions({
           {reason}
         </p>
       ) : null}
-      {chip.tooltip && chip.plainReason && !chip.tooltip.startsWith(chip.plainReason) ? (
+      {chip.statusDetail && chip.statusDetail !== chip.plainReason ? (
+        <p data-testid="laya-status-detail">{chip.statusDetail}</p>
+      ) : null}
+      {chip.tooltip && chip.plainReason && chip.tooltip !== chip.statusDetail && !chip.tooltip.startsWith(chip.plainReason) ? (
         <p data-testid="laya-reason-tooltip">{chip.tooltip}</p>
       ) : null}
-      <a data-testid="laya-start-docs" href={LAYA_START_DOCS_HREF} className="underline">
-        How to start Laya
-      </a>
+      {chip.ollamaRoute ? null : (
+        <a data-testid="laya-start-docs" href={LAYA_START_DOCS_HREF} className="underline">
+          How to start Laya
+        </a>
+      )}
       {chip.offerStart ? (
         <div>
           <Button type="button" disabled={chip.starting} onClick={() => void chip.startLaya()}>
-            {chip.starting ? "Starting…" : "Start Laya"}
+            {chip.starting ? OLLAMA_STARTING_ACTION : OLLAMA_START_ACTION}
           </Button>
         </div>
       ) : null}

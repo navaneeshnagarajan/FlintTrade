@@ -14,9 +14,7 @@ SHA = "a" * 64
 
 
 def _load_checker():
-    spec = importlib.util.spec_from_file_location(
-        "check_brokers_lock", REPO / "scripts" / "check-brokers-lock.py"
-    )
+    spec = importlib.util.spec_from_file_location("check_brokers_lock", REPO / "scripts" / "check-brokers-lock.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -87,17 +85,28 @@ def test_brokers_lock_rejects_stale_placeholder_note(tmp_path, monkeypatch, caps
 @pytest.mark.parametrize(
     "missing_field",
     [
-        "source_commit", "source_tree", "release_tag", "release_commit", "release_tree",
-        "release_wheel_sha256", "release_sdist_sha256", "licence_sha256",
+        "source_commit",
+        "source_tree",
+        "release_version",
+        "release_tag",
+        "release_commit",
+        "release_tree",
+        "release_wheel_sha256",
+        "release_sdist_sha256",
+        "licence_sha256",
     ],
 )
 def test_kotak_git_pin_requires_both_runtime_and_release_evidence(
-    tmp_path, monkeypatch, capsys, missing_field: str,
+    tmp_path,
+    monkeypatch,
+    capsys,
+    missing_field: str,
 ) -> None:
     checker = _load_checker()
     fields = {
         "source_commit": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c",
         "source_tree": "bb8f8ab64b39ef7a650f1547f5def044cceadd61",
+        "release_version": "3.0.7",
         "release_tag": "v3.0.7",
         "release_commit": "53cccc45fe56a193b30ffce3c03c71c5c0378538",
         "release_tree": "c45da6af1223cdeb211ea680ff3582edcbbbc6c9",
@@ -109,7 +118,7 @@ def test_kotak_git_pin_requires_both_runtime_and_release_evidence(
     lock = tmp_path / "brokers.lock"
     lock.write_text(
         '[[broker]]\nname = "kotakneoapi"\nversion = "3.0.7"\n'
-        f'sha256 = "{'a' * 64}"\nlicence = "MIT"\n'
+        f'sha256 = "{"a" * 64}"\nlicence = "MIT"\n'
         'licence_source = "kotakneoapi-3.0.7.dist-info/licenses/LICENSE"\n'
         'sandbox_tested = "2026-09-20"\napproved_by = "maintainer"\n'
         + "".join(f'{key} = "{value}"\n' for key, value in fields.items()),
@@ -138,13 +147,86 @@ def test_repo_kotak_pin_is_the_reviewed_runtime_and_release() -> None:
     uv_lock = tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))
     runtime = next(package for package in uv_lock["package"] if package["name"] == "kotakneoapi")
 
-    assert neo["source_commit"] == "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
+    assert neo["version"] == "3.0.8"
+    assert neo["release_version"] == "3.0.7"
+    assert neo["source_commit"] == "9a37488d77dc96442ee2a90ef78462e688cf4856"
+    assert neo["source_tree"] == "8474f26ca70c7b62f7c88843ca8b2e35e0c98313"
     assert neo["release_tag"] == "v3.0.7"
     assert neo["release_commit"] == "53cccc45fe56a193b30ffce3c03c71c5c0378538"
     assert runtime["source"]["git"] == (
         "https://github.com/Kotak-Neo/kotak-neo-python.git?rev="
-        "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c#5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
+        "9a37488d77dc96442ee2a90ef78462e688cf4856#9a37488d77dc96442ee2a90ef78462e688cf4856"
     )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (None, None),
+        ("missing-release-version", "release_version"),
+        ("invalid-release-version", "release_version"),
+        ("release-tag", "release_tag"),
+        ("runtime-version", "uv.lock"),
+        ("release-licence-path", "licence_source"),
+        ("release-wheel-hash", "release_wheel_sha256"),
+    ],
+)
+def test_lock_checks_runtime_and_release_versions_separately(tmp_path, monkeypatch, capsys, mutation, message):
+    checker = _load_checker()
+    fields = {
+        "name": "kotakneoapi",
+        "version": "3.0.8",
+        "release_version": "3.0.7",
+        "sha256": "a" * 64,
+        "licence": "MIT",
+        "licence_sha256": "f" * 64,
+        "licence_source": "kotakneoapi-3.0.8.dist-info/licenses/LICENSE",
+        "sandbox_tested": "2026-09-20",
+        "approved_by": "maintainer",
+        "source_commit": "b" * 40,
+        "source_tree": "c" * 40,
+        "release_tag": "v3.0.7",
+        "release_commit": "d" * 40,
+        "release_tree": "e" * 40,
+        "release_wheel_sha256": "a" * 64,
+        "release_sdist_sha256": "0" * 64,
+    }
+    if mutation == "missing-release-version":
+        fields.pop("release_version")
+    elif mutation == "invalid-release-version":
+        fields["release_version"] = "3.0.7rc1"
+    elif mutation == "release-tag":
+        fields["release_tag"] = "v3.0.8"
+    elif mutation == "runtime-version":
+        fields["version"] = "3.0.9"
+        fields["licence_source"] = "kotakneoapi-3.0.9.dist-info/licenses/LICENSE"
+    elif mutation == "release-licence-path":
+        fields["licence_source"] = "kotakneoapi-3.0.7.dist-info/licenses/LICENSE"
+    elif mutation == "release-wheel-hash":
+        fields["sha256"] = "1" * 64
+    lock = tmp_path / "brokers.lock"
+    lock.write_text("[[broker]]\n" + "".join(f'{key} = "{value}"\n' for key, value in fields.items()))
+    requirements = tmp_path / "requirements.lock"
+    requirements.write_text("")
+    uv = tmp_path / "uv.lock"
+    uv.write_text(
+        '[[package]]\nname = "kotakneoapi"\nversion = "3.0.8"\n'
+        f'source = {{ git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev={"b" * 40}#{"b" * 40}" }}\n'
+    )
+    monkeypatch.setattr(checker, "BROKERS_LOCK", lock)
+    monkeypatch.setattr(checker, "REQUIREMENTS_LOCK", requirements)
+    monkeypatch.setattr(checker, "UV_LOCK", uv)
+
+    def missing_distribution(_name):
+        raise metadata.PackageNotFoundError
+
+    monkeypatch.setattr(metadata, "distribution", missing_distribution)
+    assert checker.main() == (0 if mutation is None else 1)
+    failures = capsys.readouterr().err
+    if message is None:
+        assert failures == ""
+    else:
+        assert message in failures
 
 
 def test_licence_gate_rejects_changed_installed_kotak_mit_file(tmp_path, monkeypatch, capsys) -> None:
@@ -152,13 +234,15 @@ def test_licence_gate_rejects_changed_installed_kotak_mit_file(tmp_path, monkeyp
     lock = tmp_path / "brokers.lock"
     lock.write_text(
         '[[broker]]\nname = "kotakneoapi"\nversion = "3.0.7"\n'
+        'release_version = "3.0.7"\n'
         f'sha256 = "{"a" * 64}"\nlicence = "MIT"\n'
         'licence_source = "kotakneoapi-3.0.7.dist-info/licenses/LICENSE"\n'
         'sandbox_tested = "2026-09-20"\napproved_by = "maintainer"\n'
         f'source_commit = "{"b" * 40}"\nsource_tree = "{"c" * 40}"\n'
         f'release_tag = "v3.0.7"\nrelease_commit = "{"d" * 40}"\nrelease_tree = "{"e" * 40}"\n'
         f'release_wheel_sha256 = "{"a" * 64}"\nrelease_sdist_sha256 = "{"f" * 64}"\n'
-        f'licence_sha256 = "{"0" * 64}"\n', encoding="utf-8",
+        f'licence_sha256 = "{"0" * 64}"\n',
+        encoding="utf-8",
     )
     req = tmp_path / "requirements.lock"
     req.write_text("", encoding="utf-8")

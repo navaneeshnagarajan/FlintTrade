@@ -106,26 +106,72 @@ def test_catalogue_sdk_fields_are_serialisable(lock_file):
 @pytest.mark.parametrize(
     ("direct_url", "include_v2", "expected"),
     [
-        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "ok"),
-        ({"url": "https://evil.example/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "provenance_mismatch"),
-        ({"url": "https://github.com/other/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "provenance_mismatch"),
-        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "0" * 40}}, False, "provenance_mismatch"),
+        (
+            {
+                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            },
+            False,
+            "ok",
+        ),
+        (
+            {
+                "url": "https://evil.example/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            },
+            False,
+            "provenance_mismatch",
+        ),
+        (
+            {
+                "url": "https://github.com/other/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            },
+            False,
+            "provenance_mismatch",
+        ),
+        (
+            {
+                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "0" * 40},
+            },
+            False,
+            "provenance_mismatch",
+        ),
         (None, False, "provenance_mismatch"),
         ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": "git"}, False, "provenance_mismatch"),
-        ({"url": "https://github.com:bad/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "provenance_mismatch"),
-        ({"url": "https://[broken/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "provenance_mismatch"),
-        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
-            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, True, "conflict"),
+        (
+            {
+                "url": "https://github.com:bad/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            },
+            False,
+            "provenance_mismatch",
+        ),
+        (
+            {
+                "url": "https://[broken/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            },
+            False,
+            "provenance_mismatch",
+        ),
+        (
+            {
+                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            },
+            True,
+            "conflict",
+        ),
     ],
 )
 def test_kotak_attestation_requires_exact_git_origin_and_exclusive_namespace(
-    tmp_path, monkeypatch, direct_url, include_v2, expected,
+    tmp_path,
+    monkeypatch,
+    direct_url,
+    include_v2,
+    expected,
 ):
     from flinttrade_core import broker_sdk_attest as attestation
 
@@ -168,10 +214,14 @@ def test_kotak_requires_positive_namespace_ownership(tmp_path, monkeypatch, owne
     dist = tmp_path / "kotakneoapi-3.0.7.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.7\n")
-    (dist / "direct_url.json").write_text(json.dumps({
-        "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-        "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
-    }))
+    (dist / "direct_url.json").write_text(
+        json.dumps(
+            {
+                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+            }
+        )
+    )
     if owner_evidence == "record":
         (dist / "RECORD").write_text("neo_api_client/__init__.py,,\n")
         package = tmp_path / "neo_api_client"
@@ -182,5 +232,33 @@ def test_kotak_requires_positive_namespace_ownership(tmp_path, monkeypatch, owne
 
     result = attestation.attest_all(lock)[0]
 
+    assert result.status == expected
+    assert (result in required_failures([result])) is (expected != "ok")
+
+
+@pytest.mark.parametrize(("installed_version", "expected"), [("3.0.8", "ok"), ("3.0.7", "version_mismatch")])
+def test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
+    tmp_path, monkeypatch, installed_version, expected
+):
+    from flinttrade_core import broker_sdk_attest as attestation
+
+    dist = tmp_path / f"kotakneoapi-{installed_version}.dist-info"
+    dist.mkdir()
+    (dist / "METADATA").write_text(f"Metadata-Version: 2.3\nName: kotakneoapi\nVersion: {installed_version}\n")
+    (dist / "top_level.txt").write_text("neo_api_client\n")
+    (dist / "direct_url.json").write_text(
+        json.dumps(
+            {
+                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+                "vcs_info": {"vcs": "git", "commit_id": "9a37488d77dc96442ee2a90ef78462e688cf4856"},
+            }
+        )
+    )
+    real_distributions = metadata.distributions
+    monkeypatch.setattr(attestation.metadata, "distributions", lambda: real_distributions(path=[str(tmp_path)]))
+
+    result = next(row for row in attestation.attest_all() if row.broker == "kotakneoapi")
+
+    assert result.pinned_version == "3.0.8"
     assert result.status == expected
     assert (result in required_failures([result])) is (expected != "ok")

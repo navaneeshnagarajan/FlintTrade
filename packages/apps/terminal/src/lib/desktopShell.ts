@@ -60,6 +60,7 @@ export interface UpdateSnapshot {
 }
 
 export interface FlintDesktopApi {
+  readonly runtimeVersions?: Readonly<Record<"electron" | "chrome" | "node" | "v8", string | null>>;
   applyShellUpdate(): Promise<Readonly<UpdateSnapshot>>;
   applySourceUpdate(): Promise<Readonly<UpdateSnapshot>>;
   cancelBootstrap(): Promise<boolean>;

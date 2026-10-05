@@ -5,7 +5,7 @@
 import { Settings, GitBranch, ExternalLink } from "lucide-react";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { widgetCatalog } from "@/layout/widgetFactory";
-import { dependencies } from "../../../package.json";
+import { VersionInventory } from "./VersionInventory";
 import { SectionTitle } from "./shared";
 
 export function AboutSection() {
@@ -110,32 +110,7 @@ export function AboutSection() {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Terminal dependencies</p>
-        <p className="text-xs text-text-secondary">
-          Declared version ranges from this build. The lockfile records exact resolved versions.
-        </p>
-        <div className="rounded border border-border-default overflow-hidden">
-          <table className="w-full text-xs">
-            <tbody>
-              {[
-                ["React", dependencies.react, "Interface"],
-                ["FlexLayout", dependencies["flexlayout-react"], "Workspace panels"],
-                ["TanStack Query", dependencies["@tanstack/react-query"], "API data cache"],
-                ["TanStack Table", dependencies["@tanstack/react-table"], "Financial tables"],
-                ["Lightweight Charts", dependencies["lightweight-charts"], "Price charts"],
-                ["Plotly", dependencies["plotly.js-dist-min"], "Analytical charts"],
-              ].map(([name, version, purpose]) => (
-                <tr key={name} className="border-b border-border-default last:border-0">
-                  <th scope="row" className="px-3 py-1.5 text-left font-normal text-text-muted">{name}</th>
-                  <td className="px-3 py-1.5 text-text-primary font-mono">{version}</td>
-                  <td className="px-3 py-1.5 text-text-secondary">{purpose}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <VersionInventory />
     </div>
   );
 }

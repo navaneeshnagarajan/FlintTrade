@@ -90,3 +90,21 @@ describe("window.flintDesktop bridge", () => {
     expect(updateListener).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("desktop runtime inventory", () => {
+  it("copies and freezes only allowlisted version strings without IPC", () => {
+    const fake = fakeIpcRenderer();
+    const versions = { electron: "44.4.1", chrome: "151.0.0.0", node: "24.19.0", v8: "15.1.1", secret: "do-not-expose" };
+    const api = createFlintDesktopApi(fake.ipc, versions);
+    expect(api.runtimeVersions).toEqual({ electron: "44.4.1", chrome: "151.0.0.0", node: "24.19.0", v8: "15.1.1" });
+    versions.node = "changed";
+    expect(api.runtimeVersions?.node).toBe("24.19.0");
+    expect(Object.isFrozen(api.runtimeVersions)).toBe(true);
+    expect(fake.ipc.invoke).not.toHaveBeenCalled();
+  });
+
+  it("omits invalid metadata rather than exposing arbitrary strings", () => {
+    const api = createFlintDesktopApi(fakeIpcRenderer().ipc, { node: "/private/path", electron: "x".repeat(200), chrome: "151.0.0.0", v8: "15.1.0-electron.0" });
+    expect(api.runtimeVersions).toEqual({ node: null, electron: null, chrome: "151.0.0.0", v8: "15.1.0-electron.0" });
+  });
+});

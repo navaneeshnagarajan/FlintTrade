@@ -29,11 +29,14 @@ Broker SDK source/artifact mirrors can be refreshed into the gitignored
 `.local/sdk-audit/` cache with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
 tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.
 Kotak Neo uses exact Git provenance: upstream `main`
-`5bb34fae39c4a52a0e6b59d7e2d17090cafc340c` is the runtime and `v3.0.7`
+`9a37488d77dc96442ee2a90ef78462e688cf4856` is the runtime and `v3.0.7`
 peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538` is the release baseline.
-Both expose `kotakneoapi` 3.0.7 through the retained `neo_api_client` import
+The runtime exposes `kotakneoapi` 3.0.8; `release_version` 3.0.7 remains the stable
+compatibility baseline. Both retain the `neo_api_client` import
 namespace; the old `neo-api-client` distribution is forbidden. Closed-market/
 no-funds verification does not prove funded live order execution.
+The 3.0.8 runtime update is verified offline only; the retained activation date
+and earlier real-account read evidence remain historical, not new SDK proof.
 
 ## Legend
 
@@ -140,7 +143,7 @@ no-funds verification does not prove funded live order execution.
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); coming-soon selectors (Groww / INDmoney) and any selector without a published connected session do not schedule false refresh work. |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (`kotakneoapi` 3.0.7); funded Live place stays fail-closed. INDmoney and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (runtime `kotakneoapi` 3.0.8; release baseline 3.0.7); funded Live place stays fail-closed. INDmoney and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 
 ---
