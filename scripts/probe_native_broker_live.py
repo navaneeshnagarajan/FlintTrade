@@ -25,6 +25,7 @@ for rel in ("packages/core/core/src", "packages/integrations/gateway/src"):
         sys.path.insert(0, path)
 
 from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: E402
+from flinttrade_gateway.brokers.delta import DeltaAdapter  # noqa: E402
 from flinttrade_gateway.brokers.dhan import DhanAdapter  # noqa: E402
 from flinttrade_gateway.brokers.groww import GrowwAdapter  # noqa: E402
 from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter  # noqa: E402
@@ -36,6 +37,7 @@ AdapterFactory = Callable[[], Any]
 ReadCall = Callable[[Any], Awaitable[Any]]
 
 ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
+    "deltaexchange": DeltaAdapter,
     "dhan": DhanAdapter,
     "groww": GrowwAdapter,
     "indmoney": IndMoneyAdapter,
@@ -52,6 +54,9 @@ DHAN_SECURITY_RESOLVER_READ_CHOICES = frozenset(DHAN_MARKET_READ_CHOICES)
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
 INDMONEY_MARKET_READ_CHOICES = ("quotes", "ltp", "depth", "margin", "history")
 UPSTOX_MARKET_READ_CHOICES = COMMON_MARKET_READ_CHOICES + ("ltp", "ohlc")
+DELTA_PROBE_SYMBOL = "BTCUSD"
+DELTA_PROBE_UNDERLYING = "BTC"
+DELTA_READ_CHOICES = COMMON_READ_CHOICES + ("quotes", "depth", "history", "optionchain", "orderstatus", "orderhistory")
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
 PROBE_QUOTE_SYMBOL = f"{PROBE_EXCHANGE}:{PROBE_SYMBOL}"
@@ -90,6 +95,7 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
         "timings",
         "holidays",
     ),
+    "deltaexchange": DELTA_READ_CHOICES,
 }
 READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
@@ -101,6 +107,7 @@ DEFAULT_READS: dict[str, tuple[str, ...]] = {
     "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
     "upstox": COMMON_READ_CHOICES + UPSTOX_MARKET_READ_CHOICES + ("search", "timings", "holidays"),
+    "deltaexchange": ("profile", "funds", "positions", "orders", "quotes", "history"),
 }
 DEFAULT_METHOD: dict[str, str] = {
     "dhan": "access_token",
@@ -108,6 +115,7 @@ DEFAULT_METHOD: dict[str, str] = {
     "indmoney": "access_token",
     "kotakneo": "totp_mpin",
     "upstox": "access_token",
+    "deltaexchange": "api_key",
 }
 
 
@@ -183,6 +191,14 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
             CredentialField("api_secret", "Upstox API secret"),
             CredentialField("redirect_uri", "Registered redirect URI"),
             CredentialField("client_id", "Optional Upstox account/client label", required=False),
+        ),
+    },
+    "deltaexchange": {
+        "api_key": (
+            CredentialField("api_key", "Delta API key"),
+            CredentialField("api_secret", "Delta API secret"),
+            CredentialField("environment", "Venue (india_prod, india_testnet, global_prod, global_testnet)"),
+            CredentialField("user_id", "Optional Delta user id", required=False),
         ),
     },
 }
@@ -338,6 +354,7 @@ def collect_credentials(broker: str, method: str, environment: str) -> dict[str,
         "indmoney": "INDstocks",
         "kotakneo": "Kotak Neo",
         "upstox": "Upstox",
+        "deltaexchange": "Delta Exchange",
     }[broker]
     print(f"Enter {display} values locally. They will not be printed or stored by this script.")
     credentials: dict[str, str] = {}
@@ -445,6 +462,33 @@ def _sample_order() -> Any:
     )
 
 
+def _delta_history_request() -> dict[str, Any]:
+    end = _today_ist()
+    start = end - timedelta(days=7)
+    return {
+        "symbol": DELTA_PROBE_SYMBOL,
+        "exchange": "CRYPTO",
+        "interval": "1h",
+        "start_date": start.date().isoformat(),
+        "end_date": end.date().isoformat(),
+    }
+
+
+def _delta_option_chain_request() -> dict[str, Any]:
+    expiry = (_today_ist().date() + timedelta(days=30)).isoformat()
+    return {
+        "symbol": DELTA_PROBE_UNDERLYING,
+        "underlying": DELTA_PROBE_UNDERLYING,
+        "exchange": "CRYPTO",
+        "expiry": expiry,
+        "expiry_date": expiry,
+    }
+
+
+def _quote_symbol(broker: str) -> str:
+    return DELTA_PROBE_SYMBOL if broker == "deltaexchange" else PROBE_QUOTE_SYMBOL
+
+
 def _option_chain_request() -> dict[str, Any]:
     expiry = (_today_ist().date() + timedelta(days=30)).isoformat()
     return {
@@ -534,7 +578,7 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
 
         return _call_order_read
     if name == "quotes":
-        return lambda session: adapter.quotes(session, [PROBE_QUOTE_SYMBOL])
+        return lambda session: adapter.quotes(session, [_quote_symbol(broker)])
     if name == "ltp":
         call = getattr(adapter, "ltp", None) or getattr(adapter, "ltp_quotes", None)
         return (lambda session: call(session, [PROBE_QUOTE_SYMBOL])) if callable(call) else None
@@ -553,8 +597,9 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             else None
         )
     if name in {"depth", "market_depth"}:
+        symbol = _quote_symbol(broker)
         return (
-            (lambda session: adapter.market_depth(session, [PROBE_QUOTE_SYMBOL]))
+            (lambda session: adapter.market_depth(session, [symbol]))
             if callable(getattr(adapter, "market_depth", None))
             else None
         )
@@ -565,8 +610,9 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             else None
         )
     if name == "history":
+        request = _delta_history_request() if broker == "deltaexchange" else _history_request()
         return (
-            (lambda session: adapter.historical(session, _history_request()))
+            (lambda session: adapter.historical(session, request))
             if callable(getattr(adapter, "historical", None))
             else None
         )
@@ -577,8 +623,9 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             else None
         )
     if name == "optionchain":
+        request = _delta_option_chain_request() if broker == "deltaexchange" else _option_chain_request()
         return (
-            (lambda session: adapter.option_chain(session, _option_chain_request()))
+            (lambda session: adapter.option_chain(session, request))
             if callable(getattr(adapter, "option_chain", None))
             else None
         )
@@ -695,7 +742,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--method",
         help=(
             "Credential method. Defaults per broker: dhan/upstox/indmoney access_token, "
-            "groww api_key_secret, kotakneo totp_mpin."
+            "groww api_key_secret, kotakneo totp_mpin, deltaexchange api_key."
         ),
     )
     parser.add_argument(

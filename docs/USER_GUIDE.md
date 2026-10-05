@@ -198,8 +198,8 @@ For step-by-step instructions tailored to each operating system, see:
 Native broker access is **not usable on this unreleased line**: native broker UX stays down on `main`.
 Do not treat catalogue metadata as a working operator path.
 
-Broker connections use five native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney and Groww. Availability remains evidence-gated. Native broker HTTP
+Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
 mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
 cannot currently be established through the terminal. Practice uses the local
 sandbox. Funded Live placement remains unproven and fail-closed.

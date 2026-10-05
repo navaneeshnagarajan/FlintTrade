@@ -1,6 +1,6 @@
 # Gateway
 
-> Native gateway with five broker adapters, a safety-gated router, encrypted credentials and local tick dispatch. Native broker HTTP and network capture remain unavailable.
+> Native gateway with six broker adapters, a safety-gated router, encrypted credentials and local tick dispatch. Native broker HTTP and network capture remain unavailable.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -10,8 +10,8 @@
 
 - `src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG`
 - `src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification`
-- `src/flinttrade_gateway/registry.py — native account and session registry over the 5-broker catalogue`
-- `src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww) against the BrokerAdapter ABC`
+- `src/flinttrade_gateway/registry.py — native account and session registry over the 6-broker catalogue`
+- `src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww, Delta Exchange) against the BrokerAdapter ABC`
 - `src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault`
 - `src/flinttrade_gateway/ws_bridge.py — local TickDispatcher queues and latest-tick cache; no network server`
 

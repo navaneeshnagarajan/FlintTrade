@@ -21,7 +21,7 @@ from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
 pytestmark = pytest.mark.unit
 
-_ALL_OK = {"dhan", "upstox", "kotakneo", "indmoney", "groww"}
+_ALL_OK = {"dhan", "upstox", "kotakneo", "indmoney", "groww", "deltaexchange"}
 
 
 def test_catalog_covers_native_adapters():
@@ -64,6 +64,8 @@ def test_rest_only_native_declares_no_sdk_pin():
     """
     assert BROKER_CATALOG["indmoney"].sdk_pin is None
     assert SDK_PIN_BY_BROKER["indmoney"] is None
+    assert BROKER_CATALOG["deltaexchange"].sdk_pin is None
+    assert SDK_PIN_BY_BROKER["deltaexchange"] is None
     assert BROKER_CATALOG["dhan"].sdk_pin == "dhanhq"
     assert SDK_PIN_BY_BROKER["dhan"] == "dhanhq"
     assert BROKER_CATALOG["kotakneo"].sdk_pin == "kotakneoapi"

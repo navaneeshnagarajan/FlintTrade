@@ -150,6 +150,27 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
             ],
         },
     ],
+    "deltaexchange": [
+        {
+            "id": "api_key",
+            "label": "API key + secret",
+            "kind": "direct",
+            "description": (
+                "Paste a Delta Exchange API key and secret for one venue. India and Global keys are not "
+                "interchangeable, and the environment has no default."
+            ),
+            "fields": [
+                _f("api_key", "API key", secret=True),
+                _f("api_secret", "API secret", secret=True),
+                _f(
+                    "environment",
+                    "Venue",
+                    help_="One of india_prod, india_testnet, global_prod, global_testnet. A key from another venue is rejected.",
+                ),
+                _f("user_id", "User ID", required=False, help_="Required only for close-all."),
+            ],
+        },
+    ],
 }
 
 
@@ -362,6 +383,43 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "deltaexchange": {
+        "remote_url": "https://mcp.delta.exchange",
+        "docs_url": "https://mcp.delta.exchange/docs",
+        "auth_mode": "Local stdio server. FlintTrade does not proxy Delta MCP orders.",
+        "reauth": "Rotate the API key in the MCP client. FlintTrade orders still go through the router.",
+        "read_only": True,
+        "trading_supported": False,
+        "login_steps": [
+            "Install the official server with uvx delta-exchange-mcp.",
+            "Set DELTA_API_KEY, DELTA_API_SECRET, and DELTA_MCP_ENV to one venue.",
+            "Leave DELTA_MCP_MODE unset. Do not enable trade mode for FlintTrade orders.",
+        ],
+        "use_cases": [
+            "Read products, tickers, positions, and wallet state from an external MCP client",
+        ],
+        "cautions": [
+            "India and Global keys are not interchangeable.",
+            "DELTA_MCP_MODE=trade must not drive FlintTrade orders. Writes stay behind the router.",
+            "Native connect stays disabled until live order-safety proof and a deadman runtime proof exist.",
+        ],
+        "client_configs": [
+            {
+                "id": "stdio_uvx",
+                "label": "Local stdio via uvx",
+                "command": "uvx",
+                "args": ["delta-exchange-mcp"],
+                "config": {
+                    "mcpServers": {
+                        "delta-exchange": {
+                            "command": "uvx",
+                            "args": ["delta-exchange-mcp"],
+                        },
+                    },
+                },
+            },
+        ],
+    },
 }
 
 # MCP server is the FIRST-preference MCP surface (maintainer, 2026-07-06):
@@ -453,5 +511,21 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         requires_static_ip=True,
         auth_methods=_NATIVE_AUTH["indmoney"],
         sdk_pin=None,
+    ),
+    "deltaexchange": BrokerInfo(
+        name="deltaexchange",
+        display_name="Delta Exchange",
+        auth_flow=AuthFlowType.api_key_direct,
+        exchanges=["CRYPTO"],
+        native=True,
+        connectable=False,
+        requires_static_ip=False,
+        native_connect_blockers=[
+            "Live order-safety proof",
+            "Deadman heartbeat runtime proof for unattended flatten",
+        ],
+        auth_methods=_NATIVE_AUTH["deltaexchange"],
+        sdk_pin=None,
+        mcp=_BROKER_MCP["deltaexchange"],
     ),
 }

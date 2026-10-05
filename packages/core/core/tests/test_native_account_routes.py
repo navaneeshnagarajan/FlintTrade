@@ -890,7 +890,7 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
     )
     data = c.get("/api/v1/native/brokers").get_json()["data"]
     brokers = {b["adapter_id"]: b for b in data["brokers"]}
-    assert set(brokers) == {"dhan", "upstox", "kotakneo", "indmoney", "groww"}
+    assert set(brokers) == {"dhan", "upstox", "kotakneo", "indmoney", "groww", "deltaexchange"}
     # Proper display names — not .capitalize() ("Kotakneo"/"Indmoney").
     assert brokers["kotakneo"]["display_name"] == "Kotak Neo"
     assert brokers["indmoney"]["display_name"] == "INDmoney"
