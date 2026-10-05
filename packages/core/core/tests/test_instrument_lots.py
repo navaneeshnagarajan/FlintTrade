@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -363,12 +364,16 @@ def test_failed_download_writes_an_empty_excerpt(tmp_path: Path) -> None:
     def _downloader(_url: str) -> str:
         raise OSError("offline")
 
-    payload = build_excerpt(downloader=_downloader, as_of=date(2026, 9, 29))
+    # Fetch metadata can contain synthetic ID text without containing instrument rows.
+    fetched_at = "2026-10-05T13:13:13+05:30"
+    with patch("flinttrade_core.instrument_lot_master.datetime") as clock:
+        clock.now.return_value = datetime.fromisoformat(fetched_at)
+        payload = build_excerpt(downloader=_downloader, as_of=date(2026, 9, 29))
     assert payload["rows"] == []
     assert payload["source"]
-    assert payload["fetched_at"]
+    assert payload["fetched_at"] == fetched_at
     destination = tmp_path / "excerpt.json"
     write_excerpt(destination, payload)
     written = json.loads(destination.read_text(encoding="utf-8"))
     assert written["rows"] == []
-    assert "13" not in destination.read_text(encoding="utf-8")
+    assert written == payload
