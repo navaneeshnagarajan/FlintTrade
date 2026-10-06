@@ -3,7 +3,7 @@
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** —
 the Electron 44 shell for the self-hosted terminal.
 
-**Language:** TypeScript (strict) · **Runtime:** Electron 44.4.1
+**Language:** TypeScript (strict) · **Runtime:** Electron 44.5.1
 
 The package contains only the shell, local splash, bootstrap resources and
 licence notices. It does not bundle the Python backend or built terminal. On
