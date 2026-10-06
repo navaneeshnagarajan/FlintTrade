@@ -57,6 +57,7 @@ import {
   useMarketDataScope,
 } from "@/hooks/useDataScope";
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOptionChainData } from "./useOptionChainData";
 import OiPcrStrip from "./OiPcrStrip";
 import { strikeHasPositiveOi } from "./oiPcrStripData";
@@ -111,6 +112,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   const [legBuilderOpen, setLegBuilderOpen]     = useState(false);
   const legBuilderRef                           = useRef<LegBuilderHandle>(null);
   const [orderMsg, setOrderMsg]                 = useState<OrderToast | null>(null);
+  const [note, setNote]                         = useState("");
   const [secondsAgo, setSecondsAgo]             = useState<number | null>(null);
   const orderMsgTimerRef                        = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scrollTimerRef                          = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -470,6 +472,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           quantity,
           orderType: "MARKET",
           product: "MIS",
+          rationale: admissionRationale(note),
         }, orderAuthority);
         setOrderMsg({ text: `${action} ${orderSymbol} sent`, ok: true });
       } catch (e) {
@@ -623,7 +626,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           >
             <ShoppingBasket size={11} />
             {basket.length > 0 && (
-              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-xxs font-bold rounded-full bg-accent text-white leading-none">
+              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-xxs font-bold rounded-full bg-accent text-accent-foreground leading-none">
                 {basket.length}
               </span>
             )}
@@ -750,6 +753,10 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           <span>{error}</span>
         </div>
       )}
+
+      <div className="flex-none px-2 py-1 border-b border-border-subtle">
+        <AdmissionNoteField id="chain-admission-note" value={note} onChange={setNote} />
+      </div>
 
       {/* Order toast */}
       {orderMsg && (

@@ -27,9 +27,8 @@ export function ProvenanceBadge({
   style,
   ...rest
 }: ProvenanceBadgeProps) {
-  // Sample chips retired. The Mode honesty bar owns that disclaimer.
-  if (label === "Sample") return null;
-
+  // Sample provenance belongs to these figures, including fallback rows in
+  // Practice or Live; the application mode alone does not describe their source.
   const isCorner = placement === "corner";
   const baseClasses = "rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide";
   const cornerClasses = isCorner ? "absolute right-2 top-2 z-10" : "";

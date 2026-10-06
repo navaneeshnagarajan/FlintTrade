@@ -149,8 +149,7 @@ export function NoConnectionOverlay({ suppress = false }: { suppress?: boolean }
             id="no-connection-desc"
             className="text-sm text-text-secondary leading-relaxed"
           >
-            Cannot reach the configured broker gateway. Check your OpenAlgo
-            bridge or verified native broker settings, then retry.
+            Cannot reach your native broker session. Check your broker settings, then retry.
           </p>
         </div>
 
@@ -158,7 +157,7 @@ export function NoConnectionOverlay({ suppress = false }: { suppress?: boolean }
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { setShowOverlay(false); navigate("/settings#api"); }}
+            onClick={() => { setShowOverlay(false); navigate("/settings#brokers"); }}
           >
             <Settings className="w-3.5 h-3.5 mr-1.5" />
             Settings

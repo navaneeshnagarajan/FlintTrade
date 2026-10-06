@@ -3,51 +3,87 @@
   "artefacts": [
     {
       "id": "packages-csv",
-      "paths": ["flinttrade-design/baselines/packages-2026-05-23.csv"]
+      "paths": [
+        "flinttrade-design/baselines/packages-2026-05-23.csv"
+      ]
     },
     {
       "id": "blueprints-csv",
-      "paths": ["flinttrade-design/baselines/blueprints-2026-05-23.csv"]
+      "paths": [
+        "flinttrade-design/baselines/blueprints-2026-05-23.csv"
+      ]
     },
     {
       "id": "operator-data-csv",
-      "paths": ["flinttrade-design/baselines/operator-data-2026-05-23.csv"]
+      "paths": [
+        "flinttrade-design/baselines/operator-data-2026-05-23.csv"
+      ]
     },
     {
       "id": "test-count",
-      "paths": ["flinttrade-design/baselines/test-count-2026-05-23.txt"]
+      "paths": [
+        "flinttrade-design/baselines/test-count-2026-05-23.txt"
+      ]
     },
     {
       "id": "test-count-sha256",
-      "paths": ["flinttrade-design/baselines/test-count-2026-05-23.sha256"]
+      "paths": [
+        "flinttrade-design/baselines/test-count-2026-05-23.sha256"
+      ]
     },
     {
       "id": "baseline-tag-allowed-signers",
-      "paths": ["flinttrade-design/baselines/pre-restructure-baseline.allowed-signers"]
+      "paths": [
+        "flinttrade-design/baselines/pre-restructure-baseline.allowed-signers"
+      ]
     },
     {
       "id": "build-perf",
-      "paths": ["flinttrade-design/baselines/build-perf-2026-05-23.json"]
+      "paths": [
+        "flinttrade-design/baselines/build-perf-2026-05-23.json"
+      ]
     },
     {
       "id": "per-file-line-counts",
-      "paths": ["flinttrade-design/baselines/per-file-line-counts-2026-05-23.csv"]
+      "paths": [
+        "flinttrade-design/baselines/per-file-line-counts-2026-05-23.csv"
+      ]
     },
     {
       "id": "visual-regression",
-      "paths": ["flinttrade-design/baselines/visual-regression"]
+      "paths": [
+        "flinttrade-design/baselines/visual-regression",
+        "flinttrade-design/baselines/visual-regression/d2ae362/retained-snapshots.json"
+      ],
+      "retirement": {
+        "date": "2026-10-05",
+        "reason": "Maintainer-authorised provider retirement removed rendered retired-feature claims.",
+        "removed_route_families": [
+          "site/api-reference",
+          "site/docs",
+          "site/root"
+        ],
+        "removed_png_count": 36,
+        "retained_png_count": 276
+      }
     },
     {
       "id": "visual-regression-capture-script",
-      "paths": ["scripts/generate-visual-regression-baseline.sh"]
+      "paths": [
+        "scripts/generate-visual-regression-baseline.sh"
+      ]
     },
     {
       "id": "visual-regression-validator",
-      "paths": ["scripts/verify-visual-regression-capture.py"]
+      "paths": [
+        "scripts/verify-visual-regression-capture.py"
+      ]
     },
     {
       "id": "visual-regression-policy",
-      "paths": ["flinttrade-design/baselines/visual-regression-policy.md"]
+      "paths": [
+        "flinttrade-design/baselines/visual-regression-policy.md"
+      ]
     },
     {
       "id": "migration-runner",
@@ -57,11 +93,15 @@
     },
     {
       "id": "rollback-runbook",
-      "paths": ["flinttrade-design/baselines/rollback-runbook-2026-05-24.md"]
+      "paths": [
+        "flinttrade-design/baselines/rollback-runbook-2026-05-24.md"
+      ]
     },
     {
       "id": "rollback-rehearsal-script",
-      "paths": ["scripts/rehearse-baseline-rollback.py"]
+      "paths": [
+        "scripts/rehearse-baseline-rollback.py"
+      ]
     }
   ]
 }

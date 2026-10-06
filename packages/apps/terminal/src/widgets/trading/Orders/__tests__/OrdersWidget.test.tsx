@@ -39,7 +39,7 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
         ? "mock"
         : mockMode.value === "practice"
           ? "sandbox"
-          : "openalgo"
+          : "upstox"
     );
     return {
     identity: {
@@ -49,9 +49,9 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
           ? "explore:mock:default"
           : mockMode.value === "practice"
             ? "practice:sandbox:default"
-            : `live:${brokerType}:test`,
+            : `live:native:${brokerType}:U1`,
       brokerType,
-      accountId: "default",
+      accountId: mockMode.value === "live" ? "U1" : "default",
     },
     enabled: mockUseBrokerConnected(),
     host: "",
@@ -313,9 +313,9 @@ describe("OrdersWidget", () => {
       expect(mockCancelOrder).toHaveBeenCalledTimes(1);
       expect(mockCancelOrder).toHaveBeenCalledWith("ORD123", "Flint", {
         mode: "live",
-        scopeKey: "live:openalgo:test",
-        brokerType: "openalgo",
-        accountId: "default",
+        scopeKey: "live:native:upstox:U1",
+        brokerType: "upstox",
+        accountId: "U1",
       });
     });
   });
@@ -358,9 +358,9 @@ describe("OrdersWidget", () => {
         }),
         {
           mode: "live",
-          scopeKey: "live:openalgo:test",
-          brokerType: "openalgo",
-          accountId: "default",
+          scopeKey: "live:native:upstox:U1",
+          brokerType: "upstox",
+          accountId: "U1",
         },
       );
     });

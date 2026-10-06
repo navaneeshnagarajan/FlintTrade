@@ -1,24 +1,28 @@
 /**
  * SettingsRoute — /settings app route.
  *
- * Accessible from ALL routes via the TOOLS dropdown, gear icon, or Ctrl+,.
+ * Accessible from all routes via the sidebar, avatar, or Tools menu.
+ * Ctrl+, opens Quick Settings in the shared chrome.
  * Shares section components and Zustand stores with QuickAccessPanel.
  *
- * Layout: slim header + left sidebar nav + scrollable content area inside
- * the shared app chrome.
+ * Layout: shared PageHeader + grouped section nav + scrollable content area
+ * inside the shared app chrome.
  */
 
-import { useState, useCallback, useEffect, useRef, type JSX } from "react";
+import { useState, useCallback, useEffect, useMemo, type JSX } from "react";
 import { useNavigate } from "react-router";
-import { RouteBanner } from "@/components/help/RouteBanner";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
-import { ArrowLeft, RefreshCw } from "lucide-react";
-import { LogoIcon } from "@/components/brand/Logo";
+import { RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/Page";
+import { SectionNav } from "@/components/layout/SectionNav";
 import { InlineToast } from "@/tools/Settings/shared";
 import { ProfileSection }    from "@/tools/Settings/ProfileSection";
 import { GeneralSection }    from "@/tools/Settings/GeneralSection";
 import { AppearanceSection } from "@/tools/Settings/AppearanceSection";
-import { ConnectionSection } from "@/tools/Settings/ConnectionSection";
 import { BrokerConnect }     from "@/components/account/BrokerConnect";
 import { TradingSection }    from "@/tools/Settings/TradingSection";
 import { RiskSection }       from "@/tools/Settings/RiskSection";
@@ -32,15 +36,14 @@ import { PracticeSection }   from "@/tools/Settings/PracticeSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
-import { PresetSection }     from "@/tools/Settings/PresetSection";
 import { UpdatesSection }    from "@/tools/Settings/UpdatesSection";
 import { SupportSection }    from "@/tools/Settings/SupportSection";
 import { TickerSettings }    from "@/routes/settings/TickerSettings";
-import { SECTIONS, DEMO_HIDDEN_SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
+import { SECTIONS, SECTION_GROUPS, DEMO_HIDDEN_SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
 import { isPublicDemoBuild } from "@/lib/demoSession";
 import { useSettingsState } from "@/hooks/useSettingsState";
+import { PracticeLaterSetup } from "@/routes/SetupAccountRoute";
 
-const SETTINGS_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 // ---------------------------------------------------------------------------
 // Route component
@@ -48,79 +51,50 @@ const SETTINGS_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 export default function SettingsRoute() {
   const navigate = useNavigate();
-
-  // Read hash fragment to allow deep-linking: /settings#api, /settings#brokers, etc.
-  const sectionFromHash = (): SectionId => {
-    const hash = window.location.hash.replace("#", "") as SectionId;
-    return SECTIONS.some((s) => s.id === hash) ? hash : "general";
-  };
-
-  const [activeSection, setActiveSection] = useState<SectionId>(sectionFromHash);
-  const [llmWasOpened, setLlmWasOpened] = useState(activeSection === "llm");
-  const [toastMsg, setToastMsg]           = useState<string | null>(null);
-  const [llmProviderDraftPending, setLlmProviderDraftPending] = useState(false);
-  const [isDesktopTablist, setIsDesktopTablist] = useState(
-    () => window.matchMedia(SETTINGS_DESKTOP_MEDIA_QUERY).matches,
+  const mode = useModeStore((state) => state.mode);
+  const hasConnectedAccount = useBrokerStore((state) =>
+    state.accounts.some((account) => account.source === "native" && account.status === "connected"),
   );
-  const dismissToast                      = useCallback(() => setToastMsg(null), []);
-
-  const tablistRef = useRef<HTMLElement>(null);
+  // Visibility only; execution keeps its existing independent readiness gates.
+  const showLeverage = mode !== "explore" && hasConnectedAccount;
+  const [requestedSection, setRequestedSection] = useState(() => window.location.hash.slice(1));
+  const canonicalSection = requestedSection === "api" ? "brokers" : requestedSection;
+  const activeSection: SectionId = canonicalSection === "leverage" && !showLeverage
+    ? (SECTIONS.some((section) => section.id === "brokers") ? "brokers" : "general")
+    : SECTIONS.some((section) => section.id === canonicalSection)
+      ? canonicalSection as SectionId
+      : "general";
+  const [llmWasOpened, setLlmWasOpened] = useState(activeSection === "llm");
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [llmProviderDraftPending, setLlmProviderDraftPending] = useState(false);
+  const dismissToast = useCallback(() => setToastMsg(null), []);
 
   useEffect(() => {
-    const syncSectionFromHash = () => setActiveSection(sectionFromHash());
+    const syncSectionFromHash = () => {
+      const hash = window.location.hash.slice(1);
+      setRequestedSection(hash);
+    };
     window.addEventListener("hashchange", syncSectionFromHash);
     return () => window.removeEventListener("hashchange", syncSectionFromHash);
   }, []);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia(SETTINGS_DESKTOP_MEDIA_QUERY);
-    const handleChange = (event: MediaQueryListEvent) => {
-      setIsDesktopTablist(event.matches);
-    };
+    if (requestedSection === "presets") {
+      useLayoutStore.getState().setPresetPickerOpen(true);
+      navigate("/trade", { replace: true });
+    }
+  }, [navigate, requestedSection]);
 
-    setIsDesktopTablist(mediaQuery.matches);
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
-
-  const handleSidebarKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLElement>) => {
-      const previousKey = isDesktopTablist ? "ArrowUp" : "ArrowLeft";
-      const nextKey = isDesktopTablist ? "ArrowDown" : "ArrowRight";
-      const keys = [previousKey, nextKey, "Home", "End"];
-      if (!keys.includes(e.key)) return;
-      e.preventDefault();
-      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
-      if (!tabs || tabs.length === 0) return;
-      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
-      let next: number;
-      if (e.key === nextKey) next = (idx + 1) % tabs.length;
-      else if (e.key === previousKey) next = (idx - 1 + tabs.length) % tabs.length;
-      else if (e.key === "Home") next = 0;
-      else next = tabs.length - 1;
-      const nextTab = tabs[next];
-      nextTab?.focus();
-      const sectionId = SECTIONS[next]?.id;
-      if (sectionId) setActiveSection(sectionId);
-    },
-    [isDesktopTablist],
-  );
-
-  // Update hash when section changes for deep-link support
-  useEffect(() => {
-    window.history.replaceState(null, "", `#${activeSection}`);
-  }, [activeSection]);
+  const selectSection = (section: SectionId) => {
+    // Write even when the fallback tab is already selected, cancelling pending
+    // deep links while asynchronous broker discovery is still in flight.
+    window.history.replaceState(null, "", `#${section}`);
+    setRequestedSection(section);
+  };
 
   useEffect(() => {
     if (activeSection === "llm") setLlmWasOpened(true);
   }, [activeSection]);
-
-  useEffect(() => {
-    const activeTab = tablistRef.current?.querySelector<HTMLElement>(
-      `#settings-tab-${activeSection}`,
-    );
-    activeTab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [activeSection, isDesktopTablist]);
 
   // All state and actions from Zustand stores
   const {
@@ -135,7 +109,7 @@ export default function SettingsRoute() {
     llmCredentialLast4,
     telegram,
     dataPaths,
-    connection,
+
     restarting,
     updateGeneral,
     updateTradingDefaults,
@@ -145,7 +119,7 @@ export default function SettingsRoute() {
     removeLLMCredential,
     updateTelegram,
     updateDataPaths,
-    acceptConnection,
+
     handleRestart,
     retryLlmHydration,
   } = useSettingsState();
@@ -185,7 +159,6 @@ export default function SettingsRoute() {
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;
-      case "api":        return <ConnectionSection settings={connection} onSaved={acceptConnection} />;
       case "brokers":    return <BrokerConnect pollAccounts={false} />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
@@ -198,7 +171,7 @@ export default function SettingsRoute() {
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;
       case "skill":      return <SkillSection />;
-      case "presets":    return <PresetSection />;
+      case "presets":    return <></>;
       case "updates":    return <UpdatesSection />;
       case "support":    return <SupportSection />;
       case "about":      return <AboutSection />;
@@ -221,79 +194,55 @@ export default function SettingsRoute() {
                 ? { copy: "LLM changes not saved", dot: "bg-loss" }
                 : { copy: "No pending LLM changes", dot: "bg-profit" };
 
+  const navGroups = useMemo(
+    () =>
+      SECTION_GROUPS.map((group) => ({
+        id: group.id,
+        label: group.label,
+        items: SECTIONS.filter((section) => section.group === group.id && (section.id !== "leverage" || showLeverage)).map(({ id, label, icon }) => ({
+          id,
+          label,
+          icon,
+        })),
+      })).filter((group) => group.items.length > 0),
+    [showLeverage],
+  );
+
   return (
     <CinematicLayout mode="focused" className="h-full">
     <section
       aria-label="Settings"
-      className="h-full flex flex-col overflow-hidden animate-fade-in"
+      className="h-full flex flex-col overflow-hidden"
     >
-      {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
-      <RouteBanner
-        hintId="settings-broker-gateway-connect"
-        text="Use Brokers to connect broker accounts. Use Broker Gateway for OpenAlgo-compatible bridge URL and API-key settings."
-      />
-      {/* Slim header */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-glass-chrome bg-glass-chrome backdrop-blur-md shrink-0">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
-          aria-label="Go back"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back
-        </button>
-        <div className="w-px h-4 bg-border-default" />
-        <div className="flex items-center gap-1.5">
-          <LogoIcon size={16} />
-          <span className="font-heading font-semibold text-xs text-text-secondary">Settings</span>
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          {toastMsg && <InlineToast message={toastMsg} onDismiss={dismissToast} />}
-          <button
-            type="button"
-            onClick={() => handleRestart((msg) => setToastMsg(msg))}
-            disabled={restarting}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-surface-base border border-border-default text-text-secondary hover:text-text-primary hover:border-accent/40 hover:bg-accent/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw size={11} className={restarting ? "animate-spin" : ""} />
-            {restarting ? "Restarting..." : "Restart Services"}
-          </button>
-        </div>
-      </div>
-
-      {/* Body: sidebar + content */}
-      <div className="flex-1 flex min-h-0 flex-col overflow-hidden md:flex-row">
-        {/* Sidebar nav */}
-        <nav
-          ref={tablistRef}
-          role="tablist"
-          aria-orientation={isDesktopTablist ? "vertical" : "horizontal"}
-          aria-label="Settings sections"
-          className="flex w-full flex-none gap-1 overflow-x-auto border-b border-glass-l1 bg-glass-l1 px-2 py-2 md:w-52 md:flex-col md:gap-0 md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r md:px-0"
-          onKeyDown={handleSidebarKeyDown}
-        >
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
+      <PageHeader
+        title="Settings"
+        description="Your account, preferences, brokers, risk limits, AI and system options."
+        actions={
+          <>
+            {toastMsg && <InlineToast message={toastMsg} onDismiss={dismissToast} />}
+            <Button
               type="button"
-              role="tab"
-              id={`settings-tab-${id}`}
-              aria-selected={id === activeSection}
-              aria-controls={id === activeSection ? `settings-tabpanel-${id}` : undefined}
-              tabIndex={id === activeSection ? 0 : -1}
-              onClick={() => setActiveSection(id)}
-              className={`flex flex-none items-center gap-2.5 px-3 py-2 font-sans text-sm transition-colors text-left md:w-full ${
-                id === activeSection
-                  ? "bg-accent/10 text-accent md:border-r-2 md:border-accent"
-                  : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-              }`}
+              variant="outline"
+              size="sm"
+              onClick={() => handleRestart((msg) => setToastMsg(msg))}
+              disabled={restarting}
             >
-              <Icon size={13} className="flex-none" />
-              <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </nav>
+              <RefreshCw className={restarting ? "animate-spin" : ""} aria-hidden="true" />
+              {restarting ? "Restarting..." : "Restart Services"}
+            </Button>
+          </>
+        }
+      />
+
+      {/* Body: grouped section nav + content */}
+      <div className="flex-1 flex min-h-0 flex-col overflow-hidden md:flex-row">
+        <SectionNav<SectionId>
+          groups={navGroups}
+          value={activeSection}
+          onChange={selectSection}
+          label="Settings sections"
+          idPrefix="settings"
+        />
 
         {/* Content area */}
         <div
@@ -302,7 +251,8 @@ export default function SettingsRoute() {
           aria-labelledby={`settings-tab-${activeSection}`}
           className="min-w-0 flex-1 overflow-y-auto"
         >
-          <div className="w-full max-w-3xl px-4 py-5 pb-16 sm:px-6 lg:px-8">
+          <div className="w-full max-w-3xl px-[var(--ft-page-gutter)] pb-16 pt-6">
+            <PracticeLaterSetup surface="settings" />
             {activeSection !== "llm" && renderContent()}
             {(llmWasOpened || activeSection === "llm") && (
               <div hidden={activeSection !== "llm"}>
@@ -313,8 +263,8 @@ export default function SettingsRoute() {
         </div>
       </div>
 
-      {/* Footer status bar */}
-      <div
+      {/* Model persistence belongs only to its settings page. */}
+      {activeSection === "llm" && <div
         className="flex-none px-4 py-2 bg-glass-l1 border-t border-glass-l1 flex items-center gap-2"
         role="status"
         aria-label="Settings save status"
@@ -323,7 +273,7 @@ export default function SettingsRoute() {
       >
         <div className={`size-1.5 rounded-full ${saveStatus.dot}`} />
         <span className="text-xs text-text-muted">{saveStatus.copy}</span>
-      </div>
+      </div>}
     </section>
     </CinematicLayout>
   );

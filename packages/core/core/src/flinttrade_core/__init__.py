@@ -8,6 +8,7 @@ from .version import APP_VERSION, APP_VERSION_TAG
 
 __version__ = APP_VERSION
 
+from .broker_client import BrokerClient
 from .config import FlintTradeConfig, Settings
 from .exceptions import (
     APIError,
@@ -46,7 +47,6 @@ from .models import (
     SplitOrder,
     Trade,
 )
-from .openalgo_client import OpenAlgoClient
 from .system_metrics import SystemMetrics, get_system_metrics
 from .workspace import Workspace
 
@@ -61,8 +61,10 @@ if TYPE_CHECKING:
 def __getattr__(name: str) -> Any:
     if name == "FlintTradeApp":
         from .app import FlintTradeApp as _FlintTradeApp  # noqa: PLC0415
+
         return _FlintTradeApp
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # App
@@ -73,7 +75,7 @@ __all__ = [
     "SystemMetrics",
     "get_system_metrics",
     # Client
-    "OpenAlgoClient",
+    "BrokerClient",
     # Config
     "Settings",
     "FlintTradeConfig",

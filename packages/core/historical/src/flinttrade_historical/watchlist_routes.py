@@ -9,6 +9,7 @@ POST   /v1/historify/watchlist  — add an item
 DELETE /v1/historify/watchlist  — remove an item
 POST   /v1/historify/download   — trigger download for all enabled items
 """
+
 from __future__ import annotations
 
 import logging
@@ -64,6 +65,7 @@ def _migrate_legacy_watchlist_db(legacy: Path, new: Path) -> None:
     except OSError as exc:
         logger.warning("Could not migrate legacy watchlist DB %s -> %s: %s", legacy, new, exc)
 
+
 historify_bp = Blueprint("historify", __name__)
 
 # Module-level singleton — replaced by ``init_watchlist_routes`` when injected.
@@ -113,18 +115,20 @@ def list_watchlist() -> tuple[Any, int]:
         keys ``symbol``, ``exchange``, ``interval``, ``enabled``.
     """
     items = _get_watchlist().list_items()
-    return jsonify({
-        "status": "success",
-        "data": [
-            {
-                "symbol": item.symbol,
-                "exchange": item.exchange,
-                "interval": item.interval,
-                "enabled": item.enabled,
-            }
-            for item in items
-        ],
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": [
+                {
+                    "symbol": item.symbol,
+                    "exchange": item.exchange,
+                    "interval": item.interval,
+                    "enabled": item.enabled,
+                }
+                for item in items
+            ],
+        }
+    ), 200
 
 
 @historify_bp.route("/v1/historify/watchlist", methods=["POST"])
@@ -150,15 +154,17 @@ def add_watchlist() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "exchange is required"}), 400
 
     item = _get_watchlist().add(symbol, exchange, interval)
-    return jsonify({
-        "status": "success",
-        "data": {
-            "symbol": item.symbol,
-            "exchange": item.exchange,
-            "interval": item.interval,
-            "enabled": item.enabled,
-        },
-    }), 201
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "symbol": item.symbol,
+                "exchange": item.exchange,
+                "interval": item.interval,
+                "enabled": item.enabled,
+            },
+        }
+    ), 201
 
 
 @historify_bp.route("/v1/historify/watchlist", methods=["DELETE"])
@@ -193,7 +199,7 @@ def trigger_download() -> tuple[Any, int]:
     ``GET /v1/historify/download/status?job_id=<id>`` for progress, the
     time-remaining (ETA) estimate, and the disk safety state. Bars are persisted
     via the Historify engine (DuckDB) — the previous synchronous route discarded
-    them and, because it constructed OpenAlgoClient with the wrong signature,
+    them and, because it constructed BrokerClient with the wrong signature,
     never actually downloaded.
 
     Request JSON (optional):
@@ -246,16 +252,20 @@ def start_watchlist_download(from_date: date, to_date: date) -> Any | None:
         app_obj = None
 
     async def _runner(progress: Any) -> None:
-        from flinttrade_core.openalgo_client import resolve_openalgo_client  # noqa: PLC0415
+        from flinttrade_core.broker_client import resolve_broker_client  # noqa: PLC0415
 
         from .historify import HistorifyDownloader  # noqa: PLC0415
         from .pipeline import DataPipeline  # noqa: PLC0415
 
-        client, close_client = resolve_openalgo_client(app_obj)
+        client, close_client = resolve_broker_client(app_obj)
         try:
             downloader = HistorifyDownloader(client, DataPipeline())
             await downloader.download_symbols(
-                symbols, intervals, from_date, to_date, progress_callback=progress,
+                symbols,
+                intervals,
+                from_date,
+                to_date,
+                progress_callback=progress,
             )
         finally:
             if close_client:

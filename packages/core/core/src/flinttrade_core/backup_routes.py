@@ -175,9 +175,7 @@ def create_backup_blueprint(
         force: bool = bool(body.get("force", False))
 
         try:
-            result = bk.restore_backup(
-                backup_path, target_dir=target_dir, force=force
-            )
+            result = bk.restore_backup(backup_path, target_dir=target_dir, force=force)
             return jsonify({"status": "ok", **result})  # type: ignore[return-value]
         except CoordinatedRestoreUnavailable as exc:
             return jsonify({"status": "error", "code": exc.code, "message": exc.code}), 503

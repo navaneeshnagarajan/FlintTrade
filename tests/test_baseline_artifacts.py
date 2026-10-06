@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -277,7 +278,7 @@ def test_pre_restructure_baseline_tag_verifies_with_tracked_allowed_signers() ->
         check=True,
     )
 
-    assert "Good \"git\" signature for navaneeshnagarajan@gmail.com" in result.stderr
+    assert 'Good "git" signature for navaneeshnagarajan@gmail.com' in result.stderr
     assert "82c2b391c5dcd2677df9132891b25ee2d0dae981" in result.stdout
 
 
@@ -304,9 +305,6 @@ def test_visual_regression_baseline_inventory_matches_route_matrix() -> None:
         "missing-route-for-404",
     ]
     site_routes = [
-        "root",
-        "docs",
-        "api-reference",
         "mcp",
         "contribute",
         "api-mcp",
@@ -327,8 +325,31 @@ def test_visual_regression_baseline_inventory_matches_route_matrix() -> None:
 
     actual = set(root.rglob("*.png"))
 
-    assert len(actual) == 312
+    assert len(actual) == 276
     assert actual == expected
+
+
+def test_visual_regression_retirement_preserves_remaining_snapshot_hashes() -> None:
+    root = BASELINES / "visual-regression" / "d2ae362"
+    record = json.loads((root / "retained-snapshots.json").read_text(encoding="utf-8"))
+    manifest = json.loads((BASELINES / "MANIFEST.json").read_text(encoding="utf-8"))
+    artefact = next(item for item in manifest["artefacts"] if item["id"] == "visual-regression")
+    retired = ["site/api-reference", "site/docs", "site/root"]
+
+    assert record["source_commit"] == "d2ae362"
+    assert record["recorded_at"] == artefact["retirement"]["date"] == "2026-10-05"
+    assert record["retired_route_families"] == artefact["retirement"]["removed_route_families"] == retired
+    assert record["retained_png_count"] == artefact["retirement"]["retained_png_count"] == 276
+    assert artefact["retirement"]["removed_png_count"] == 36
+    for family in retired:
+        assert list((root / family).rglob("*.png")) == []
+
+    recorded_paths = [item["path"] for item in record["snapshots"]]
+    actual_paths = sorted(path.relative_to(root).as_posix() for path in root.rglob("*.png"))
+    assert len(recorded_paths) == len(set(recorded_paths)) == 276
+    assert sorted(recorded_paths) == actual_paths
+    for item in record["snapshots"]:
+        assert hashlib.sha256((root / item["path"]).read_bytes()).hexdigest() == item["sha256"], item["path"]
 
 
 def test_visual_regression_capture_script_seeds_current_terminal_state() -> None:
@@ -354,10 +375,10 @@ def test_visual_regression_capture_script_seeds_current_terminal_state() -> None
         assert required in script
 
     assert 'localStorage.setItem("flinttrade.theme", theme)' in script
-    assert "if (app === \"terminal\")" in script
+    assert 'if (app === "terminal")' in script
 
 
-def test_visual_regression_policy_keeps_forensic_baseline_immutable() -> None:
+def test_visual_regression_policy_preserves_retained_baseline_and_records_retirement() -> None:
     policy = (BASELINES / "visual-regression-policy.md").read_text(encoding="utf-8").lower()
 
     for required in [
@@ -368,6 +389,11 @@ def test_visual_regression_policy_keeps_forensic_baseline_immutable() -> None:
         "current release baseline",
         "verify-visual-regression-capture.py",
         "312",
+        "authorised retirement exception",
+        "276",
+        "36 png",
+        "retained-snapshots.json",
+        "closed historical removal",
     ]:
         assert required in policy
 

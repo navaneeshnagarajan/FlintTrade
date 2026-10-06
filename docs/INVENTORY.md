@@ -29,11 +29,14 @@ Broker SDK source/artifact mirrors can be refreshed into the gitignored
 `.local/sdk-audit/` cache with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
 tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.
 Kotak Neo uses exact Git provenance: upstream `main`
-`5bb34fae39c4a52a0e6b59d7e2d17090cafc340c` is the runtime and `v3.0.7`
+`9a37488d77dc96442ee2a90ef78462e688cf4856` is the runtime and `v3.0.7`
 peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538` is the release baseline.
-Both expose `kotakneoapi` 3.0.7 through the retained `neo_api_client` import
+The runtime exposes `kotakneoapi` 3.0.8; `release_version` 3.0.7 remains the stable
+compatibility baseline. Both retain the `neo_api_client` import
 namespace; the old `neo-api-client` distribution is forbidden. Closed-market/
 no-funds verification does not prove funded live order execution.
+The 3.0.8 runtime update is verified offline only; the retained activation date
+and earlier real-account read evidence remain historical, not new SDK proof.
 
 ## Legend
 
@@ -57,13 +60,11 @@ no-funds verification does not prove funded live order execution.
 
 | Item | Status | Notes |
 |---|---|---|
-| OpenAlgo bridge adapter (orders + market data) | ✅ | First-class optional bridge path; ~45 endpoints |
 | Smart routing suggestions | ✅ | Capability metadata + recommendation engine + Account-Manager UI |
 | — Dhan: rolling-options history + documented L20 depth feed | 🟡 | Rolling-options history is encoded in routing capabilities; Dhan's L20 depth remains feed-only until FlintTrade wires a runtime depth snapshot bridge (`market_depth_runtime_ready=false`). |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
 | Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan and Upstox are connectable after live verification and emergency-planner coverage. INDmoney's fail-closed planner is locally verified but it remains coming soon pending an authoritative restart-time regular/smart-parent discriminator, a broker-atomic reduce-only close primitive, and a funded/live-market order-safety proof. Kotak Neo is connectable for Connected (read) / API smoke on the exact v3 Git runtime; its async SFeed and order-feed lifecycle is wired and locally synthetic-tested, while the historical live evidence remains REST reads only. Live-account/market-hours feed, funded-order safety, Live catalogue promotion, and cross-platform proof remain outstanding; Live place stays fail-closed. Neo has no sandbox (never offer Neo Practice). Groww retains its documented live blockers. |
-| Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Generic terminal place/modify/cancel now route to the active native account when no OpenAlgo key is configured, but funded live native order placement remains unproven because verification used no-funds/closed-market accounts. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 
 ## AI Agent
@@ -86,14 +87,14 @@ no-funds verification does not prove funded live order execution.
 | Preset layouts (17) | ✅ | FlexLayout workspace presets |
 | Options-scalper 4-chart layout | ✅ | Index+Futures (centre) / CE+PE (sides) / option chain — per-panel pinned charts; tested |
 | Trading + dashboard widgets (71 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
-| Operating modes: Explore / Practice / Live | ✅ | Website sample opens ordinary Home in Explore mode; installed app has no first-class Demo mode. Practice places a simulated order, never a “paper order”. Widget catalogue count remains 71. `/explore` is not a first-class installed screen. |
+| Operating modes: Practice and Live | ✅ | Connected (read) is a broker status, not a Mode. Example is sample data, not a Mode. The public web demo is Demo (example data). Practice places a simulated order. Widget catalogue count remains 71. The old sample-data URL is not a first-class installed screen. |
 | Professional charts + indicators | ✅ | `widgets/analysis/Chart/` on the lightweight-charts library |
-| Practice mode (Explore/Practice/Live boundary) | ✅ | `SandboxControls` (capital + place simulated order) |
-| Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
+| Practice mode | ✅ | Practice controls (capital + place simulated order) |
+| Trade journal | Partial | `TradeJournalTool` reads recorded executions; authoritative native fill ingestion is not connected. Submission acknowledgements remain in the audit trail, not the fill journal. |
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains use strict exchange, expiry, row, Greek and lot-size provenance through the configured broker path; incomplete or contradictory inputs fail closed to a labelled sample/unavailable state |
-| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | Live via `/api/v1/history` + screener analysers (`/v1/analytics/*`, `/api/v1/analytics/correlation`); Live chip when the feed is live; Sample chips retired in favour of the Mode honesty line |
-| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | Sourced from the live IV-smile feed (`getFtIVSmile`); greeks Black–Scholes-derived (shared with GreeksSurface); pure unit-tested transforms; Live chip when the feed is live; Sample chips retired in favour of the Mode honesty line |
+| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | History and analysis reads are scoped to the selected native account and mode; explicit source badges identify Sample/Example fallbacks. Native HTTP reads remain unavailable until cutover activation. |
+| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | IV-smile analysis and shared Black–Scholes transforms use explicit source badges and loading/unavailable states. Native HTTP reads remain unavailable until cutover activation. |
 | Vol-surface, straddle-PnL analysis | 🟡 | Honest sample only (need multi-expiry / candle source) |
 
 ## Data & Infra
@@ -101,7 +102,7 @@ no-funds verification does not prove funded live order execution.
 | Item | Status | Notes |
 |---|---|---|
 | Historical download + time-remaining + safety monitor | ✅ | `HistoricalDownloadPanel` (ETA, free-disk, refused/aborted) |
-| Live tick capture to storage | ✅ | `TickRecorder` (opt-in via `FLINTTRADE_TICK_CAPTURE`) |
+| Native tick capture to storage | 🟡 | Unavailable pending a native stream source. Retained local tick storage and processing remain available; an environment flag does not enable capture. |
 | Daily DB optimise + tick retention | ✅ | Nightly cron (CHECKPOINT/ANALYZE + prune); scheduler started |
 | Per-broker customisable API rate limits | ✅ | Config + live-apply UI |
 | Live order-flow footprint | ✅ | Aggregator fed from the tick stream (Lee-Ready side classification); honest synthetic fallback |
@@ -113,7 +114,6 @@ no-funds verification does not prove funded live order execution.
 
 | Item | Status | Notes |
 |---|---|---|
-| Account Manager (brokers + daily reauth + OpenAlgo state) | ✅ | `AccountStatusPanel` ↔ `/accounts/status` (live ping); tested |
 | Profile Manager (in unified settings, quick-settings + profile button) | ✅ | `ProfileSection`; both entry points tested |
 | Notification System (central manager, drives action) | ✅ | NotificationCentre + dispatchers + remediation actions + e2e test |
 | Unified Settings | ✅ | `SettingsRoute`, 19 sections, deep-linkable |
@@ -122,8 +122,8 @@ no-funds verification does not prove funded live order execution.
 
 | Item | Status | Notes |
 |---|---|---|
-| Automate pillar (webhooks / flow builder / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (generic HMAC-signed custom webhooks, flow builder, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
-| Ditto multi-account mirror (account mirroring / margin / trailing SL / risk manager) | ✅ | `/ditto` route + backend `/ditto/*` (`operations_routes.py`); natively reimplemented AlgoMirror patterns |
+| Automate pillar (webhooks / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (generic HMAC-signed custom webhooks, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
+| Native copy trading | Unavailable | Account metadata is retained; mirroring, risk execution and linking remain unavailable pending a native safety design. |
 | Invest & Learn routes | ✅ | `/invest` (mutual funds / SIP / net worth) and `/learn` (guided learning) protected routes |
 
 ## Known backlog (built-but-unreachable / referenced-not-built / blocked)
@@ -132,15 +132,12 @@ no-funds verification does not prove funded live order execution.
 |---|---|---|
 | SmartOrderRouter (liquidity-aware TWAP slicing) | ✅ | Wired end-to-end: `POST /api/v1/orders/smart-route` (background job + live polling) → every child order independently traverses SafetySystem → `gate_order` → `BrokerRouter` via `GatedChildExecutor`; "Smart Order" terminal widget; OFF by default (`brokers.smart_routing.enabled`), live-mode only |
 | Analytics endpoints: VWAP bands / pairs / MTF | ✅ | Compute endpoints built + tested **and now reached by their widgets** — live intraday/daily bars via `getHistory`, honest sample fallback |
-| Excel export (browser download) | ✅ | Streaming `/export/download` + `downloadExcel` + "Export to Excel" button in the Positions widget (Notification System feedback) |
-| Excel portfolio report (browser download) | ✅ | Streaming `/portfolio/report/download` + `downloadPortfolioReport` + "Portfolio Report" button in the Holdings widget (Positions+Holdings+Summary; Notification System feedback) |
-| Excel import (browser upload) | ✅ | Multipart `/import/upload` + `uploadExcel` + Settings → Data watchlist import (feeds the historify download watchlist; Notification System feedback) |
 | Download-watchlist manager UI | ✅ | Settings → Data: list / add / remove the symbols the bulk downloader fetches (was previously API-only — fresh installs had no way to populate it) |
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | ✅ | "Historical Chain" widget — archived expiries → grouped CE/PE chain; honest empty state |
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); coming-soon selectors (Groww / INDmoney) and any selector without a published connected session do not schedule false refresh work. |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (`kotakneoapi` 3.0.7); funded Live place stays fail-closed. INDmoney and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (runtime `kotakneoapi` 3.0.8; release baseline 3.0.7); funded Live place stays fail-closed. INDmoney and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 
 ---

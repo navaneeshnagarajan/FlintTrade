@@ -5,11 +5,6 @@ self-hosted deployment example.
 
 ## Purpose
 
-If you choose to self-host FlintTrade (with optional OpenAlgo-compatible
-integrations) on a server you control, this directory holds example hardening
-configs you can adapt. They are illustrative, not prescriptive: harden the box
-to suit your own environment.
-
 This is **one option among several** — running everything on `localhost`, in
 Docker, or on a managed cloud host are all equally valid. There is no single
 canonical deployment target. Bring your own server, your own addresses, and

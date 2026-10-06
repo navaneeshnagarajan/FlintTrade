@@ -5,8 +5,9 @@ import { ProvenanceBadge, type ProvenanceKind } from "../ProvenanceBadge";
 import { DemoBadge } from "@/routes/home/DemoBadge";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { useModeStore } from "@/stores/modeStore";
 
-const LABELS: ProvenanceKind[] = ["Unavailable", "Live", "Stale"];
+const LABELS: ProvenanceKind[] = ["Sample", "Unavailable", "Live", "Stale"];
 
 const DEFAULT_TITLES: Record<ProvenanceKind, string> = {
   Sample: "Sample data — not live",
@@ -27,10 +28,11 @@ describe("ProvenanceBadge (Slice 3 canonical atom)", () => {
     expect(badge).not.toHaveAttribute("aria-live");
   });
 
-  it("renders nothing for Sample — Mode honesty owns that disclaimer", () => {
-    const { container } = render(<ProvenanceBadge label="Sample" placement="inline" />);
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+  it.each(["explore", "practice", "live"] as const)("discloses inline Sample figures in %s", (mode) => {
+    useModeStore.setState({ mode });
+    render(<ProvenanceBadge label="Sample" placement="inline" />);
+    expect(screen.getByText("Sample")).toHaveAttribute("data-provenance", "Sample");
+    expect(screen.getByText("Sample")).toHaveAttribute("title", "Sample data — not live");
   });
 
   it("inline placement omits absolute positioning and uses inline test id", () => {
@@ -73,9 +75,8 @@ describe("ProvenanceBadge (Slice 3 canonical atom)", () => {
 });
 
 describe("DemoBadge route compatibility shim", () => {
-  it("renders nothing when the default label is Sample", () => {
-    const { container } = render(<DemoBadge />);
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByTestId("home-demo-badge")).not.toBeInTheDocument();
+  it("retains the route alias and its explicit Sample default", () => {
+    render(<DemoBadge />);
+    expect(screen.getByTestId("home-demo-badge")).toHaveTextContent("Sample");
   });
 });

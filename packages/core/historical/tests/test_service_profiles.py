@@ -8,7 +8,7 @@ from flinttrade_core.service_providers import PermissionState, ServiceKind
 from flinttrade_historical.data_provider import ProviderRegistry
 from flinttrade_historical.service_profiles import (
     HISTORICAL_PROVIDER_PROFILES,
-    OPENALGO_PROFILE,
+    NATIVE_BROKER_PROFILE,
     OPENCHART_PROFILE,
     YFINANCE_PROFILE,
     historical_service_descriptors,
@@ -17,22 +17,22 @@ from flinttrade_historical.service_profiles import (
 
 def test_static_profiles_expose_exact_runtime_coverage() -> None:
     assert HISTORICAL_PROVIDER_PROFILES == (
-        OPENALGO_PROFILE,
+        NATIVE_BROKER_PROFILE,
         OPENCHART_PROFILE,
         YFINANCE_PROFILE,
     )
     assert tuple(profile.runtime_name for profile in HISTORICAL_PROVIDER_PROFILES) == (
-        "openalgo",
+        "native",
         "openchart",
         "yfinance",
     )
-    assert OPENALGO_PROFILE.exchanges == ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX")
+    assert NATIVE_BROKER_PROFILE.exchanges == ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX")
     assert OPENCHART_PROFILE.exchanges == ("NSE", "NFO")
     assert YFINANCE_PROFILE.exchanges == ("MCX",)
-    assert OPENALGO_PROFILE.requires_configured_client is True
+    assert NATIVE_BROKER_PROFILE.requires_configured_client is True
     assert OPENCHART_PROFILE.requires_configured_client is False
     assert YFINANCE_PROFILE.requires_configured_client is False
-    assert OPENALGO_PROFILE.pricing_class == "unknown"
+    assert NATIVE_BROKER_PROFILE.pricing_class == "unknown"
     assert OPENCHART_PROFILE.pricing_class == "free"
     assert YFINANCE_PROFILE.pricing_class == "free"
 
@@ -41,12 +41,12 @@ def test_static_descriptors_are_exact_and_fail_closed() -> None:
     descriptors = historical_service_descriptors()
 
     assert tuple(item.provider_id for item in descriptors) == (
-        "market-data:openalgo-history",
+        "market-data:native-history",
         "market-data:openchart",
         "market-data:yfinance",
     )
     assert tuple(item.display_name for item in descriptors) == (
-        "OpenAlgo historical data",
+        "native broker historical data",
         "OpenChart historical data",
         "yfinance commodity proxies",
     )
@@ -68,7 +68,7 @@ def test_static_descriptors_are_exact_and_fail_closed() -> None:
 def test_static_descriptor_construction_does_not_construct_runtime_providers() -> None:
     with (
         patch("flinttrade_historical.data_provider.ProviderRegistry", side_effect=AssertionError("registry")),
-        patch("flinttrade_historical.data_provider.OpenAlgoProvider", side_effect=AssertionError("openalgo")),
+        patch("flinttrade_historical.data_provider.NativeBrokerProvider", side_effect=AssertionError("native")),
         patch("flinttrade_historical.data_provider.OpenChartProvider", side_effect=AssertionError("openchart")),
         patch("flinttrade_historical.data_provider.YFinanceProvider", side_effect=AssertionError("yfinance")),
     ):
@@ -90,7 +90,7 @@ def test_extra_providers_keep_the_existing_priority_slot() -> None:
     extra.name = "fixture"
 
     assert tuple(provider.name for provider in ProviderRegistry(MagicMock(), [extra]).providers) == (
-        "openalgo",
+        "native",
         "fixture",
         "openchart",
         "yfinance",

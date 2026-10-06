@@ -94,6 +94,7 @@ class Segments(IntFlag):
     MCX = auto()
     NCDEX = auto()
     MF = auto()
+    CRYPTO = auto()
 
 
 class OrderTypes(IntFlag):
@@ -122,7 +123,6 @@ class TickProtocol(Enum):
     DHAN_BINARY = "dhan_binary"
     UPSTOX_JSON = "upstox_json"
     KOTAK_NEO_BINARY = "kotak_neo_binary"
-    OPENALGO_JSON = "openalgo_json"
     GENERIC_JSON = "generic_json"
 
 
@@ -235,8 +235,8 @@ def _native_to_broker_capabilities(broker_name: str, caps: Capabilities) -> Brok
         supports_bracket_orders=caps.bracket_order_native or bool(caps.order_types & OrderTypes.BO),
         supports_cover_orders=caps.cover_order_native or bool(caps.order_types & OrderTypes.CO),
         supports_basket_orders=caps.basket_order_native,
-        supports_options=bool(caps.segments & (Segments.NFO | Segments.BFO)),
-        supports_futures=bool(caps.segments & (Segments.NFO | Segments.BFO | Segments.MCX | Segments.NCDEX)),
+        supports_options=bool(caps.segments & (Segments.NFO | Segments.BFO | Segments.CRYPTO)),
+        supports_futures=bool(caps.segments & (Segments.NFO | Segments.BFO | Segments.MCX | Segments.NCDEX | Segments.CRYPTO)),
         supports_commodities=bool(caps.segments & (Segments.MCX | Segments.NCDEX)),
         supports_currency=bool(caps.segments & (Segments.CDS | Segments.BCD)),
         supports_equity=bool(caps.segments & (Segments.NSE_EQ | Segments.BSE_EQ)),

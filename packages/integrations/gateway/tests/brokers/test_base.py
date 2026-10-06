@@ -3,7 +3,7 @@
 Every concrete adapter MUST implement the complete async ``BrokerAdapter``
 surface — no abstract method left over — so the router can rely on the full
 contract. The parametrize list grows as each broker's wave lands. Today the
-OpenAlgo bridge adapter is functional and the native Dhan / Upstox / Kotak Neo /
+The native Dhan / Upstox / Kotak Neo /
 IndMoney adapters ship gated and dormant (every live call needs attestation +
 vault credentials); all five are held to the full ABC surface here.
 """
@@ -14,7 +14,7 @@ import inspect
 
 import pytest
 
-from flinttrade_gateway.brokers import dhan, indmoney, kotakneo, openalgo, upstox
+from flinttrade_gateway.brokers import dhan, indmoney, groww, kotakneo, upstox
 from flinttrade_gateway.brokers._base import BrokerAdapter
 
 ADAPTERS = [
@@ -22,7 +22,7 @@ ADAPTERS = [
     (upstox.UpstoxAdapter, "upstox"),
     (kotakneo.KotakNeoAdapter, "kotakneo"),
     (indmoney.IndMoneyAdapter, "indmoney"),
-    (openalgo.OpenAlgoAdapter, "openalgo"),
+    (groww.GrowwAdapter, "groww"),
 ]
 
 # The full abstract surface mandated by contract §5.
@@ -51,13 +51,6 @@ EXPECTED_ABSTRACT = {
 
 
 def _instance(cls):
-    if cls is openalgo.OpenAlgoAdapter:
-        from flinttrade_gateway.registry import create_owned_registry
-        from flinttrade_gateway.session_provider import AuthenticatingSessionProvider, ConnectedSessionClientResolver
-        registry, owner = create_owned_registry()
-        # Contract introspection only: no publication and deliberately no routing authority.
-        provider = AuthenticatingSessionProvider(registry, {})
-        return cls(session_clients=ConnectedSessionClientResolver(provider, registry))
     return cls()
 
 

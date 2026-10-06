@@ -202,7 +202,7 @@ describe("SectorsTab bars view", () => {
     renderTab(<SectorsTab initialView="bars" />);
 
     expect(mockGetSectorRotation).not.toHaveBeenCalled();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
     // The one sample sector table renders (12 Nifty sectoral indices).
     for (const name of ["IT", "Pharma", "FMCG", "Realty", "PSU Bank"]) {
       expect(screen.getByText(name)).toBeTruthy();
@@ -217,7 +217,7 @@ describe("SectorsTab bars view", () => {
     renderTab(<SectorsTab initialView="bars" />);
     // The badge stays and the fabricated backend rows never claim freshness.
     expect(await screen.findByText("IT")).toBeTruthy();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
 
@@ -226,7 +226,7 @@ describe("SectorsTab bars view", () => {
     mockGetSectorRotation.mockResolvedValue(unflagged);
     renderTab(<SectorsTab initialView="bars" />);
     expect(await screen.findByText("IT")).toBeTruthy();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 
   it("drops the badge and shows live rows + timestamp on an explicit is_sample_data: false", async () => {
@@ -315,7 +315,7 @@ describe("SectorsTab heatmap view", () => {
     renderTab(<SectorsTab initialView="heatmap" />);
 
     expect(mockGetSectorRotation).not.toHaveBeenCalled();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
 
@@ -324,7 +324,7 @@ describe("SectorsTab heatmap view", () => {
     mockGetSectorRotation.mockResolvedValue(unflagged);
     renderTab(<SectorsTab initialView="heatmap" />);
     expect(await screen.findByText("IT")).toBeTruthy();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 
   it("states that tile size is market cap so colour is not read as the whole story", () => {

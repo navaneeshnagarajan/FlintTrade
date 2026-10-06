@@ -1042,7 +1042,7 @@ def _build_prompt(market_data: dict[str, Any]) -> str:
     """Serialise market_data to a clean string for the LLM prompt.
 
     Args:
-        market_data: Raw market data from OpenAlgo or FlintTrade screener.
+        market_data: Raw market data from broker or FlintTrade screener.
 
     Returns:
         Formatted string embedding all market data fields.
@@ -1079,7 +1079,7 @@ def generate_market_summary(
             The function accepts ``Any`` so it can be tested with mocks without
             importing the client module.
         market_data: Dictionary of market inputs — indices, FII/DII flow, sector
-            data, options PCR, etc. from OpenAlgo or the FlintTrade screener.
+            data, options PCR, etc. from broker or the FlintTrade screener.
         temperature: LLM sampling temperature. Keep low (0.1–0.4) for structured
             output to reduce hallucinations.
         max_tokens: Maximum tokens the LLM may generate for the response.

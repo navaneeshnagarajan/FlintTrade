@@ -1,4 +1,4 @@
-import { get, getBase, isDemoAuthSession, post, postV1 } from "./ftApi.helpers";
+import { buildHeaders, get, getBase, isDemoAuthSession, post, postV1 } from "./ftApi.helpers";
 
 export interface BacktestConfig {
   symbol: string;
@@ -490,7 +490,7 @@ export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
   const base = getBase() + "/api/v1/strategies/upload";
   const form = new FormData();
   form.append("file", file);
-  return fetch(base, { method: "POST", body: form })
+  return fetch(base, { method: "POST", body: form, headers: buildHeaders(false) })
     .then((res) => {
       if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
       return res.json() as Promise<unknown>;

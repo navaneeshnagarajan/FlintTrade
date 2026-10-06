@@ -11,11 +11,8 @@ from typing import Any
 
 import pytest
 
-from flinttrade_core.models import Order
 from flinttrade_ditto.account_manager import BrokerAccount
-from flinttrade_ditto.mirror import MirrorRiskError
-from flinttrade_ditto.runtime import DittoCapabilityUnavailable, DittoRouterOwner, DittoRuntime
-from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
+from flinttrade_ditto.runtime import DittoCapabilityUnavailable, DittoRuntime
 from flinttrade_engine.safety import (
     EmergencyDispatchResult,
     EmergencyVerbOutcome,
@@ -39,8 +36,8 @@ def _account(
 ) -> BrokerAccount:
     return BrokerAccount(
         account_id=account_id,
-        openalgo_host=f"http://127.0.0.1:{5100 + len(account_id)}",
-        api_key=f"key-{account_id}",
+        adapter_id="dhan",
+
         name=account_id.title(),
         enabled=enabled,
         is_master=is_master,
@@ -210,7 +207,7 @@ class _FakeRouterOwner:
         )
         outcomes = []
         for account in self.accounts:
-            selector = f"openalgo:{account.account_id}"
+            selector = f"dhan:{account.account_id}"
             failed = account.account_id in self.failed_kill_accounts
             outcomes.extend(
                 EmergencyVerbOutcome(
@@ -280,8 +277,8 @@ def test_start_controls_real_position_mirror_and_reports_active(*, backend_lease
     )
 
     assert sorted(owners[0].router.calls) == [
-        ("openalgo", "one", 2),
-        ("openalgo", "two", 2),
+        ("dhan", "one", 2),
+        ("dhan", "two", 2),
     ]
     assert sorted(owners[0].admission_calls) == [("one", 2), ("two", 2)]
     assert all(context.actor_type == "human" for context in owners[0].router.contexts)
@@ -407,7 +404,7 @@ def test_zero_daily_loss_cap_still_requires_risk_but_does_not_limit_loss(*, back
         }
     )
 
-    assert owner.router.calls == [("openalgo", "target", 2)]
+    assert owner.router.calls == [("dhan", "target", 2)]
     assert runtime.status()["active"] is True
     runtime.stop()
 
@@ -438,7 +435,7 @@ def test_runtime_tracks_same_symbol_products_as_independent_legs(*, backend_leas
         }
     )
 
-    assert owner.router.calls == [("openalgo", "target", 2)]
+    assert owner.router.calls == [("dhan", "target", 2)]
     assert runtime._source_quantities == {
         ("NSE", "RELIANCE", "MIS"): 2,
         ("NSE", "RELIANCE", "CNC"): 2,
@@ -705,7 +702,7 @@ def test_partial_dispatch_failure_pauses_before_source_reversal(*, backend_lease
     )
 
     assert sorted(owners[0].admission_calls) == [("one", 2), (rejected_id, 2)]
-    assert owners[0].router.calls == [("openalgo", "one", 2)]
+    assert owners[0].router.calls == [("dhan", "one", 2)]
     paused = runtime.status()
     assert paused["active"] is False
     assert paused["lifecycle"] == "reconciliation-needed"
@@ -938,373 +935,18 @@ def test_stale_watcher_callback_cannot_drive_restarted_generation(*, backend_lea
 
     assert owners[1].router.calls == []
     watchers[1].emit(changed_position)
-    assert owners[1].router.calls == [("openalgo", "target", 3)]
+    assert owners[1].router.calls == [("dhan", "target", 3)]
     runtime.stop()
 
 
-def test_router_owner_admission_passes_complete_target_account_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state = SimpleNamespace(
-        positions=("position",),
-        used_margin=1200.0,
-        total_balance=10000.0,
-        daily_pnl=-75.0,
-        starting_capital=10000.0,
-        net_delta=0.42,
-        net_vega=6.5,
-        ltp_for=lambda _order: 250.25,
-        admission_for=lambda _index: SimpleNamespace(
-            positions=("prospective-position",),
-            used_margin=1400.0,
-            net_delta=750.0,
-            net_vega=12000.0,
-        ),
-    )
-    gather_calls: list[tuple[dict[str, Any], str, str, list[Order]]] = []
-
-    async def fake_gather_safety_state(
-        config: dict[str, Any],
-        adapter_id: str,
-        *,
-        account_id: str,
-        orders: list[Order],
-        reservations: tuple[Any, ...],
-        include_order_margin: bool,
-    ) -> Any:
-        assert reservations == ()
-        assert include_order_margin is True
-        gather_calls.append((config, adapter_id, account_id, orders))
-        return state
-
-    class _Safety:
-        def __init__(self) -> None:
-            self.calls: list[tuple[Order, dict[str, Any]]] = []
-
-        def check_order(self, order: Order, **kwargs: Any) -> list[Any]:
-            self.calls.append((order, kwargs))
-            return [SimpleNamespace(passed=True, layer=1, reason="")]
-
-        @contextmanager
-        def order_admission(self, _selector: str):
-            yield SimpleNamespace(reservations=(), reconcile=lambda _ids: None)
-
-    client = object()
-    scheduler = object()
-    safety = _Safety()
-    owner = object.__new__(DittoRouterOwner)
-    owner.accounts = [_account("target")]
-    owner._clients = {"target": client}
-    owner._safety_system = safety
-    owner._time_scheduler = scheduler
-    owner.run_router_call = lambda _account_id, awaitable: asyncio.run(awaitable)
-    monkeypatch.setattr(
-        "flinttrade_core.l2_state.gather_safety_state",
-        fake_gather_safety_state,
-    )
-    order = Order(
-        symbol="RELIANCE",
-        exchange="NSE",
-        action="BUY",
-        product="MIS",
-        quantity="2",
-        price="250.25",
-        pricetype="LIMIT",
-    )
-
-    with owner.admit_order("target", order):
-        pass
-
-    assert gather_calls == [
-        (
-            {"OPENALGO_CLIENT": client, "TIME_SCHEDULER": scheduler},
-            "openalgo",
-            "default",
-            [order],
-        )
-    ]
-    assert safety.calls == [
-        (
-            order,
-            {
-                "selector": "openalgo:target",
-                "positions": ("prospective-position",),
-                "used_margin": 1400.0,
-                "total_balance": 10000.0,
-                "daily_pnl": -75.0,
-                "starting_capital": 10000.0,
-                "ltp": 250.25,
-                "net_delta": 750.0,
-                "net_vega": 12000.0,
-            },
-        )
-    ]
 
 
-def test_router_owner_rechecks_daily_loss_cap_before_gate_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def fake_gather_safety_state(*_args: Any, **_kwargs: Any) -> Any:
-        return SimpleNamespace(daily_pnl=-100.0)
-
-    safety_calls: list[Order] = []
-
-    @contextmanager
-    def order_admission(_selector: str):
-        yield SimpleNamespace(reservations=(), reconcile=lambda _ids: None)
-
-    safety = SimpleNamespace(
-        check_order=lambda order, **_kwargs: safety_calls.append(order),
-        order_admission=order_admission,
-    )
-    owner = object.__new__(DittoRouterOwner)
-    owner.accounts = [_account("target", max_loss_daily=100.0)]
-    owner._clients = {"target": object()}
-    owner._safety_system = safety
-    owner._time_scheduler = None
-    owner.run_router_call = lambda _account_id, awaitable: asyncio.run(awaitable)
-    monkeypatch.setattr(
-        "flinttrade_core.l2_state.gather_safety_state",
-        fake_gather_safety_state,
-    )
-
-    with pytest.raises(MirrorRiskError, match="daily loss limit"):
-        with owner.admit_order("target", Order(symbol="TCS", action="BUY", quantity="1")):
-            pass
-
-    assert safety_calls == []
 
 
-def test_router_owner_admission_blocks_failed_safety_layer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state = SimpleNamespace(
-        positions=(),
-        used_margin=0.0,
-        total_balance=10000.0,
-        daily_pnl=0.0,
-        starting_capital=10000.0,
-        net_delta=0.0,
-        net_vega=0.0,
-        ltp_for=lambda _order: 100.0,
-        admission_for=lambda _index: SimpleNamespace(
-            positions=(),
-            used_margin=0.0,
-            net_delta=0.0,
-            net_vega=0.0,
-        ),
-    )
-
-    async def fake_gather_safety_state(*_args: Any, **_kwargs: Any) -> Any:
-        return state
-
-    @contextmanager
-    def order_admission(_selector: str):
-        yield SimpleNamespace(reservations=(), reconcile=lambda _ids: None)
-
-    safety = SimpleNamespace(
-        check_order=lambda *_args, **_kwargs: [
-            SimpleNamespace(passed=False, layer=3, reason="private exposure detail")
-        ],
-        order_admission=order_admission,
-    )
-    owner = object.__new__(DittoRouterOwner)
-    owner.accounts = [_account("target")]
-    owner._clients = {"target": object()}
-    owner._safety_system = safety
-    owner._time_scheduler = None
-    owner.run_router_call = lambda _account_id, awaitable: asyncio.run(awaitable)
-    monkeypatch.setattr(
-        "flinttrade_core.l2_state.gather_safety_state",
-        fake_gather_safety_state,
-    )
-
-    with pytest.raises(DittoCapabilityUnavailable, match="blocked by the safety system") as exc_info:
-        with owner.admit_order("target", Order(symbol="TCS", action="BUY", quantity="1")):
-            pass
-
-    assert "private exposure detail" not in str(exc_info.value)
 
 
-def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clock = [100.0]
-
-    # This test is about the DEADLINE ARITHMETIC: one shared deadline, the
-    # remaining budget handed to each client, and an unclosed client being
-    # retained rather than dropped. Nothing here is about threading.
-    #
-    # But `_close_clients` runs each close on a real thread and joins it with
-    # `deadline - time.monotonic()`. With the clock driven, that budget is
-    # deterministic while the join stays a REAL wall-clock wait, so under a
-    # loaded run (-n 4) the worker was not always scheduled inside the 0.75s
-    # window; `is_alive()` was then true and the owner correctly returned False,
-    # failing assertions that expect the client removed. The product was right
-    # every time - refusing to drop a client whose close has not finished is the
-    # fail-closed behaviour we want - so the flake was this test asserting
-    # arithmetic while depending on OS scheduling.
-    #
-    # Running the close inline removes the scheduling variable and changes no
-    # assertion. The real-thread path keeps its own coverage in
-    # test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs,
-    # which uses a genuine clock and a client that genuinely blocks.
-    class _InlineThread:
-        def __init__(self, *, target: Any, name: str = "", daemon: bool = False) -> None:
-            del name, daemon
-            self._target = target
-            self._ran = False
-
-        def start(self) -> None:
-            self._target()
-            self._ran = True
-
-        def join(self, timeout: float | None = None) -> None:
-            del timeout
-
-        def is_alive(self) -> bool:
-            return not self._ran
-
-    monkeypatch.setattr("flinttrade_ditto.runtime.threading.Thread", _InlineThread)
-
-    class _Router:
-        def __init__(self) -> None:
-            self.timeouts: list[float] = []
-
-        def revoke_and_drain(self, *, timeout: float) -> bool:
-            self.timeouts.append(timeout)
-            # Draining happens on the calling thread, so spending the driven
-            # clock here is ordered against every later read.
-            clock[0] += 0.25
-            return True
-
-    class _Client:
-        def __init__(self, elapsed: float) -> None:
-            self.elapsed = elapsed
-            self.timeouts: list[float] = []
-            self.unbanked = 0.0
-            self.worker: threading.Thread | None = None
-
-        def close_sync(self, *, timeout: float) -> None:
-            self.timeouts.append(timeout)
-            # Deliberately does NOT spend the clock here. Cleanup runs each
-            # close on its own worker thread and derives that thread's join
-            # budget from this same driven clock while ``join()`` itself blocks
-            # on the real one. A worker that spent the budget before the parent
-            # had read it would leave the parent joining for zero seconds and
-            # abandoning a close that had in fact finished, so which clients
-            # survived would be decided by OS scheduling rather than by the
-            # deadline. Bank the elapsed time instead and let the parent claim
-            # it once this worker has demonstrably gone.
-            self.unbanked = self.elapsed
-
-    router = _Router()
-    first = _Client(0.0)
-    second = _Client(0.8)
-    owner = object.__new__(DittoRouterOwner)
-    owner.router = router
-    owner._clients = {"first": first, "second": second}
-
-    def _worker_finished(client: _Client) -> bool:
-        """Report whether cleanup's close worker for ``client`` has ended.
-
-        The worker is remembered on first sight because cleanup drops its own
-        record of the attempt as soon as the join succeeds, and the elapsed
-        time still has to land on the read that follows.
-        """
-        attempts = getattr(owner, "_client_close_attempts", {})
-        for attempt_client, thread, _state in attempts.values():
-            if attempt_client is client:
-                client.worker = thread
-                break
-        return client.worker is not None and not client.worker.is_alive()
-
-    def _driven_monotonic() -> float:
-        """Return the driven clock, banking finished workers' elapsed time.
-
-        Elapsed time only lands once ``thread.is_alive()`` is already False —
-        the very predicate cleanup checks immediately after its join — so the
-        clock can never cross the deadline while a close is still running, and
-        the outcome no longer depends on which thread is scheduled first.
-        """
-        for client in (first, second):
-            if client.unbanked and _worker_finished(client):
-                clock[0] += client.unbanked
-                client.unbanked = 0.0
-        return clock[0]
-
-    monkeypatch.setattr("flinttrade_ditto.runtime.time.monotonic", _driven_monotonic)
-
-    assert owner.close(timeout=1.0) is False
-    assert router.timeouts == [1.0]
-    assert second.timeouts == [pytest.approx(0.75)]
-    assert first.timeouts == []
-    assert owner._clients == {"first": first}
-    assert owner.router is router
-
-    assert owner.close(timeout=1.0) is True
-    assert first.timeouts == [pytest.approx(0.75)]
-    assert owner._clients == {}
-    assert owner.router is None
 
 
-def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    release_close = threading.Event()
-    close_started = threading.Event()
-    observed_join_timeouts: list[float] = []
-    real_join = threading.Thread.join
-
-    def _record_bounded_join(
-        thread: threading.Thread,
-        timeout: float | None = None,
-    ) -> None:
-        if thread.name.startswith("ditto-client-close-"):
-            assert timeout is not None
-            observed_join_timeouts.append(timeout)
-            # Preserve the real hang/deadline behaviour without allowing a
-            # deliberately mutated oversized budget to slow this regression
-            # test down.
-            real_join(thread, timeout=min(timeout, 0.05))
-            return
-        real_join(thread, timeout=timeout)
-
-    monkeypatch.setattr(threading.Thread, "join", _record_bounded_join)
-
-    class _Router:
-        @staticmethod
-        def revoke_and_drain(*, timeout: float) -> bool:
-            assert timeout <= 1.0
-            return True
-
-    class _Client:
-        def close_sync(self, *, timeout: float) -> None:
-            del timeout
-            close_started.set()
-            release_close.wait()
-
-    client = _Client()
-    owner = object.__new__(DittoRouterOwner)
-    owner.router = _Router()
-    owner._clients = {"account": client}
-
-    try:
-        assert owner.close(timeout=0.05) is False
-        assert len(observed_join_timeouts) == 1
-        assert 0.0 < observed_join_timeouts[0] <= 0.05
-        assert close_started.wait(1.0)
-        attempt_client, thread, _state = next(iter(owner._client_close_attempts.values()))
-        assert attempt_client is client
-        assert thread.is_alive()
-        assert owner._clients == {"account": client}
-        assert owner.router is not None
-    finally:
-        release_close.set()
-
-    assert owner.close(timeout=1.0) is True
-    assert owner._clients == {}
-    assert owner.router is None
 
 
 def test_start_fails_closed_when_source_cannot_be_primed(*, backend_lease_factory) -> None:
@@ -1542,7 +1184,7 @@ def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten(*
     assert not kill_thread.is_alive()
     assert kill_outcome and isinstance(kill_outcome[0], dict)
     assert kill_outcome[0]["mirror_quiesced"] is True
-    assert owners[0].router.calls == [("openalgo", "target", 2)]
+    assert owners[0].router.calls == [("dhan", "target", 2)]
     assert owners[0].closed is True
     assert owners[1].kill_call == (
         "operator-1",
@@ -1558,7 +1200,7 @@ def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten(*
             "quantity": 4,
         }
     )
-    assert owners[0].router.calls == [("openalgo", "target", 2)]
+    assert owners[0].router.calls == [("dhan", "target", 2)]
 
 
 def test_kill_all_deactivates_the_mirror_when_quiesce_refuses(*, backend_lease_factory) -> None:
@@ -1675,106 +1317,10 @@ def test_kill_all_refuses_empty_managed_account_scope() -> None:
         runtime.kill_all(actor_id="operator-1", jti="jwt-1", reason="confirmed")
 
 
-def _production_router_owner(
-    monkeypatch: pytest.MonkeyPatch,
-    account: BrokerAccount,
-    *,
-    orders: list[dict[str, Any]] | None = None,
-    positions: list[dict[str, Any]] | None = None,
-    lifecycle_store: Any | None = None,
-) -> tuple[DittoRouterOwner, list[Any], list[tuple[bool, str]]]:
-    """Build the real Ditto owner/router/adapter stack over a network-free client."""
-
-    clients: list[Any] = []
-    write_admissions: list[tuple[bool, str]] = []
-
-    class _Client:
-        def __init__(self, _settings: Any) -> None:
-            self.calls: list[tuple[Any, ...]] = []
-            self.order_rows = [dict(row) for row in (orders or [])]
-            self.position_rows = [dict(row) for row in (positions or [])]
-            self.closed = False
-            clients.append(self)
-
-        def run_sync(self, awaitable: Any) -> Any:
-            return asyncio.run(awaitable)
-
-        def close_sync(self, *, timeout: float) -> None:
-            assert timeout >= 0
-            self.closed = True
-
-        async def place_order(self, order: Order) -> Any:
-            self.calls.append(("place_order", order))
-            self.position_rows = []
-            return SimpleNamespace(status="success", orderid="DITTO-OID-1")
-
-        async def cancel_order(self, order_id: str, strategy: str = "Flint") -> Any:
-            self.calls.append(("cancel_order", order_id, strategy))
-            self.order_rows = [
-                row for row in self.order_rows if str(row.get("orderid")) != order_id
-            ]
-            return SimpleNamespace(status="success", orderid=order_id)
-
-        async def orderbook(self) -> list[dict[str, Any]]:
-            self.calls.append(("orderbook",))
-            return [dict(row) for row in self.order_rows]
-
-        async def positionbook(self) -> list[dict[str, Any]]:
-            self.calls.append(("positionbook",))
-            return [dict(row) for row in self.position_rows]
-
-    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", _Client)
-
-    @contextmanager
-    def write_admission(emergency_reduction: bool, selector: str):
-        write_admissions.append((emergency_reduction, selector))
-        yield
-
-    owner = DittoRouterOwner(
-        [account],
-        "operator-1",
-        write_admission=write_admission,
-        intent_journal=InMemoryEmergencyIntentJournal(),
-        safety_system=SimpleNamespace(check_order=lambda *_args, **_kwargs: []),
-        lifecycle_store=lifecycle_store,
-    )
-    return owner, clients, write_admissions
 
 
-def test_production_ditto_owner_denies_before_client_allocation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
-
-    allocations = []
-    def forbidden(*args, **kwargs):
-        allocations.append("client")
-        raise AssertionError("client allocation before cutover guard")
-    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", forbidden)
-    with pytest.raises(BrokerAccountCutoverUnavailable):
-        DittoRouterOwner([_account("target")], "operator-1",
-            write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
-    assert allocations == []
 
 
-def test_production_ditto_owner_denies_before_account_enumeration() -> None:
-    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
-
-    accesses = []
-    def forbidden(*args, **kwargs):
-        accesses.append("accounts")
-        raise AssertionError("account access before cutover guard")
-
-    class Accounts(list):
-        __iter__ = forbidden
-        __len__ = forbidden
-        __getitem__ = forbidden
-        __getattribute__ = forbidden
-
-    with pytest.raises(BrokerAccountCutoverUnavailable):
-        DittoRouterOwner(Accounts(), "operator-1",
-            write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
-    assert accesses == []
 
 
 def test_runtime_exposes_current_owner_reconciliation_targets() -> None:
@@ -1786,14 +1332,3 @@ def test_runtime_exposes_current_owner_reconciliation_targets() -> None:
     with runtime._lock:
         runtime._router_owner = owner
     assert runtime.reconciliation_targets() == expected
-
-
-def test_production_ditto_owner_denies_before_owner_state_initialisation() -> None:
-    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
-
-    owner = object.__new__(DittoRouterOwner)
-    assert vars(owner) == {}
-    with pytest.raises(BrokerAccountCutoverUnavailable):
-        owner.__init__([_account("target")], "operator-1",
-            write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
-    assert vars(owner) == {}

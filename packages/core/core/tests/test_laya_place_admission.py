@@ -5,6 +5,7 @@ Open-place cases in this file seed Ready themselves. The process default stays D
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -47,7 +48,9 @@ def _passing_safety() -> SafetySystem:
     return safety
 
 
-def _live_app(backend_lease_proof: object, *, safety: SafetySystem | None = None) -> tuple[Flask, MagicMock, SafetySystem]:
+def _live_app(
+    backend_lease_proof: object, *, safety: SafetySystem | None = None
+) -> tuple[Flask, MagicMock, SafetySystem]:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     router.backend_lease_proof = backend_lease_proof
@@ -75,7 +78,7 @@ def _practice_app() -> tuple[Flask, MagicMock]:
 def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> None:
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -83,8 +86,11 @@ def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> Non
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
     assert body["reason"] == body["message"]
-    assert "Down" in body["reason"]
-    assert body["limits"]["max_quantity"] == 100
+    assert body["reason"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert "Practice orders are blocked" not in body["reason"]
+    assert "Live" not in body["reason"]
+    assert "limits" not in body
+    assert "Max quantity" not in json.dumps(body)
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
 
@@ -94,14 +100,14 @@ def test_live_clamp_stops_before_safety_and_names_the_reduced_quantity(backend_l
     process_laya().set_status(DecisionStatus.READY)
     app, router, safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "quantity": 101},
         headers=_headers("live", unlocked=True),
     )
     body = response.get_json()
     assert response.status_code == 409
     assert body["code"] == "laya_clamp"
-    assert body["message"] == "Qty reduced to 100 (Laya limit)"
+    assert body["message"] == "Not placed. Laya allows up to 100."
     assert body["applied_quantity"] == 100
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -112,7 +118,7 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     process_laya().set_status(DecisionStatus.DEGRADED)
     app, router, safety = _live_app(backend_lease_proof)
     inside = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json=_BODY,
         headers=_headers("live", unlocked=True),
     )
@@ -126,14 +132,14 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     safety.check_order.reset_mock()
     router.place_order.reset_mock()
     over = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "quantity": 2},
         headers=_headers("live", unlocked=True),
     )
     over_body = over.get_json()
     assert over.status_code == 409
     assert over_body["code"] == "laya_clamp"
-    assert over_body["message"] == "Qty reduced to 1 (Laya limit)"
+    assert over_body["message"] == "Not placed. Laya allows up to 1."
     assert over_body["limits"]["max_quantity"] == 1
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -144,7 +150,7 @@ def test_client_cannot_mark_an_operator_place_as_chat(backend_lease_proof) -> No
     process_laya().set_status(DecisionStatus.READY)
     app, router, _safety = _live_app(backend_lease_proof)
     response = app.test_client().post(
-        "/api/v1/orders/openalgo/place",
+        "/api/v1/orders/dhan/place",
         json={**_BODY, "source": "chat"},
         headers=_headers("live", unlocked=True),
     )
@@ -154,6 +160,63 @@ def test_client_cannot_mark_an_operator_place_as_chat(backend_lease_proof) -> No
     assert "Chat" not in body["message"]
     assert "safety state" in body["message"].lower()
     router.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("order_type,pricetype", [("LIMIT", "MARKET"), ("market", " limit ")])
+def test_practice_conflicting_types_never_reach_laya_or_the_book(monkeypatch, order_type, pricetype) -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    process_laya().set_status(DecisionStatus.READY)
+    admit = MagicMock(wraps=process_laya().admit)
+    monkeypatch.setattr(process_laya(), "admit", admit)
+    app, _ = _practice_app()
+    sandbox = SandboxEngine(db_path=":memory:")
+    app.config["DATA_SANDBOX_ENGINE"] = sandbox
+    app.config["TICK_RECORDER"] = MagicMock()
+    try:
+        response = app.test_client().post(
+            "/api/v1/orders/place",
+            json={**_BODY, "order_type": order_type, "pricetype": pricetype, "price": 100, "price_basis": "ltp"},
+            headers=_headers("practice"),
+        )
+        assert response.status_code == 400
+        admit.assert_not_called()
+        assert sandbox.get_orders() == []
+        assert sandbox.get_positions() == []
+    finally:
+        sandbox.close()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("type_fields", [
+    {"order_type": " limit ", "pricetype": "LIMIT"},
+    {"order_type": "LIMIT", "pricetype": " limit "},
+    {"pricetype": "limit"},
+])
+def test_practice_aliases_admit_and_rest_the_same_type(monkeypatch, type_fields) -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    process_laya().set_status(DecisionStatus.READY)
+    admit = MagicMock(wraps=process_laya().admit)
+    monkeypatch.setattr(process_laya(), "admit", admit)
+    app, _ = _practice_app()
+    sandbox = SandboxEngine(db_path=":memory:")
+    app.config["DATA_SANDBOX_ENGINE"] = sandbox
+    app.config["TICK_RECORDER"] = MagicMock()
+    body = {key: value for key, value in _BODY.items() if key != "order_type"}
+    try:
+        response = app.test_client().post(
+            "/api/v1/orders/place",
+            json={**body, **type_fields, "price": 100},
+            headers=_headers("practice"),
+        )
+        assert response.status_code == 200, response.get_json()
+        assert admit.call_args.args[0].order_type == "LIMIT"
+        assert sandbox.get_orders()[0]["pricetype"] == "LIMIT"
+        assert sandbox.get_orders()[0]["status"] == "PENDING"
+    finally:
+        sandbox.close()
 
 
 @pytest.mark.unit
@@ -167,8 +230,59 @@ def test_practice_down_denies_before_the_sandbox() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
-    assert "Down" in body["reason"]
+    assert body["reason"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert "Practice orders are blocked" not in json.dumps(body)
+    assert "Live" not in body["reason"]
+    assert "limits" not in body
     sandbox.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_unqualified_ready_live_names_the_qualification_requirement(backend_lease_proof) -> None:
+    process_laya().apply_runtime_status(DecisionStatus.READY, live_qualified=False)
+    app, router, safety = _live_app(backend_lease_proof)
+    response = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json=_BODY,
+        headers=_headers("live", unlocked=True),
+    )
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["code"] == "laya_denied"
+    assert body["reason"] == "Laya isn't qualified for Live yet. Practice orders are available."
+    assert "Orders are paused" not in body["reason"]
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_unqualified_degraded_live_uses_the_same_sentence(backend_lease_proof) -> None:
+    process_laya().apply_runtime_status(DecisionStatus.DEGRADED, live_qualified=False)
+    app, router, safety = _live_app(backend_lease_proof)
+    response = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json=_BODY,
+        headers=_headers("live", unlocked=True),
+    )
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["reason"] == "Laya isn't qualified for Live yet. Practice orders are available."
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_unqualified_ready_practice_reaches_the_sandbox_without_saying_live() -> None:
+    process_laya().apply_runtime_status(DecisionStatus.READY, live_qualified=False)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json=_BODY,
+        headers=_headers("practice"),
+    )
+    assert response.status_code == 200
+    assert "Live" not in response.get_data(as_text=True)
+    sandbox.place_order.assert_called_once()
 
 
 @pytest.mark.unit
@@ -196,5 +310,291 @@ def test_explore_stays_on_the_mode_refusal() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body.get("code") == "mode_blocked"
-    assert "Explore mode" in body["message"]
+    assert body["message"] == ("Orders are not available for Example. Switch to Practice or Live to trade.")
     safety.check_order.assert_not_called()
+
+
+class _ScriptedHost:
+    def __init__(self, answers: dict[str, object]) -> None:
+        self.answers = answers
+        self.calls: list[str] = []
+
+    def decide(self, state: str, questions: object) -> dict[str, object]:
+        self.calls.append(state)
+        return {"answers": self.answers}
+
+
+def _choice(deny_key: str, deny_p: float) -> dict[str, object]:
+    other = "A" if deny_key == "B" else "B"
+    return {"choice": other, "probabilities": {deny_key: deny_p, other: 1 - deny_p}}
+
+
+def _allow_answers() -> dict[str, object]:
+    return {
+        "rationale": _choice("B", 0.1),
+        "tilt": _choice("A", 0.1),
+        "side": _choice("A", 0.1),
+    }
+
+
+def _deny_answers() -> dict[str, object]:
+    return {**_allow_answers(), "tilt": _choice("A", 0.95)}
+
+
+@pytest.mark.unit
+def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() -> None:
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "quantity": 4},
+        headers=_headers("practice"),
+    )
+    body = response.get_json()
+    assert response.status_code == 409
+    assert body["code"] == "laya_clamp"
+    assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
+    assert body["message"] == "Not placed. Laya allows up to 1."
+    assert "concrete reason is required" not in json.dumps(body)
+    assert "Live" not in body["reason"]
+    sandbox.place_order.assert_not_called()
+    assert host.calls == []
+
+    blank = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "quantity": 4, "note": "   ", "rationale": ""},
+        headers=_headers("practice"),
+    )
+    assert blank.status_code == 409
+    assert blank.get_json()["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
+    assert host.calls == []
+    sandbox.place_order.assert_not_called()
+
+
+_DESK_ORDER_PAD = {
+    "symbol": "SBIN",
+    "exchange": "NSE",
+    "action": "BUY",
+    "product": "MIS",
+    "orderType": "MARKET",
+    "quantity": 1,
+    "price": 0,
+    "triggerPrice": 0,
+    "strategy": "FlintOrderPad",
+    "order_type": "MARKET",
+    "trigger_price": 0,
+}
+
+
+@pytest.mark.unit
+def test_practice_desk_order_pad_without_a_note_reaches_the_policy() -> None:
+    """The desk Order Pad body has no rationale. Quantity 1 is already allowed."""
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json=_DESK_ORDER_PAD,
+        headers=_headers("practice"),
+    )
+    assert "rationale" not in _DESK_ORDER_PAD
+    assert "note" not in _DESK_ORDER_PAD
+    assert response.status_code == 200
+    assert "concrete reason is required" not in response.get_data(as_text=True)
+    assert "Live" not in response.get_data(as_text=True)
+    sandbox.place_order.assert_called_once()
+    assert host.calls == []
+
+
+@pytest.mark.unit
+def test_place_one_on_allows_up_to_one_places() -> None:
+    """A no-note clamp to 1 must not refuse the follow-up place at quantity 1."""
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    first = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "quantity": 4},
+        headers=_headers("practice"),
+    )
+    body = first.get_json()
+    assert first.status_code == 409
+    assert body["code"] == "laya_clamp"
+    assert body["message"] == "Not placed. Laya allows up to 1."
+    sandbox.place_order.assert_not_called()
+    second = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "quantity": 1},
+        headers=_headers("practice"),
+    )
+    assert second.status_code == 200
+    sandbox.place_order.assert_called_once()
+
+
+@pytest.mark.unit
+def test_place_100_after_a_150_cap_passes_admission(backend_lease_proof) -> None:
+    process_laya().set_status(DecisionStatus.READY)
+    app, router, safety = _live_app(backend_lease_proof)
+    first = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json={**_BODY, "quantity": 150},
+        headers=_headers("live", unlocked=True),
+    )
+    body = first.get_json()
+    assert first.status_code == 409
+    assert body["message"] == "Not placed. Laya allows up to 100."
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+    second = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json={**_BODY, "quantity": 100},
+        headers=_headers("live", unlocked=True),
+    )
+    assert second.status_code == 503
+    assert second.get_json().get("code") not in {"laya_denied", "laya_clamp"}
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_live_place_without_a_note_denies_as_uncertain(backend_lease_proof) -> None:
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, router, safety = _live_app(backend_lease_proof)
+    response = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json=_BODY,
+        headers=_headers("live", unlocked=True),
+    )
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["code"] == "laya_denied"
+    assert body["reason"] == "Laya is uncertain. Live stays closed."
+    assert "concrete reason is required" not in json.dumps(body)
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+    assert host.calls == []
+
+
+@pytest.mark.unit
+def test_practice_model_deny_never_reaches_the_sandbox() -> None:
+    host = _ScriptedHost(_deny_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "rationale": "I am chasing the last loss."},
+        headers=_headers("practice"),
+    )
+    assert response.status_code == 403
+    assert response.get_json()["code"] == "laya_denied"
+    sandbox.place_order.assert_not_called()
+    assert host.calls
+
+
+@pytest.mark.unit
+def test_practice_model_allow_reaches_the_sandbox() -> None:
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "rationale": "Buying the planned breakout."},
+        headers=_headers("practice"),
+    )
+    assert response.status_code == 200
+    sandbox.place_order.assert_called_once()
+
+
+@pytest.mark.unit
+def test_live_model_deny_stops_before_safety_and_the_router(backend_lease_proof) -> None:
+    host = _ScriptedHost(_deny_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, router, safety = _live_app(backend_lease_proof)
+    response = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json={**_BODY, "rationale": "I need to win it back."},
+        headers=_headers("live", unlocked=True),
+    )
+    assert response.status_code == 403
+    assert response.get_json()["code"] == "laya_denied"
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_action_center_model_deny_stops_before_safety(backend_lease_proof, monkeypatch) -> None:
+    import threading
+    import time
+
+    from flinttrade_core.agent_routes import (
+        _RUNNER,
+        _RUNNER_LOCK,
+        _reset_runner_for_tests,
+        dispatch_action_center_approval,
+    )
+    from flinttrade_engine.action_center import ApprovalRequest
+
+    host = _ScriptedHost(_deny_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, router, safety = _live_app(backend_lease_proof)
+    monkeypatch.setattr(
+        "flinttrade_core.order_routes._require_live_payload",
+        lambda **_kwargs: ({"jti": "j", "sub": "operator"}, None),
+    )
+    monkeypatch.setattr("flinttrade_core.agent_routes._acl_grants_agent", lambda *_args, **_kwargs: True)
+    trader = MagicMock()
+    trader.stop_requested = False
+    thread = threading.Thread(target=lambda: time.sleep(2), daemon=True)
+    thread.start()
+    approval = ApprovalRequest(
+        id="approval-1",
+        order_params={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 1,
+            "product": "MIS",
+            "order_type": "MARKET",
+        },
+        reason="I need to win the last loss back.",
+        created_at="t",
+        expires_at="t",
+        adapter_id="dhan",
+        account_id="default",
+        source="autonomous-agent",
+        intent_type="entry",
+        producer_ref="prod-1",
+        intent_context={"entry_price": 100.0, "stop_loss": 90.0, "take_profit": 110.0},
+    )
+    try:
+        with _RUNNER_LOCK:
+            _RUNNER.clear()
+            _RUNNER.update(
+                {
+                    "producer_ref": "prod-1",
+                    "trader": trader,
+                    "thread": thread,
+                    "loop": None,
+                    "params": {"broker": "dhan", "account_id": "default"},
+                }
+            )
+        with app.app_context():
+            result = dispatch_action_center_approval(approval)
+    finally:
+        _reset_runner_for_tests()
+    assert result.succeeded is False
+    assert result.status_code == 403
+    assert "tilt or revenge" in result.message
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+    assert host.calls
+    assert "win the last loss back" in host.calls[0]

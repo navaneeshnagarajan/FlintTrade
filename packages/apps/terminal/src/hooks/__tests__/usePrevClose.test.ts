@@ -3,7 +3,7 @@
  *
  * Strategy:
  *   - Mock getMultiQuotes and getQuotes (api.ts) to return deterministic Quote values
- *   - Mock useConnectionStore to control apiKey (enabled/disabled gate)
+ *   - Mock native broker connectivity to control the query (enabled/disabled gate)
  *   - Use renderHook with a wrapper that provides both:
  *       - Jotai Provider (custom store for inspection)
  *       - QueryClientProvider (TanStack Query, no retries in tests)
@@ -18,26 +18,35 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore, Provider } from "jotai";
 import React from "react";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { useModeStore } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import type { BrokerAccount } from "@/types/broker";
+function selectNativeAccount(accountId = "A1") {
+  useModeStore.setState({ mode: "live" });
+  useBrokerStore.setState({ accounts: [{ account_id: accountId, broker: "dhan", source: "native", label: "Test", status: "connected", connected_at: null, error_message: null, is_primary: true } as BrokerAccount], activeAccountId: `native:dhan:${accountId}` });
+}
 import type { Quote } from "@/types/api";
 
 // --- Mocks ------------------------------------------------------------------
 
-const mockGetMultiQuotes = vi.fn<(symbols: Array<{ symbol: string; exchange: string }>) => Promise<Quote[]>>();
-const mockGetQuotes = vi.fn<(symbol: string, exchange: string) => Promise<Quote>>();
+const mockGetMultiQuotes = vi.fn<(symbols: Array<{ symbol: string; exchange: string }>, signal?: AbortSignal, scope?: string) => Promise<Quote[]>>();
+const mockGetQuotes = vi.fn<(symbol: string, exchange: string, signal?: AbortSignal, scope?: string) => Promise<Quote>>();
 
 vi.mock("@/services/api", () => ({
-  getMultiQuotes: (symbols: Array<{ symbol: string; exchange: string }>) =>
-    mockGetMultiQuotes(symbols),
-  getQuotes: (symbol: string, exchange: string) =>
-    mockGetQuotes(symbol, exchange),
+  getMultiQuotes: (symbols: Array<{ symbol: string; exchange: string }>, signal?: AbortSignal, scope?: string) =>
+    mockGetMultiQuotes(symbols, signal, scope),
+  getQuotes: (symbol: string, exchange: string, signal?: AbortSignal, scope?: string) =>
+    mockGetQuotes(symbol, exchange, signal, scope),
 }));
 
-let _apiKey = "test-api-key";
+let _connected = true;
 
-vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: (selector: (s: { apiKey: string }) => unknown) => {
-    return selector({ apiKey: _apiKey });
-  },
+vi.mock("@/hooks/useBrokerConnected", () => ({ useBrokerConnected: () => _connected }));
+let mockScope = "live:native:dhan:A1";
+vi.mock("@/hooks/useDataScope", () => ({
+  useMarketDataScope: () => mockScope,
+  requireCurrentMarketDataScope: (scope: string) => { if (scope !== mockScope) throw new Error("Authority changed"); },
+  MarketDataAuthorityChangedError: class extends Error {},
 }));
 
 // ----------------------------------------------------------------------------
@@ -77,7 +86,9 @@ describe("usePrevClose", () => {
   beforeEach(() => {
     store = createStore();
     queryClient = makeQueryClient();
-    _apiKey = "test-api-key";
+    _connected = true;
+    mockScope = "live:native:dhan:A1";
+    selectNativeAccount();
     mockGetMultiQuotes.mockReset();
     mockGetQuotes.mockReset();
   });
@@ -87,8 +98,8 @@ describe("usePrevClose", () => {
     vi.clearAllMocks();
   });
 
-  it("does nothing when apiKey is empty (query is disabled)", async () => {
-    _apiKey = "";
+  it("does nothing when no native broker is connected (query is disabled)", async () => {
+    _connected = false;
     mockGetMultiQuotes.mockResolvedValue([]);
 
     renderHook(() => usePrevClose(), {
@@ -124,7 +135,7 @@ describe("usePrevClose", () => {
     );
   });
 
-  it("reads prev_close (OpenAlgo field) as the primary prevClose source", async () => {
+  it("reads prev_close (native broker field) as the primary prevClose source", async () => {
     // Pre-seed atom with live LTP data (as WS bridge would do)
     store.set(tickAtomFamily("NSE_INDEX:NIFTY"), {
       symbol: "NIFTY",
@@ -399,4 +410,102 @@ describe("usePrevClose", () => {
     // No atoms should be set
     expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
   });
+  it("aborts old previous-close authority without starting fallback reads or seeding its atoms", async () => {
+    const requests: Array<{ symbols: Array<{ symbol: string; exchange: string }>; signal: AbortSignal; scope: string; finish: (value: Quote[]) => void }> = [];
+    mockGetMultiQuotes.mockImplementation((symbols, signal, scope) => new Promise((finish) => { requests.push({ symbols, signal: signal!, scope: scope!, finish }); }));
+    const { rerender } = renderHook(() => usePrevClose(), { wrapper: makeWrapper(store, queryClient) });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    mockScope = "practice:native:upstox:B1";
+    useModeStore.setState({ mode: "practice" });
+    useBrokerStore.setState({ accounts: [{ account_id: "B1", broker: "upstox", source: "native", label: "B", status: "connected", is_primary: true, connected_at: null, error_message: null }], activeAccountId: "native:upstox:B1" });
+    rerender();
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0].signal.aborted).toBe(true);
+    expect(requests[1].scope).toBe(mockScope);
+    await act(async () => { requests[0].finish(requests[0].symbols.map((s) => ({ ...s, ltp: 100, prev_close: 90 }) as Quote)); });
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+    expect(mockGetQuotes).not.toHaveBeenCalled();
+    await act(async () => { requests[1].finish(requests[1].symbols.map((s) => ({ ...s, ltp: 100, prev_close: 110 }) as Quote)); });
+    await waitFor(() => expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))?.prevClose).toBe(110));
+  });
+
+  it("restores previous-close fetching after root StrictMode replay and aborts on unmount", async () => {
+    const requests: Array<{ signal: AbortSignal; finish: (value: Quote[]) => void }> = [];
+    mockGetMultiQuotes.mockImplementation((_symbols, signal) => new Promise((finish) => { requests.push({ signal: signal!, finish }); }));
+    const { unmount } = renderHook(() => usePrevClose(), { wrapper: makeWrapper(store, queryClient), reactStrictMode: true });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0].signal.aborted).toBe(true);
+    expect(requests[1].signal.aborted).toBe(false);
+    unmount();
+    expect(requests[1].signal.aborted).toBe(true);
+    await act(async () => { requests.forEach((request) => request.finish([])); });
+    expect(mockGetQuotes).not.toHaveBeenCalled();
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+  });
+
+  it("refuses a pending A reference after batched return and admits the fresh returned-A result", async () => {
+    const requests: Array<{ symbols: Array<{ symbol: string; exchange: string }>; signal: AbortSignal; finish: (value: Quote[]) => void }> = [];
+    mockGetMultiQuotes.mockImplementation((symbols, signal) => new Promise((finish) => { requests.push({ symbols, signal: signal!, finish }); }));
+    renderHook(() => usePrevClose(), { wrapper: makeWrapper(store, queryClient) });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    act(() => { selectNativeAccount("A2"); selectNativeAccount(); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0].signal.aborted).toBe(true);
+    await act(async () => { requests[0].finish(requests[0].symbols.map((s) => ({ ...s, ltp: 999, prev_close: 999 }) as Quote)); });
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+    expect(mockGetQuotes).not.toHaveBeenCalled();
+    await act(async () => { requests[1].finish(requests[1].symbols.map((s) => ({ ...s, ltp: 101, prev_close: 90 }) as Quote)); });
+    await waitFor(() => expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))?.prevClose).toBe(90));
+  });
+
+  it("clears the cached A reference on batched return until a fresh reference arrives", async () => {
+    let finish!: (quotes: Quote[]) => void;
+    let symbols: Array<{ symbol: string; exchange: string }> = [];
+    mockGetMultiQuotes.mockImplementationOnce((items) => Promise.resolve(items.map((s) => ({ ...s, ltp: 101, prev_close: 90 }) as Quote)));
+    mockGetMultiQuotes.mockImplementation((items) => {
+      symbols = items;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    renderHook(() => usePrevClose(), { wrapper: makeWrapper(store, queryClient) });
+    await waitFor(() => expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))?.prevClose).toBe(90));
+    act(() => { selectNativeAccount("A2"); selectNativeAccount(); });
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+    await waitFor(() => expect(mockGetMultiQuotes).toHaveBeenCalledTimes(2));
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+    await act(async () => { finish(symbols.map((s) => ({ ...s, ltp: 102, prev_close: 91 }) as Quote)); });
+    await waitFor(() => expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))?.prevClose).toBe(91));
+  });
+
+  it("retires a pending individual fallback across batched return without dispatching its remaining instruments", async () => {
+    let finish!: (quote: Quote) => void;
+    let freshFinish!: (quotes: Quote[]) => void;
+    let freshSymbols: Array<{ symbol: string; exchange: string }> = [];
+    mockGetMultiQuotes.mockResolvedValueOnce([]);
+    mockGetMultiQuotes.mockImplementation((symbols) => {
+      freshSymbols = symbols;
+      return new Promise((resolve) => { freshFinish = resolve; });
+    });
+    mockGetQuotes.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    renderHook(() => usePrevClose(), { wrapper: makeWrapper(store, queryClient) });
+    await waitFor(() => expect(mockGetQuotes).toHaveBeenCalledTimes(1));
+    const retiredSignal = mockGetQuotes.mock.calls[0][2]!;
+    act(() => { selectNativeAccount("A2"); selectNativeAccount(); });
+    await waitFor(() => expect(mockGetMultiQuotes).toHaveBeenCalledTimes(2));
+    expect(retiredSignal.aborted).toBe(true);
+    await act(async () => { finish({ symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 999, prev_close: 999 } as Quote); });
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+    expect(mockGetQuotes).toHaveBeenCalledTimes(1);
+    await act(async () => { freshFinish(freshSymbols.map((s) => ({ ...s, ltp: 102, prev_close: 91 }) as Quote)); });
+    await waitFor(() => expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))?.prevClose).toBe(91));
+  });
+
+  it("refuses non-finite prior closes instead of seeding tick references", async () => {
+    mockGetMultiQuotes.mockImplementation((symbols) => Promise.resolve(symbols.map((s) => ({ ...s, ltp: 100, prev_close: Infinity, close: -Infinity }) as Quote)));
+    mockGetQuotes.mockResolvedValue({ symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 100, prev_close: Infinity, close: Infinity } as Quote);
+    renderHook(() => usePrevClose(), { wrapper: makeWrapper(store, queryClient) });
+    await waitFor(() => expect(mockGetQuotes).toHaveBeenCalledTimes(10), { timeout: 2500 });
+    await act(async () => { await Promise.resolve(); });
+    expect(store.get(tickAtomFamily("NSE_INDEX:NIFTY"))).toBeNull();
+  });
+
 });

@@ -95,12 +95,15 @@ function buildOptionsDesk(): IJsonModel {
 // ---------------------------------------------------------------------------
 // Preset 3 — Market Watch (also used as the default startup layout)
 //
+// The dedicated ticker strip already shows live prices, so this desk does
+// not repeat them in a Live Prices panel. Positions takes that slot.
+//
 // ┌──────────┬────────────────────┐
 // │          │                    │
 // │ Watchlist│      Chart         │
 // │          │                    │
 // ├──────────┼────────────────────┤
-// │  Ticker  │    Indices         │
+// │ Positions│    Indices         │
 // └──────────┴────────────────────┘
 // ---------------------------------------------------------------------------
 function buildMarketWatch(): IJsonModel {
@@ -108,7 +111,7 @@ function buildMarketWatch(): IJsonModel {
     rowJson(100, [
       rowJson(25, [
         tabsetJson(72, [tabJson("watchlist", "Watchlist")]),
-        tabsetJson(28, [tabJson("ticker", "Ticker")]),
+        tabsetJson(28, [tabJson("positions", "Positions")]),
       ]),
       rowJson(75, [
         tabsetJson(72, [tabJson("chart", "Chart")]),
@@ -270,7 +273,7 @@ function buildSectorView(): IJsonModel {
 // │Strategy        │              │
 // │ Templates      │              │
 // └────────────────┴──────────────┘
-// Flow Builder lives at /automate — the chart stands in as analysis surface.
+// Automation uses its dedicated schedules and strategy monitor route.
 // ---------------------------------------------------------------------------
 function buildOrderAutomation(): IJsonModel {
   return workspaceJson(
@@ -658,7 +661,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "market-watch",
     name: "Market Watch",
-    description: "Watchlist + Chart + Ticker + Dashboard",
+    description: "Watchlist + Chart + Positions + Indices",
     icon: "Star",
     build: buildMarketWatch,
   },

@@ -219,7 +219,7 @@ def _restore_env():
 @pytest.fixture(scope="module")
 def route_client(_restore_env):
     """Flask test client with an in-memory ActivityLog pre-seeded with entries."""
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
     from flinttrade_data.activity_log import ActivityLog
 

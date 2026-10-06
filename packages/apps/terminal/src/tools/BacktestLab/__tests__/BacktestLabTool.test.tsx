@@ -56,6 +56,7 @@ const chartMocks = vi.hoisted(() => {
 
 const apiMocks = vi.hoisted(() => ({
   runBacktest: vi.fn(),
+  getStrategies: vi.fn().mockRejectedValue(new Error("Catalogue unavailable")),
 }));
 
 vi.mock("lightweight-charts", () => ({
@@ -84,6 +85,7 @@ vi.mock("@/hooks/useChartTheme", () => ({
 
 vi.mock("@/services/ftApi", () => ({
   runBacktest: apiMocks.runBacktest,
+  getStrategies: apiMocks.getStrategies,
 }));
 
 vi.mock("@/components/ui/select", async () => {
@@ -169,6 +171,16 @@ describe("BacktestLabTool", () => {
   });
 
   it("routes the equity curve through the shared Flint line chart runtime", async () => {
+    apiMocks.runBacktest.mockResolvedValue({
+      trades: [],
+      equity_curve: [
+        { timestamp: "2026-01-01T00:00:00Z", equity: 1000000 },
+        { timestamp: "2026-01-02T00:00:00Z", equity: 1001000 },
+      ],
+      metrics: { total_return: 0.1, total_trades: 0 },
+      final_equity: 1001000,
+      total_bars: 2,
+    });
     const user = userEvent.setup();
     renderBacktestLab();
 
@@ -176,7 +188,7 @@ describe("BacktestLabTool", () => {
     await user.type(screen.getByPlaceholderText("RELIANCE"), "RELIANCE");
     await user.click(screen.getByRole("button", { name: /Run Backtest/i }));
 
-    await screen.findByText("Mock data");
+    await screen.findByRole("img", { name: "Backtest equity curve" });
 
     await waitFor(() => {
       expect(chartMocks.lineRuntime.addLineSeries).toHaveBeenCalledTimes(1);
@@ -189,6 +201,15 @@ describe("BacktestLabTool", () => {
         priceFormat: { type: "price", precision: 0, minMove: 1 },
       }),
     ]);
+  });
+
+  it("keeps a failed real run visible without substituting invented results", async () => {
+    renderBacktestLab();
+    await userEvent.type(screen.getByPlaceholderText("RELIANCE"), "RELIANCE");
+    await userEvent.click(screen.getByRole("button", { name: /Run Backtest/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Backend unavailable");
+    expect(screen.queryByRole("img", { name: "Backtest equity curve" })).not.toBeInTheDocument();
+    expect(chartMocks.lineRuntime.addLineSeries).not.toHaveBeenCalled();
   });
 
   it("keeps fallback chart artwork out of local inline SVG markup", () => {

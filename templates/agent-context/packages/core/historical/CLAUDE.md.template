@@ -10,22 +10,14 @@
 
 See `packages/core/historical/pyproject.toml` for declared dependencies and optional extras.
 
-## Rules
-- Read root CLAUDE.md for project-wide rules
-- Use `flinttrade_core.openalgo_client` (`packages/core/core/src/flinttrade_core/openalgo_client.py`) for the optional OpenAlgo REST bridge. Live writes must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and flow through `BrokerRouter`; never call broker writes directly.
-- Keep shared service logic broker-neutral; broker-specific implementations and capability differences belong in gateway adapters.
-- Tests are in the `tests/` directory. Add new test files as needed.
-- Update root `changelog.md` only for shipped user-visible or API changes; do not add entries for tests, behaviour-preserving refactors or in-flight design.
-- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
-
 ## Multi-exchange data
 - Support historical data for ALL exchanges: NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX
 - MCX data includes evening session (post 3:30 PM)
 - Expired commodity options available via broker API (some brokers provide 5yr data)
-- openchart library provides free NSE/NFO data only — MCX/CDS needs broker API via OpenAlgo
+- openchart library provides free NSE/NFO data only — MCX/CDS needs broker API via the native gateway
 
 ## Crypto historical data
-- Delta Exchange historical via OpenAlgo API
+- Delta Exchange historical via the native gateway API
 - Supplementary: yfinance for BTC/ETH/commodity prices (free)
 - Supplementary: `pip install ccxt` for exchange-specific historical (optional, not currently integrated)
 - Commodity prices from yfinance are international futures proxies with approximate USDINR conversion, not native MCX exchange data; see `src/flinttrade_historical/service_profiles.py` and `free_data.py`.

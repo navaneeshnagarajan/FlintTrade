@@ -60,7 +60,7 @@ from flinttrade_core.broker_read_port import (
     QuoteSnapshot,
     TradeSnapshot,
 )
-from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.models import (
     OHLCV,
     Candles,
@@ -85,7 +85,6 @@ from flinttrade_engine.request_context import RequestContext
 from .registry import (
     BrokerRegistry,
     ConnectedRegistrySession,
-    OpenAlgoDefaultCompatibilitySessionVersion,
 )
 from .session_provider import AuthenticatingSessionProvider
 
@@ -139,7 +138,7 @@ _ROLE_OPERATIONS = {
 class _Grant:
     selector: BrokerSelector
     role: BrokerDataRole | None
-    binding: SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion
+    binding: SessionVersion
     context: RequestContext
     verify_current_authority: Callable[[], RequestContext | None] | None
     allowed: frozenset[_Operation]
@@ -157,6 +156,14 @@ _FACADE_LOCK = threading.RLock()
 _FACADE_OWNERS: weakref.WeakKeyDictionary[_BrokerReadFacade, weakref.ReferenceType[BrokerReadOwner]] = (
     weakref.WeakKeyDictionary()
 )
+
+
+class _ReadAdmissionRefused(Exception):
+    """Internal control flow for an authority refusal while awaiting a token."""
+
+    def __init__(self, failure: BrokerReadFailure) -> None:
+        super().__init__()
+        self.failure = failure
 
 
 class _BrokerReadFacade:
@@ -378,12 +385,12 @@ class BrokerReadOwner:
 
     def _current_binding(
         self, selector: BrokerSelector
-    ) -> SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion:
+    ) -> SessionVersion:
         self._provider.current_authority_for(selector)
         state = self._registry.snapshot_exact_state(selector)
         if state is None or state.status != "connected" or state.binding is None:
             raise RegistrySessionUnavailable
-        if type(state.binding) not in (SessionVersion, OpenAlgoDefaultCompatibilitySessionVersion):
+        if type(state.binding) is not SessionVersion:
             raise RegistrySessionUnavailable
         return state.binding
 
@@ -498,9 +505,9 @@ class BrokerReadOwner:
     @classmethod
     def _provenance(
         cls,
-        binding: SessionVersion | OpenAlgoDefaultCompatibilitySessionVersion, role: BrokerDataRole | None
+        binding: SessionVersion, role: BrokerDataRole | None
     ) -> BrokerReadProvenance:
-        if type(binding) not in (SessionVersion, OpenAlgoDefaultCompatibilitySessionVersion):
+        if type(binding) is not SessionVersion:
             raise ValueError
         registry = binding.registry_version
         if type(registry) is not RegistrySelectorVersion:
@@ -710,6 +717,8 @@ class BrokerReadOwner:
         self,
         grant: _Grant,
         capability: str | tuple[str, ...],
+        *,
+        depth_exchange: str | None = None,
     ) -> _ProviderCall | BrokerReadFailure:
         first = self._revalidate(grant)
         if type(first) is BrokerReadFailure:
@@ -738,9 +747,32 @@ class BrokerReadOwner:
                 break
         if selected is None:
             return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+        if selected == "depth":
+            # A request outside an adapter's static depth scope makes no provider
+            # call, so it must not wait for or consume quote/data quota either.
+            missing = object()
+            exchanges = inspect.getattr_static(adapter_type, "_BROKER_READ_DEPTH_EXCHANGES", missing)
+            if exchanges is not missing and (
+                type(exchanges) is not frozenset
+                or any(type(exchange) is not str or not exchange for exchange in exchanges)
+                or depth_exchange not in exchanges
+            ):
+                return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
         if self._rate_limiter is not None:
+            def revalidate_waiter() -> None:
+                result = self._revalidate(grant)
+                if type(result) is BrokerReadFailure:
+                    raise _ReadAdmissionRefused(result)
+
             try:
-                await self._rate_limiter.acquire(grant.selector.adapter_id, "data")
+                # Single/batch quotes and quote-backed depth share the stricter
+                # market-quote cap as well as the generic data budget.
+                kind = "quote" if selected in {"quotes", "depth"} else "data"
+                await self._rate_limiter.acquire(
+                    grant.selector.adapter_id, kind, before_retry=revalidate_waiter
+                )
+            except _ReadAdmissionRefused as refusal:
+                return refusal.failure
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         second = self._revalidate(grant)
@@ -1038,11 +1070,13 @@ class BrokerReadOwner:
         if type(grant) is BrokerReadFailure:
             return grant
         try:
-            call = await self._admit_provider(grant, "depth")
+            call = await self._admit_provider(grant, "depth", depth_exchange=request.instrument.exchange)
             if type(call) is BrokerReadFailure:
                 return call
             try:
                 raw_result = await call.method(call.handle, request)
+            except UnsupportedCapabilityError:
+                return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
             except BrokerReadResponseInvalid:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             except Exception:
@@ -1353,14 +1387,14 @@ class BrokerReadOwner:
             try:
                 if type(raw) is not list or len(raw) != len(request.positions):
                     raise ValueError
-                copied = self._portfolio_rows(raw, request.positions, grant.selector.adapter_id == "openalgo")
+                copied = self._portfolio_rows(raw, request.positions)
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             return self._published(grant, copied)
         finally:
             self._end(grant)
 
-    def _portfolio_rows(self, raw: list[object], requested: tuple[PortfolioPositionRef, ...], openalgo: bool):
+    def _portfolio_rows(self, raw: list[object], requested: tuple[PortfolioPositionRef, ...]):
         expected = {(item.exchange, item.symbol): item for item in requested}
         if len(expected) != len(requested):
             raise ValueError
@@ -1376,7 +1410,7 @@ class BrokerReadOwner:
             instrument_id = self._text(row, "instrument_id")
             if expected_row.instrument_id is not None and instrument_id != expected_row.instrument_id:
                 raise ValueError
-            if expected_row.instrument_id is None and not openalgo and instrument_id is None:
+            if expected_row.instrument_id is None and instrument_id is None:
                 raise ValueError
             if instrument_id is not None:
                 if instrument_id in seen_ids:

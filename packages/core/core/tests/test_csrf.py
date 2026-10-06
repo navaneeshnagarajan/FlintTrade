@@ -32,7 +32,7 @@ _TEST_API_KEY = "csrf-test-api-key"
 @pytest.fixture()
 def app():
     """Create a Flask test app with auth middleware active."""
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app
@@ -42,8 +42,8 @@ def app():
     yield flask_app
 
     # Restore — don't leak test key
-    if os.environ.get("OPENALGO_API_KEY") == _TEST_API_KEY:
-        os.environ.pop("OPENALGO_API_KEY", None)
+    if os.environ.get("FLINTTRADE_API_KEY") == _TEST_API_KEY:
+        os.environ.pop("FLINTTRADE_API_KEY", None)
 
 
 @pytest.fixture()
@@ -133,9 +133,11 @@ class TestPublicEndpointBypass:
         assert resp.status_code in (401, 503)
         data = resp.get_json()
         # The error should be about credentials or service, not about API key
-        assert "unauthorized" not in data.get("message", "").lower() or \
-            "credentials" in data.get("message", "").lower() or \
-            "service" in data.get("message", "").lower()
+        assert (
+            "unauthorized" not in data.get("message", "").lower()
+            or "credentials" in data.get("message", "").lower()
+            or "service" in data.get("message", "").lower()
+        )
 
     def test_auth_setup_no_key_required(self, client: Any) -> None:
         """POST /v1/auth/setup is public — accessible without API key."""
@@ -155,25 +157,52 @@ class TestPublicEndpointBypass:
         """Documented public liveness probe stays reachable without an API key."""
         resp = client.get("/api/v1/ping")
         assert resp.status_code == 200
-        assert resp.get_json()["status"] == "ok"
+        body = resp.get_json()
+        assert set(body) == {
+            "status",
+            "timestamp",
+            "laya",
+            "laya_practice",
+            "laya_live_qualified",
+            "laya_reason",
+            "laya_port",
+            "laya_download_bytes",
+            "laya_download_total",
+        }
+        assert body["status"] == "ok"
+        assert body["laya"] in {"ready", "degraded", "down"}
+        text = resp.get_data(as_text=True).lower()
+        assert "version" not in text
+        assert "/home/" not in text
+        for detail in ("broker", "duckdb", "disk", "memory", "checks", "path"):
+            assert detail not in text
 
-    def test_api_v1_health_no_key_required(self, client: Any) -> None:
-        """Documented public aggregated health surface stays reachable without a key."""
+    def test_api_v1_health_requires_a_session(self, client: Any) -> None:
+        """Aggregated health includes subsystem detail and stays behind a session."""
         resp = client.get("/api/v1/health")
-        assert resp.status_code in (200, 503)
-        assert resp.get_json()["status"] in ("ok", "degraded", "error")
+        assert resp.status_code == 401
 
-    def test_process_health_paths_require_api_key_when_configured(self, client: Any) -> None:
-        """``/healthz`` and ``/health/detail`` stay key-gated when a key is set.
+    def test_process_probes_are_status_only(self, client: Any) -> None:
+        """``/healthz`` and ``/readyz`` are public and return only a status.
 
-        ``docs/API.md`` tells operators to probe ``/api/v1/ping`` and
-        ``/api/v1/health`` instead. Opening the whole health blueprint would
-        also publish workspace paths from ``/health/detail``.
+        ``/health`` and ``/health/detail`` stay behind a session so a probe
+        cannot publish workspace paths or config.
         """
         healthz = client.get("/healthz")
-        assert healthz.status_code == 401
-        detail = client.get("/health/detail")
-        assert detail.status_code == 401
+        assert healthz.status_code == 200
+        assert set(healthz.get_json()) == {"status"}
+        assert healthz.get_json()["status"] == "ok"
+        readyz = client.get("/readyz")
+        assert readyz.status_code in (200, 503)
+        assert set(readyz.get_json()) == {"status"}
+        assert readyz.get_json()["status"] in {"ready", "not_ready"}
+        for resp in (healthz, readyz):
+            text = resp.get_data(as_text=True).lower()
+            assert "version" not in text
+            assert "path" not in text
+            assert "config" not in text
+        assert client.get("/health").status_code == 401
+        assert client.get("/health/detail").status_code == 401
 
 
 # ---------------------------------------------------------------------------

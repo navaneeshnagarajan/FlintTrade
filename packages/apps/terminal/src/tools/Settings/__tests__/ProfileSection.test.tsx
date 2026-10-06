@@ -24,6 +24,14 @@ describe("ProfileSection", () => {
 
   afterEach(() => cleanup());
 
+  it.each([["beginner", "Getting Started"], ["intermediate", "Confident"], ["pro", "Expert"], ["custom", "Custom"]] as const)(
+    "shows the shared label for %s", (experience, label) => {
+      act(() => useSettingsStore.setState({ experience }));
+      render(<ProfileSection />);
+      expect(screen.getByText(label)).toBeVisible();
+    },
+  );
+
   it("renders the operator display name", () => {
     render(<ProfileSection />);
     expect(screen.getByText("Navaneesh")).toBeInTheDocument();
@@ -40,7 +48,7 @@ describe("ProfileSection", () => {
 
   it("shows the live mode and connection context", () => {
     render(<ProfileSection />);
-    expect(screen.getByText(/explore mode/i)).toBeInTheDocument();
+    expect(screen.getByText("Example mode")).toBeInTheDocument();
     expect(screen.getByText(/gateway disconnected/i)).toBeInTheDocument();
   });
 
@@ -50,10 +58,10 @@ describe("ProfileSection", () => {
     expect(screen.getByText(/gateway connected/i)).toBeInTheDocument();
   });
 
-  it("deep-links to a settings section via the hash", () => {
+  it("does not repeat the Settings navigation grid", () => {
     render(<ProfileSection />);
-    fireEvent.click(screen.getByRole("button", { name: /open brokers settings/i }));
-    expect(window.location.hash).toBe("#brokers");
+    expect(screen.queryByText(/Preferences & optimisation/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open brokers settings/i })).not.toBeInTheDocument();
   });
 
   // The most security-relevant Profile Manager actions — only shown when the

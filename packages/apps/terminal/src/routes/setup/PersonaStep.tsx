@@ -136,7 +136,7 @@ export const INTERESTS = [
   { id: "investing",   label: "Investing",            icon: PiggyBank,       desc: "Mutual funds, SIPs, portfolio, net worth"   },
   { id: "trading",     label: "Trading",              icon: CandlestickChart, desc: "F&O scalping, options, intraday"           },
   { id: "backtesting", label: "Backtesting",          icon: Zap,             desc: "Strategy testing, walk-forward, optimization" },
-  { id: "automation",  label: "Automation",           icon: Workflow,        desc: "Flow builder, cron jobs, alerts"            },
+  { id: "automation",  label: "Automation",           icon: Workflow,        desc: "Schedules, strategy monitors, alerts"            },
   { id: "ai",          label: "AI & Analysis",        icon: Bot,             desc: "LLM advisor, sentiment, signals"            },
 ] as const;
 

@@ -22,8 +22,28 @@ export interface OperatorSignalSnapshot {
   observedHostDown: boolean;
   observedBackendUnreachable: boolean;
   llmChrome: string | null;
-  /** Down until a heartbeat reports Ready or Degraded. Null is not Ready. */
+  /** Live-facing status. Down until a heartbeat reports Ready or Degraded. Null is not Ready. */
   decisionStatus: "ready" | "degraded" | "down" | null;
+  /** Sidecar status for Practice and Explore. Null is not Ready. */
+  layaPracticeStatus: "ready" | "degraded" | "down" | null;
+  /** True only when a qualification record covers the pin. */
+  layaLiveQualified: boolean;
+  /** Sidecar reason code. Null when Ready or Degraded has cleared it. */
+  layaReason: string | null;
+  /** Loopback port the reason refers to. The host stays 127.0.0.1. */
+  layaPort: number;
+  /** Bytes received while the reason is `downloading`. */
+  layaDownloadBytes: number | null;
+  /** Bytes expected while the reason is `downloading`. */
+  layaDownloadTotal: number | null;
+  /** True after a stop or start until the next ping confirms the gate. */
+  layaChecking: boolean;
+  /** `ollama` when the gate is on that route. Null keeps the sidecar copy. */
+  layaRoute: "ollama" | null;
+  /** True when FlintTrade installed Ollama and can start it. */
+  layaManaged: boolean;
+  /** Bumps when a place updates the chip, so an older ping cannot overwrite it. */
+  layaEpoch: number;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -39,6 +59,16 @@ const INITIAL: OperatorSignalSnapshot = {
   observedBackendUnreachable: false,
   llmChrome: null,
   decisionStatus: "down",
+  layaPracticeStatus: "down",
+  layaLiveQualified: false,
+  layaReason: null,
+  layaPort: 8000,
+  layaDownloadBytes: null,
+  layaDownloadTotal: null,
+  layaChecking: false,
+  layaRoute: null,
+  layaManaged: false,
+  layaEpoch: 0,
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {
@@ -48,6 +78,23 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setPublicInternet: (publicInternet: OperatorSignalSnapshot["publicInternet"]) => void;
   setLlmChrome: (llmChrome: string | null) => void;
   setDecisionStatus: (decisionStatus: OperatorSignalSnapshot["decisionStatus"]) => void;
+  setLayaPracticeStatus: (layaPracticeStatus: OperatorSignalSnapshot["layaPracticeStatus"]) => void;
+  setLayaLiveQualified: (layaLiveQualified: boolean) => void;
+  setLayaReason: (layaReason: string | null) => void;
+  setLayaPort: (layaPort: number) => void;
+  setLayaDownloadProgress: (layaDownloadBytes: number | null, layaDownloadTotal: number | null) => void;
+  /** The order gate refused because Laya is Down. The chip must not stay Ready. */
+  noteLayaDown: () => void;
+  /**
+   * Start Laya was accepted, or a place was admitted while the chip was not
+   * Ready or Degraded, and no ping has confirmed the gate yet. The chip says
+   * Checking, not the last label.
+   */
+  noteLayaUnconfirmed: () => void;
+  /** Clear or set Checking without moving the epoch. A confirmed ping clears it. */
+  setLayaChecking: (layaChecking: boolean) => void;
+  setLayaRoute: (layaRoute: "ollama" | null) => void;
+  setLayaManaged: (layaManaged: boolean) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -69,6 +116,24 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   setPublicInternet: (publicInternet) => set({ publicInternet }),
   setLlmChrome: (llmChrome) => set({ llmChrome }),
   setDecisionStatus: (decisionStatus) => set({ decisionStatus }),
+  setLayaPracticeStatus: (layaPracticeStatus) => set({ layaPracticeStatus }),
+  setLayaLiveQualified: (layaLiveQualified) => set({ layaLiveQualified }),
+  setLayaReason: (layaReason) => set({ layaReason }),
+  setLayaPort: (layaPort) => set({ layaPort }),
+  setLayaDownloadProgress: (layaDownloadBytes, layaDownloadTotal) => set({ layaDownloadBytes, layaDownloadTotal }),
+  noteLayaDown: () => set((state) => ({
+    decisionStatus: "down",
+    layaPracticeStatus: "down",
+    layaChecking: false,
+    layaEpoch: state.layaEpoch + 1,
+  })),
+  noteLayaUnconfirmed: () => set((state) => ({
+    layaChecking: true,
+    layaEpoch: state.layaEpoch + 1,
+  })),
+  setLayaChecking: (layaChecking) => set({ layaChecking }),
+  setLayaRoute: (layaRoute) => set({ layaRoute }),
+  setLayaManaged: (layaManaged) => set({ layaManaged }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

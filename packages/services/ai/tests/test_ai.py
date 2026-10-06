@@ -7,6 +7,8 @@ LLM/ChromaDB/LightGBM/CatBoost calls are mocked.
 from __future__ import annotations
 
 import os
+
+import pytest
 from unittest.mock import MagicMock
 
 
@@ -160,7 +162,7 @@ class TestRAG:
     def test_rag_engine_infer_doc_type(self):
         from flinttrade_ai.rag import RAGEngine
         assert RAGEngine._infer_doc_type("my_strategy.md") == "strategy"
-        assert RAGEngine._infer_doc_type("OPENALGO_API.md") == "api_docs"
+        assert RAGEngine._infer_doc_type("BROKER_API.md") == "api_docs"
         assert RAGEngine._infer_doc_type("trade_journal.txt") == "trade_journal"
         assert RAGEngine._infer_doc_type("market_report.md") == "market_report"
         assert RAGEngine._infer_doc_type("random.txt") == "general"
@@ -455,8 +457,12 @@ class TestMCPBridge:
         assert result is not None
         assert result.arguments["action"] == "SELL"
         assert result.arguments["exchange"] == "NFO"
-        # 2 lots * 75 = 150
-        assert result.arguments["quantity"] == "150"
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
+        lot = lot_size_from_master("NIFTY")
+        assert lot is not None
+        # 2 lots × the near-month master lot.
+        assert result.arguments["quantity"] == str(2 * lot)
 
     def test_parse_with_price(self):
         from flinttrade_ai.mcp_bridge import parse_order_command
@@ -476,29 +482,29 @@ class TestMCPBridge:
         result = parse_order_command("What is the current NIFTY price?")
         assert result is None
 
-    def test_bridge_execute_with_handler(self):
+    def test_bridge_refuses_order_handler(self):
         from flinttrade_ai.mcp_bridge import MCPBridge
         bridge = MCPBridge()
         mock_handler = MagicMock(return_value={"orderid": "12345"})
-        bridge.register_handler("place_order", mock_handler)
-
+        with pytest.raises(ValueError, match="Order-capable"):
+            bridge.register_handler("place_order", mock_handler)
         result = bridge.execute("Buy RELIANCE 100 shares")
-        assert result.success
-        assert result.tool_name == "place_order"
-        mock_handler.assert_called_once()
+        assert not result.success
+        assert "unavailable" in result.error
+        mock_handler.assert_not_called()
 
     def test_bridge_execute_no_handler(self):
         from flinttrade_ai.mcp_bridge import MCPBridge
         bridge = MCPBridge()
         result = bridge.execute("Buy RELIANCE 100 shares")
         assert not result.success
-        assert "No handler" in result.error
+        assert "Order-capable tools are unavailable" in result.error
 
     def test_bridge_available_tools(self):
         from flinttrade_ai.mcp_bridge import MCPBridge
         bridge = MCPBridge()
         tools = bridge.available_tools
-        assert "place_order" in tools
+        assert "place_order" not in tools
         assert "get_positions" in tools
         assert "get_quotes" in tools
         assert "get_option_chain" in tools
@@ -662,3 +668,25 @@ class TestPackageExports:
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         assert os.path.exists(os.path.join(pkg_dir, "src", "flinttrade_ai", "__init__.py"))
         assert os.path.exists(os.path.join(pkg_dir, "README.md"))
+
+
+def test_mcp_injected_order_handler_still_cannot_execute():
+    from flinttrade_ai.mcp_bridge import MCPBridge
+    bridge = MCPBridge()
+    handler = MagicMock()
+    bridge._handlers["place_order"] = handler
+    result = bridge.execute("Buy TEST 10 shares")
+    assert not result.success
+    handler.assert_not_called()
+
+
+def test_mcp_read_handler_uses_only_parsed_arguments():
+    from flinttrade_ai.mcp_bridge import MCPBridge, MCPToolCall
+    bridge = MCPBridge()
+    handler = MagicMock(return_value={"ltp": 123})
+    bridge.register_handler("get_quotes", handler)
+    bridge.parse = MagicMock(return_value=MCPToolCall("get_quotes", {"symbol": "TEST"}))
+    result = bridge.execute("Read TEST")
+    assert result.success
+    assert result.result == {"ltp": 123}
+    handler.assert_called_once_with(symbol="TEST")

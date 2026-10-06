@@ -391,7 +391,7 @@ class ApprovalRequest:
     expires_at: str
     status: ApprovalStatus = "pending"
     rejection_reason: str | None = None
-    adapter_id: str = "openalgo"
+    adapter_id: str = ""
     account_id: str = "default"
     source: str = "unknown"
     intent_type: str = "entry"
@@ -589,7 +589,7 @@ class PendingOrderQueue:
             expires_at       TEXT NOT NULL,
             status           TEXT NOT NULL DEFAULT 'pending',
             rejection_reason TEXT,
-            adapter_id       TEXT NOT NULL DEFAULT 'openalgo',
+            adapter_id       TEXT NOT NULL DEFAULT '',
             account_id       TEXT NOT NULL DEFAULT 'default',
             source           TEXT NOT NULL DEFAULT 'unknown',
             intent_type      TEXT NOT NULL DEFAULT 'entry',
@@ -610,7 +610,7 @@ class PendingOrderQueue:
     """
 
     _MIGRATIONS = (
-        "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS adapter_id TEXT DEFAULT 'openalgo'",
+        "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS adapter_id TEXT DEFAULT ''",
         "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS account_id TEXT DEFAULT 'default'",
         "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'unknown'",
         "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS intent_type TEXT DEFAULT 'entry'",
@@ -733,7 +733,7 @@ class PendingOrderQueue:
         ttl_minutes: int = 5,
         request_id: str | None = None,
         *,
-        adapter_id: str = "openalgo",
+        adapter_id: str = "",
         account_id: str = "default",
         source: str = "unknown",
         intent_type: str = "entry",
@@ -773,7 +773,7 @@ class PendingOrderQueue:
             created_at=created_at,
             expires_at=expires_at,
             status="pending",
-            adapter_id=str(adapter_id or "").strip().lower() or "openalgo",
+            adapter_id=str(adapter_id or "").strip().lower() or "",
             account_id=str(account_id or "").strip() or "default",
             source=str(source or "").strip() or "unknown",
             intent_type=str(intent_type or "").strip() or "entry",

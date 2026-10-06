@@ -8,7 +8,7 @@ Commands:
   /pause    — pause a strategy
   /resume   — resume a strategy
   /pnl      — today's P&L breakdown
-  /health   — OpenAlgo connection, WebSocket, disk space
+  /health   — broker connection, WebSocket, disk space
 
 Restricted to the configured chat id — only the owner can send commands.
 
@@ -214,8 +214,8 @@ def format_orders(orders: list[dict[str, Any]]) -> str:
 def format_health(health_data: dict[str, Any]) -> str:
     """Format system health info."""
     lines = ["*System Health:*"]
-    openalgo = "✅" if health_data.get("openalgo_connected") else "❌"
-    lines.append(f"OpenAlgo: {openalgo}")
+    broker = "✅" if health_data.get("broker_connected") else "❌"
+    lines.append(f"broker: {broker}")
 
     ws = "✅" if health_data.get("websocket_connected") else "❌"
     lines.append(f"WebSocket: {ws}")
@@ -327,7 +327,7 @@ class TelegramBot:
         - kill_switch: () -> EmergencyDispatchResult | None (activates kill)
         - pause_strategy: (name: str) -> None
         - resume_strategy: (name: str) -> None
-        - get_health: () -> dict with "openalgo_connected", "websocket_connected", "disk_free_gb"
+        - get_health: () -> dict with "broker_connected", "websocket_connected", "disk_free_gb"
         """
         self._handlers[name] = handler
 
@@ -440,7 +440,7 @@ class TelegramBot:
             emergency_result = activate()
 
         # 2. Read bounded outcomes from the injected L5 dispatcher. The bot's
-        #    OpenAlgo client remains available for status/orderbook READS only.
+        #    broker client remains available for status/orderbook READS only.
         succeeded = getattr(emergency_result, "succeeded", None)
         cancel_requests_accepted = bool(callable(succeeded) and succeeded("cancel_all_orders"))
         exit_requests_accepted = bool(callable(succeeded) and succeeded("exit_all_positions"))
@@ -512,12 +512,12 @@ class TelegramBot:
         # Try wired mode first
         if self.client:
             try:
-                # This client is the OpenAlgo bridge read surface, which may be
+                # This client is the broker bridge read surface, which may be
                 # different from one or more native emergency targets.
                 positions = self._client_sync(self.client.positionbook())
                 if positions:
                     lines.append(
-                        "*OpenAlgo bridge account:*\n"
+                        "*broker bridge account:*\n"
                         + format_positions(
                             [
                                 p.model_dump()
@@ -528,17 +528,17 @@ class TelegramBot:
                         )
                     )
                 else:
-                    lines.append("*OpenAlgo bridge account:* No open positions.")
+                    lines.append("*broker bridge account:* No open positions.")
             except Exception as exc:
-                logger.exception("OpenAlgo bridge position status unavailable: %s", exc)
-                lines.append("*OpenAlgo bridge account:* positions unavailable; broker state not verified.")
+                logger.exception("broker bridge position status unavailable: %s", exc)
+                lines.append("*broker bridge account:* positions unavailable; broker state not verified.")
 
             try:
                 funds = self._client_sync(self.client.funds())
-                lines.append(f"\n*OpenAlgo bridge funds:* ₹{funds.available_balance} available")
+                lines.append(f"\n*broker bridge funds:* ₹{funds.available_balance} available")
             except Exception as exc:
-                logger.exception("OpenAlgo bridge fund status unavailable: %s", exc)
-                lines.append("\n*OpenAlgo bridge funds:* unavailable")
+                logger.exception("broker bridge fund status unavailable: %s", exc)
+                lines.append("\n*broker bridge funds:* unavailable")
 
         elif self._handlers.get("get_positions"):
             # Legacy callback mode
@@ -661,7 +661,7 @@ class TelegramBot:
             disk = shutil.disk_usage("/")
             return format_health(
                 {
-                    "openalgo_connected": True,
+                    "broker_connected": True,
                     "websocket_connected": True,
                     "disk_free_gb": disk.free / (1024**3),
                 }
@@ -677,7 +677,7 @@ class TelegramBot:
         """Run an async coroutine from sync context (ad-hoc loop).
 
         Only for coroutines that own no loop-affine state. Broker-client calls
-        MUST go through :meth:`_client_sync` — the OpenAlgo client pools httpx
+        MUST go through :meth:`_client_sync` — the broker client pools httpx
         connections affine to one loop, which this closes between calls.
         """
         try:
@@ -696,7 +696,7 @@ class TelegramBot:
     def _client_sync(self, coro: Any) -> Any:
         """Run a read-only broker-client coroutine on its OWN persistent loop.
 
-        :class:`~flinttrade_core.openalgo_client.OpenAlgoClient` pools httpx
+        :class:`~flinttrade_core.broker_client.BrokerClient` pools httpx
         connections affine to a single event loop and exposes ``run_sync`` for
         exactly this. Driving it through :meth:`_run_async`'s ad-hoc
         ``asyncio.run`` loops closes the loop between calls, so a second read

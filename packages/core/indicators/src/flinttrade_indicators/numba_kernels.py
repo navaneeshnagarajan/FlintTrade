@@ -38,9 +38,7 @@ except ImportError:
 
 
 @njit(cache=True)
-def _ema_core(
-    close: np.ndarray, k: float, seed: float
-) -> np.ndarray:
+def _ema_core(close: np.ndarray, k: float, seed: float) -> np.ndarray:
     """EMA inner loop — O(n), cacheable.
 
     Args:
@@ -60,9 +58,7 @@ def _ema_core(
 
 
 @njit(cache=True)
-def _rsi_core(
-    changes: np.ndarray, period: int
-) -> np.ndarray:
+def _rsi_core(changes: np.ndarray, period: int) -> np.ndarray:
     """RSI Wilder smoothing inner loop.
 
     Args:

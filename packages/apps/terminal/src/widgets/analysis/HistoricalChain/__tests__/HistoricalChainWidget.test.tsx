@@ -139,7 +139,7 @@ describe("HistoricalChainWidget", () => {
   });
 
   it("surfaces capture failures", async () => {
-    mockCapture.mockRejectedValue(new Error("OpenAlgo is not connected"));
+    mockCapture.mockRejectedValue(new Error("native broker is not connected"));
     renderWidget();
 
     fireEvent.change(screen.getByLabelText(/expiry to capture/i), {
@@ -148,7 +148,7 @@ describe("HistoricalChainWidget", () => {
     fireEvent.click(screen.getByRole("button", { name: /capture/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Capture failed: OpenAlgo is not connected",
+      "Capture failed: native broker is not connected",
     );
   });
 

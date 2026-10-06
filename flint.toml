@@ -5,7 +5,7 @@
 [project]
 name = "FlintTrade"
 version = "v0.0.1"
-description = "Open-source self-hosted trading software with native backend and optional OpenAlgo-compatible integration"
+description = "Open-source self-hosted trading software with native backend"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
 # Canonical public site origin — the single source of truth for the domain that
@@ -61,8 +61,8 @@ os_requires = "Ubuntu 24.04 LTS or any platform providing Python >= 3.12"
 os_target = "Ubuntu 26.04 LTS"
 
 [packages]
-core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
-data = { path = "packages/core/data", lang = "python", description = "Real-time tick capture, WebSocket storage, audit logs, sandbox state" }
+core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, native broker boundary, config, models, logging" }
+data = { path = "packages/core/data", lang = "python", description = "Tick storage and processing, audit logs, sandbox state" }
 historical = { path = "packages/core/historical", lang = "python", description = "Historical data download, merge, DuckDB/Parquet, free NSE data" }
 indicators = { path = "packages/core/indicators", lang = "python", description = "Pure-NumPy batch indicators (110 exports) + pure-Python streaming classes (optional Numba on 3 kernels) + Pine Script conversion" }
 ticks = { path = "packages/core/ticks", lang = "rust", description = "High-performance tick processing engine — Rust core with Python bindings via PyO3" }
@@ -72,10 +72,10 @@ screener = { path = "packages/services/screener", lang = "python", description =
 backtest = { path = "packages/services/backtest", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
 ai = { path = "packages/services/ai", lang = "python", description = "LLM chat, RAG, ML signals, autonomous trading, news sentiment" }
 ditto = { path = "packages/services/ditto", lang = "python", description = "Multi-broker, multi-account orchestration, in-process mirroring, sizing rules, and risk manager" }
-automation = { path = "packages/services/automation", lang = "python", description = "Cron jobs, Telegram bot (kill switch), post-market analysis, voice-order intent extraction" }
+automation = { path = "packages/services/automation", lang = "python", description = "Cron jobs, Telegram bot (kill switch), post-market analysis" }
 journal = { path = "packages/services/journal", lang = "python", description = "Trade journal, trade logging, execution analytics, and P&L tracking" }
 gateway = { path = "packages/integrations/gateway", lang = "python", description = "Direct broker connections, adapter pattern, encrypted credentials, WebSocket bridge" }
-webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "Generic HMAC-signed custom webhooks and flow builder" }
+webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "Generic HMAC-signed custom webhooks" }
 terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — manual orders, automation, option-chain views, OI analysis, DOM, charts" }
 site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
 desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 44 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }
@@ -87,29 +87,17 @@ integrations = ["gateway", "webhooks"]
 apps = ["terminal", "site", "desktop"]
 
 # [infra] — external test-only dependencies, not bundled with FlintTrade.
-# OpenAlgo and OpenClaw used to be git submodules under infra/. They are
+# OpenClaw was formerly a git submodule under infra/. It is
 # now external services that users install separately. Contributors who
 # want a local copy for testing can clone them under .local/external/
-# via scripts/setup-test-deps.sh; the directory is gitignored.
+# as an optional local reference; the directory is gitignored.
 #
 # AlgoMirror is intentionally absent: its multi-account mirroring patterns
 # are fully absorbed into packages/services/ditto/ (PositionMirror, TrailingSLManager,
 # MarginCalculator, RiskManager) and run in-process. There is no live
 # integration; the upstream repo is no longer tracked.
 [infra]
-openalgo = { path = ".local/external/openalgo", type = "external-test-dep", upstream = "https://github.com/marketcalls/openalgo.git" }
 openclaw = { path = ".local/external/openclaw", type = "external-test-dep", upstream = "https://github.com/openclaw/openclaw.git" }
-
-[openalgo]
-api_version = "v1"
-default_host = "http://127.0.0.1:5000"
-default_ws = "ws://127.0.0.1:8765"
-
-[openalgo.rate_limits]
-orders_per_second = 10
-smart_orders_per_second = 2
-general_per_second = 50
-webhooks_per_minute = 100
 
 [safety]
 # Self-imposed rate limit to stay within broker throttles.
@@ -131,7 +119,8 @@ maintenance_window_start = "15:45"
 maintenance_window_end = "18:00"
 
 [exchanges]
-# Exchange segments known to the optional OpenAlgo-compatible integration path.
+# Exchange metadata understood by the domain model. The implemented native
+# adapters expose NSE, BSE, NFO, BFO, CDS, BCD and MCX only.
 # Index-only segments (NSE_INDEX, BSE_INDEX, MCX_INDEX, GLOBAL_INDEX) are
 # quote-only and reject orders at the safety layer.
 NSE = { name = "NSE Equity", hours = "09:15-15:30" }
@@ -155,20 +144,8 @@ currency_end = "17:00"
 mcx_end = "23:55"
 # Safe deploy window: after MCX close (11:55 PM) until 8:30 AM next day
 
-[exchanges.crypto]
-# Delta Exchange — represented by OpenAlgo-compatible metadata when configured.
-DELTA = { name = "Delta Exchange (Crypto)", hours = "24/7", products = "BTC/ETH futures, perpetuals, options, trackers" }
-# 24/7 segments require operator-defined deploy-freeze handling.
-
 [brokers]
-# Broker names represented by the OpenAlgo-compatible integration metadata.
+# Implemented native broker names.
 # Mirrors BROKER_CATALOG in packages/integrations/gateway/src/flinttrade_gateway/adapter.py — keep in sync
-# after every .local/external/openalgo refresh.
-supported = [
-  "5paisa", "5paisa-xts", "AliceBlue", "AngelOne", "Compositedge",
-  "Definedge", "Delta Exchange", "Dhan", "Dhan-Sandbox", "Firstock",
-  "Flattrade", "Fyers", "Groww", "IBulls", "IIFL", "IIFL Capital",
-  "IndMoney", "JainamXTS", "Kotak Neo", "Motilal Oswal",
-  "Mstock", "Nubra", "Paytm Money", "Pocketful", "RMoney", "Samco",
-  "Shoonya", "Tradejini", "Upstox", "Wisdom Capital", "Zebu", "Zerodha"
-]
+# whenever native adapters change.
+supported = ["Dhan", "Upstox", "Kotak Neo", "IndMoney", "Groww"]

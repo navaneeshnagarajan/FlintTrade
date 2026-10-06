@@ -83,7 +83,7 @@ async function resolveExpiry(
  * Fetch the ATM strike from the option chain.
  *
  * The chain payload carries `atm_strike` at runtime (the native normaliser
- * guarantees it; OpenAlgo returns it) even though the typed OptionChainData
+ * guarantees it; broker returns it) even though the typed OptionChainData
  * shape does not declare it — ThreePanel read it through the same cast.
  */
 async function resolveATMStrike(

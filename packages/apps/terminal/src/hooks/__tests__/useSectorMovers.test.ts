@@ -17,6 +17,7 @@ import React from "react";
 // ---------------------------------------------------------------------------
 
 let currentMode: "explore" | "practice" | "live" = "explore";
+vi.mock("@/hooks/useDataScope", () => ({ useMarketDataScope: () => `${currentMode}:native:dhan:A1` }));
 const modeListeners = new Set<() => void>();
 
 vi.mock("@/stores/modeStore", () => ({
@@ -60,10 +61,10 @@ const mockQuotes = [
   },
 ];
 
-const getMultiQuotesMock = vi.fn((_symbols: unknown) => Promise.resolve(mockQuotes));
+const getMultiQuotesMock = vi.fn((_symbols: unknown, _signal?: AbortSignal, _scope?: string) => Promise.resolve(mockQuotes));
 
 vi.mock("@/services/api", () => ({
-  getMultiQuotes: (symbols: unknown) => getMultiQuotesMock(symbols),
+  getMultiQuotes: (symbols: unknown, signal?: AbortSignal, scope?: string) => getMultiQuotesMock(symbols, signal, scope),
   normaliseMultiQuotes: (raw: unknown) => (Array.isArray(raw) ? raw : []),
 }));
 
@@ -139,7 +140,7 @@ describe("useSectorMovers", () => {
 
   it("falls back to sample rows on fetch failure and never claims live", { timeout: 15000 }, async () => {
     currentMode = "live";
-    getMultiQuotesMock.mockImplementation(() => Promise.reject(new Error("OpenAlgo down")));
+    getMultiQuotesMock.mockImplementation(() => Promise.reject(new Error("native broker down")));
 
     const { result } = renderHook(() => useSectorMovers(), {
       wrapper: createWrapper(),

@@ -7,7 +7,6 @@ import json
 import os
 import sqlite3
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -131,9 +130,9 @@ def test_snapshotted_crash_wal_generation_drift_never_publishes_stale_snapshot(t
                 legacy,
                 target,
                 installation_state_root=installation,
-                phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-                if phase == "snapshotted"
-                else None,
+                phase_hook=lambda phase: (
+                    (_ for _ in ()).throw(RuntimeError("crash")) if phase == "snapshotted" else None
+                ),
             )
         wal = Path(f"{legacy / 'ditto_accounts.sqlite'}-wal")
         original = wal.stat()
@@ -161,9 +160,7 @@ def test_snapshotted_accounts_only_receipt_rejects_newly_appeared_vault(tmp_path
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-            if phase == "snapshotted"
-            else None,
+            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash")) if phase == "snapshotted" else None,
         )
     _database(legacy / "ditto_credentials.db", "late-vault")
 
@@ -219,9 +216,9 @@ def test_crash_after_candidate_fsync_recovers_without_resnapshot(tmp_path, monke
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("durability-boundary"))
-            if phase == "durable:credentials"
-            else None,
+            phase_hook=lambda phase: (
+                (_ for _ in ()).throw(RuntimeError("durability-boundary")) if phase == "durable:credentials" else None
+            ),
         )
     receipt = json.loads((installation / "ditto-legacy-migration.json").read_text())
     candidate = target / f".ditto_credentials.db.{receipt['receipt_id']}.publishing"
@@ -254,9 +251,9 @@ def test_truncated_recovered_publish_candidate_is_durably_rebuilt(tmp_path):
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-            if phase == "durable:accounts"
-            else None,
+            phase_hook=lambda phase: (
+                (_ for _ in ()).throw(RuntimeError("crash")) if phase == "durable:accounts" else None
+            ),
         )
     receipt = json.loads((installation / "ditto-legacy-migration.json").read_text())
     candidate = target / f".ditto_accounts.sqlite.{receipt['receipt_id']}.publishing"
@@ -281,9 +278,7 @@ def test_empty_unhardened_recovered_publish_candidate_is_durably_rebuilt(tmp_pat
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-            if phase == "consumed"
-            else None,
+            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash")) if phase == "consumed" else None,
         )
     receipt = json.loads((installation / "ditto-legacy-migration.json").read_text())
     candidate = target / f".ditto_accounts.sqlite.{receipt['receipt_id']}.publishing"
@@ -311,9 +306,7 @@ def test_nonempty_unhardened_recovered_publish_candidate_remains_fatal(tmp_path,
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-            if phase == "consumed"
-            else None,
+            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash")) if phase == "consumed" else None,
         )
     receipt = json.loads((installation / "ditto-legacy-migration.json").read_text())
     candidate = target / f".ditto_accounts.sqlite.{receipt['receipt_id']}.publishing"
@@ -612,9 +605,9 @@ def test_prior_published_exact_target_main_with_stale_sidecar_is_rejected(tmp_pa
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-            if phase == "published:accounts"
-            else None,
+            phase_hook=lambda phase: (
+                (_ for _ in ()).throw(RuntimeError("crash")) if phase == "published:accounts" else None
+            ),
         )
     stale_wal = Path(f"{target / 'ditto_accounts.sqlite'}-wal")
     stale_wal.write_bytes(b"stale-target-wal")
@@ -636,9 +629,9 @@ def test_prior_published_matching_target_with_broad_mode_is_rejected(tmp_path):
             legacy,
             target,
             installation_state_root=installation,
-            phase_hook=lambda phase: (_ for _ in ()).throw(RuntimeError("crash"))
-            if phase == "published:accounts"
-            else None,
+            phase_hook=lambda phase: (
+                (_ for _ in ()).throw(RuntimeError("crash")) if phase == "published:accounts" else None
+            ),
         )
     published = target / "ditto_accounts.sqlite"
     published.chmod(0o644)
@@ -1046,111 +1039,45 @@ def test_unsafe_shm_sidecar_fails_before_sqlite_backup(tmp_path):
         )
 
 
-def test_workspace_copy_and_account_writer_share_one_fence(tmp_path):
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_workspace_copy_holds_installation_fence_until_publication(tmp_path, target_exists):
     from flinttrade_core import workspace
-    from flinttrade_core.broker_identity import BrokerSelector
-    from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
+    from flinttrade_core.installation_state import InstallationState
 
-    legacy = tmp_path / "legacy"
-    target = tmp_path / "target"
+    legacy, target = tmp_path / "legacy", tmp_path / "target"
     installation = tmp_path / "installation"
-    _database(legacy / "ditto_accounts.sqlite", "before")
-    legacy.chmod(0o700)
-    migration_paused = threading.Event()
-    release_migration = threading.Event()
-    manager = AccountManager(
-        mutation_admission=lambda: None,
-        db_path=str(legacy / "writer.sqlite"),
-        master_password="test-master-pw",
-        installation_state_root=installation,
-    )
-    selector = BrokerSelector("openalgo", "after")
-    manager._cred.put_credentials(
-        selector, "openalgo", "after", {"api_key": "secret"},
-        expected=manager._cred.selector_state(selector).version,
-    )
+    _database(legacy / "ditto_accounts.sqlite", "preserved")
+    if target_exists:
+        target.mkdir()
+    paused, release, acquired = threading.Event(), threading.Event(), threading.Event()
+    errors = []
 
-    def hook(phase: str) -> None:
+    def hook(phase):
         if phase == "preparing":
-            migration_paused.set()
-            release_migration.wait(2)
+            paused.set()
+            if not release.wait(5):
+                raise RuntimeError("Test migration barrier timed out")
 
-    migration = threading.Thread(
-        target=workspace._migrate_legacy_ditto_state,
-        args=(legacy, target),
-        kwargs={"installation_state_root": installation, "phase_hook": hook},
-    )
+    def migrate():
+        try:
+            workspace._migrate_legacy_ditto_state(legacy, target, installation_state_root=installation, phase_hook=hook)
+        except Exception as error:
+            errors.append(error)
+
+    def acquire():
+        with InstallationState(installation).ditto_fence():
+            acquired.set()
+            assert _value(target / "ditto_accounts.sqlite") == "preserved"
+
+    migration = threading.Thread(target=migrate)
     migration.start()
-    assert migration_paused.wait(2)
-    writer_done = threading.Event()
-
-    def write() -> None:
-        manager.add_account(BrokerAccount("after", "http://127.0.0.1:1", "secret"))
-        writer_done.set()
-
-    writer = threading.Thread(target=write)
-    writer.start()
-    time.sleep(0.05)
-    assert not writer_done.is_set()
-    release_migration.set()
-    migration.join(2)
-    writer.join(2)
-    assert writer_done.is_set()
-    manager.close()
-
-
-def test_target_account_manager_constructor_and_write_wait_for_migration(tmp_path):
-    from flinttrade_core import workspace
-    from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
-
-    class Store:
-        def store(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-            return None
-
-        def retrieve_for(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-            return {"api_key": "test-key"}
-
-    legacy = tmp_path / "legacy"
-    target = tmp_path / "target"
-    installation = tmp_path / "installation"
-    _database(legacy / "ditto_accounts.sqlite", "preserved-before-writer")
-    migration_paused = threading.Event()
-    release_migration = threading.Event()
-
-    def hook(phase: str) -> None:
-        if phase == "preparing":
-            migration_paused.set()
-            release_migration.wait(2)
-
-    migration = threading.Thread(
-        target=workspace._migrate_legacy_ditto_state,
-        args=(legacy, target),
-        kwargs={"installation_state_root": installation, "phase_hook": hook},
-    )
-    migration.start()
-    assert migration_paused.wait(2)
-
-    constructor_returned = threading.Event()
-
-    def construct_and_write() -> None:
-        with AccountManager(
-            mutation_admission=lambda: None,
-            db_path=str(target / "ditto_accounts.sqlite"),
-            credential_store=Store(),  # type: ignore[arg-type]
-            installation_state_root=installation,
-        ) as manager:
-            constructor_returned.set()
-            manager.add_account(BrokerAccount("after", "http://127.0.0.1:1", "test-key"))
-
-    writer = threading.Thread(target=construct_and_write)
-    writer.start()
-    time.sleep(0.05)
-    assert not constructor_returned.is_set()
-    release_migration.set()
-    migration.join(2)
-    writer.join(2)
-
-    assert constructor_returned.is_set()
-    assert _value(target / "ditto_accounts.sqlite") == "preserved-before-writer"
-    with sqlite3.connect(target / "ditto_accounts.sqlite") as connection:
-        assert connection.execute("SELECT account_id FROM accounts").fetchone()[0] == "after"
+    assert paused.wait(5)
+    observer = threading.Thread(target=acquire)
+    observer.start()
+    assert not acquired.wait(0.05)
+    release.set()
+    migration.join(5)
+    observer.join(5)
+    assert not migration.is_alive() and not observer.is_alive()
+    assert not errors
+    assert acquired.is_set()

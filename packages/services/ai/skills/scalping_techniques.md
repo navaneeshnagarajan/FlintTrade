@@ -33,7 +33,7 @@ Order flow tells you who is in control before price confirms it:
 - **Tape reading:** Consecutive trades printing at the ask = buyers in control. Consecutive trades at the bid = sellers in control.
 - **Imbalance:** When ask-side orders vanish suddenly (pulled) price often jumps — this is a trigger to enter fast.
 
-Use FlintTrade's depth widget (50-level DOM from OpenAlgo) to monitor stacking.
+Use FlintTrade's depth widget (50-level DOM from broker) to monitor stacking.
 
 ## 1-Minute Chart Patterns for Scalpers
 
@@ -53,24 +53,26 @@ Use FlintTrade's depth widget (50-level DOM from OpenAlgo) to monitor stacking.
 
 ## Spread Cost Analysis
 
-Spread cost must be factored into every scalp. Lot sizes are revised by the exchange from time to time, so always take the current lot size from the broker's instrument master rather than this file.
+Spread cost must be factored into every scalp. Lot sizes come from the broker instrument master, not from this file, and the exchange revises them about twice a year.
 
-The worked example is indicative only. It uses one Nifty futures lot (indicative lot size 65) at an index level of about 25,000 (about ₹16.25 lakh notional per leg):
+The worked example is indicative only. It uses one Nifty futures lot (indicative lot size 65) at an index level of about 25,000 (about ₹16.25 lakh notional per leg). Statutory charges are the shared Indian table: futures sell-side STT 0.05% from 1 April 2026, NSE futures transaction 0.00183% each side from 1 March 2026, stamp duty 0.002% on the buy, SEBI ₹10 per crore each side, and GST 18% on brokerage plus the exchange charge plus the SEBI fee.
 
 ```
 Spread ≈ 1 point × 65 ≈ ₹65 (indicative)
-Brokerage depends on the broker (for example a flat fee per order)
-STT alone ≈ ₹800 on the sell leg (0.05% of sell-side notional for futures; indicative)
-Exchange transaction charges, stamp duty on the buy leg, the SEBI fee and GST come on top
+Buy: NSE transaction ₹29.74 + SEBI fee ₹1.63 + stamp duty ₹32.50 + GST ₹5.65 ≈ ₹69.52
+Sell: STT ₹812.50 + NSE transaction ₹29.74 + SEBI fee ₹1.63 + GST ₹5.65 ≈ ₹849.52
+Statutory round trip before brokerage ≈ ₹919.04
 ```
+
+About ₹919 statutory round trip before brokerage (indicative): STT about ₹812 on the sell leg, NSE transaction about ₹59 across both legs, stamp about ₹33 on the buy leg, SEBI about ₹3, GST about ₹11.
 
 Indicative figures; charge rates and lot sizes change. Check current exchange circulars and the broker instrument master.
 
-A 5-point move on one lot is about ₹325 gross (indicative). At these rates that does not cover STT alone, so a scalp target must clear the full round-trip cost (spread, brokerage, statutory charges) before it counts as positive expectancy. Scalping requires disciplined sizing to keep costs below 30% of gross profit.
+A 5-point move on one lot is about ₹325 gross (indicative). At these rates that does not cover STT alone. Break-even, in points, is the statutory round trip from the table, plus the spread, plus brokerage, divided by the lot size. With the indicative ₹65 spread and a flat ₹40 brokerage example, that is about 16 points. A scalp target has to clear that break-even before it counts as positive expectancy.
 
 ## Execution Requirements
 
 - Use **LIMIT orders** for entries whenever possible — avoid paying the spread.
 - Use **MARKET orders** for exits if the move is going against you fast.
 - Co-location or low-latency connection is preferable for sub-second execution.
-- OpenAlgo MIS product type for all scalps — never NRML for intraday scalps.
+- broker MIS product type for all scalps — never NRML for intraday scalps.

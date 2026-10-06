@@ -1,329 +1,112 @@
-// Pure utility functions for StrategyBuilder — extracted from StrategyBuilderTool.tsx
-// Adapted patterns from openalgo-chart/src/services/strategyTemplates.js
+/** Vanilla-option valuation and local signal simulation for the FlintTrade lab. */
+import type { EquityPoint, Leg, PayoffPoint, PerfMetrics, Underlying } from './types';
 
-import { formatCurrency as formatINRCanonical } from "@/lib/formatters";
+export const UNSET_PREMIUM_HELPER = 'Enter premium to model payoff';
+export const SAMPLE_PREMIUM_HELPER = 'Example premium — edit to model';
+export const ZERO_PREMIUM_WARNING = 'Premium is ₹0 — payoff treats cost as free';
+export const POSITION_BASIS_TAG = 'position';
 
-import type { Leg, PayoffPoint, EquityPoint, PerfMetrics, Underlying } from "./types";
-
-/** Summary cards show this instead of modelling a blank premium as ₹0. */
-export const UNSET_PREMIUM_HELPER = "Enter premium to model payoff";
-
-/** Chip on Explore Long Call after seeding sample-chain LTP. */
-export const SAMPLE_PREMIUM_HELPER = "Sample premium — edit to model";
-
-/** Warning when the operator types an explicit ₹0. */
-export const ZERO_PREMIUM_WARNING = "Premium is ₹0 — payoff treats cost as free";
-
-/** True when any leg still has an unknown (null/blank) premium. */
-export function hasUnsetPremium(legs: readonly Leg[]): boolean {
-  return legs.some((leg) => !isPricedPremium(leg.premium));
+export const isPricedPremium = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+export const hasUnsetPremium = (legs: readonly Leg[]) => legs.some(leg => !isPricedPremium(leg.premium));
+export const hasExplicitZeroPremium = (legs: readonly Leg[]) => legs.some(leg => leg.premium === 0);
+export function parsePremiumInput(value: string): number | null {
+  const parsed = value.trim() ? Number(value) : NaN;
+  return isPricedPremium(parsed) ? parsed : null;
 }
-
-/** True when any leg has an explicit typed ₹0 — distinct from unset. */
-export function hasExplicitZeroPremium(legs: readonly Leg[]): boolean {
-  return legs.some((leg) => leg.premium === 0);
-}
-
-export function isPricedPremium(premium: number | null | undefined): premium is number {
-  return typeof premium === "number" && Number.isFinite(premium);
-}
-
-/** Parse the premium input: blank → unset, `0` → explicit zero. */
-export function parsePremiumInput(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (trimmed === "") return null;
-  const value = Number(trimmed);
-  if (!Number.isFinite(value)) return null;
-  return Math.max(0, value);
-}
-
-// Adapted from strategyTemplates.js — calculateNetPremium
-/** Per-unit net (lots included, contract lot-size not). Positive = debit. */
 export function calculateNetPremium(legs: readonly Leg[]): number | null {
   if (hasUnsetPremium(legs)) return null;
-  return legs.reduce((total, leg) => {
-    const multiplier = leg.action === "BUY" ? 1 : -1;
-    return total + multiplier * leg.lots * (leg.premium as number);
-  }, 0);
+  return legs.reduce((sum, leg) => sum + (leg.action === 'BUY' ? 1 : -1) * leg.premium! * leg.lots, 0);
 }
-
-/**
- * Position rupees: per-unit net × contract lot size.
- * This is the shared basis for Net Debit/Credit, Max Loss, and Max Profit.
- */
-export function calculatePositionNetPremium(legs: readonly Leg[], lotSize: number): number | null {
-  const net = calculateNetPremium(legs);
-  if (net == null) return null;
-  return net * lotSize;
+export function calculatePositionNetPremium(legs: readonly Leg[], lotSize: number | null): number | null {
+  const premium = calculateNetPremium(legs);
+  return premium !== null && lotSize !== null && lotSize > 0 ? premium * lotSize : null;
 }
-
-/** Shared lot count when every priced leg uses the same lots; otherwise null. */
 export function uniformLotCount(legs: readonly Leg[]): number | null {
-  if (legs.length === 0) return null;
-  const lots = legs[0].lots;
-  return legs.every((leg) => leg.lots === lots) ? lots : null;
+  const count = legs[0]?.lots;
+  return count && legs.every(leg => leg.lots === count) ? count : null;
 }
-
-/**
- * Muted breakdown under a position-₹ primary figure.
- * `₹X per lot · N lots · lot size L` — omitted when lots differ, the figure is
- * unbounded, or premium is unset. `positionRupees` defaults to the net debit.
- */
-export function formatPositionSublabel(
-  legs: readonly Leg[],
-  lotSize: number,
-  positionRupees?: number | null,
-): string | null {
+export function formatINR(value: number): string {
+  if (!Number.isFinite(value)) return value === Infinity ? 'Unlimited' : value === -Infinity ? 'Unlimited' : '—';
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(value);
+}
+export function formatPositionSublabel(legs: readonly Leg[], lotSize: number | null, positionRupees?: number | null): string | null {
   const lots = uniformLotCount(legs);
-  const amount = positionRupees ?? calculatePositionNetPremium(legs, lotSize);
-  if (lots == null || lotSize <= 0 || amount == null || !Number.isFinite(amount)) return null;
-  return `${formatINR(Math.abs(amount / lots))} per lot · ${lots} lots · lot size ${lotSize}`;
+  const total = positionRupees === undefined ? calculatePositionNetPremium(legs, lotSize) : positionRupees;
+  if (lots === null || lotSize === null || total === null || !Number.isFinite(total)) return null;
+  return `${formatINR(Math.abs(total) / lots)} per lot · ${lots} ${lots === 1 ? 'lot' : 'lots'} · lot size ${lotSize}`;
 }
-
-/** Fallback tag when a per-lot breakdown cannot be formed. */
-export const POSITION_BASIS_TAG = "position";
-
-// Adapted from strategyTemplates.js — validateStrategy
 export function validateLegs(legs: Leg[]): { valid: boolean; error: string | null } {
-  if (legs.length < 1) return { valid: false, error: "Add at least one leg" };
-  if (legs.length > 6) return { valid: false, error: "Maximum 6 legs allowed" };
-  for (let i = 0; i < legs.length; i++) {
-    if (legs[i].strike <= 0)  return { valid: false, error: `Leg ${i + 1}: strike must be > 0` };
-    if (legs[i].lots < 1)     return { valid: false, error: `Leg ${i + 1}: lots must be >= 1` };
-    const premium = legs[i].premium;
-    if (isPricedPremium(premium) && premium < 0) {
-      return { valid: false, error: `Leg ${i + 1}: premium must be >= 0` };
-    }
-  }
-  return { valid: true, error: null };
+  const invalid = legs.find(leg => !Number.isFinite(leg.strike) || leg.strike <= 0 || !Number.isInteger(leg.lots) || leg.lots <= 0 ||
+    !['BUY', 'SELL'].includes(leg.action) || !['CE', 'PE'].includes(leg.optionType) || (leg.premium !== null && !isPricedPremium(leg.premium)));
+  return { valid: legs.length > 0 && !invalid, error: invalid ? 'Enter a positive strike and whole number of lots' : legs.length ? null : 'Add a strategy leg' };
 }
-
-export function genId(): string {
-  return `leg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-export function formatINR(v: number): string {
-  return formatINRCanonical(v);
-}
-
-/** Per-unit expiry P&L (lots included, contract lot-size not). */
+export const genId = () => crypto.randomUUID();
 export function pnlAtExpiry(legs: Leg[], price: number): number {
-  let pnl = 0;
-  for (const leg of legs) {
-    if (!isPricedPremium(leg.premium)) continue;
-    const multiplier = leg.action === "BUY" ? 1 : -1;
-    const intrinsic =
-      leg.optionType === "CE"
-        ? Math.max(0, price - leg.strike)
-        : Math.max(0, leg.strike - price);
-    pnl += multiplier * leg.lots * (intrinsic - leg.premium);
-  }
-  return pnl;
-}
-
-export interface PayoffSummary {
-  /** +Infinity when the right-hand slope is positive (naked long calls, long straddles, …). */
-  maxProfit: number;
-  /** −Infinity when the right-hand slope is negative (naked short calls, short straddles, …). */
-  maxLoss: number;
-  breakevens: number[];
-}
-
-const PNL_EPS = 1e-9;
-
-/** Net call exposure — the slope of expiry P&L as spot → +∞. */
-function rightHandSlope(legs: Leg[]): number {
-  return legs.reduce((acc, leg) => {
-    if (leg.optionType !== "CE") return acc;
-    return acc + (leg.action === "BUY" ? 1 : -1) * leg.lots;
+  return legs.reduce((sum, leg) => {
+    const intrinsic = Math.max(0, leg.optionType === 'CE' ? price - leg.strike : leg.strike - price);
+    return sum + (leg.action === 'BUY' ? 1 : -1) * leg.lots * (intrinsic - (leg.premium ?? 0));
   }, 0);
 }
-
-function uniqueStrikes(legs: Leg[]): number[] {
-  return [...new Set(legs.map((leg) => leg.strike).filter((strike) => strike > 0))].sort(
-    (a, b) => a - b,
-  );
-}
-
-/**
- * Analytical expiry summary: evaluate kinks (spot 0 and every strike) and
- * inspect the right-hand slope instead of taking min/max of a sampled curve.
- *
- * A ±15% scan caps unbounded legs (FT-LAB-001: NIFTY 22,500 ATM long call
- * reported ₹2,53,125) and misses breakevens that sit on a flat-zero segment
- * (zero-premium long call never changes sign).
- */
+export interface PayoffSummary { maxProfit: number; maxLoss: number; breakevens: number[] }
+/** A vanilla portfolio is affine between strikes. Kinks determine every bounded extremum. */
 export function computePayoffSummary(legs: Leg[]): PayoffSummary | null {
-  if (legs.length === 0) {
-    return { maxProfit: 0, maxLoss: 0, breakevens: [] };
+  if (!validateLegs(legs).valid || hasUnsetPremium(legs)) return null;
+  const boundaries = [...new Set([0, ...legs.map(leg => leg.strike)])].sort((a, b) => a - b);
+  const values = boundaries.map(price => pnlAtExpiry(legs, price));
+  const tailSlope = legs.filter(leg => leg.optionType === 'CE').reduce((sum, leg) => sum + (leg.action === 'BUY' ? 1 : -1) * leg.lots, 0);
+  const roots = new Set<number>();
+  for (let index = 1; index < boundaries.length; index++) {
+    const left = boundaries[index - 1], right = boundaries[index];
+    const lower = values[index - 1], upper = values[index];
+    if (lower * upper < 0) roots.add(left - lower * (right - left) / (upper - lower));
+    // A zero plateau has infinitely many roots; report its strike boundary.
+    if (upper === 0 && right > 0) roots.add(right);
+    if (lower === 0 && left > 0) roots.add(left);
   }
-  // Blank premium is unknown — do not model it as a free (₹0) long call.
-  if (hasUnsetPremium(legs)) return null;
-
-  const strikes = uniqueStrikes(legs);
-  const nodes = [0, ...strikes];
-  const pnls = nodes.map((price) => pnlAtExpiry(legs, price));
-  const slope = rightHandSlope(legs);
-
-  let maxProfit = -Infinity;
-  let maxLoss = Infinity;
-  for (const pnl of pnls) {
-    if (pnl > maxProfit) maxProfit = pnl;
-    if (pnl < maxLoss) maxLoss = pnl;
-  }
-  if (slope > PNL_EPS) maxProfit = Infinity;
-  else if (slope < -PNL_EPS) maxLoss = -Infinity;
-
-  return { maxProfit, maxLoss, breakevens: findBreakevens(nodes, pnls, slope) };
+  const last = boundaries.at(-1)!, lastValue = values.at(-1)!;
+  if (tailSlope && -lastValue / tailSlope > 0) roots.add(last - lastValue / tailSlope);
+  return {
+    maxProfit: tailSlope > 0 ? Infinity : Math.max(...values),
+    maxLoss: tailSlope < 0 ? -Infinity : Math.min(...values),
+    breakevens: [...roots].sort((a, b) => a - b),
+  };
 }
-
-function findBreakevens(nodes: number[], pnls: number[], slope: number): number[] {
-  const candidates: number[] = [];
-
-  for (let i = 0; i < nodes.length - 1; i++) {
-    const pa = pnls[i];
-    const pb = pnls[i + 1];
-    if ((pa < -PNL_EPS && pb > PNL_EPS) || (pa > PNL_EPS && pb < -PNL_EPS)) {
-      candidates.push(nodes[i] + (-pa / (pb - pa)) * (nodes[i + 1] - nodes[i]));
-    }
-  }
-
-  const last = nodes[nodes.length - 1];
-  const pLast = pnls[pnls.length - 1];
-  if (Math.abs(slope) > PNL_EPS) {
-    const crossing = last - pLast / slope;
-    if (crossing > last + PNL_EPS) candidates.push(crossing);
-  }
-
-  for (let i = 0; i < nodes.length; i++) {
-    if (Math.abs(pnls[i]) > PNL_EPS) continue;
-    const leftZero = i === 0 || Math.abs(pnls[i - 1]) <= PNL_EPS;
-    const rightZero =
-      i === nodes.length - 1
-        ? Math.abs(slope) <= PNL_EPS
-        : Math.abs(pnls[i + 1]) <= PNL_EPS;
-    const leavesLeft = i > 0 && !leftZero;
-    const leavesRight = !rightZero;
-    if (leavesLeft || leavesRight) candidates.push(nodes[i]);
-  }
-
-  candidates.sort((a, b) => a - b);
-  const deduped: number[] = [];
-  for (const value of candidates) {
-    if (deduped.length === 0 || Math.abs(value - deduped[deduped.length - 1]) > 1e-6) {
-      deduped.push(value);
-    }
-  }
-  return deduped;
-}
-
 export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
-  const range = spotPrice * 0.15;
-  const steps = 40;
-  const step = (range * 2) / steps;
-  const points: PayoffPoint[] = [];
-
-  for (let i = 0; i <= steps; i++) {
-    const price = spotPrice - range + i * step;
-    points.push({ price, pnl: pnlAtExpiry(legs, price) });
-  }
-  return points;
+  return Array.from({ length: 101 }, (_, index) => {
+    const price = spotPrice * (85 + index * 0.3) / 100;
+    return { price, pnl: pnlAtExpiry(legs, price) };
+  });
 }
-
-// Rough SPAN-style margin estimate (simplified — adapted from openalgo-chart
-// PositionTracker margin concept): ~15% of the leg's REAL notional for sold
-// options, 100% of premium for bought. The notional derives from each leg's
-// own strike × lot size — previously a hardcoded ₹20,000 "NIFTY unit value"
-// was applied to every underlying, so a SENSEX (~80,000) collar and a
-// MIDCPNIFTY one showed the same number.
-export function estimateMargin(legs: Leg[], underlying: Underlying): number {
-  let margin = 0;
-  for (const leg of legs) {
-    if (leg.action === "SELL") {
-      const notionalPerLot = leg.strike * underlying.lotSize;
-      margin += 0.15 * notionalPerLot * leg.lots;
-    } else if (isPricedPremium(leg.premium)) {
-      margin += leg.premium * leg.lots * underlying.lotSize;
-    }
-  }
-  return margin;
+/** Local planning estimate only. Broker margin is a separate authorised read. */
+export function estimateMargin(legs: Leg[], underlying: Underlying): number | null {
+  const lot = underlying.lotSize;
+  const summary = computePayoffSummary(legs);
+  if (!summary || lot === null || lot <= 0) return null;
+  if (Number.isFinite(summary.maxLoss)) return Math.max(0, -summary.maxLoss * lot);
+  const debit = Math.max(0, calculateNetPremium(legs) ?? 0) * lot;
+  const shortNotional = legs.filter(leg => leg.action === 'SELL').reduce((sum, leg) => sum + leg.strike * leg.lots * lot, 0);
+  return debit + shortNotional * 0.2;
 }
-
-// Equity curve computation from bar closes + signals
-export function computeEquityCurve(
-  bars: { close: number }[],
-  signals: { bar: number; type: "BUY" | "SELL" }[],
-): EquityPoint[] {
-  let inTrade = false;
-  let entryPrice = 0;
-  let equity = 10000; // notional starting capital
-  const curve: EquityPoint[] = [{ bar: 0, equity }];
-
-  const signalMap = new Map(signals.map((s) => [s.bar, s.type]));
-
-  for (let i = 1; i < bars.length; i++) {
-    const sig = signalMap.get(i);
-    if (sig === "BUY" && !inTrade) {
-      inTrade = true;
-      entryPrice = bars[i].close;
-    } else if (sig === "SELL" && inTrade) {
-      const pct = (bars[i].close - entryPrice) / entryPrice;
-      equity *= 1 + pct;
-      inTrade = false;
-      curve.push({ bar: i, equity });
+export function computeEquityCurve(bars: { close: number }[], signals: { bar: number; type: 'BUY' | 'SELL' }[]): EquityPoint[] {
+  const events = new Map(signals.map(signal => [signal.bar, signal.type]));
+  let cash = 10_000, shares = 0, lastClose = 0;
+  return bars.map((bar, index) => {
+    if (Number.isFinite(bar.close) && bar.close > 0) {
+      lastClose = bar.close;
+      if (events.get(index) === 'BUY' && shares === 0) { shares = cash / bar.close; cash = 0; }
+      if (events.get(index) === 'SELL' && shares > 0) { cash = shares * bar.close; shares = 0; }
     }
-  }
-
-  // Close any open position at last bar
-  if (inTrade && bars.length > 0) {
-    const lastClose = bars[bars.length - 1].close;
-    const pct = (lastClose - entryPrice) / entryPrice;
-    equity *= 1 + pct;
-    curve.push({ bar: bars.length - 1, equity });
-  }
-
-  return curve;
+    // An unusable bar cannot fill a signal or replace the last valid valuation.
+    return { bar: index, equity: cash + shares * lastClose };
+  });
 }
-
-// Performance metrics
-export function computeMetrics(
-  bars: { close: number }[],
-  signals: { bar: number; type: "BUY" | "SELL" }[],
-): PerfMetrics {
-  const buys  = signals.filter((s) => s.type === "BUY").length;
-  const sells = signals.filter((s) => s.type === "SELL").length;
-
-  let inTrade = false;
-  let entryPrice = 0;
-  const tradeReturns: number[] = [];
-  const signalMap = new Map(signals.map((s) => [s.bar, s.type]));
-
-  for (let i = 1; i < bars.length; i++) {
-    const sig = signalMap.get(i);
-    if (sig === "BUY" && !inTrade) {
-      inTrade = true;
-      entryPrice = bars[i].close;
-    } else if (sig === "SELL" && inTrade) {
-      tradeReturns.push((bars[i].close - entryPrice) / entryPrice);
-      inTrade = false;
-    }
-  }
-
-  const totalReturn =
-    tradeReturns.length > 0
-      ? tradeReturns.reduce((acc, r) => acc * (1 + r), 1) - 1
-      : 0;
-
-  const mean =
-    tradeReturns.length > 0
-      ? tradeReturns.reduce((a, b) => a + b, 0) / tradeReturns.length
-      : 0;
-  const variance =
-    tradeReturns.length > 1
-      ? tradeReturns.reduce((a, r) => a + (r - mean) ** 2, 0) / tradeReturns.length
-      : 0;
-  const stdDev = Math.sqrt(variance);
-  const sharpeApprox = stdDev > 0 ? (mean / stdDev) * Math.sqrt(tradeReturns.length) : 0;
-
-  return { totalReturn, totalSignals: signals.length, buySignals: buys, sellSignals: sells, sharpeApprox };
+export function computeMetrics(bars: { close: number }[], signals: { bar: number; type: 'BUY' | 'SELL' }[]): PerfMetrics {
+  const curve = computeEquityCurve(bars, signals);
+  const returns = curve.slice(1).map((point, index) => curve[index].equity > 0 ? point.equity / curve[index].equity - 1 : 0);
+  const mean = returns.reduce((a, b) => a + b, 0) / (returns.length || 1);
+  const deviation = Math.sqrt(returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (returns.length || 1));
+  return { totalReturn: ((curve.at(-1)?.equity ?? 10_000) / 10_000 - 1) * 100,
+    totalSignals: signals.length, buySignals: signals.filter(signal => signal.type === 'BUY').length,
+    sellSignals: signals.filter(signal => signal.type === 'SELL').length, sharpeApprox: deviation ? mean / deviation * Math.sqrt(252) : 0 };
 }

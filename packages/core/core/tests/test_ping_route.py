@@ -53,6 +53,31 @@ class TestPingRoute:
         assert data is not None
         assert data["status"] == "ok"
 
+    def test_ping_omits_component_version_and_path_detail(self, client) -> None:  # type: ignore[no-untyped-def]
+        """Public liveness is status, timestamp, and the Laya heartbeat only."""
+        response = client.get("/api/v1/ping")
+        data = response.get_json()
+        assert data is not None
+        assert set(data) == {
+            "status",
+            "timestamp",
+            "laya",
+            "laya_practice",
+            "laya_live_qualified",
+            "laya_reason",
+            "laya_port",
+            "laya_download_bytes",
+            "laya_download_total",
+        }
+        assert data["status"] == "ok"
+        assert data["laya"] in {"ready", "degraded", "down"}
+        assert isinstance(data["timestamp"], str)
+        assert "/" not in data["timestamp"]
+        blob = response.get_data(as_text=True).lower()
+        assert "version" not in blob
+        for detail in ("broker", "duckdb", "disk", "memory", "cpu", "gpu", "network", "checks", "path"):
+            assert detail not in blob
+
     def test_ping_has_timestamp(self, client) -> None:  # type: ignore[no-untyped-def]
         """Response body contains a non-empty ISO-8601 timestamp."""
         response = client.get("/api/v1/ping")
@@ -71,12 +96,22 @@ class TestPingRoute:
         first = client.get("/api/v1/ping").get_json()
         assert first is not None
         assert first["laya"] == "down"
+        assert first["laya_practice"] == "down"
+        assert first["laya_live_qualified"] is False
+        assert first["laya_reason"] == "not_started"
+        assert first["laya_port"] == 8000
         process_laya().set_status(DecisionStatus.READY)
         second = client.get("/api/v1/ping").get_json()
         assert second is not None
         assert second["laya"] == "ready"
-        process_laya().set_status(DecisionStatus.DEGRADED)
+        assert second["laya_practice"] == "ready"
+        assert second["laya_live_qualified"] is True
+        assert second["laya_reason"] is None
+        process_laya().apply_runtime_status(DecisionStatus.DEGRADED, live_qualified=False)
         third = client.get("/api/v1/ping").get_json()
         assert third is not None
-        assert third["laya"] == "degraded"
+        assert third["laya"] == "down"
+        assert third["laya_practice"] == "degraded"
+        assert third["laya_live_qualified"] is False
+        assert third["laya_reason"] is None
         reset_process_laya_for_tests()

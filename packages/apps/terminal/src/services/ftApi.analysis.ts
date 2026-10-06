@@ -111,31 +111,6 @@ export interface CorrelationResponse {
   is_sample_data: boolean;
 }
 
-export interface FundingRateEntry {
-  symbol: string;
-  rate: number;
-  predicted_rate: number;
-  next_funding_ms: number;
-  history: number[];
-  open_interest_usd: number | null;
-}
-
-export interface FundingRatesResponse {
-  rates: FundingRateEntry[];
-  /**
-   * Absent on sample payloads — the backend stub deliberately stops minting
-   * request-time timestamps on fabricated rates (a fresh ``updated_at`` on
-   * stub data defeats the user's staleness instincts).
-   */
-  updated_at?: string;
-  /**
-   * True when the rates are fabricated. Survives the response unwrap because
-   * this endpoint has no ``data`` envelope. Widgets must badge on THIS, not
-   * on connection state — the backend serves the stub even when connected.
-   */
-  is_sample_data?: boolean;
-}
-
 export interface EarningsCalendarEntry {
   symbol: string;
   company: string;
@@ -372,8 +347,8 @@ export interface CandlestickPatternBar {
   time?: string;
 }
 
-export const getCandlestickPatterns = (bars: CandlestickPatternBar[]) =>
-  post<CandlestickPatternResponse>("candlestick-patterns", { bars });
+export const getCandlestickPatterns = (bars: CandlestickPatternBar[], signal?: AbortSignal) =>
+  post<CandlestickPatternResponse>("candlestick-patterns", { bars }, signal);
 
 export const getVolSurface = (
   symbol: string,
@@ -498,8 +473,9 @@ export interface MtfAnalysis {
 export const getMultiTimeframe = (
   symbol: string,
   data: Record<string, MtfBar[]>,
+  signal?: AbortSignal,
 ) =>
-  postV1<MtfAnalysis>("analytics/mtf", { symbol, data });
+  postV1<MtfAnalysis>("analytics/mtf", { symbol, data }, signal);
 
 // --- Pair correlation (registered at the bare /v1 family) -------------------
 
@@ -736,9 +712,6 @@ export const getRiskReturn = () =>
 
 export const getCorrelationMatrix = () =>
   get<CorrelationResponse>("analytics/correlation");
-
-export const getCryptoFundingRates = () =>
-  get<FundingRatesResponse>("crypto/funding_rates");
 
 export const getEarningsCalendar = async (
   year: number,

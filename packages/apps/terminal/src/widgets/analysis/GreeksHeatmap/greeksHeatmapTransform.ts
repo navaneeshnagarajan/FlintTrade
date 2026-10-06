@@ -3,7 +3,7 @@
  * (`IVSmileData`) into the `ExpiryRow[]` matrix the Greeks Matrix widget renders
  * under BOTH of its projections (the 2-D heat grid and the CSS-3D surface).
  *
- * IMPORTANT: greeks are NOT carried in the OpenAlgo `optionchain` feed (that
+ * IMPORTANT: greeks are NOT carried in the broker `optionchain` feed (that
  * payload has only ltp/bid/ask/oi). The live IV smile is the dedicated source;
  * the per-strike greeks are derived from it through the shared Black–Scholes
  * module (`@/lib/optionsMath`), so every greek the terminal renders comes from

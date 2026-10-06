@@ -2,12 +2,14 @@
  * Strategy Builder payoff maths.
  *
  * The Payoff tab used to take min/max of a ±15% sampled curve. That caps
- * unbounded legs (a zero-premium NIFTY ATM long call reported ₹2,53,125)
+ * unbounded legs (a zero-premium NIFTY ATM long call reported ₹2,19,375)
  * and misses breakevens that sit on a flat-zero segment (zero-premium
  * long call never changes sign).
  */
 
 import { describe, expect, it } from "vitest";
+
+import { lotCountLabel } from "@/lib/instrumentLots";
 
 import type { Leg } from "../types";
 import {
@@ -18,12 +20,29 @@ import {
   calculatePositionNetPremium,
   computePayoff,
   computePayoffSummary,
+  computeEquityCurve,
+  computeMetrics,
   formatPositionSublabel,
   hasExplicitZeroPremium,
   hasUnsetPremium,
   pnlAtExpiry,
   validateLegs,
 } from "../utils";
+
+describe("local signal valuation", () => {
+  it.each([NaN, Infinity, -Infinity, 0, -5])("keeps the last valid mark across an unusable close (%s)", (invalid) => {
+    const bars = [{ close: 100 }, { close: 110 }, { close: invalid }, { close: 120 }];
+    const signals = [{ bar: 0, type: "BUY" as const }, { bar: 2, type: "SELL" as const }];
+    expect(computeEquityCurve(bars, signals).map(point => point.equity)).toEqual([10_000, 11_000, 11_000, 12_000]);
+    expect(computeMetrics(bars.slice(0, 3), signals).totalReturn).toBeCloseTo(10);
+  });
+
+  it("does not fill or carry a buy signal from an unusable bar", () => {
+    const bars = [{ close: NaN }, { close: 100 }, { close: 120 }];
+    expect(computeEquityCurve(bars, [{ bar: 0, type: "BUY" }]).map(point => point.equity))
+      .toEqual([10_000, 10_000, 10_000]);
+  });
+});
 
 function leg(partial: Partial<Leg> & Pick<Leg, "action" | "optionType" | "strike">): Leg {
   return {
@@ -53,7 +72,7 @@ describe("pnlAtExpiry", () => {
 describe("computePayoffSummary", () => {
   it("treats a zero-premium long call as unbounded profit with breakeven at the strike", () => {
     // Tester FT-LAB-001: Explore → /lab → Options Builder → Long Call → Payoff.
-    // Default NIFTY ATM 22500, lot size 75, template premium 0.
+    // Example multiplier 65. A valid NIFTY quantity for this case; not a live master read.
     const call = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 0 });
     const summary = pricedSummary([call]);
 
@@ -62,10 +81,10 @@ describe("computePayoffSummary", () => {
     expect(summary.breakevens).toEqual([22500]);
 
     // The sampled curve still peaks at +15% of spot — that figure must not
-    // leak into the summary (22500 × 0.15 × 75 = 2,53,125).
+    // leak into the summary (22500 × 0.15 × 65 = 2,19,375).
     const sampled = computePayoff([call], 22500);
     const sampledMax = Math.max(...sampled.map((p) => p.pnl));
-    expect(sampledMax * 75).toBe(253125);
+    expect(sampledMax * 65).toBe(219375);
     expect(summary.maxProfit).not.toBe(sampledMax);
   });
 
@@ -158,13 +177,19 @@ describe("computePayoffSummary", () => {
 describe("premium honesty copy", () => {
   it("keeps the FT-LAB-003 helper strings stable", () => {
     expect(UNSET_PREMIUM_HELPER).toBe("Enter premium to model payoff");
-    expect(SAMPLE_PREMIUM_HELPER).toBe("Sample premium — edit to model");
+    expect(SAMPLE_PREMIUM_HELPER).toBe("Example premium — edit to model");
     expect(ZERO_PREMIUM_WARNING).toBe("Premium is ₹0 — payoff treats cost as free");
   });
 });
 
 describe("position rupee basis (FT-LAB-005)", () => {
-  const niftyLot = 75;
+  /** Example NIFTY quantity for these cases. Not a live master read. */
+  const niftyLot = 65;
+
+  it("pluralises one lot and two lots", () => {
+    expect(lotCountLabel(1)).toBe("1 lot");
+    expect(lotCountLabel(2)).toBe("2 lots");
+  });
 
   it("scales a long-call net debit to position rupees so it equals max loss", () => {
     const call = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 45 });
@@ -179,13 +204,13 @@ describe("position rupee basis (FT-LAB-005)", () => {
   it("builds the muted per-lot sublabel from uniform lots", () => {
     const oneLot = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 45 });
     expect(formatPositionSublabel([oneLot], niftyLot)).toBe(
-      "₹3,375.00 per lot · 1 lots · lot size 75",
+      "₹2,925.00 per lot · 1 lot · lot size 65",
     );
 
     const twoLots = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 45, lots: 2 });
-    expect(calculatePositionNetPremium([twoLots], niftyLot)).toBe(6_750);
+    expect(calculatePositionNetPremium([twoLots], niftyLot)).toBe(5_850);
     expect(formatPositionSublabel([twoLots], niftyLot)).toBe(
-      "₹3,375.00 per lot · 2 lots · lot size 75",
+      "₹2,925.00 per lot · 2 lots · lot size 65",
     );
   });
 
@@ -194,12 +219,12 @@ describe("position rupee basis (FT-LAB-005)", () => {
       leg({ id: "long", action: "BUY", optionType: "CE", strike: 22500, premium: 100 }),
       leg({ id: "short", action: "SELL", optionType: "CE", strike: 22600, premium: 40 }),
     ];
-    expect(formatPositionSublabel(legs, niftyLot)).toBe("₹4,500.00 per lot · 1 lots · lot size 75");
+    expect(formatPositionSublabel(legs, niftyLot)).toBe("₹3,900.00 per lot · 1 lot · lot size 65");
     expect(formatPositionSublabel(legs, niftyLot, 40 * niftyLot)).toBe(
-      "₹3,000.00 per lot · 1 lots · lot size 75",
+      "₹2,600.00 per lot · 1 lot · lot size 65",
     );
     expect(formatPositionSublabel(legs, niftyLot, -60 * niftyLot)).toBe(
-      "₹4,500.00 per lot · 1 lots · lot size 75",
+      "₹3,900.00 per lot · 1 lot · lot size 65",
     );
   });
 

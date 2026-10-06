@@ -17,12 +17,7 @@ def tracker():
 
 
 def test_schema_has_section_10_tables(tracker) -> None:
-    names = {
-        r[0]
-        for r in tracker._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-    }
+    names = {r[0] for r in tracker._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {"security_events", "security_counters", "mcp_tool_counters"} <= names
 
 
@@ -38,9 +33,7 @@ def test_actor_scope_resolution() -> None:
 
 
 def test_record_event_appends_and_counts(tracker) -> None:
-    tracker.record_event(
-        "auth.failed_login", actor_id="alice", ip_hash="h1", reason="bad_password"
-    )
+    tracker.record_event("auth.failed_login", actor_id="alice", ip_hash="h1", reason="bad_password")
     events = tracker.recent_events("auth.failed_login")
     assert len(events) == 1
     assert events[0]["actor_id"] == "alice"
@@ -66,22 +59,21 @@ def test_threshold_crossed_per_scope(tracker) -> None:
     for i in range(5):
         tracker.record_event("auth.failed_login", actor_id="bob", ip_hash="hx", ts=now + i)
     # 5-in-window for actor scope crosses the §10.4 actor threshold (5)
-    assert tracker.threshold_crossed(
-        "auth.failed_login", actor_id="bob", limit=5, window_seconds=300, now=now + 5
-    ) is True
+    assert (
+        tracker.threshold_crossed("auth.failed_login", actor_id="bob", limit=5, window_seconds=300, now=now + 5) is True
+    )
     # a different, quiet actor is unaffected (per-scope evaluation)
-    assert tracker.threshold_crossed(
-        "auth.failed_login", actor_id="carol", limit=5, window_seconds=300, now=now + 5
-    ) is False
+    assert (
+        tracker.threshold_crossed("auth.failed_login", actor_id="carol", limit=5, window_seconds=300, now=now + 5)
+        is False
+    )
 
 
 def test_threshold_respects_window(tracker) -> None:
     now = 2_000_000.0
     tracker.record_event("auth.failed_login", ip_hash="old", ts=now - 1000)  # outside 300s
-    tracker.record_event("auth.failed_login", ip_hash="old", ts=now - 10)    # inside
-    assert tracker.count_events_in_window(
-        "auth.failed_login", ip_hash="old", window_seconds=300, now=now
-    ) == 1
+    tracker.record_event("auth.failed_login", ip_hash="old", ts=now - 10)  # inside
+    assert tracker.count_events_in_window("auth.failed_login", ip_hash="old", window_seconds=300, now=now) == 1
 
 
 def test_mcp_tool_decision_counters(tracker) -> None:
@@ -91,9 +83,7 @@ def test_mcp_tool_decision_counters(tracker) -> None:
     tracker.mcp_tool_decision("data.quote", "bogus")  # coerced to 'other'
     rows = {
         (r[0], r[1]): r[2]
-        for r in tracker._conn.execute(
-            "SELECT tool_name, decision, count_total FROM mcp_tool_counters"
-        ).fetchall()
+        for r in tracker._conn.execute("SELECT tool_name, decision, count_total FROM mcp_tool_counters").fetchall()
     }
     assert rows[("trade.place_order", "denied")] == 2
     assert rows[("trade.place_order", "external_input_refused")] == 1

@@ -123,7 +123,7 @@ def test_generated_source_columns_refuse_without_changing_any_source_state(tmp_p
 
 
 @pytest.mark.parametrize("adapter", [False, True])
-def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, monkeypatch, adapter):
+def test_zero_to_four_partitions_invalid_rows_and_preserves_raw_types(tmp_path, monkeypatch, adapter):
     path = source(tmp_path, adapter=adapter)
     with closing(sqlite3.connect(path)) as conn:
         add(conn, "Valid:Case")
@@ -134,10 +134,35 @@ def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, m
         ).fetchone()
         conn.commit()
 
-    def forbidden(*args, **kwargs):
-        pytest.fail("Migration/list must not invoke credential cryptography")
+    encrypt = vault.CredentialStore._encrypt
+    decrypt = vault.CredentialStore._decrypt
+    new_metadata = {}
+    metadata_reads = []
 
-    monkeypatch.setattr(vault.CredentialStore, "_derive_key", forbidden)
+    def capture_new_metadata(self, value):
+        result = encrypt(self, value)
+        # Only a newly minted protocol key envelope may be opened to authenticate
+        # the schema-3 ledger before schema-4 backfill. Source rows remain opaque.
+        assert set(value) == {"schema", "vault_incarnation", "mac_key"}
+        assert type(value["schema"]) is int and value["schema"] == 1
+        assert str(UUID(value["vault_incarnation"])) == value["vault_incarnation"]
+        assert UUID(value["vault_incarnation"]).version == 4
+        assert type(value["mac_key"]) is str and len(value["mac_key"]) == 64
+        assert bytes.fromhex(value["mac_key"]).hex() == value["mac_key"]
+        new_metadata[result] = dict(value)
+        return result
+
+    def metadata_only(self, row):
+        cells = (row["salt"], row["encrypted_creds"])
+        if set(row.keys()) != {"singleton", "salt", "encrypted_creds"} or row["singleton"] != 1 or cells not in new_metadata:
+            pytest.fail("Migration/list must not decrypt any existing credential or quarantined cell")
+        result = decrypt(self, row)
+        assert result == new_metadata[cells]
+        metadata_reads.append(cells)
+        return result
+
+    monkeypatch.setattr(vault.CredentialStore, "_encrypt", capture_new_metadata)
+    monkeypatch.setattr(vault.CredentialStore, "_decrypt", metadata_only)
     store = vault.CredentialStore(path, "synthetic")
     assert [row["account_id"] for row in store.list_accounts()] == ["Valid:Case"]
     entries = store.list_quarantine()
@@ -148,8 +173,8 @@ def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, m
     assert all(entry.ref.row_generation == 1 for entry in entries)
     assert "PRIVATE" not in repr(entries) and "bad%" not in repr(entries)
     with closing(sqlite3.connect(path)) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert conn.execute("SELECT schema_version FROM credential_vault_metadata").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("SELECT schema_version FROM credential_vault_metadata").fetchone()[0] == 4
         assert (
             conn.execute("SELECT salt,encrypted_creds,label,created_at,is_primary FROM accounts").fetchone() == before
         )
@@ -173,6 +198,15 @@ def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, m
     snapshot = logical(path)
     assert vault.CredentialStore(path, "synthetic").list_quarantine() == entries
     assert logical(path) == snapshot
+    assert len(new_metadata) == len(metadata_reads) == 1
+    # The narrow exception must still reject both a source credential-shaped
+    # row and an otherwise plausible key-shaped row holding source ciphertext.
+    for old_row in (
+        {"salt": before[0], "encrypted_creds": before[1]},
+        {"singleton": 1, "salt": before[0], "encrypted_creds": before[1]},
+    ):
+        with pytest.raises(pytest.fail.Exception, match="must not decrypt any existing"):
+            store._decrypt(old_row)
 
 
 @pytest.mark.parametrize("components", ["credentials", "setup", "both"])
@@ -824,7 +858,7 @@ def test_uncertain_migration_commit_is_failure_without_retry_or_false_rollback(t
         vault.CredentialStore(path, "synthetic")
     assert commits == [1]
     applied = logical(path)
-    assert applied[0] == (2,)
+    assert applied[0] == (4,)
     monkeypatch.setattr(vault.CredentialStore, "_get_connection", real)
     assert len(vault.CredentialStore(path, "synthetic").list_quarantine()) == 1
     assert logical(path) == applied
@@ -872,21 +906,6 @@ def test_one_to_two_reserved_absent_and_setup_tombstones_do_not_bump_without_rem
     assert len(store.list_quarantine()) == int(setup == 1)
 
 
-def test_unrelated_setup_and_versions_are_byte_preserved_by_reserved_cutover(tmp_path):
-    path = source(tmp_path, version=1)
-    with closing(sqlite3.connect(path)) as conn:
-        add(conn, "default", "openalgo", "openalgo", version=1)
-        conn.execute("INSERT INTO credential_selector_versions VALUES('openalgo','Other',14,1,'managed')")
-        conn.execute(
-            "INSERT INTO broker_selector_setup VALUES('openalgo','Other',1,?)",
-            ('{"base_url":"https://example.com:8443","ws_port":8766}',),
-        )
-        before = conn.execute("SELECT * FROM broker_selector_setup").fetchall()
-        conn.commit()
-    store = vault.CredentialStore(path, "synthetic")
-    assert store.selector_state(BrokerSelector("openalgo", "Other")).version.generation == 14
-    with closing(sqlite3.connect(path)) as conn:
-        assert conn.execute("SELECT * FROM broker_selector_setup").fetchall() == before
 
 
 @pytest.mark.parametrize(
@@ -910,76 +929,6 @@ def test_missing_or_wrong_quarantine_schema_is_global_corruption(tmp_path, chang
     assert logical(path) == before
 
 
-@pytest.mark.parametrize("first", ["credentials", "setup"])
-def test_first_component_cannot_bypass_unified_sibling_presence(tmp_path, first):
-    store = vault.CredentialStore(source(tmp_path), "synthetic")
-    native, bridge = BrokerSelector("dhan", "SHARED"), BrokerSelector("openalgo", "SHARED")
-    if first == "credentials":
-        store.put_credentials(native, "dhan", "Synthetic", {}, expected=store.selector_state(native).version)
-
-        def call():
-            return store.put_setup(
-                bridge, {"base_url": "https://example.com"}, expected=store.selector_state(bridge).version
-            )
-    else:
-        store.put_setup(bridge, {"base_url": "https://example.com"}, expected=store.selector_state(bridge).version)
-
-        def call():
-            return store.put_credentials(native, "dhan", "Synthetic", {}, expected=store.selector_state(native).version)
-
-    before = logical(store._db_path)
-    with pytest.raises(vault.CredentialConflictError):
-        call()
-    assert logical(store._db_path) == before
-    if first == "setup":
-        with pytest.raises(vault.CredentialConflictError):
-            store.stage_credentials(native, {}, broker="dhan", label="Synthetic")
-
-
-def test_setup_sibling_update_allowed_but_missing_setup_restore_refused(tmp_path):
-    store = vault.CredentialStore(source(tmp_path), "synthetic")
-    native, bridge = BrokerSelector("dhan", "SHARED"), BrokerSelector("openalgo", "SHARED")
-    expected = store.selector_state(bridge).version
-    store.put_credentials(bridge, "openalgo", "Synthetic", {}, expected=expected)
-    store.put_setup(bridge, {"base_url": "https://example.com"}, expected=store.selector_state(bridge).version)
-    with closing(sqlite3.connect(store._db_path)) as conn:
-        conn.execute(
-            "INSERT INTO accounts SELECT account_id,'dhan','dhan',label,salt,encrypted_creds,0,created_at FROM accounts"
-        )
-        conn.execute("INSERT INTO credential_selector_versions VALUES('dhan','SHARED',1,1,'managed')")
-        conn.commit()
-    native_version = store.selector_state(native).version
-    snap = store.snapshot_selector(bridge)
-    changed = store.put_setup(
-        bridge, {"base_url": "https://example.com:8443"}, expected=store.selector_state(bridge).version
-    )
-    restored = store.restore_selector(snap, expected=changed)
-    assert store.retrieve_setup(bridge) == {"base_url": "https://example.com"}
-    assert store.selector_state(native).version == native_version
-    removed = store.remove_setup(bridge, expected=restored)
-    before = logical(store._db_path)
-    with pytest.raises(vault.CredentialConflictError):
-        store.restore_selector(snap, expected=removed)
-    with pytest.raises(vault.CredentialConflictError):
-        store.put_setup(bridge, {"base_url": "https://example.com"}, expected=removed)
-    assert logical(store._db_path) == before
-
-
-def test_absent_sibling_tombstone_does_not_prevent_first_component(tmp_path):
-    store = vault.CredentialStore(source(tmp_path), "synthetic")
-    native, bridge = BrokerSelector("dhan", "SHARED"), BrokerSelector("openalgo", "SHARED")
-    absent = store.remove_selector(bridge, expected=store.selector_state(bridge).version)
-    native_version = store.put_credentials(
-        native, "dhan", "Synthetic", {}, expected=store.selector_state(native).version
-    )
-    snapshot = store.snapshot_selector(native)
-    assert store.selector_state(bridge).version == absent
-    native_absent = store.remove_selector(native, expected=native_version)
-    store.put_setup(bridge, {"base_url": "https://example.com"}, expected=absent)
-    before = logical(store._db_path)
-    with pytest.raises(vault.CredentialConflictError):
-        store.restore_selector(snapshot, expected=native_absent)
-    assert logical(store._db_path) == before
 
 
 def test_version_two_open_refuses_failed_sqlite_integrity_check(tmp_path, monkeypatch):

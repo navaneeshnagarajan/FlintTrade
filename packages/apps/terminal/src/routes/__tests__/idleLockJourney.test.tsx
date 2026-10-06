@@ -78,7 +78,6 @@ vi.mock("@/hooks/useWsBridge", () => ({ useWsBridge: () => undefined }));
 vi.mock("@/hooks/useDemoFeed", () => ({ useDemoFeed: () => undefined }));
 vi.mock("@/hooks/useTickerFallback", () => ({ useTickerFallback: () => undefined }));
 vi.mock("@/hooks/usePrevClose", () => ({ usePrevClose: () => undefined }));
-vi.mock("@/hooks/useOpenAlgoConfigHydration", () => ({ useOpenAlgoConfigHydration: () => undefined }));
 vi.mock("@/hooks/useTradingStoreSync", () => ({ useTradingStoreSync: () => undefined }));
 vi.mock("@/hooks/useBrokerAccounts", () => ({ useBrokerAccounts: () => undefined }));
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
@@ -199,7 +198,7 @@ describe("idle lock route", () => {
     );
 
     vi.useRealTimers();
-    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
       target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Unlock Practice desk" }));

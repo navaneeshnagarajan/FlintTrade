@@ -90,9 +90,7 @@ class TestPriceLevelRounding:
         key = agg.process_tick(ltp=83.123, volume=200, timestamp=_BASE_TS + 1)
         bucket = agg.get_bucket(key)
         expected_level = round(83.123 / 0.05) * 0.05
-        assert pytest.approx(expected_level, abs=1e-9) in [
-            pytest.approx(p, abs=1e-9) for p in bucket.cells
-        ]
+        assert pytest.approx(expected_level, abs=1e-9) in [pytest.approx(p, abs=1e-9) for p in bucket.cells]
 
 
 # ===========================================================================

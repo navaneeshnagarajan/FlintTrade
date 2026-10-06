@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
-import { Zap } from "lucide-react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { RouteBanner } from "@/components/help/RouteBanner";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Page, PageBody, PageHeader } from "@/components/layout/Page";
 import TabTransition from "@/components/motion/TabTransition";
 import PineEditor from "@/routes/lab/PineEditor";
 import { type BacktestResult } from "@/services/ftApi";
@@ -78,44 +77,36 @@ export default function LabRoute() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <RouteBanner
-        hintId="lab-import-strategy"
-        text="Import a ready-made strategy from the library — open the Backtest tab and click 'Choose Strategy' to get started."
-      />
-      <div className="border-b border-glass-chrome bg-glass-chrome/70 px-6 pt-4 pb-0 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 pb-3 text-center" data-tour-target="strategy-picker">
-          <Zap className="w-6 h-6 text-accent" />
-          <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">
-              {level === "beginner" ? "Try a Strategy" : "Strategy Lab"}
-            </h1>
-            <p className="text-xxs text-text-muted">
-              {level === "beginner"
-                ? "Pick a built-in strategy and run a backtest — no code needed"
-                : "Backtest, forward test, and optimise strategies — no broker has this built-in"}
-            </p>
-          </div>
-        </div>
-        <div className="mx-auto max-w-5xl">
-          <LabTabBar active={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Strategy Lab"
+        tourTarget="strategy-picker"
+        description={
+          level === "beginner"
+            ? "Pick a built-in strategy and run a backtest. No code needed."
+            : "Backtest, forward test and optimise strategies before they trade."
+        }
+      >
+        <LabTabBar active={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
+      </PageHeader>
 
-      <div
+      <PageBody
         role="tabpanel"
         id={`lab-tabpanel-${activeTab}`}
         aria-labelledby={`lab-tab-${activeTab}`}
-        className="flex-1"
+        width={activeTab === "options-builder" || activeTab === "pine-editor" ? "wide" : "default"}
       >
-        <ScrollArea className="h-full">
-          <div className="mx-auto max-w-5xl p-6" data-tour-target="backtest-results">
-            <TabTransition tabKey={activeTab}>
-              {renderTab(activeTab)}
-            </TabTransition>
-          </div>
-        </ScrollArea>
-      </div>
+        <div data-tour-target="backtest-results">
+          <RouteBanner
+            hintId="lab-import-strategy"
+            text="Import a ready-made strategy from the library — open the Backtest tab and click 'Choose Strategy' to get started."
+            className="mb-5"
+          />
+          <TabTransition tabKey={activeTab}>
+            {renderTab(activeTab)}
+          </TabTransition>
+        </div>
+      </PageBody>
 
       {level === "beginner" && (
         <SpotlightTour
@@ -123,6 +114,6 @@ export default function LabRoute() {
           steps={TOUR_DEFINITIONS["lab-beginner"] ?? []}
         />
       )}
-    </div>
+    </Page>
   );
 }

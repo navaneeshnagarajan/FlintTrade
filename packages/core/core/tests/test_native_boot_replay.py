@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from flinttrade_core.broker_identity import BrokerSelector, parse_broker_selector, serialise_broker_selector
 from flinttrade_core.workspace_migrations import compare_and_swap_workspace
 
 _fixture_spec = importlib.util.spec_from_file_location(
@@ -33,48 +31,10 @@ def authority(tmp_path, monkeypatch):
     fixture.close()
 
 
-def test_reconnect_saved_accounts_skips_native_rows(monkeypatch, authority):
-    from flinttrade_core.app import _reconnect_saved_accounts
-
-    native = BrokerSelector("dhan", "D1")
-    bridge = BrokerSelector("openalgo", "OA1")
-    for selector, broker in ((native, "dhan"), (bridge, "zerodha")):
-        authority.store.put_credentials(
-            selector, broker, "Synthetic", {"api_key": selector.account_id},
-            expected=authority.store.selector_state(selector).version,
-        )
-    workspace = compare_and_swap_workspace(
-        authority.path, authority.workspace.version,
-        lambda config: config["brokers"]["execution"].update({"default": serialise_broker_selector(bridge)}),
-    )
-    calls = []
-
-    class BridgeAdapter:
-        def authenticate(self, credentials):
-            calls.append(credentials["api_key"])
-            return "synthetic-token", None
-
-    def load_adapter(broker):
-        assert broker == "zerodha", "Native rows must never reach the bridge loader"
-        return BridgeAdapter()
-
-    monkeypatch.setattr("flinttrade_gateway.session.load_broker_adapter", load_adapter)
-    _reconnect_saved_accounts(
-        authority.registry, authority.store, logging.getLogger("test.replay"),
-        mutation_admission=lambda: None, registry_publication_owner=authority.owner,
-        workspace_path=authority.path,
-        execution_default_selector=parse_broker_selector(workspace.as_dict()["brokers"]["execution"]["default"]),
-    )
-
-    assert calls == ["OA1"]
-    assert authority.registry.snapshot_selector(native).generation == 0
-    assert authority.registry.snapshot_exact_state(bridge).status == "connected"
-    assert authority.registry.get_primary_session().info.account_id == "OA1"
-
-
 def _replay_app(authority, native_adapters, selectors):
     compare_and_swap_workspace(
-        authority.path, authority.workspace.version,
+        authority.path,
+        authority.workspace.version,
         lambda config: config["brokers"].update({"registered": selectors}),
     )
     return SimpleNamespace(
@@ -96,8 +56,15 @@ def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch
     fake_app = _replay_app(authority, object_marker, selectors)
 
     async def fake_establish(
-        native_adapters, registry, credential_store, received_selectors, *,
-        verify=False, mutation_admission=None, registry_publication_owner=None, workspace_path=None,
+        native_adapters,
+        registry,
+        credential_store,
+        received_selectors,
+        *,
+        verify=False,
+        mutation_admission=None,
+        registry_publication_owner=None,
+        workspace_path=None,
     ):
         # Wrapper wiring evidence only; actual replay/activation refusals have
         # separate real-registry tests. This fake invokes no provider.
@@ -128,8 +95,15 @@ def test_reestablish_native_sessions_verifies_by_default(monkeypatch, authority)
     fake_app = _replay_app(authority, {"upstox": object()}, ["upstox:U1"])
 
     async def fake_establish(
-        native_adapters, registry, credential_store, selectors, *,
-        verify=False, mutation_admission=None, registry_publication_owner=None, workspace_path=None,
+        native_adapters,
+        registry,
+        credential_store,
+        selectors,
+        *,
+        verify=False,
+        mutation_admission=None,
+        registry_publication_owner=None,
+        workspace_path=None,
     ):
         seen["verify"] = verify
         assert selectors == ["upstox:U1"]

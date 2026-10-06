@@ -22,15 +22,15 @@ function resolve(
 }
 
 describe("FT-CORE-002 feed freshness", () => {
-  it("Explore is always Sample, even when a leftover live feed is connected", () => {
+  it("Explore is always Example, even when a leftover live feed is connected", () => {
     const freshness = resolve({
       mode: "explore",
       wsConnected: true,
       lastTickAt: NOW - 200,
     });
     expect(freshness.state).toBe("sample");
-    expect(freshness.label).toBe("Sample");
-    expect(freshness.chipText).toBe("Sample");
+    expect(freshness.label).toBe("Example");
+    expect(freshness.chipText).toBe("Example");
     expect(freshness.muted).toBe(false);
     expect(freshness.chipText).not.toMatch(/Live|Practice/i);
   });
@@ -97,10 +97,11 @@ describe("FT-CORE-002 feed freshness", () => {
     expect(freshness.chipText).toBe("Unknown · 5s");
   });
 
-  it("unknown source with no timestamp is muted Unknown without inventing an age", () => {
+  it("Practice with no feed is labelled once, without an invented age", () => {
     const freshness = resolve({ mode: "practice" });
     expect(freshness.state).toBe("unknown");
-    expect(freshness.chipText).toBe("Unknown");
+    expect(freshness.chipText).toBe("No live feed (Practice)");
+    expect(freshness.label).toBe("No live feed (Practice)");
     expect(freshness.ageLabel).toBeNull();
     expect(freshness.muted).toBe(true);
   });

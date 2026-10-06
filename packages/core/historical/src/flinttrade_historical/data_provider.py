@@ -1,12 +1,12 @@
 """Data provider abstraction for historical OHLCV data.
 
 Defines a Protocol for data providers and a registry with fallback chain:
-    1. OpenAlgo (primary — broker API via OpenAlgoClient)
+    1. native broker (primary — broker API via BrokerClient)
     2. NSEData / OpenChart (free NSE/NFO data, no API key required)
     3. CommodityData / yfinance (free MCX commodity data)
 
 Adapted patterns from:
-- historify: OpenAlgo integration, rate limiting, interval normalisation
+- historify: native broker integration, rate limiting, interval normalisation
 - openchart: NSE charting API, segment/exchange mapping
 """
 
@@ -19,7 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from .service_profiles import (
     HISTORICAL_PROVIDER_PROFILES,
-    OPENALGO_PROFILE,
+    NATIVE_BROKER_PROFILE,
     OPENCHART_PROFILE,
     YFINANCE_PROFILE,
 )
@@ -27,7 +27,7 @@ from .service_profiles import (
 logger = logging.getLogger("flinttrade.historical.data_provider")
 
 # ---------------------------------------------------------------------------
-# Canonical interval map — normalise user-supplied strings to OpenAlgo format
+# Canonical interval map — normalise user-supplied strings to native broker format
 # Adapted from historify convert_interval_format() and openchart interval_map
 # ---------------------------------------------------------------------------
 
@@ -46,19 +46,17 @@ INTERVAL_MAP: dict[str, str] = {
     "1M": "1M",
 }
 
-INTRADAY_INTERVALS: frozenset[str] = frozenset(
-    {"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"}
-)
+INTRADAY_INTERVALS: frozenset[str] = frozenset({"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"})
 
-# Exchanges supported natively via OpenAlgo
-OPENALGO_EXCHANGES: frozenset[str] = frozenset(OPENALGO_PROFILE.exchanges)
+# Exchanges supported natively via native broker
+NATIVE_BROKER_EXCHANGES: frozenset[str] = frozenset(NATIVE_BROKER_PROFILE.exchanges)
 
 # Exchanges supported via free NSE/NFO data (openchart)
 FREE_NSE_EXCHANGES: frozenset[str] = frozenset(OPENCHART_PROFILE.exchanges)
 
 
 def normalise_interval(interval: str) -> str:
-    """Return the canonical OpenAlgo interval string.
+    """Return the canonical native broker interval string.
 
     Args:
         interval: User-supplied interval string (e.g. "1d", "D", "1h").
@@ -71,10 +69,7 @@ def normalise_interval(interval: str) -> str:
     """
     canonical = INTERVAL_MAP.get(interval)
     if canonical is None:
-        raise ValueError(
-            f"Unrecognised interval: {interval!r}. "
-            f"Supported: {sorted(INTERVAL_MAP)}"
-        )
+        raise ValueError(f"Unrecognised interval: {interval!r}. Supported: {sorted(INTERVAL_MAP)}")
     return canonical
 
 
@@ -143,12 +138,12 @@ class DataProvider(Protocol):
 
     A provider accepts a symbol, exchange, interval, and date range and
     returns a ``ProviderResult``. Providers are synchronous at the protocol
-    boundary — the OpenAlgo async client is wrapped internally.
+    boundary — the native broker async client is wrapped internally.
     """
 
     @property
     def name(self) -> str:
-        """Short identifier for this provider (e.g. "openalgo", "openchart")."""
+        """Short identifier for this provider (e.g. "native", "openchart")."""
         ...
 
     def supports(self, exchange: str) -> bool:
@@ -183,18 +178,18 @@ class DataProvider(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# OpenAlgo provider
+# native broker provider
 # ---------------------------------------------------------------------------
 
 
-class OpenAlgoProvider:
-    """Primary data provider — wraps OpenAlgoClient async history endpoint.
+class NativeBrokerProvider:
+    """Primary data provider — wraps BrokerClient async history endpoint.
 
     Uses the existing HistoricalDownloader for automatic date chunking so
     brokers' 30-day intraday limits are transparently handled.
 
     Args:
-        client: An ``OpenAlgoClient`` instance.
+        client: An ``BrokerClient`` instance.
         chunk_days_intraday: Max days per API call for intraday intervals.
         chunk_days_daily: Max days per API call for daily/weekly intervals.
     """
@@ -212,10 +207,10 @@ class OpenAlgoProvider:
     @property
     def name(self) -> str:
         """Provider identifier."""
-        return OPENALGO_PROFILE.runtime_name
+        return NATIVE_BROKER_PROFILE.runtime_name
 
     def supports(self, exchange: str) -> bool:
-        """OpenAlgo supports all standard Indian exchanges.
+        """native broker supports all standard Indian exchanges.
 
         Args:
             exchange: Exchange code.
@@ -223,7 +218,7 @@ class OpenAlgoProvider:
         Returns:
             True for NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX.
         """
-        return exchange.upper() in OPENALGO_PROFILE.exchanges
+        return exchange.upper() in NATIVE_BROKER_PROFILE.exchanges
 
     def fetch(
         self,
@@ -233,7 +228,7 @@ class OpenAlgoProvider:
         start_date: str,
         end_date: str,
     ) -> ProviderResult:
-        """Fetch via OpenAlgo history API with automatic chunking.
+        """Fetch via native broker history API with automatic chunking.
 
         Args:
             symbol: Trading symbol.
@@ -243,7 +238,7 @@ class OpenAlgoProvider:
             end_date: End date "YYYY-MM-DD".
 
         Returns:
-            ProviderResult with OpenAlgo bars.
+            ProviderResult with native broker bars.
         """
         canonical = normalise_interval(interval)
         result = ProviderResult(
@@ -270,7 +265,7 @@ class OpenAlgoProvider:
 
             if download.errors:
                 for err in download.errors:
-                    logger.warning("OpenAlgo provider partial error: %s", err)
+                    logger.warning("native broker provider partial error: %s", err)
 
             result.bars = [
                 ProviderBar(
@@ -292,8 +287,11 @@ class OpenAlgoProvider:
         except Exception as exc:
             result.error = str(exc)
             logger.error(
-                "OpenAlgo provider error for %s %s %s: %s",
-                symbol, exchange, canonical, exc,
+                "native broker provider error for %s %s %s: %s",
+                symbol,
+                exchange,
+                canonical,
+                exc,
             )
 
         return result
@@ -309,7 +307,7 @@ class OpenChartProvider:
 
     No API key required. Covers NSE equities, indices, futures, and options.
     MCX and other exchanges are not supported — the registry falls back to
-    OpenAlgo for those.
+    native broker for those.
 
     Adapted from openchart core.py patterns: lazy cookie initialisation,
     segment-based symbol resolution, intraday cutoff at 15:29:59.
@@ -388,7 +386,10 @@ class OpenChartProvider:
         except Exception as exc:
             result.error = str(exc)
             logger.error(
-                "OpenChart provider error for %s %s: %s", symbol, exchange, exc,
+                "OpenChart provider error for %s %s: %s",
+                symbol,
+                exchange,
+                exc,
             )
 
         return result
@@ -480,7 +481,10 @@ class YFinanceProvider:
         except Exception as exc:
             result.error = str(exc)
             logger.error(
-                "yfinance provider error for %s %s: %s", symbol, exchange, exc,
+                "yfinance provider error for %s %s: %s",
+                symbol,
+                exchange,
+                exc,
             )
 
         return result
@@ -494,10 +498,10 @@ class YFinanceProvider:
 ProviderFactory = Callable[[Any | None], DataProvider]
 
 
-def _openalgo_factory(client: Any | None) -> DataProvider:
+def _native_broker_factory(client: Any | None) -> DataProvider:
     if client is None:
-        raise ValueError("OpenAlgo provider requires a configured client")
-    return OpenAlgoProvider(client)
+        raise ValueError("native broker provider requires a configured client")
+    return NativeBrokerProvider(client)
 
 
 def _openchart_factory(_client: Any | None) -> DataProvider:
@@ -509,7 +513,7 @@ def _yfinance_factory(_client: Any | None) -> DataProvider:
 
 
 _PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
-    OPENALGO_PROFILE.runtime_name: _openalgo_factory,
+    NATIVE_BROKER_PROFILE.runtime_name: _native_broker_factory,
     OPENCHART_PROFILE.runtime_name: _openchart_factory,
     YFINANCE_PROFILE.runtime_name: _yfinance_factory,
 }
@@ -519,20 +523,20 @@ class ProviderRegistry:
     """Registry that routes fetch requests to the correct provider with fallback.
 
     Default chain (ordered by priority):
-        1. OpenAlgoProvider — primary, all exchanges, requires API key
+        1. NativeBrokerProvider — primary, all exchanges, requires API key
         2. OpenChartProvider — free fallback for NSE/NFO
         3. YFinanceProvider — free fallback for MCX commodities
 
     Usage::
 
-        registry = ProviderRegistry(openalgo_client)
+        registry = ProviderRegistry(broker_client)
         result = registry.fetch("RELIANCE", "NSE", "5m", "2026-01-01", "2026-03-31")
 
         # With fallback disabled (strict mode):
         result = registry.fetch(..., fallback=False)
 
     Args:
-        openalgo_client: Initialised ``OpenAlgoClient``. Pass None to skip the
+        broker_client: Initialised ``BrokerClient``. Pass None to skip the
             primary provider (useful when only free data sources are needed).
         extra_providers: Additional providers inserted before the built-in
             free providers. Useful for testing or custom data sources.
@@ -540,13 +544,13 @@ class ProviderRegistry:
 
     def __init__(
         self,
-        openalgo_client: Any | None = None,
+        broker_client: Any | None = None,
         extra_providers: list[DataProvider] | None = None,
     ) -> None:
         self._providers: list[DataProvider] = [
-            _PROVIDER_FACTORIES[profile.runtime_name](openalgo_client)
+            _PROVIDER_FACTORIES[profile.runtime_name](broker_client)
             for profile in HISTORICAL_PROVIDER_PROFILES
-            if profile.requires_configured_client and openalgo_client is not None
+            if profile.requires_configured_client and broker_client is not None
         ]
 
         if extra_providers:
@@ -615,27 +619,40 @@ class ProviderRegistry:
         suitable = [p for p in self._providers if p.supports(exchange)]
         if not suitable:
             logger.warning(
-                "No provider supports exchange %s for %s", exchange, symbol,
+                "No provider supports exchange %s for %s",
+                exchange,
+                symbol,
             )
             return last_result
 
         for provider in suitable:
             logger.info(
                 "Trying provider %r for %s %s %s (%s → %s)",
-                provider.name, symbol, exchange, canonical, start_date, end_date,
+                provider.name,
+                symbol,
+                exchange,
+                canonical,
+                start_date,
+                end_date,
             )
             result = provider.fetch(symbol, exchange, interval, start_date, end_date)
 
             if result.success:
                 logger.info(
                     "Provider %r returned %d bars for %s %s",
-                    provider.name, result.total_bars, symbol, exchange,
+                    provider.name,
+                    result.total_bars,
+                    symbol,
+                    exchange,
                 )
                 return result
 
             logger.warning(
                 "Provider %r failed for %s %s: %s",
-                provider.name, symbol, exchange, result.error,
+                provider.name,
+                symbol,
+                exchange,
+                result.error,
             )
             last_result = result
 

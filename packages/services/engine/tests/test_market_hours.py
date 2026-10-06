@@ -91,7 +91,7 @@ class TestStandardHours:
 
     def test_all_exchanges_present(self) -> None:
         # NCO (NSE Commodities), MCX_INDEX (commodity indices), and
-        # GLOBAL_INDEX (world reference feeds) were added in the OpenAlgo
+        # GLOBAL_INDEX (world reference feeds) were added in the broker
         # v2.0.0.7 sync; keep this list in lock-step with STANDARD_HOURS
         # so any future addition trips the assertion.
         expected = {

@@ -1,27 +1,34 @@
 # FlintTrade — Development Roadmap
 
+Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
+mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
+cannot currently be established through the terminal. Practice uses the local
+sandbox. Funded Live placement remains unproven and fail-closed.
+
+
 > This is the public roadmap. Detailed working notes, specs and evidence live in the maintainer's private workspace; phase outcomes are summarised here when they land. Shipped detail moves to `changelog.md`.
 
-FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic and AI-assisted workflows on Indian markets (NSE/BSE equity and F&O). It runs its own native backend first and treats OpenAlgo as one optional bridge adapter. The headline feature is **gated execution**: every reachable live order traverses the five-layer `SafetySystem`, a one-shot HMAC `SafetyContext` and the `BrokerRouter` before any broker adapter is invoked — no order path may bypass this chain.
+FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic and AI-assisted workflows on Indian markets (NSE/BSE equity and F&O). It runs its own native backend first and uses native broker adapters. The headline feature is **gated execution**: every reachable live order traverses the five-layer `SafetySystem`, a one-shot HMAC `SafetyContext` and the `BrokerRouter` before any broker adapter is invoked — no order path may bypass this chain.
 
 Current version: **v0.0.1** — a clean-slate pre-1.0 baseline after the 2026-07-23 release reset. Not production-ready.
 
 ## Architecture north star
 
+- **The core backend is the only place broker differences are absorbed.** No feature talks to a broker directly; everything flows through the unified core functions (catalogue, router, gate, reads facade, storage). A feature with its own broker path is a consolidation bug.
+
 One unbranching pipeline — every feature builds on the same layers, never around them:
 
-```
-broker  →  OpenAlgo bridge  OR  FlintTrade native adapter  →  FlintTrade core backend  →  terminal UI/UX
-```
-
-- **OpenAlgo is the first preferred way** — an active community keeps it battle-tested across 30+ brokers. Native adapters are the secondary path, promoted per broker only on live verification evidence. This ordering applies to every surface: connect UI, recommendations and the broker MCP catalogue.
-- **The core backend is the only place broker differences are absorbed.** No feature talks to a broker or the bridge directly; everything flows through the unified core functions (catalogue, router, gate, reads facade, storage). A feature with its own broker path is a consolidation bug.
+native adapter → BrokerRouter/read port → core backend → terminal
 
 ## Current state
 
+- **Brokers:** native broker HTTP UX is frozen on `main` until Task 9D and Task 7C.2. This remains an accepted product decision.
+
 - **Safety:** no reachable ungated live order path — verified via repeated adversarial audit passes and pinned by guard tests. Intentionally-raw paths are Layer-5 emergencies on shrinking allowlists.
-- **Brokers:** OpenAlgo remains first-class through the bridge path. Native connectability is still evidence-gated in the catalogue (Dhan, Upstox, and Kotak Neo listed as enabled for Connected (read) / API smoke; INDmoney and Groww stay disabled until their remaining live-safety blockers clear), but **native broker HTTP UX is frozen on `main` until Task 9D and Task 7C.2**. That is an accepted product decision: broker-account mutations return `503` until Task 9D; native HTTP account and market-data reads return `409` with zero provider calls until the Task 7C.2 / 8B read-port cutover; service connections are inert only. The terminal still calls those routes, so Setup → Brokers will fail until those tasks land. Exact broker reads that did land are the in-process `BrokerReadPort`, not terminal UX. Funded live order placement remains unproven across the native adapters. Gated writes (`SafetySystem` → `gate_order` / `gate_broker_write` → `BrokerRouter`) stay preserved. **FT-MONDAY-002** records native Dhan + Kotak Neo Connected (read) / API smoke on the MSI static-IP host for non-funded live REST reads; chrome is Connected (read) / API smoke (`Live read only until funded unlock.`). OpenAlgo is Settings/fallback only. Neo has no sandbox — never offer Neo Practice. `dhanhq` stays on latest stable 2.2.0. Neo's exact runtime is upstream `main` `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`, with `v3.0.7` peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538` as the release baseline; both expose `kotakneoapi` 3.0.7 through the retained `neo_api_client` namespace. The old `neo-api-client` distribution is prohibited. Async market/order-feed lifecycle coverage is local and synthetic; live-account/market-hours, funded order, Live-promotion, and cross-platform proof remain. Live place stays fail-closed. See `docs/acceptance/FT-MONDAY-002.md`.
+
 - **Modes:** Explore / Practice / Live are enforced server-side via JWT claims; PIN live-unlock and downgrade paths are wired through the app-auth flow, and Practice order placement is proven through the native sandbox engine.
+
 - **Desktop:** the Electron source-bootstrap shell is complete and locally verified (macOS packaged ad hoc). No complete installer release is published yet — macOS awaits Apple distribution signing and notarisation secrets; Windows/Linux installers build only in CI.
 
 ## Phase tracker
@@ -61,6 +68,7 @@ Done highlights:
 - Gated basket/split/options-strategy orders; sandbox fill realism; native GTT (forever-order) correctness across Dhan and Upstox with fail-closed cross-broker fields; explicit unknown-outcome recovery for response-lost writes; a hash-chained, verifiable audit log; a native two-way Telegram bot carrying the kill switch; a real searchable trade journal (SQLite + FTS5); honest provenance labels on every widget that can fall back to sample data; clean uninstall plus backend persistence for data that previously lived only in browser storage; CI test-visibility fixes so every terminal test file runs in a shard, with drift guards.
 - A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
+- The native broker account foundation now has strict mutation contracts, encrypted durable claims, witnessed workspace recovery, retained runtime custody and a synthetic transaction coordinator. Read enrolment follows validated vault authority, and terminal receipts retain redacted audit events for verified retryable delivery. This foundation precedes the production HTTP cutovers below; it does not enable native broker UX or a provider driver.
 
 Remaining: continue evidence-backed duplicate consolidation, and close only the still-open rows after a fresh code-ground-truth audit. Cross-platform nightly-CI repairs landed in #140. The older broker-connect, GTT UI, `post_market_analysis`, dead-admin-route, installer-duplication and “final two widget” rows are shipped or superseded. **Task 9D** must migrate broker-account HTTP handlers and remove `guard_broker_account_http` atomically (today every production mutation answers `503`). **Task 7C.2 / 8B** must cut native HTTP reads over to the authenticated in-process `BrokerReadPort` (today those reads answer `409` and make zero provider calls). Until both land, native broker UX on `main` stays down — that is the accepted product decision for the service-connections / identity merge, not a regression to restore in place.
 
@@ -99,8 +107,9 @@ Full local verification green → semver bump → changelog (shipped only) → t
 ## Standing constraints
 
 - **no-overscope:** personal-use open-source (operator == user == data principal). No DPDPA / §65B / CERT-In / RBI / vendor-compliance ceremony. SEBI-derived functional requirements only (per-second order rate limiting, 2FA/OAuth broker login, daily session re-auth) plus AGPL licence compliance.
+
 - **Trading safety:** all development and testing happens in Explore/Practice; Live is armed only by the maintainer, explicitly, per session. Every new order path mints a `SafetyContext` via `gate_order`/`gate_broker_write` → `BrokerRouter`.
-- **Ports:** terminal 5173 (Vite dev), FlintTrade backend 5100, OpenAlgo 5000 (external), OpenAlgo WebSocket 8765. Never consolidate 5100 into 5000–5009.
+
 - **Review discipline:** a phase or wave is done only after a full adversarial audit, fixes, and a clean re-audit.
 
 *Curated public roadmap — tick items as they ship; shipped detail lives in `changelog.md`.*

@@ -37,7 +37,7 @@ For Nifty at 22,000, typical weekly (Thursday) condor setup:
 - Short call: 22,000 + 200 = 22,200 (≈ 16-delta)
 - Long call: 22,200 + 100 = 22,300 (wing)
 
-Adjust strike distances for current IV — use the option chain's delta column via `/api/v1/optionchain`.
+Adjust strike distances for current IV — use the option chain's delta column via the native option-chain reader.
 
 **Minimum credit rule:** Only place the condor if total credit collected ≥ 30% of the spread width. For a 100-point spread, minimum credit = 30 points. Below this, the risk:reward is insufficient.
 
@@ -75,4 +75,4 @@ Example: Collected ₹30 credit per lot on a 100-point spread. If the position s
 
 ## Margin Considerations
 
-Iron condor margin is calculated as the wider spread's SPAN margin. The four-leg structure reduces margin vs. a naked straddle by approximately 40–60%. Use `/api/v1/margin` to verify before entry. Ensure at least 30% free margin buffer after entry.
+Iron condor margin is calculated as the wider spread's SPAN margin. The four-leg structure reduces margin vs. a naked straddle by approximately 40–60%. Use the connected native adapter margin reader to verify before entry. Ensure at least 30% free margin buffer after entry.

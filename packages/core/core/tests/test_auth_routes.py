@@ -10,15 +10,16 @@ from flinttrade_core.app import create_flask_app
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     """Flask test client with auth service pointed at tmp_path."""
-    # Other test modules set OPENALGO_API_KEY / FLINTTRADE_API_KEY via os.environ
+    # Other test modules set FLINTTRADE_API_KEY / FLINTTRADE_API_KEY via os.environ
     # directly, and the value leaks across xdist workers — making the global
     # require_auth demand an X-API-Key before our own auth guards even run.
     # Unset them so the guard/PIN/native-write tests exercise the loopback
     # allowance deterministically (mirrors the test_native_account_routes fixture).
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     with patch("flinttrade_core.auth_routes._get_auth_service") as mock:
         from flinttrade_core.auth_service import AuthService
+
         svc = AuthService(db_path=tmp_path / "auth.db")
         mock.return_value = svc
         app = create_flask_app()
@@ -53,12 +54,16 @@ def _token_claims(token: str) -> dict:
 class TestSetupEndpoint:
     def test_setup_creates_account(self, client):
         c, svc = client
-        resp = c.post("/v1/auth/setup", json={
-            "username": "nav",
-            "email": "nav@example.com",
-            "password": "StrongP@ss123!",
-            "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        resp = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 201
         data = resp.get_json()
         assert data["status"] == "success"
@@ -67,15 +72,30 @@ class TestSetupEndpoint:
 
     def test_setup_rejects_duplicate(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
-        resp = c.post("/v1/auth/setup", json={
-            "username": "nav2", "email": "nav2@example.com",
-            "password": "StrongP@ss123!", "pin": "654321",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        resp = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav2",
+                "email": "nav2@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "654321",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["code"] == "operator_exists"
+        assert body["message"] == "Request conflicts with the current state"
 
 
 class TestSetupVault:
@@ -89,12 +109,16 @@ class TestSetupVault:
         vault = tmp_path / "vault-ws"
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
         try:
-            setup = c.post("/v1/auth/setup", json={
-                "username": "operator",
-                "email": "operator@example.com",
-                "password": "StrongP@ss123!",
-                "pin": "",
-            }, headers={"Content-Type": "application/json"})
+            setup = c.post(
+                "/v1/auth/setup",
+                json={
+                    "username": "operator",
+                    "email": "operator@example.com",
+                    "password": "StrongP@ss123!",
+                    "pin": "",
+                },
+                headers={"Content-Type": "application/json"},
+            )
             assert setup.status_code == 201
             token = setup.get_json()["data"]["token"]
             secret = "VaultKey123!"
@@ -124,12 +148,16 @@ class TestSetupVault:
         (vault / "master_password").write_text(existing, encoding="utf-8")
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
         try:
-            setup = c.post("/v1/auth/setup", json={
-                "username": "operator",
-                "email": "operator@example.com",
-                "password": "StrongP@ss123!",
-                "pin": "",
-            }, headers={"Content-Type": "application/json"})
+            setup = c.post(
+                "/v1/auth/setup",
+                json={
+                    "username": "operator",
+                    "email": "operator@example.com",
+                    "password": "StrongP@ss123!",
+                    "pin": "",
+                },
+                headers={"Content-Type": "application/json"},
+            )
             token = setup.get_json()["data"]["token"]
             resp = c.post(
                 "/v1/auth/setup/vault",
@@ -150,12 +178,16 @@ class TestSetupVault:
         c, _svc = client
         vault = tmp_path / "vault-ws"
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
-        setup = c.post("/v1/auth/setup", json={
-            "username": "operator",
-            "email": "operator@example.com",
-            "password": "StrongP@ss123!",
-            "pin": "",
-        }, headers={"Content-Type": "application/json"})
+        setup = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "operator",
+                "email": "operator@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         token = setup.get_json()["data"]["token"]
         denied = c.post(
             "/v1/auth/setup/vault",
@@ -188,67 +220,124 @@ def _enable_totp(svc, password: str = "StrongP@ss123!") -> str:
 class TestLoginEndpoint:
     def test_login_with_correct_credentials(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         # Get TOTP code
         import pyotp
+
         secret = svc.get_totp_secret()
         code = pyotp.TOTP(secret).now()
-        resp = c.post("/v1/auth/login", json={
-            "password": "StrongP@ss123!",
-            "totp_code": code,
-        }, headers={"Content-Type": "application/json"})
+        resp = c.post(
+            "/v1/auth/login",
+            json={
+                "password": "StrongP@ss123!",
+                "totp_code": code,
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert "token" in data["data"]
+        assert data["data"]["mode"] == "practice"
+        from flinttrade_core.auth_routes import decode_token
+
+        assert decode_token(data["data"]["token"])["mode"] == "practice"
 
     def test_login_password_only_when_authenticator_deferred(self, client):
         """FT-SETUP-002: Explore/Practice daily login is password-only
         until the operator enrols TOTP."""
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert svc.is_totp_enabled() is False
-        resp = c.post("/v1/auth/login", json={
-            "password": "StrongP@ss123!",
-        }, headers={"Content-Type": "application/json"})
+        resp = c.post(
+            "/v1/auth/login",
+            json={
+                "password": "StrongP@ss123!",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 200
-        assert "token" in resp.get_json()["data"]
+        body = resp.get_json()["data"]
+        assert "token" in body
+        assert body["mode"] == "practice"
+        from flinttrade_core.auth_routes import decode_token
+
+        payload = decode_token(body["token"])
+        assert payload["mode"] == "practice"
+        assert payload["live_mode_unlocked"] is False
 
     def test_login_requires_totp_once_enrolled(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         _enable_totp(svc)
-        resp = c.post("/v1/auth/login", json={
-            "password": "StrongP@ss123!",
-        }, headers={"Content-Type": "application/json"})
+        resp = c.post(
+            "/v1/auth/login",
+            json={
+                "password": "StrongP@ss123!",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 401
         assert "totp" in resp.get_json()["message"].lower()
         import pyotp
+
         code = pyotp.TOTP(svc.get_totp_secret()).now()
-        ok = c.post("/v1/auth/login", json={
-            "password": "StrongP@ss123!",
-            "totp_code": code,
-        }, headers={"Content-Type": "application/json"})
+        ok = c.post(
+            "/v1/auth/login",
+            json={
+                "password": "StrongP@ss123!",
+                "totp_code": code,
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert ok.status_code == 200
 
     def test_login_with_wrong_password(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
-        resp = c.post("/v1/auth/login", json={
-            "password": "wrong",
-            "totp_code": "000000",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        resp = c.post(
+            "/v1/auth/login",
+            json={
+                "password": "wrong",
+                "totp_code": "000000",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 401
 
 
@@ -257,18 +346,24 @@ class TestTotpEnableEndpoint:
 
     def test_enable_totp_with_live_code(self, client):
         import pyotp
+
         c, svc = client
-        setup = c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        setup = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         token = setup.get_json()["data"]["token"]
         code = pyotp.TOTP(svc.get_totp_secret()).now()
         resp = c.post(
             "/v1/auth/totp/enable",
             json={"totp_code": code},
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {token}"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200
         assert resp.get_json()["data"]["totp_enabled"] is True
@@ -276,16 +371,21 @@ class TestTotpEnableEndpoint:
 
     def test_enable_totp_rejects_wrong_code(self, client):
         c, svc = client
-        setup = c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        setup = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         token = setup.get_json()["data"]["token"]
         resp = c.post(
             "/v1/auth/totp/enable",
             json={"totp_code": "000000"},
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {token}"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 401
         assert svc.is_totp_enabled() is False
@@ -297,13 +397,20 @@ class TestStatusEndpoint:
         resp = c.get("/v1/auth/status")
         data = resp.get_json()
         assert data["data"]["is_setup"] is False
+        assert data["data"]["migration_blocked"] is None
 
     def test_status_after_setup(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         resp = c.get("/v1/auth/status")
         data = resp.get_json()
         assert data["data"]["is_setup"] is True
@@ -311,46 +418,252 @@ class TestStatusEndpoint:
 
     def test_status_totp_enabled_after_enrolment(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         _enable_totp(svc)
         data = c.get("/v1/auth/status").get_json()["data"]
         assert data["totp_enabled"] is True
 
+    def test_status_reports_vault_and_unfinished_setup(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        before = c.get("/v1/auth/status").get_json()["data"]
+        assert before["is_setup"] is False
+        assert before["vault_open"] is False
+        assert before["setup_finished"] is False
+        assert "master_password" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+        (vault / "master_password").write_text("already-open-secret", encoding="utf-8")
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        mid = c.get("/v1/auth/status").get_json()["data"]
+        assert mid["is_setup"] is True
+        assert mid["vault_open"] is True
+        assert mid["setup_finished"] is False
+        assert mid["vault_presecured"] is True
+        assert "already-open-secret" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+    def test_opening_the_vault_later_does_not_change_the_step_total(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        before = c.get("/v1/auth/status").get_json()["data"]
+        assert before["vault_presecured"] is None
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        created = c.get("/v1/auth/status").get_json()["data"]
+        assert created["is_setup"] is True
+        assert created["vault_open"] is False
+        assert created["vault_presecured"] is False
+        (vault / "master_password").write_text("opened-during-setup", encoding="utf-8")
+        after = c.get("/v1/auth/status").get_json()["data"]
+        assert after["vault_open"] is True
+        assert after["vault_presecured"] is False
+        assert "opened-during-setup" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+
+class TestSetupResumeAndComplete:
+    """Reload mid-setup and re-entry after Setup is finished."""
+
+    def _create_operator(self, c):
+        resp = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "operator",
+                "email": "operator@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 201
+        return resp.get_json()["data"]["token"]
+
+    def test_resume_remints_a_setup_session_while_setup_is_unfinished(self, client, tmp_path, monkeypatch):
+        from flinttrade_core.auth_routes import decode_token
+
+        c, svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        self._create_operator(c)
+        denied = c.post(
+            "/v1/auth/setup/resume", json={"password": "wrong-password"}, headers={"Content-Type": "application/json"}
+        )
+        assert denied.status_code == 401
+
+        resumed = c.post(
+            "/v1/auth/setup/resume", json={"password": "StrongP@ss123!"}, headers={"Content-Type": "application/json"}
+        )
+        assert resumed.status_code == 200
+        body = resumed.get_json()["data"]
+        assert body["username"] == "operator"
+        assert "StrongP@ss123!" not in resumed.get_data(as_text=True)
+        payload = decode_token(body["token"])
+        assert payload["setup_session"] is True
+        assert payload["setup_bound"] == svc.get_created_at()
+        assert payload["sub"] == "operator"
+
+        missing = c.post(
+            "/v1/auth/setup/complete",
+            json={},
+            headers={"Authorization": f"Bearer {body['token']}", "Content-Type": "application/json"},
+        )
+        assert missing.status_code == 409
+        assert svc.is_setup_finished() is False
+
+        (vault / "master_password").write_text("already-open-secret", encoding="utf-8")
+        done = c.post(
+            "/v1/auth/setup/complete",
+            json={},
+            headers={"Authorization": f"Bearer {body['token']}", "Content-Type": "application/json"},
+        )
+        assert done.status_code == 200
+        assert done.get_json()["data"]["setup_finished"] is True
+        assert svc.is_setup_finished() is True
+        status = c.get("/v1/auth/status").get_json()["data"]
+        assert status["setup_finished"] is True
+        assert "already-open-secret" not in done.get_data(as_text=True)
+
+        again = c.post(
+            "/v1/auth/setup/resume", json={"password": "StrongP@ss123!"}, headers={"Content-Type": "application/json"}
+        )
+        assert again.status_code == 409
+
+    def test_resume_mints_the_same_practice_session_as_setup(self, client):
+        """A password-proven resume carries the Practice mode setup minted."""
+        from flinttrade_core.auth_routes import decode_token
+
+        c, _svc = client
+        created = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "operator",
+                "email": "operator@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert created.status_code == 201
+        setup_payload = decode_token(created.get_json()["data"]["token"])
+        assert setup_payload["mode"] == "practice"
+
+        resumed = c.post(
+            "/v1/auth/setup/resume", json={"password": "StrongP@ss123!"}, headers={"Content-Type": "application/json"}
+        )
+        assert resumed.status_code == 200
+        resume_payload = decode_token(resumed.get_json()["data"]["token"])
+        assert resume_payload["mode"] == "practice"
+        assert resume_payload["mode"] == setup_payload["mode"]
+        assert resume_payload["setup_session"] is True
+        assert resume_payload["live_mode_unlocked"] is False
+
+    def test_resume_requires_authenticator_once_enrolled(self, client):
+        c, svc = client
+        self._create_operator(c)
+        _enable_totp(svc)
+        refused = c.post(
+            "/v1/auth/setup/resume", json={"password": "StrongP@ss123!"}, headers={"Content-Type": "application/json"}
+        )
+        assert refused.status_code == 401
+        import pyotp
+
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        resumed = c.post(
+            "/v1/auth/setup/resume",
+            json={
+                "password": "StrongP@ss123!",
+                "totp_code": code,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert resumed.status_code == 200
+        from flinttrade_core.auth_routes import decode_token
+
+        assert decode_token(resumed.get_json()["data"]["token"])["setup_session"] is True
+
+    def test_daily_login_cannot_open_the_vault(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        self._create_operator(c)
+        denied = c.post(
+            "/v1/auth/setup/vault",
+            json={"master_password": "VaultKey123!"},
+            headers=_session_headers(),
+        )
+        assert denied.status_code == 401
+        assert not (vault / "master_password").exists()
+
 
 class TestPinEndpoint:
     def _setup_with_totp(self, c, svc):
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         _enable_totp(svc)
 
     def test_pin_verify_correct(self, client):
         c, svc = client
         self._setup_with_totp(c, svc)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers=_session_headers())
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers())
         assert resp.status_code == 200
 
     def test_live_pin_requires_authenticator_enrolment(self, client):
         """A session that is already Live keeps the authenticator enrolment check."""
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers=_session_headers("live", live_mode_unlocked=True))
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers("live", live_mode_unlocked=True))
         assert resp.status_code == 403
         body = resp.get_json()
         assert body.get("code") == "totp_required"
         assert "authenticator" in body["message"].lower()
         _enable_totp(svc)
-        ok = c.post("/v1/auth/pin", json={"pin": "123456"},
-                    headers=_session_headers("live", live_mode_unlocked=True))
+        ok = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers("live", live_mode_unlocked=True))
         assert ok.status_code == 200
         data = ok.get_json()["data"]
         assert data["mode"] == "live"
@@ -360,12 +673,17 @@ class TestPinEndpoint:
     def test_practice_pin_unlock_without_totp(self, client):
         """A Practice session unlocks with the PIN and stays Practice."""
         c, _svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers=_session_headers("practice"))
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers("practice"))
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "practice"
@@ -374,16 +692,14 @@ class TestPinEndpoint:
     def test_pin_verify_wrong(self, client):
         c, svc = client
         self._setup_with_totp(c, svc)
-        resp = c.post("/v1/auth/pin", json={"pin": "000000"},
-                       headers=_session_headers())
+        resp = c.post("/v1/auth/pin", json={"pin": "000000"}, headers=_session_headers())
         assert resp.status_code == 401
 
     def test_pin_response_includes_new_token(self, client):
         """Unlock returns a replacement token for the existing session mode."""
         c, svc = client
         self._setup_with_totp(c, svc)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers=_session_headers("practice"))
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers("practice"))
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert isinstance(data.get("token"), str)
@@ -402,10 +718,16 @@ class TestPinSetEndpoint:
     """
 
     def _setup_without_pin(self, c):
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            },
+            headers={"Content-Type": "application/json"},
+        )
 
     def test_status_exposes_has_pin(self, client):
         c, _ = client
@@ -419,8 +741,7 @@ class TestPinSetEndpoint:
         permanently unreachable with no hint of the fix."""
         c, _ = client
         self._setup_without_pin(c)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers=_session_headers())
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers())
         assert resp.status_code == 409
         body = resp.get_json()
         assert body.get("code") == "pin_not_set"
@@ -430,9 +751,11 @@ class TestPinSetEndpoint:
     def test_set_pin_requires_session(self, client):
         c, _ = client
         self._setup_without_pin(c)
-        resp = c.post("/v1/auth/pin/set",
-                      json={"password": "StrongP@ss123!", "pin": "654321"},
-                      headers={"Content-Type": "application/json"})
+        resp = c.post(
+            "/v1/auth/pin/set",
+            json={"password": "StrongP@ss123!", "pin": "654321"},
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 401
 
     def test_set_pin_rejects_reset_token(self, client):
@@ -443,35 +766,77 @@ class TestPinSetEndpoint:
         from flinttrade_core.auth_routes import _create_reset_token
 
         reset = _create_reset_token("nav")
-        resp = c.post("/v1/auth/pin/set",
-                      json={"password": "StrongP@ss123!", "pin": "654321"},
-                      headers={"Content-Type": "application/json",
-                               "Authorization": f"Bearer {reset}"})
+        resp = c.post(
+            "/v1/auth/pin/set",
+            json={"password": "StrongP@ss123!", "pin": "654321"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
+
+    def test_session_on_x_flinttrade_token_passes_the_global_guard(self, client, monkeypatch):
+        """The fallback session header is a JWT, not an API key."""
+        c, _svc = client
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("nav", mode="explore")
+        missing = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert missing.status_code == 401
+        assert missing.get_json()["message"] == "Unauthorized"
+
+        accepted = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "X-FlintTrade-Token": token},
+        )
+        assert accepted.status_code == 200
+
+        monkeypatch.setenv("FLINTTRADE_API_KEY", "desk-key")
+        rejected = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "X-FlintTrade-Token": "desk-key"},
+        )
+        assert rejected.status_code == 401
+        assert rejected.get_json()["message"] == "Unauthorized"
 
     def test_set_pin_rejects_wrong_password(self, client):
         c, _ = client
         self._setup_without_pin(c)
-        resp = c.post("/v1/auth/pin/set",
-                      json={"password": "wrong-password", "pin": "654321"},
-                      headers=_session_headers())
+        resp = c.post(
+            "/v1/auth/pin/set", json={"password": "wrong-password", "pin": "654321"}, headers=_session_headers()
+        )
         assert resp.status_code == 401
 
-    @pytest.mark.parametrize("pin", [
-        "12345",
-        "1234567",
-        "12ab56",
-        "abcdef",
-        "１２３４５６",
-    ])
+    @pytest.mark.parametrize(
+        "pin",
+        [
+            "12345",
+            "1234567",
+            "12ab56",
+            "abcdef",
+            "１２３４５６",
+        ],
+    )
     def test_set_pin_rejects_non_six_digit_pin(self, client, pin):
         """FT-SET-003: /v1/auth/pin/set stays fail-closed on anything but ^\\d{6}$."""
         c, _ = client
         self._setup_without_pin(c)
-        resp = c.post("/v1/auth/pin/set",
-                      json={"password": "StrongP@ss123!", "pin": pin},
-                      headers=_session_headers())
+        resp = c.post("/v1/auth/pin/set", json={"password": "StrongP@ss123!", "pin": pin}, headers=_session_headers())
         assert resp.status_code == 400
         assert "exactly 6 digits" in resp.get_json()["message"]
 
@@ -481,9 +846,9 @@ class TestPinSetEndpoint:
         c, svc = client
         self._setup_without_pin(c)
 
-        resp = c.post("/v1/auth/pin/set",
-                      json={"password": "StrongP@ss123!", "pin": "654321"},
-                      headers=_session_headers())
+        resp = c.post(
+            "/v1/auth/pin/set", json={"password": "StrongP@ss123!", "pin": "654321"}, headers=_session_headers()
+        )
         assert resp.status_code == 200
         assert resp.get_json()["data"]["has_pin"] is True
         # Mints no token — the PIN set is not a session/mode change.
@@ -494,8 +859,7 @@ class TestPinSetEndpoint:
         assert status["has_pin"] is True
 
         _enable_totp(svc)
-        unlock = c.post("/v1/auth/live", json={"pin": "654321"},
-                        headers=_session_headers())
+        unlock = c.post("/v1/auth/live", json={"pin": "654321"}, headers=_session_headers())
         assert unlock.status_code == 200
         data = unlock.get_json()["data"]
         assert data["mode"] == "live"
@@ -503,15 +867,21 @@ class TestPinSetEndpoint:
 
     def test_set_pin_changes_existing_pin(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         _enable_totp(svc)
 
-        resp = c.post("/v1/auth/pin/set",
-                      json={"password": "StrongP@ss123!", "pin": "999999"},
-                      headers=_session_headers())
+        resp = c.post(
+            "/v1/auth/pin/set", json={"password": "StrongP@ss123!", "pin": "999999"}, headers=_session_headers()
+        )
         assert resp.status_code == 200
 
         old = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers())
@@ -529,13 +899,18 @@ class TestModeSwitchEndpoint:
 
     def _setup_and_pin_unlock(self, client):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         _enable_totp(svc)
-        pin_resp = c.post("/v1/auth/live", json={"pin": "123456"},
-                          headers=_session_headers())
+        pin_resp = c.post("/v1/auth/live", json={"pin": "123456"}, headers=_session_headers())
         return pin_resp.get_json()["data"]["token"]
 
     def test_downgrade_to_practice_returns_fresh_token(self, client):
@@ -598,10 +973,16 @@ class TestModeSwitchEndpoint:
 
     def test_missing_token_returns_401(self, client):
         c, _ = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
 
         resp = c.post(
             "/v1/auth/mode",
@@ -637,15 +1018,43 @@ class TestModeSwitchEndpoint:
         # keeps the old live-unlocked JWT, frontend stays in Live.
         assert "data" not in resp.get_json() or "token" not in resp.get_json().get("data", {})
 
-    def test_downgrade_to_explore_returns_fresh_token(self, client):
-        """Phase 1 G1: /auth/mode must also accept an 'explore' downgrade so
-        a Practice/Live session flipping the UI to Explore keeps the JWT claim
-        in lockstep instead of holding a higher-mode token.
+    def test_legacy_explore_token_remains_a_session(self, client):
+        """An explore token issued before this default still authenticates
+        as example data until the next sign-in."""
+        c, _ = client
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        from flinttrade_core.auth_routes import _create_token, decode_token
+
+        legacy = _create_token("nav", mode="explore")
+        assert decode_token(legacy)["mode"] == "explore"
+        resp = c.post(
+            "/v1/auth/mode",
+            json={"mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {legacy}",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["mode"] == "practice"
+
+    def test_downgrade_to_explore_is_refused_without_revoking(self, client):
+        """A desk session cannot move to example data. The refusal happens
+        before revocation, so the live token can still downgrade to practice.
         """
         c, _ = client
         live_token = self._setup_and_pin_unlock(client)
 
-        resp = c.post(
+        refused = c.post(
             "/v1/auth/mode",
             json={"mode": "explore"},
             headers={
@@ -653,32 +1062,19 @@ class TestModeSwitchEndpoint:
                 "Authorization": f"Bearer {live_token}",
             },
         )
-        assert resp.status_code == 200
-        data = resp.get_json()["data"]
-        assert data["mode"] == "explore"
-        assert data["live_mode_unlocked"] is False
-        assert data["token"] != live_token
+        assert refused.status_code == 400
+        assert "practice" in refused.get_json()["message"].lower()
 
-    def test_downgrade_to_explore_revokes_prior_jwt(self, client):
-        c, _ = client
-        live_token = self._setup_and_pin_unlock(client)
-        c.post(
+        still_valid = c.post(
             "/v1/auth/mode",
-            json={"mode": "explore"},
+            json={"mode": "practice"},
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {live_token}",
             },
         )
-        retry = c.post(
-            "/v1/auth/mode",
-            json={"mode": "explore"},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {live_token}",
-            },
-        )
-        assert retry.status_code == 401
+        assert still_valid.status_code == 200
+        assert still_valid.get_json()["data"]["mode"] == "practice"
 
     def test_downgrade_rejects_unknown_target(self, client):
         c, _ = client
@@ -703,18 +1099,23 @@ class TestUnlockRestoresSession:
 
     def _setup(self, client, *, enable_totp: bool = False):
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         if enable_totp:
             _enable_totp(svc)
         return c
 
     def test_practice_unlock_with_right_pin_stays_practice(self, client):
         c = self._setup(client)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers=_session_headers("practice"))
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers("practice"))
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "practice"
@@ -725,8 +1126,7 @@ class TestUnlockRestoresSession:
 
     def test_wrong_pin_is_rejected(self, client):
         c = self._setup(client)
-        resp = c.post("/v1/auth/pin", json={"pin": "000000"},
-                      headers=_session_headers("practice"))
+        resp = c.post("/v1/auth/pin", json={"pin": "000000"}, headers=_session_headers("practice"))
         assert resp.status_code == 401
         assert "token" not in (resp.get_json().get("data") or {})
 
@@ -782,14 +1182,12 @@ class TestUnlockRestoresSession:
     def test_explicit_live_switch_keeps_authenticator_check(self, client):
         c, svc = client
         self._setup(client)
-        blocked = c.post("/v1/auth/live", json={"pin": "123456"},
-                         headers=_session_headers("practice"))
+        blocked = c.post("/v1/auth/live", json={"pin": "123456"}, headers=_session_headers("practice"))
         assert blocked.status_code == 403
         assert blocked.get_json().get("code") == "totp_required"
 
         _enable_totp(svc)
-        ok = c.post("/v1/auth/live", json={"pin": "123456", "mode": "practice"},
-                    headers=_session_headers("practice"))
+        ok = c.post("/v1/auth/live", json={"pin": "123456", "mode": "practice"}, headers=_session_headers("practice"))
         assert ok.status_code == 200
         data = ok.get_json()["data"]
         assert data["mode"] == "live"
@@ -818,6 +1216,51 @@ class TestUnlockRestoresSession:
         )
         assert resp.status_code == 400
         assert "no mode" in resp.get_json()["message"].lower()
+
+    def test_pin_unlock_rotates_the_session_token_and_keeps_the_mode(self, client):
+        import jwt
+
+        from flinttrade_core.auth_routes import _create_token, decode_token
+
+        c = self._setup(client)
+        old = _create_token("nav", mode="practice")
+        old_payload = decode_token(old)
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {old}",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        new = data["token"]
+        assert data["mode"] == "practice"
+        new_payload = decode_token(new)
+        assert new_payload["mode"] == "practice"
+        assert new_payload["jti"] != old_payload["jti"]
+        with pytest.raises(jwt.InvalidTokenError):
+            decode_token(old)
+        stale = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {old}",
+            },
+        )
+        assert stale.status_code == 401
+        wrong = c.post(
+            "/v1/auth/pin",
+            json={"pin": "000000", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {new}",
+            },
+        )
+        assert wrong.status_code == 401
+        assert wrong.get_json()["message"] == "Invalid PIN."
 
 
 class TestRateLimitRegistration:
@@ -877,25 +1320,32 @@ class TestPinIsSessionBound:
     next-08:00-IST expiry) can never be sidestepped by a low-entropy PIN."""
 
     def _setup(self, c):
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
 
     def test_correct_pin_without_session_is_rejected(self, client):
         c, _ = client
         self._setup(c)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers={"Content-Type": "application/json"})
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"}, headers={"Content-Type": "application/json"})
         assert resp.status_code == 401
-        assert "sign in with password" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_correct_pin_with_garbage_session_is_rejected(self, client):
         c, _ = client
         self._setup(c)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers={"Content-Type": "application/json",
-                               "Authorization": "Bearer not-a-jwt"})
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-jwt"},
+        )
         assert resp.status_code == 401
 
     def test_correct_pin_with_revoked_session_is_rejected(self, client):
@@ -906,9 +1356,11 @@ class TestPinIsSessionBound:
         token = _create_token("nav", mode="explore")
         payload = decode_token(token)
         _revoke_jti(payload["jti"], float(payload["exp"]))
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers={"Content-Type": "application/json",
-                               "Authorization": f"Bearer {token}"})
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        )
         assert resp.status_code == 401
 
 
@@ -919,10 +1371,16 @@ class TestGuardsRejectResetTokens:
     the D6 session requirement on /v1/auth/pin."""
 
     def _setup(self, c):
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
 
     def test_reset_token_rejected_by_native_write_guard(self, client):
         c, _ = client
@@ -936,7 +1394,7 @@ class TestGuardsRejectResetTokens:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_reset_token_rejected_by_pin_unlock(self, client):
         c, _ = client
@@ -945,11 +1403,12 @@ class TestGuardsRejectResetTokens:
 
         reset = _create_reset_token("nav")
         resp = c.post(
-            "/v1/auth/pin", json={"pin": "123456"},
+            "/v1/auth/pin",
+            json={"pin": "123456"},
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
 
 class TestSetupSessionReset:
@@ -960,12 +1419,16 @@ class TestSetupSessionReset:
     """
 
     def _setup(self, c):
-        return c.post("/v1/auth/setup", json={
-            "username": "nav",
-            "email": "nav@example.com",
-            "password": "StrongP@ss123!",
-            "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        return c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
 
     def test_session_reset_wipes_unfinished_account(self, client):
         c, svc = client
@@ -995,12 +1458,16 @@ class TestSetupSessionReset:
         first = self._setup(c)
         stale = first.get_json()["data"]["token"]
         assert svc.reset_account("StrongP@ss123!") is True
-        second = c.post("/v1/auth/setup", json={
-            "username": "bob",
-            "email": "bob@example.com",
-            "password": "AnotherP@ss123!",
-            "pin": "654321",
-        }, headers={"Content-Type": "application/json"})
+        second = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "bob",
+                "email": "bob@example.com",
+                "password": "AnotherP@ss123!",
+                "pin": "654321",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert second.status_code == 201
         resp = c.post(
             "/v1/auth/setup/reset",
@@ -1015,6 +1482,7 @@ class TestSetupSessionReset:
         c, svc = client
         self._setup(c)
         from flinttrade_core.auth_routes import _create_reset_token
+
         reset = _create_reset_token("nav")
         resp = c.post(
             "/v1/auth/setup/reset",
@@ -1024,27 +1492,151 @@ class TestSetupSessionReset:
         assert resp.status_code == 401
         assert svc.is_setup() is True
 
+    def test_password_alone_does_not_wipe_existing_account(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == ("Sign in to reset this account. You'll need your password.")
+        assert resp.get_json()["authenticator_enrolled"] is False
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "nav"
+
+    def test_invalid_bearer_and_password_do_not_wipe(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-session"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_reset_token_and_password_do_not_wipe(self, client):
+        c, svc = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+
+        reset = _create_reset_token("nav")
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_session_and_password_wipes(self, client):
+        c, svc = client
+        self._setup(c)
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!"},
+            headers=_session_headers(),
+        )
+        assert resp.status_code == 200
+        assert svc.is_setup() is False
+
+
+class TestSetupRegenerateRequiresSession:
+    """Once an account exists, authenticator regeneration needs a session."""
+
+    def _setup(self, c):
+        return c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_password_alone_does_not_rekey(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == ("Sign in to reset this account. You'll need your password.")
+        assert resp.get_json()["authenticator_enrolled"] is False
+        assert svc.get_totp_secret() == before
+        assert "totp_uri" not in resp.get_data(as_text=True)
+
+    def test_invalid_bearer_does_not_rekey(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer not-a-session"},
+        )
+        assert resp.status_code == 401
+        assert svc.get_totp_secret() == before
+
+    def test_session_and_password_rekeys(self, client):
+        c, svc = client
+        created = self._setup(c)
+        before = svc.get_totp_secret()
+        setup_token = created.get_json()["data"]["token"]
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert resp.status_code == 200
+        assert svc.get_totp_secret() != before
+        assert resp.get_json()["data"]["totp_uri"]
+
+    def test_daily_session_and_password_rekeys(self, client):
+        c, svc = client
+        self._setup(c)
+        before = svc.get_totp_secret()
+        resp = c.post(
+            "/v1/auth/setup/regenerate-2fa",
+            json={"password": "StrongP@ss123!"},
+            headers=_session_headers(),
+        )
+        assert resp.status_code == 200
+        assert svc.get_totp_secret() != before
+
 
 class TestSetupMintsSession:
-    """Audit fix (#18/#19): /v1/auth/setup returns an explore-mode session token
-    so the rest of the setup wizard (broker connect behind the G9 guard, mode
-    select behind the D6 PIN) is authenticated. Non-live: arming Live still
-    needs the PIN."""
+    """/v1/auth/setup returns a practice session token so the rest of the
+    setup wizard (broker connect behind the G9 guard, mode select behind the
+    D6 PIN) is authenticated. Non-live: arming Live still needs the PIN."""
 
-    def test_setup_returns_explore_session_token(self, client):
+    def test_setup_returns_practice_session_token(self, client):
         c, _ = client
-        resp = c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        resp = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 201
         data = resp.get_json()["data"]
-        assert data["mode"] == "explore"
+        assert data["mode"] == "practice"
         from flinttrade_core.auth_routes import decode_token
 
         payload = decode_token(data["token"])
         assert payload["type"] == "session"
-        assert payload["mode"] == "explore"
+        assert payload["mode"] == "practice"
         assert payload["live_mode_unlocked"] is False
         assert payload["setup_session"] is True
         assert payload["setup_bound"]
@@ -1064,10 +1656,16 @@ class TestModeSwitchRejectsResetToken:
     then satisfies the G9 write guard and the D6 PIN unlock."""
 
     def _setup(self, c):
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
 
     def test_reset_token_cannot_downgrade_mode(self, client):
         c, _ = client
@@ -1076,11 +1674,12 @@ class TestModeSwitchRejectsResetToken:
 
         reset = _create_reset_token("nav")
         resp = c.post(
-            "/v1/auth/mode", json={"mode": "practice"},
+            "/v1/auth/mode",
+            json={"mode": "practice"},
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_session_token_can_still_downgrade(self, client):
         c, _ = client
@@ -1089,7 +1688,8 @@ class TestModeSwitchRejectsResetToken:
 
         token = _create_token("nav", mode="live", live_mode_unlocked=True)
         resp = c.post(
-            "/v1/auth/mode", json={"mode": "practice"},
+            "/v1/auth/mode",
+            json={"mode": "practice"},
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200
@@ -1141,3 +1741,182 @@ def test_verified_operator_session_rejects_non_full_or_invalid_identity(monkeypa
     verify = getattr(auth_routes, "verify_operator_session_token", lambda token: None)
     with pytest.raises(Exception):
         verify("signed.jwt.value")
+
+
+def _seed_two_operators(db_path) -> None:
+    """An older account table with two rows and no single-operator constraint."""
+    import sqlite3
+    from datetime import UTC, datetime
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE account (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                pin_hash TEXT NOT NULL,
+                totp_secret_encrypted BLOB NOT NULL,
+                totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        created = datetime.now(UTC).isoformat()
+        for operator_id, username in ((1, "alice"), (2, "bob")):
+            conn.execute(
+                """INSERT INTO account (
+                       id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at
+                   ) VALUES (?, ?, ?, 'hash', '', ?, ?, 0, ?)""",
+                (operator_id, username, f"{username}@example.com", b"secret", b"salt", created),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_status_pauses_when_two_operators_exist_and_login_does_not_start(tmp_path, monkeypatch):
+    """Two operator rows set migration_blocked and do not mint a desk session."""
+    import sqlite3
+
+    from flinttrade_core.auth_service import AuthService
+
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    db_path = tmp_path / "auth.db"
+    _seed_two_operators(db_path)
+    before = sqlite3.connect(db_path)
+    try:
+        before_rows = before.execute("SELECT id, username, email, created_at FROM account ORDER BY id").fetchall()
+    finally:
+        before.close()
+
+    svc = AuthService(db_path=db_path)
+    with patch("flinttrade_core.auth_routes._get_auth_service", return_value=svc):
+        app = create_flask_app()
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            status = c.get("/v1/auth/status")
+            data = status.get_json()["data"]
+            assert status.status_code == 200
+            assert data["migration_blocked"] == "two_operators"
+            login = c.post(
+                "/v1/auth/login",
+                json={"password": "StrongP@ss123!", "totp_code": ""},
+                headers={"Content-Type": "application/json"},
+            )
+            body = login.get_json()
+            assert login.status_code == 409
+            assert body["migration_blocked"] == "two_operators"
+            assert "token" not in body.get("data", {})
+            assert "alice" not in login.get_data(as_text=True)
+            assert "bob" not in login.get_data(as_text=True)
+
+    after = sqlite3.connect(db_path)
+    try:
+        after_rows = after.execute("SELECT id, username, email, created_at FROM account ORDER BY id").fetchall()
+    finally:
+        after.close()
+    assert after_rows == before_rows
+    assert len(after_rows) == 2
+
+
+class TestEnrolledAccountRecovery:
+    """Once an authenticator is enrolled, recovery needs a session, password, and code."""
+
+    def _setup(self, c):
+        return c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "nav",
+                "email": "nav@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "123456",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_signed_out_reset_and_regenerate_are_refused(self, client, monkeypatch):
+        c, svc = client
+        self._setup(c)
+        _enable_totp(svc)
+        before = svc.get_totp_secret()
+        monkeypatch.setenv("FLINTTRADE_API_KEY", "tester-api-key")
+        headers = {"Content-Type": "application/json", "X-API-Key": "tester-api-key"}
+        body = {"password": "StrongP@ss123!"}
+        reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
+        regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
+        assert reset.status_code == 403
+        assert regenerate.status_code == 403
+        assert reset.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password and authenticator code."
+        )
+        assert reset.get_json()["authenticator_enrolled"] is True
+        assert regenerate.get_json()["message"] == reset.get_json()["message"]
+        assert regenerate.get_json()["authenticator_enrolled"] is True
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "nav"
+        assert svc.get_totp_secret() == before
+        assert svc.is_totp_enabled() is True
+
+    def test_signed_in_without_code_is_refused(self, client):
+        c, svc = client
+        self._setup(c)
+        _enable_totp(svc)
+        before = svc.get_totp_secret()
+        headers = _session_headers()
+        body = {"password": "StrongP@ss123!"}
+        reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
+        regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
+        assert reset.status_code == 403
+        assert regenerate.status_code == 403
+        assert reset.get_json()["message"] == (
+            "Account recovery requires your password and the current authenticator code."
+        )
+        assert svc.is_setup() is True
+        assert svc.get_totp_secret() == before
+        assert svc.is_totp_enabled() is True
+
+    def test_reset_invalidates_earlier_tokens(self, client):
+        import pyotp
+
+        from flinttrade_core.auth_routes import _create_token
+
+        c, svc = client
+        created = self._setup(c)
+        setup_token = created.get_json()["data"]["token"]
+        _enable_totp(svc)
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        daily = _create_token("nav", mode="practice")
+        epoch_before = svc.current_session_binding()[1]
+        reset = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!", "totp_code": code},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert reset.status_code == 200
+        assert svc.is_setup() is False
+        assert svc.current_session_binding()[1] == epoch_before + 1
+        assert c.get("/health", headers={"Authorization": f"Bearer {daily}"}).status_code == 401
+        config = c.get("/health", headers={"Authorization": f"Bearer {setup_token}"})
+        assert config.status_code == 401
+        assert c.get("/v1/auth/status").status_code == 200
+
+        recreated = c.post(
+            "/v1/auth/setup",
+            json={
+                "username": "bob",
+                "email": "bob@example.com",
+                "password": "AnotherP@ss123!",
+                "pin": "654321",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert recreated.status_code == 201
+        fresh = recreated.get_json()["data"]["token"]
+        assert svc.current_session_binding()[1] == epoch_before + 2
+        assert c.get("/health", headers={"Authorization": f"Bearer {daily}"}).status_code == 401
+        assert c.get("/health", headers={"Authorization": f"Bearer {fresh}"}).status_code != 401

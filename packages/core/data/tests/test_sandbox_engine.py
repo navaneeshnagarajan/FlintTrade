@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,6 +24,107 @@ _DEFAULT_CAPITAL = 1_000_000.0
 def engine() -> SandboxEngine:
     """Fresh in-memory SandboxEngine for each test."""
     return SandboxEngine(db_path=":memory:")
+
+
+@pytest.mark.unit
+class TestModifyOrder:
+    @pytest.mark.parametrize(
+        "quantity",
+        [
+            1.9,
+            True,
+            False,
+            "1.9",
+            "bad",
+            "",
+            "NaN",
+            "Infinity",
+            0,
+            -1,
+            [],
+            {},
+            float("nan"),
+            float("inf"),
+            -float("inf"),
+            Decimal("2.000000000000000001"),
+            Decimal("NaN"),
+            Decimal("Infinity"),
+            Fraction(3, 2),
+        ],
+    )
+    def test_invalid_quantity_leaves_the_book_unchanged(self, engine: SandboxEngine, quantity: Any) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        result = engine.modify_order(placed["order_id"], quantity=quantity, price=110.0)
+
+        assert result["status"] == "REJECTED"
+        assert "quantity" in result["message"].lower()
+        assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
+
+    @pytest.mark.parametrize(
+        "quantity,expected",
+        [(2, 2), (2.0, 2), ("2", 2), (" 2 ", 2), ("+2", 2), ("1_0", 10), (Decimal("2"), 2), (Fraction(4, 2), 2)],
+    )
+    def test_whole_quantities_update_quantity_and_margin(
+        self, engine: SandboxEngine, quantity: Any, expected: int
+    ) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+
+        result = engine.modify_order(placed["order_id"], quantity=quantity, price=110.0)
+
+        assert result["status"] == "PENDING"
+        order = engine.get_orders()[0]
+        assert order["quantity"] == expected
+        assert order["price"] == 110.0
+        assert engine.get_capital()["used_margin"] == pytest.approx(expected * 110.0)
+
+    @pytest.mark.parametrize("changes", [{}, {"quantity": None}])
+    def test_omitted_and_none_quantities_keep_existing_quantity(
+        self, engine: SandboxEngine, changes: dict[str, Any]
+    ) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+
+        result = engine.modify_order(placed["order_id"], price=110.0, **changes)
+
+        assert result["status"] == "PENDING"
+        order = engine.get_orders()[0]
+        assert order["quantity"] == 5
+        assert order["price"] == 110.0
+        assert order["order_type"] == "LIMIT"
+
+    def test_valid_quantity_still_cannot_exceed_available_capital(self, engine: SandboxEngine) -> None:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        before = (engine.get_orders(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        result = engine.modify_order(placed["order_id"], quantity="1000000")
+
+        assert result["status"] == "REJECTED"
+        assert "capital" in result["message"].lower()
+        assert (engine.get_orders(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
+
+    def test_valid_quantity_still_respects_other_pending_sells(self, engine: SandboxEngine) -> None:
+        assert engine.place_order("INFY", "NSE", "BUY", 10, 100.0)["status"] == "COMPLETE"
+        placed = engine.place_order("INFY", "NSE", "SELL", 5, 110.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        assert engine.place_order("INFY", "NSE", "SELL", 4, 120.0, order_type="LIMIT")["status"] == "PENDING"
+        before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        result = engine.modify_order(placed["order_id"], quantity="7")
+
+        assert result["status"] == "REJECTED"
+        assert "uncovered position" in result["message"].lower()
+        assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
 
 
 # ---------------------------------------------------------------------------
@@ -53,12 +157,7 @@ class TestInitialCapital:
 
         assert db_path.exists()
         with sqlite3.connect(db_path) as conn:
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert {"capital", "orders", "positions", "pnl", "mtm"} <= tables
         assert {"sandbox_capital", "sandbox_orders", "sandbox_positions"}.isdisjoint(tables)
 
@@ -254,8 +353,16 @@ class TestGetPositions:
     def test_position_has_required_keys(self, engine: SandboxEngine) -> None:
         engine.place_order("ZOMATO", "NSE", "BUY", 100, 200.0)
         pos = engine.get_positions()[0]
-        for key in ("symbol", "exchange", "product", "net_qty", "avg_price",
-                    "realised_pnl", "unrealised_pnl", "updated_at"):
+        for key in (
+            "symbol",
+            "exchange",
+            "product",
+            "net_qty",
+            "avg_price",
+            "realised_pnl",
+            "unrealised_pnl",
+            "updated_at",
+        ):
             assert key in pos, f"Missing key: {key}"
 
     def test_avg_price_weighted_correctly(self, engine: SandboxEngine) -> None:
@@ -285,8 +392,7 @@ class TestGetOrders:
     def test_order_has_required_keys(self, engine: SandboxEngine) -> None:
         engine.place_order("ONGC", "NSE", "BUY", 50, 260.0)
         order = engine.get_orders()[0]
-        for key in ("order_id", "symbol", "exchange", "action",
-                    "quantity", "price", "product", "status", "created_at"):
+        for key in ("order_id", "symbol", "exchange", "action", "quantity", "price", "product", "status", "created_at"):
             assert key in order, f"Missing key: {key}"
 
 
@@ -463,3 +569,212 @@ class TestImportData:
 
         assert data1["capital"]["current"] == pytest.approx(data2["capital"]["current"])
         assert data1["capital"]["initial"] == pytest.approx(data2["capital"]["initial"])
+
+
+class TestPracticeCharges:
+    """Every Practice fill persists the shared-table estimate."""
+
+    def test_fill_stores_breakdown_and_daily_total(self, engine: SandboxEngine) -> None:
+        from flinttrade_core.indian_charges import estimate_practice_fill
+
+        engine.place_order("ITC", "NSE", "BUY", 10, 400.0)
+        expected = estimate_practice_fill(
+            symbol="ITC",
+            exchange="NSE",
+            product="MIS",
+            action="BUY",
+            quantity=10,
+            price=400.0,
+        )
+        trade = engine.get_trades()[0]
+        assert trade["charges"] == pytest.approx(float(expected.total))
+        assert trade["charges_breakdown"]["exchange_label"] == "NSE transaction"
+        assert trade["charges_breakdown"]["brokerage"] == 0.0
+        history = engine.get_pnl_history()
+        assert history[0]["charges"] == pytest.approx(float(expected.total))
+        assert history[0]["net_pnl"] == pytest.approx(history[0]["gross_pnl"] - history[0]["charges"])
+        assert engine.get_capital()["estimated_charges"] == pytest.approx(float(expected.total))
+        assert engine.get_pnl()["net"] == pytest.approx(engine.get_pnl()["gross"] - engine.get_pnl()["charges"])
+
+    def test_practice_fill_uses_the_named_contracts_lot(
+        self, engine: SandboxEngine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """October stays 75; a quantity of 65 is the November contract, not October."""
+        import json
+        from datetime import date
+        from pathlib import Path
+
+        from flinttrade_core.indian_charges import estimate_practice_fill
+        from flinttrade_core.instrument_lots import contract_quantity_message as master_message
+
+        revision = json.loads(
+            (
+                Path(__file__).resolve().parents[2] / "core" / "tests" / "data" / "instrument_lot_revision_window.json"
+            ).read_text(encoding="utf-8")
+        )
+        rows = [
+            row
+            for row in revision["rows"]
+            if row.get("SEM_CUSTOM_SYMBOL") == "NIFTY" or row.get("pSymbolName") == "NIFTY"
+        ]
+
+        def _message(token: str, quantity: int, contract: str = "") -> str | None:
+            return master_message(token, quantity, rows, as_of=date(2026, 9, 1), contract=contract)
+
+        monkeypatch.setattr("flinttrade_data.sandbox_engine.contract_quantity_message", _message)
+        rejected = engine.place_order(
+            "NIFTY-OCT2026-FUT",
+            "NFO",
+            "BUY",
+            65,
+            100.0,
+            instrument_token="13",
+        )
+        assert rejected["status"] == "REJECTED"
+        assert rejected["message"] == "Quantity must be a positive multiple of the lot size (75)"
+
+        unnamed = engine.place_order(
+            "NIFTY 24500 CE",
+            "NFO",
+            "BUY",
+            65,
+            100.0,
+            instrument_token="missing",
+        )
+        assert unnamed["status"] == "REJECTED"
+        assert unnamed["message"] == (
+            "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
+        )
+
+        accepted = engine.place_order(
+            "NIFTY-NOV2026-FUT",
+            "NFO",
+            "BUY",
+            65,
+            100.0,
+            instrument_token="14",
+        )
+        assert accepted["status"] == "COMPLETE"
+        trade = engine.get_trades()[0]
+        assert trade["quantity"] == 65
+        october = estimate_practice_fill(
+            symbol="NIFTY-OCT2026-FUT",
+            exchange="NFO",
+            product="MIS",
+            action="BUY",
+            quantity=75,
+            price=100.0,
+        )
+        november = estimate_practice_fill(
+            symbol="NIFTY-NOV2026-FUT",
+            exchange="NFO",
+            product="MIS",
+            action="BUY",
+            quantity=65,
+            price=100.0,
+        )
+        assert trade["charges"] == pytest.approx(float(november.total))
+        assert trade["charges"] != pytest.approx(float(october.total))
+
+    def test_imported_fill_uses_the_rate_on_its_trade_date(self, engine: SandboxEngine) -> None:
+        from datetime import datetime
+
+        from flinttrade_core.indian_charges import estimate_practice_fill
+        from flinttrade_data.state_store import IST
+
+        traded = datetime(2025, 6, 2, 10, 15, tzinfo=IST)
+        historical = estimate_practice_fill(
+            symbol="NIFTY24APRFUT",
+            exchange="NFO",
+            product="NRML",
+            action="SELL",
+            quantity=1,
+            price=20_000,
+            on=traded.date(),
+        )
+        current = estimate_practice_fill(
+            symbol="NIFTY24APRFUT",
+            exchange="NFO",
+            product="NRML",
+            action="SELL",
+            quantity=1,
+            price=20_000,
+        )
+        assert float(historical.total) != pytest.approx(float(current.total))
+        engine.import_data(
+            json.dumps(
+                {
+                    "capital": {"initial": 1_000_000, "current": 1_000_000},
+                    "orders": [
+                        {
+                            "order_id": "hist-1",
+                            "symbol": "NIFTY24APRFUT",
+                            "exchange": "NFO",
+                            "action": "SELL",
+                            "quantity": 1,
+                            "price": 20_000,
+                            "product": "NRML",
+                            "status": "COMPLETE",
+                            "created_at": traded.isoformat(),
+                        }
+                    ],
+                    "trades": [
+                        {
+                            "order_id": "hist-1",
+                            "symbol": "NIFTY24APRFUT",
+                            "exchange": "NFO",
+                            "action": "SELL",
+                            "quantity": 1,
+                            "price": 20_000,
+                            "product": "NRML",
+                            "traded_at": traded.isoformat(),
+                        }
+                    ],
+                }
+            )
+        )
+        trade = engine.get_trades()[0]
+        assert trade["charges"] == pytest.approx(float(historical.total))
+        assert trade["charges"] != pytest.approx(float(current.total))
+        assert engine.get_funds()["estimated_charges"] == pytest.approx(float(historical.total))
+
+
+class TestNetWorthLedger:
+    """Practice funds expose ledger cash and do not settle futures MTM."""
+
+    def test_long_option_premium_is_in_the_ledger_and_margin_stays_inside_current(self, engine: SandboxEngine) -> None:
+        engine.place_order("NIFTY24APR25500CE", "NFO", "BUY", 10, 20.0)
+        capital = engine.get_capital()
+        funds = engine.get_funds()
+
+        assert capital["current"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert capital["used_margin"] == pytest.approx(200.0)
+        assert funds["available_balance"] == pytest.approx(_DEFAULT_CAPITAL - 200.0)
+        assert funds["futures_mtm_in_ledger"] is False
+        assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL - 200.0)
+        assert "settlement_price" not in engine.get_positions()[0]
+
+    def test_future_margin_does_not_leave_the_ledger_and_mtm_is_not_settled(self, engine: SandboxEngine) -> None:
+        engine.place_order("NIFTY24APRFUT", "NFO", "BUY", 1, 1_000.0)
+        engine.process_tick("NFO", "NIFTY24APRFUT", 1_100.0)
+        capital = engine.get_capital()
+        funds = engine.get_funds()
+        position = engine.get_positions()[0]
+
+        assert capital["current"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert capital["used_margin"] == pytest.approx(1_000.0)
+        assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert funds["futures_mtm_in_ledger"] is False
+        assert position["unrealised_pnl"] == pytest.approx(100.0)
+        assert "settlement_price" not in position
+        assert "mark_source" not in position
+
+    def test_equity_notional_is_booked_into_the_ledger_without_removing_margin_twice(
+        self, engine: SandboxEngine
+    ) -> None:
+        engine.place_order("SBIN", "NSE", "BUY", 1, 800.0)
+        funds = engine.get_funds()
+
+        assert engine.get_capital()["current"] == pytest.approx(_DEFAULT_CAPITAL)
+        assert engine.get_capital()["used_margin"] == pytest.approx(800.0)
+        assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL - 800.0)

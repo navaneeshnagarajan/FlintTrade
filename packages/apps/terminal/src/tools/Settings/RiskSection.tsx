@@ -1,17 +1,19 @@
 /**
- * RiskSection — local MTM references and account-bound backend L4 controls.
+ * RiskSection — canonical global safety and account-bound daily-loss controls.
  *
  * Local reference values remain in Zustand. Percentage daily-loss thresholds,
  * opening capital, and latch resets use the authoritative backend.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Save, CheckCircle2, AlertTriangle, RotateCcw, LockKeyhole } from "lucide-react";
 import { FieldRow, TextInput, SectionTitle } from "./shared";
 import { Button } from "@/components/ui/button";
+import { SafetyControls } from "./SafetyControls";
 import { RISK_HINTS } from "@/lib/schemas/riskSchema";
 import {
+  getSafetyConfig,
   getSafetyConfigForTarget,
   resetDailyPnLState,
   updateSafetyConfig,
@@ -58,8 +60,8 @@ export function buildRiskSafetyConfigUpdate(
 export function RiskSection({ settings, onChange }: RiskSectionProps) {
   const mode = useModeStore((state) => state.mode);
   const isLive = mode === "live";
+  const queryClient = useQueryClient();
   const apiKey = useConnectionStore((state) => state.apiKey);
-  const openAlgoHydrated = useConnectionStore((state) => state.openAlgoHydrated);
   const accounts = useBrokerStore((state) => state.accounts);
   const activeAccountId = useBrokerStore((state) => state.activeAccountId);
   const activeAccount = useMemo(
@@ -67,23 +69,19 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
     [accounts, activeAccountId],
   );
   const safetyTarget = useMemo<SafetyAccountTarget | undefined>(() => {
-    if (!isLive || !openAlgoHydrated) return undefined;
-    if (apiKey.trim()) return { broker: "openalgo", account_id: "default" };
+    if (!isLive) return undefined;
     return pickNativeBrokerOrderTargetFromState(
       mode,
       apiKey,
       accounts,
       activeAccountId,
-      openAlgoHydrated,
     );
-  }, [accounts, activeAccountId, apiKey, isLive, mode, openAlgoHydrated]);
+  }, [accounts, activeAccountId, apiKey, isLive, mode]);
   const backendSelectorKey = safetyTarget
     ? `${safetyTarget.broker}:${safetyTarget.account_id}`
     : "unbound";
   const displayedSelectorKey = safetyTarget
-    ? apiKey.trim()
-      ? "gateway:openalgo:default"
-      : activeAccount
+    ? activeAccount
         ? brokerAccountKey(activeAccount)
         : `native:${safetyTarget.broker}:${safetyTarget.account_id}`
     : "unbound";
@@ -91,6 +89,22 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
   const [dailyLossPausePct, setDailyLossPausePct] = useState("");
   const [dailyLossHardStopPct, setDailyLossHardStopPct] = useState("");
   const [openingRiskCapital, setOpeningRiskCapital] = useState("");
+  const [dailyLossDirty, setDailyLossDirty] = useState(false);
+  // Percentages are process-wide configuration, independent of the selected
+  // account. Only capital and stop-latch state use the account-bound query.
+  const globalSafetyQuery = useQuery({
+    queryKey: [SAFETY_CONFIG_QUERY_KEY],
+    queryFn: getSafetyConfig,
+  });
+  useEffect(() => {
+    if (!globalSafetyQuery.data || dailyLossDirty) return;
+    setDailyLossPausePct(String(globalSafetyQuery.data.daily_loss_pause_pct));
+    setDailyLossHardStopPct(String(globalSafetyQuery.data.daily_loss_kill_pct));
+  }, [dailyLossDirty, globalSafetyQuery.data]);
+  const globalStateReady = isLive
+    && globalSafetyQuery.data !== undefined
+    && !globalSafetyQuery.isLoading
+    && !globalSafetyQuery.isError;
   const hydratedSelector = useRef<string | null>(null);
   const safetyQuery = useQuery({
     queryKey: [SAFETY_CONFIG_QUERY_KEY, "risk", displayedSelectorKey],
@@ -103,8 +117,6 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
 
   useEffect(() => {
     if (!safetyQuery.data || hydratedSelector.current === displayedSelectorKey) return;
-    setDailyLossPausePct(String(safetyQuery.data.daily_loss_pause_pct));
-    setDailyLossHardStopPct(String(safetyQuery.data.daily_loss_kill_pct));
     setOpeningRiskCapital(
       safetyQuery.data.opening_risk_capital
         ? String(safetyQuery.data.opening_risk_capital)
@@ -133,13 +145,16 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
   }
 
   const syncMutation = useMutation({
-    mutationFn: () => updateSafetyConfig(
-      buildRiskSafetyConfigUpdate(
-        dailyLossPausePct,
-        dailyLossHardStopPct,
-      ),
+    mutationFn: (draft: { pausePct: string; hardStopPct: string }) => updateSafetyConfig(
+      buildRiskSafetyConfigUpdate(draft.pausePct, draft.hardStopPct),
     ),
-    onSuccess: () => {
+    onMutate: () => queryClient.cancelQueries({ queryKey: [SAFETY_CONFIG_QUERY_KEY], exact: true }),
+    onSuccess: (_result, draft) => {
+      queryClient.setQueryData<SafetyConfig>([SAFETY_CONFIG_QUERY_KEY], (current) => current
+        ? { ...current, ...buildRiskSafetyConfigUpdate(draft.pausePct, draft.hardStopPct) }
+        : current);
+      setDailyLossDirty(false);
+      void queryClient.invalidateQueries({ queryKey: [SAFETY_CONFIG_QUERY_KEY] });
       showSuccess("Backend daily-loss limits updated");
     },
     onError: (error) => {
@@ -182,7 +197,8 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
 
   function handleSync() {
     setFeedback(null);
-    syncMutation.mutate();
+    if (!globalStateReady || syncMutation.isPending) return;
+    syncMutation.mutate({ pausePct: dailyLossPausePct, hardStopPct: dailyLossHardStopPct });
   }
 
   function handleFreezeCapital() {
@@ -208,11 +224,13 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
 
   return (
     <div className="space-y-5">
-      <SectionTitle>Risk Limits</SectionTitle>
+      <SectionTitle>Risk &amp; Safety</SectionTitle>
+
+      <SafetyControls />
 
       <div className="p-3 rounded bg-warning/5 border border-warning/20 text-xs text-warning/80">
         Rupee MTM and lot/rate references are local display preferences. Percentage daily-loss
-        values are backend new-order stops. Only the explicit Layer 5 Kill Switch attempts cancel
+        values are backend new-order stops. Only the explicit Kill Switch attempts cancel
         and flatten actions.
       </div>
 
@@ -262,7 +280,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
 
       <FieldRow
         label="MTM Target (INR)"
-        hint="Local MTM profit target used by terminal monitors. It does not activate Layer 5."
+        hint="Local MTM profit target used by terminal monitors. It does not activate the kill switch."
         tooltip={RISK_HINTS.mtmTarget}
       >
         <TextInput
@@ -311,10 +329,13 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       >
         <TextInput
           value={dailyLossPausePct}
-          onChange={setDailyLossPausePct}
+          onChange={(value) => {
+            setDailyLossPausePct(value);
+            setDailyLossDirty(true);
+          }}
           placeholder="e.g. 3"
           type="number"
-          disabled={!accountStateReady}
+          disabled={!globalStateReady || syncMutation.isPending}
           aria-label="Daily loss pause threshold in percent"
         />
       </FieldRow>
@@ -325,10 +346,13 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       >
         <TextInput
           value={dailyLossHardStopPct}
-          onChange={setDailyLossHardStopPct}
+          onChange={(value) => {
+            setDailyLossHardStopPct(value);
+            setDailyLossDirty(true);
+          }}
           placeholder="e.g. 15"
           type="number"
-          disabled={!accountStateReady}
+          disabled={!globalStateReady || syncMutation.isPending}
           aria-label="Daily loss hard stop threshold in percent"
         />
       </FieldRow>
@@ -352,7 +376,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
           variant="outline"
           size="sm"
           onClick={handleSync}
-          disabled={!accountStateReady || syncMutation.isPending}
+          disabled={!globalStateReady || syncMutation.isPending}
           className="flex items-center gap-1.5 text-xs h-7"
         >
           {syncMutation.isPending ? (

@@ -56,7 +56,7 @@ vi.mock("@/stores/modeStore", () => ({
 // ---------------------------------------------------------------------------
 
 const EXPLORE_EMPTY =
-  "No execution logs in Explore (sample-only). Switch to Practice or Live to see real run history.";
+  "No execution logs for Example. Switch to Practice or Live to see real run history.";
 const DATE_EMPTY = "No execution logs for this date.";
 const LOAD_ERROR = "Failed to load logs. Backend may be offline.";
 const LOADING = "Loading logs…";

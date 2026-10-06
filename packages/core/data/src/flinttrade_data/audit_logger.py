@@ -71,6 +71,7 @@ def _default_audit_dir() -> str:
 
     return str(audit_log_dir())
 
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -203,9 +204,7 @@ class AuditLogger:
         keys + compact separators give a stable, reproducible canonical form.
         """
         payload = {k: v for k, v in record.items() if k != "hash"}
-        canonical = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False
-        )
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _iter_files(self) -> list[Path]:
@@ -384,12 +383,20 @@ class AuditLogger:
         product: str = "",
         orderid: str = "",
     ) -> None:
-        self._write(self._make_event(
-            "ORDER_PLACED",
-            strategy=strategy, symbol=symbol, exchange=exchange,
-            action=action, quantity=quantity, price=price,
-            pricetype=pricetype, product=product, orderid=orderid,
-        ))
+        self._write(
+            self._make_event(
+                "ORDER_PLACED",
+                strategy=strategy,
+                symbol=symbol,
+                exchange=exchange,
+                action=action,
+                quantity=quantity,
+                price=price,
+                pricetype=pricetype,
+                product=product,
+                orderid=orderid,
+            )
+        )
 
     def log_order_modified(
         self,
@@ -402,11 +409,18 @@ class AuditLogger:
         quantity: str,
         price: str,
     ) -> None:
-        self._write(self._make_event(
-            "ORDER_MODIFIED",
-            strategy=strategy, symbol=symbol, exchange=exchange,
-            orderid=orderid, action=action, quantity=quantity, price=price,
-        ))
+        self._write(
+            self._make_event(
+                "ORDER_MODIFIED",
+                strategy=strategy,
+                symbol=symbol,
+                exchange=exchange,
+                orderid=orderid,
+                action=action,
+                quantity=quantity,
+                price=price,
+            )
+        )
 
     def log_order_cancelled(
         self,
@@ -416,11 +430,15 @@ class AuditLogger:
         symbol: str = "",
         exchange: str = "",
     ) -> None:
-        self._write(self._make_event(
-            "ORDER_CANCELLED",
-            strategy=strategy, orderid=orderid,
-            symbol=symbol, exchange=exchange,
-        ))
+        self._write(
+            self._make_event(
+                "ORDER_CANCELLED",
+                strategy=strategy,
+                orderid=orderid,
+                symbol=symbol,
+                exchange=exchange,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Safety events
@@ -436,11 +454,17 @@ class AuditLogger:
         exchange: str = "",
         strategy: str = "",
     ) -> None:
-        self._write(self._make_event(
-            "SAFETY_CHECK",
-            layer=layer, verdict=verdict, reason=reason,
-            symbol=symbol, exchange=exchange, strategy=strategy,
-        ))
+        self._write(
+            self._make_event(
+                "SAFETY_CHECK",
+                layer=layer,
+                verdict=verdict,
+                reason=reason,
+                symbol=symbol,
+                exchange=exchange,
+                strategy=strategy,
+            )
+        )
 
     def log_kill_switch(self, *, activated: bool, reason: str = "") -> None:
         event_type = "KILL_SWITCH_ACTIVATED" if activated else "KILL_SWITCH_RESET"
@@ -534,9 +558,7 @@ class AuditLogger:
                     raise RuntimeError("idempotent audit event identity is ambiguous")
                 path, record = matches[0]
                 stored_fields = {
-                    key: value
-                    for key, value in record.items()
-                    if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
+                    key: value for key, value in record.items() if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
                 }
                 _, stored_canonical = self._canonical_event_fields(stored_fields)
                 if record.get("event_type") != event_type or stored_canonical != canonical_fields:
@@ -555,6 +577,100 @@ class AuditLogger:
             event = self._make_event(event_type, event_id=event_id, **detached)
             self._append_prepared(event, sync_namespace=True)
             return event_id
+
+    def verify_idempotent_event_receipt(
+        self,
+        event_type: str,
+        *,
+        event_id: str,
+        fields: Mapping[str, object],
+    ) -> bool:
+        """Verify one exact stable-ID event in a complete, unambiguous chain.
+
+        Verification is read-only: malformed evidence, including a torn tail,
+        is refused rather than repaired. The ID returned by
+        :meth:`log_idempotent_event` identifies the event, not its record hash.
+        """
+
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate audit JSON key")
+                result[key] = value
+            return result
+
+        def reject_constant(value: str) -> None:
+            raise ValueError("non-finite audit JSON value")
+
+        try:
+            if type(event_type) is not str or not event_type or type(event_id) is not str:
+                return False
+            identifier = UUID(event_id)
+            if identifier.version != 4 or identifier.variant != RFC_4122 or str(identifier) != event_id:
+                return False
+            if not isinstance(fields, Mapping):
+                return False
+            detached, canonical_fields = self._canonical_event_fields(dict(fields))
+            identity = json.dumps(
+                {"event_type": event_type, "event_id": event_id, "fields": detached},
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            if len(identity.encode("utf-8")) > MAX_IDEMPOTENT_EVENT_INPUT_BYTES:
+                return False
+
+            with self._lock, self._chain_lock:
+                previous = GENESIS_HASH
+                expected_seq = 0
+                matches = 0
+                for path in self._iter_files():
+                    for line in self._read_lines(path):
+                        if not line.endswith("\n"):
+                            return False
+                        record = json.loads(line, object_pairs_hook=unique_object, parse_constant=reject_constant)
+                        if type(record) is not dict:
+                            return False
+                        # Validate all parsed values, including overflowed JSON
+                        # numbers, without applying field-name rules to metadata.
+                        self._canonical_event_fields({"record": record})
+                        if not record.get("hash"):
+                            if expected_seq or record.get("event_id") == event_id:
+                                return False
+                            continue  # permitted legacy prefix, never a receipt
+                        if (
+                            type(record.get("seq")) is not int
+                            or record["seq"] != expected_seq
+                            or record.get("prev_hash") != previous
+                            or type(record.get("hash")) is not str
+                            or self._record_hash(record) != record["hash"]
+                            or type(record.get("event_type")) is not str
+                            or not record["event_type"]
+                            or type(record.get("ts")) is not str
+                            or not record["ts"]
+                        ):
+                            return False
+                        if record.get("event_id") == event_id:
+                            matches += 1
+                            stored_fields = {
+                                key: value
+                                for key, value in record.items()
+                                if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
+                            }
+                            _, stored_canonical = self._canonical_event_fields(stored_fields)
+                            if (
+                                matches != 1
+                                or record["event_type"] != event_type
+                                or stored_canonical != canonical_fields
+                            ):
+                                return False
+                        previous = record["hash"]
+                        expected_seq += 1
+                return matches == 1
+        except Exception:  # noqa: BLE001 - unreadable or malformed receipts must fail closed
+            return False
 
     def verify_event_receipt(
         self,
@@ -646,14 +762,22 @@ class AuditLogger:
                 try:
                     lines = self._read_lines(path)
                 except (OSError, gzip.BadGzipFile) as exc:
-                    return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
-                            "break": {"file": path.name, "reason": f"unreadable: {exc}"}}
+                    return {
+                        "ok": False,
+                        "checked": checked,
+                        "anchored_at_genesis": anchored_at_genesis,
+                        "break": {"file": path.name, "reason": f"unreadable: {exc}"},
+                    }
                 for idx, line in enumerate(lines):
                     try:
                         rec = json.loads(line)
                     except json.JSONDecodeError:
-                        return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
-                                "break": {"file": path.name, "line": idx, "reason": "invalid JSON"}}
+                        return {
+                            "ok": False,
+                            "checked": checked,
+                            "anchored_at_genesis": anchored_at_genesis,
+                            "break": {"file": path.name, "line": idx, "reason": "invalid JSON"},
+                        }
                     is_chained = isinstance(rec, dict) and bool(rec.get("hash"))
                     if prev is None:
                         if not is_chained:
@@ -671,9 +795,12 @@ class AuditLogger:
                     elif int(rec.get("seq", -1)) != expected_seq:
                         reason = f"seq gap: expected {expected_seq}, found {rec.get('seq')}"
                     if reason is not None:
-                        return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
-                                "break": {"file": path.name, "line": idx,
-                                          "seq": rec.get("seq"), "reason": reason}}
+                        return {
+                            "ok": False,
+                            "checked": checked,
+                            "anchored_at_genesis": anchored_at_genesis,
+                            "break": {"file": path.name, "line": idx, "seq": rec.get("seq"), "reason": reason},
+                        }
                     prev = str(rec["hash"])
                     expected_seq += 1
                     checked += 1

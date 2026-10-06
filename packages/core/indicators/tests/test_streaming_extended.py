@@ -385,7 +385,7 @@ class TestStreamingCumulativeDelta:
         from flinttrade_indicators.streaming import StreamingCumulativeDelta
 
         cd = StreamingCumulativeDelta()
-        cd.update(100.0, 1000.0)   # seed close
+        cd.update(100.0, 1000.0)  # seed close
         result = cd.update(101.0, 500.0)  # up bar
         assert result == pytest.approx(500.0)
 
@@ -418,11 +418,11 @@ class TestStreamingCumulativeDelta:
 
         cd = StreamingCumulativeDelta()
         bars = [
-            (100.0, 1000.0),   # seed
-            (101.0, 500.0),    # +500 → 500
-            (99.0,  300.0),    # -300 → 200
-            (99.0,  400.0),    # flat → 200
-            (100.0, 200.0),    # +200 → 400
+            (100.0, 1000.0),  # seed
+            (101.0, 500.0),  # +500 → 500
+            (99.0, 300.0),  # -300 → 200
+            (99.0, 400.0),  # flat → 200
+            (100.0, 200.0),  # +200 → 400
         ]
         results = [cd.update(c, v) for c, v in bars]
         assert results[-1] == pytest.approx(400.0)

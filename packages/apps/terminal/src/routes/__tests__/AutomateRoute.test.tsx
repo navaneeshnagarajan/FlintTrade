@@ -57,7 +57,6 @@ vi.mock("@/services/ftApi", () => ({
 }));
 
 // Mock the section components to avoid deep dependency trees
-vi.mock("../automate/FlowsSection", () => ({ default: () => <div data-testid="flows-section">Flows</div> }));
 vi.mock("../automate/CronSection", () => ({ default: () => <div data-testid="cron-section">Cron</div> }));
 vi.mock("../automate/MonitorsSection", () => ({ default: () => <div data-testid="monitors-section">Monitors</div> }));
 vi.mock("../automate/LogsSection", () => ({ default: () => <div data-testid="logs-section">Logs</div> }));
@@ -120,14 +119,15 @@ describe("AutomateRoute", () => {
     mockGetUploadedStrategies.mockReset().mockResolvedValue([]);
   });
 
-  it("renders the Automation Hub heading", () => {
+  it("renders the Automate heading, matching its sidebar label", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Automation Hub")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Automate" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it("has section tabs for all sections at advanced level", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Flow Builder")).toBeInTheDocument();
+    expect(screen.queryByText("Flow Builder")).not.toBeInTheDocument();
     expect(screen.getByText("Schedules")).toBeInTheDocument();
     expect(screen.getByText("Monitors")).toBeInTheDocument();
     expect(screen.getByText("Strategies")).toBeInTheDocument();

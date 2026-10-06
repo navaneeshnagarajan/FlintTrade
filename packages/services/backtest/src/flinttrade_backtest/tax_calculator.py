@@ -29,12 +29,14 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
+from flinttrade_core.indian_charges import calculate_leg, classify_fill
+
 # Rounding to paise (2 decimal places)
 _TWO = Decimal("0.01")
-_EIGHT = Decimal("0.00000001")  # For intermediate calculations
 
 
 # ---------------------------------------------------------------------------
@@ -66,46 +68,8 @@ class Exchange(StrEnum):
     BSE_FO = "BSE_FO"
 
 
-# ---------------------------------------------------------------------------
-# Rate tables (Updated April 2026 per Finance Act)
-# ---------------------------------------------------------------------------
-
-# STT rates (applied on trade value, as fraction)
-# April 2026 changes: Futures 0.02% → 0.05%; Options 0.1% → 0.15% (on premium)
-# TradeType.FO covers both futures and options; rate here uses the futures rate.
-# For options-specific STT (0.15% on premium), use the data.tax_report module
-# which handles the futures/options split at the segment level.
-_STT_RATES: dict[tuple[TradeType, bool], Decimal] = {
-    # (trade_type, is_buy) -> rate
-    (TradeType.DELIVERY, True):  Decimal("0.001"),    # 0.1% on buy (unchanged)
-    (TradeType.DELIVERY, False): Decimal("0.001"),    # 0.1% on sell (unchanged)
-    (TradeType.INTRADAY, True):  Decimal(0),        # No STT on intraday buy
-    (TradeType.INTRADAY, False): Decimal("0.00025"),  # 0.025% on sell (unchanged)
-    (TradeType.FO, True):        Decimal(0),        # No STT on F&O buy
-    (TradeType.FO, False):       Decimal("0.0005"),   # 0.05% on F&O sell (futures, Apr 2026)
-}
-
-# Stamp duty — buy side only, as fraction of trade value
-_STAMP_DUTY_RATES: dict[TradeType, Decimal] = {
-    TradeType.DELIVERY: Decimal("0.00015"),  # 0.015%
-    TradeType.INTRADAY: Decimal("0.00003"),  # 0.003%
-    TradeType.FO:       Decimal("0.00002"),  # 0.002%
-}
-
-# Exchange transaction charges (as fraction of trade value)
-_EXCHANGE_CHARGES: dict[Exchange, Decimal] = {
-    Exchange.NSE:    Decimal("0.0000325"),  # 0.00325%
-    Exchange.BSE:    Decimal("0.0000375"),  # 0.00375% (equity)
-    Exchange.MCX:    Decimal("0.0000260"),  # 0.0026%
-    Exchange.NSE_FO: Decimal("0.0000500"),  # 0.005% (F&O segment)
-    Exchange.BSE_FO: Decimal("0.0000500"),  # 0.005%
-}
-
-# SEBI turnover fee (as fraction of trade value)
-_SEBI_FEE_RATE = Decimal("0.000001")  # 0.0001%
-
-# GST rate on (brokerage + exchange charges + SEBI fee)
-_GST_RATE = Decimal("0.18")  # 18%
+# Statutory rates live in flinttrade_core.indian_charges. This module only
+# classifies a backtest leg and asks that table for the amount.
 
 
 # ---------------------------------------------------------------------------
@@ -239,12 +203,16 @@ class IndianTaxCalculator:
         brokerage_per_order: Decimal = Decimal(20),
         brokerage_pct: Decimal = Decimal(0),
         zero_brokerage_delivery: bool = False,
+        contract: str = "futures",
     ) -> None:
         self.instrument_type = instrument_type.lower()
         self.exchange = exchange
         self.brokerage_per_order = brokerage_per_order
         self.brokerage_pct = brokerage_pct
         self.zero_brokerage_delivery = zero_brokerage_delivery
+        # ``FO`` alone is futures. Pass ``contract="options"`` or a symbol
+        # that parses as an option so options STT, stamp and exchange rates apply.
+        self.contract = contract.strip().lower()
 
         # Running summary
         self._summary = TaxSummary()
@@ -259,6 +227,10 @@ class IndianTaxCalculator:
         trade_type: TradeType | None = None,
         is_buy: bool = True,
         exchange: Exchange | None = None,
+        *,
+        symbol: str | None = None,
+        on: date | None = None,
+        contract: str | None = None,
     ) -> TaxBreakdown:
         """Calculate all charges for a single trade leg.
 
@@ -267,6 +239,10 @@ class IndianTaxCalculator:
             trade_type: Type of trade. Falls back to ``instrument_type`` if None.
             is_buy: True for buy leg, False for sell leg.
             exchange: Override exchange for this trade.
+            symbol: Instrument symbol. Options and Sensex contracts are read
+                from this so the shared table can pick the contract rate.
+            on: Trade date. Defaults to today, which selects the rate in force.
+            contract: ``"futures"`` or ``"options"`` when ``symbol`` is absent.
 
         Returns:
             TaxBreakdown with all charge components.
@@ -274,46 +250,33 @@ class IndianTaxCalculator:
         if trade_type is None:
             trade_type = self._default_trade_type()
         exch = exchange or self.exchange
-        tv = trade_value  # Alias for brevity
-
-        # Brokerage
+        tv = trade_value
         brokerage = self._compute_brokerage(tv, trade_type, is_buy)
-
-        # STT
-        stt_rate = _STT_RATES.get((trade_type, is_buy), Decimal(0))
-        stt = (tv * stt_rate).quantize(_TWO, rounding=ROUND_HALF_UP)
-
-        # Stamp duty — buy side only
-        stamp_duty = Decimal(0)
-        if is_buy:
-            stamp_rate = _STAMP_DUTY_RATES.get(trade_type, Decimal(0))
-            stamp_duty = (tv * stamp_rate).quantize(_TWO, rounding=ROUND_HALF_UP)
-
-        # Exchange transaction charges
-        exch_rate = _EXCHANGE_CHARGES.get(exch, Decimal("0.0000325"))
-        exchange_charges = (tv * exch_rate).quantize(_TWO, rounding=ROUND_HALF_UP)
-
-        # SEBI turnover fee
-        sebi_fee = (tv * _SEBI_FEE_RATE).quantize(_TWO, rounding=ROUND_HALF_UP)
-
-        # GST — on brokerage + exchange_charges + sebi_fee (NOT on STT or stamp duty)
-        gst_base = brokerage + exchange_charges + sebi_fee
-        gst = (gst_base * _GST_RATE).quantize(_TWO, rounding=ROUND_HALF_UP)
-
-        # Total charges
-        total = brokerage + stt + stamp_duty + exchange_charges + sebi_fee + gst
-
+        rate_exchange, segment = self._rate_key(
+            trade_type,
+            exch,
+            symbol=symbol,
+            contract=contract,
+        )
+        leg = calculate_leg(
+            exchange=rate_exchange,
+            segment=segment,
+            trade_value=tv,
+            is_buy=is_buy,
+            on=on,
+            brokerage=brokerage,
+        )
         breakdown = TaxBreakdown(
             trade_value=tv,
             trade_type=trade_type,
             is_buy=is_buy,
-            brokerage=brokerage,
-            stt=stt,
-            stamp_duty=stamp_duty,
-            exchange_charges=exchange_charges,
-            sebi_fee=sebi_fee,
-            gst=gst,
-            total_charges=total.quantize(_TWO, rounding=ROUND_HALF_UP),
+            brokerage=leg.brokerage,
+            stt=leg.stt,
+            stamp_duty=leg.stamp_duty,
+            exchange_charges=leg.exchange_charges,
+            sebi_fee=leg.sebi_fee,
+            gst=leg.gst,
+            total_charges=leg.total,
         )
 
         # Accumulate into summary
@@ -398,6 +361,34 @@ class IndianTaxCalculator:
             return Decimal(0)
         pct_fee = trade_value * self.brokerage_pct / Decimal(100)
         return (self.brokerage_per_order + pct_fee).quantize(_TWO, rounding=ROUND_HALF_UP)
+
+    def _rate_key(
+        self,
+        trade_type: TradeType,
+        exch: Exchange,
+        *,
+        symbol: str | None,
+        contract: str | None,
+    ) -> tuple[str, str]:
+        """Map a backtest leg onto a shared-table exchange and segment."""
+        venue = exch.value
+        if symbol:
+            product = "CNC" if trade_type == TradeType.DELIVERY else "MIS"
+            return classify_fill(symbol, venue, product)
+        if trade_type == TradeType.DELIVERY:
+            probe = "BSE" if venue.startswith("BSE") else "NSE"
+            return classify_fill("RELIANCE", probe, "CNC")
+        if trade_type == TradeType.INTRADAY:
+            probe = "BSE" if venue.startswith("BSE") else "NSE"
+            return classify_fill("RELIANCE", probe, "MIS")
+        chosen = (contract or self.contract or "futures").lower()
+        if venue == "MCX":
+            segment = "commodity_options" if "option" in chosen else "commodity_futures"
+            return "MCX", segment
+        probe = "BSE" if "BSE" in venue else "NSE"
+        if "option" in chosen or "option" in self.instrument_type:
+            return probe, "equity_options"
+        return probe, "equity_futures"
 
     def _default_trade_type(self) -> TradeType:
         """Resolve instrument_type string to TradeType enum.

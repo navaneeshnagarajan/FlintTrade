@@ -1,10 +1,11 @@
 """Tests for HistorifyDownloader.
 
-Mocks the OpenAlgoClient so no live server is needed.
+Mocks the BrokerClient so no live server is needed.
 
 Run with:
     python -m pytest packages/core/historical/tests/test_historify.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -62,7 +63,7 @@ def pipeline(tmp_path):
 
 @pytest.fixture()
 def mock_client():
-    """Return a mock OpenAlgoClient whose history() returns 5 bars."""
+    """Return a mock BrokerClient whose history() returns 5 bars."""
     client = MagicMock()
     client.history = AsyncMock(return_value=[_make_bar(f"2025-06-{i:02d}T09:15:00") for i in range(1, 6)])
     return client
@@ -312,9 +313,7 @@ class TestDeltaSync:
             )
 
     def test_delta_sync_returns_int(self, downloader):
-        result = asyncio.run(
-            downloader.delta_sync([("RELIANCE", "NSE")], "1d")
-        )
+        result = asyncio.run(downloader.delta_sync([("RELIANCE", "NSE")], "1d"))
         assert isinstance(result, int)
 
 
@@ -340,8 +339,8 @@ def test_async_downloader_retries_transient_chunk_failures() -> None:
     dl = _AsyncDownloader(client, max_retries=3, base_backoff=0.0, sleep=AsyncMock())
     result = asyncio.run(dl.download("NIFTY", "NSE", "1d", "2026-01-01", "2026-01-02"))
 
-    assert calls["n"] == 3          # failed twice, succeeded on the 3rd
-    assert result.errors == []       # the chunk was retried, NOT dropped
+    assert calls["n"] == 3  # failed twice, succeeded on the 3rd
+    assert result.errors == []  # the chunk was retried, NOT dropped
     assert result.chunks_fetched == 1
 
 
@@ -354,7 +353,7 @@ def test_async_downloader_records_error_only_after_retries_exhausted() -> None:
     dl = _AsyncDownloader(client, max_retries=3, base_backoff=0.0, sleep=AsyncMock())
     result = asyncio.run(dl.download("NIFTY", "NSE", "1d", "2026-01-01", "2026-01-02"))
 
-    assert client.history.await_count == 3   # all attempts used before giving up
+    assert client.history.await_count == 3  # all attempts used before giving up
     assert len(result.errors) == 1
     assert "failed after retries" in result.errors[0]
 
@@ -369,5 +368,5 @@ def test_async_downloader_awaits_throttle_before_each_fetch() -> None:
     dl = _AsyncDownloader(client, throttle=throttle, sleep=AsyncMock())
     asyncio.run(dl.download("NIFTY", "NSE", "1d", "2026-01-01", "2026-01-02"))
 
-    assert throttle.await_count >= 1         # rate-limited before the fetch
+    assert throttle.await_count >= 1  # rate-limited before the fetch
     assert client.history.await_count >= 1

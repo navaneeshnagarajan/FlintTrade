@@ -190,8 +190,11 @@ def test_orderflow_live_reports_real_bin_width_not_requested(app):
     from unittest.mock import MagicMock
 
     bucket = SimpleNamespace(
-        timestamp_bin=1_700_000_000, price_level=100.0,
-        buy_volume=5, sell_volume=3, delta=2,
+        timestamp_bin=1_700_000_000,
+        price_level=100.0,
+        buy_volume=5,
+        sell_volume=3,
+        delta=2,
     )
     aggregator = MagicMock()
     aggregator.time_bin_seconds = 300
@@ -204,7 +207,7 @@ def test_orderflow_live_reports_real_bin_width_not_requested(app):
     assert resp.status_code == 200
     data = resp.get_json()["data"]
     assert data["is_live"] is True
-    assert data["interval"] == 300          # the aggregator's true width, not 60
+    assert data["interval"] == 300  # the aggregator's true width, not 60
     assert data["requested_interval"] == 60  # the request is echoed separately
 
 

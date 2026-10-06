@@ -7,15 +7,15 @@
  *   - Shared store (aiConversationStore) — persisted via Zustand, shared with AITutorPill
  *   - SSE streaming responses with token-by-token rendering
  *   - Fallback to non-streaming endpoint on 404
- *   - MCP tool confirmation cards (Approve / Reject)
+ *   - Order proposal confirmation cards (Approve / Reject)
  *   - Clear chat button
  *   - Honest LLM chrome from advisor/status (not the local settings store)
  *   - Composer gated until the probe reports configured
  */
 
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
+import { useState, useRef, useEffect, useCallback, useId, type KeyboardEvent, memo } from "react";
 import { safeParse, wsMessageSchema } from "@/lib/safeParse";
-import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft, RefreshCw } from "lucide-react";
+import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft, RefreshCw, Mic, Square } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getAiSession,
@@ -29,6 +29,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useAdvisorLlmStatus } from "@/hooks/useAdvisorLlmStatus";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import {
   advisorLlmChromeLabel,
   requestAdvisorReply,
@@ -97,23 +98,30 @@ function fmtTime(ts: number): string {
  * Parse tool call from assistant message content.
  * Supports `[TOOL_CALL:...]` pattern and JSON `{"type":"tool_call",...}` blocks.
  */
-function parseToolCall(content: string): ToolCall | undefined {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validatedToolCall(value: Record<string, unknown>): ToolCall | undefined {
+  const { endpoint, method, description, payload } = value;
+  if (typeof endpoint !== "string" || !endpoint.trim() || typeof method !== "string" || !method.trim()) return undefined;
+  if (description !== undefined && typeof description !== "string") return undefined;
+  if (!isRecord(payload)) return undefined;
+  return { endpoint: endpoint.trim(), method: method.trim().toUpperCase(), description: description?.trim() || "Execute action", payload };
+}
+
+export function parseToolCall(content: string): ToolCall | undefined {
   // Pattern 1: [TOOL_CALL:description|endpoint|method|payload_json]
   const match = TOOL_CALL_PATTERN.exec(content);
   if (match) {
     const parts = match[1].split("|").map((s) => s.trim());
     if (parts.length >= 3) {
-      let payload: Record<string, unknown> = {};
-      if (parts[3]) {
-        // Payload is arbitrary JSON from the AI — validate it's an object, allow any keys.
-        payload = (safeParse(parts[3], wsMessageSchema) ?? {}) as Record<string, unknown>;
-      }
-      return {
+      return validatedToolCall({
         description: parts[0],
         endpoint: parts[1],
-        method: parts[2].toUpperCase(),
-        payload,
-      };
+        method: parts[2],
+        payload: safeParse(parts.slice(3).join("|"), wsMessageSchema),
+      });
     }
   }
 
@@ -122,12 +130,7 @@ function parseToolCall(content: string): ToolCall | undefined {
   if (jsonMatch) {
     const parsed = safeParse(jsonMatch[0], wsMessageSchema);
     if (parsed && parsed["type"] === "tool_call") {
-      return {
-        description: (parsed["description"] as string) ?? "Execute action",
-        endpoint: (parsed["endpoint"] as string) ?? "",
-        method: ((parsed["method"] as string) ?? "POST").toUpperCase(),
-        payload: (parsed["payload"] as Record<string, unknown>) ?? {},
-      };
+      return validatedToolCall(parsed);
     }
   }
 
@@ -140,6 +143,7 @@ function parseToolCall(content: string): ToolCall | undefined {
  * `placeorder`… all normalise to the same key).
  */
 export function normaliseToolEndpoint(endpoint: string): string {
+  if (typeof endpoint !== "string") return "";
   return endpoint
     .replace(/^https?:\/\/[^/]+/i, "")
     .replace(/^\/?(ft-api\/)?(api\/)?v1\//i, "")
@@ -161,6 +165,7 @@ export function normaliseToolEndpoint(endpoint: string): string {
  * that no client guard has inspected.
  */
 export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrderParams | null {
+  if (!isRecord(payload)) return null;
   const symbol = typeof payload["symbol"] === "string" ? payload["symbol"].trim() : "";
   const exchange = typeof payload["exchange"] === "string" ? payload["exchange"].trim().toUpperCase() : "";
   const action = typeof payload["action"] === "string" ? payload["action"].trim().toUpperCase() : "";
@@ -168,13 +173,15 @@ export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrder
   const orderType = typeof rawOrderType === "string" ? rawOrderType.trim().toUpperCase() : "";
   const rawProduct = payload["product"];
   const product = typeof rawProduct === "string" ? rawProduct.trim().toUpperCase() : "";
-  const quantity = Number(payload["quantity"]);
+  const rawQuantity = payload["quantity"];
+  if (typeof rawQuantity !== "number" && typeof rawQuantity !== "string") return null;
+  const quantity = Number(rawQuantity);
 
   if (!symbol || !exchange) return null;
   if (!ORDER_ACTIONS.has(action)) return null;
   if (!ORDER_TYPES.has(orderType)) return null;
   if (!ORDER_PRODUCTS.has(product)) return null;
-  if (!Number.isInteger(quantity) || quantity <= 0) return null;
+  if (!Number.isSafeInteger(quantity) || quantity <= 0) return null;
 
   const params: PlaceOrderParams = {
     symbol,
@@ -188,12 +195,14 @@ export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrder
 
   const rawPrice = payload["price"];
   if (rawPrice !== undefined && rawPrice !== null && rawPrice !== "") {
+    if (typeof rawPrice !== "number" && typeof rawPrice !== "string") return null;
     const price = Number(rawPrice);
     if (!Number.isFinite(price) || price < 0) return null;
     params.price = price;
   }
   const rawTrigger = payload["triggerPrice"] ?? payload["trigger_price"];
   if (rawTrigger !== undefined && rawTrigger !== null && rawTrigger !== "") {
+    if (typeof rawTrigger !== "number" && typeof rawTrigger !== "string") return null;
     const triggerPrice = Number(rawTrigger);
     if (!Number.isFinite(triggerPrice) || triggerPrice < 0) return null;
     params.triggerPrice = triggerPrice;
@@ -230,7 +239,7 @@ export interface ApprovedToolCallOutcome {
 
 export async function executeApprovedToolCall(toolCall: ToolCall): Promise<ApprovedToolCallOutcome> {
   const endpointKey = normaliseToolEndpoint(toolCall.endpoint);
-  if (!APPROVABLE_ORDER_ENDPOINTS.has(endpointKey)) {
+  if (toolCall.method !== "POST" || !APPROVABLE_ORDER_ENDPOINTS.has(endpointKey)) {
     return {
       executed: false,
       message:
@@ -311,7 +320,7 @@ interface ToolCardProps {
   onReject: () => void;
 }
 
-function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
+export function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
   // The card must show what WOULD ACTUALLY EXECUTE — the validated payload —
   // not the model's free-text description, which a prompt-injected model
   // could arbitrage against the payload ("Buy 1 RELIANCE" describing a
@@ -319,7 +328,7 @@ function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
   // Live place stays fail-closed on the AI path (FT-MONDAY-003).
   const mode = useModeStore((s) => s.mode);
   const liveBlocked = mode === "live";
-  const approvable = APPROVABLE_ORDER_ENDPOINTS.has(normaliseToolEndpoint(toolCall.endpoint));
+  const approvable = toolCall.method === "POST" && APPROVABLE_ORDER_ENDPOINTS.has(normaliseToolEndpoint(toolCall.endpoint));
   const params = approvable && !liveBlocked ? toPlaceOrderParams(toolCall.payload) : null;
 
   return (
@@ -486,6 +495,30 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   const { chrome, configured, refetch: refetchAdvisorStatus } = useAdvisorLlmStatus();
   const chatReady = configured;
 
+  const voiceHintId = useId();
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceDraftAllowed = useRef(false);
+  voiceDraftAllowed.current = chatReady && !sending;
+  const voice = useVoiceInput({
+    onResult: (text) => {
+      if (!voiceDraftAllowed.current) return;
+      setDraft((current) => [current.trim(), text.trim()].filter(Boolean).join(" "));
+      inputRef.current?.focus();
+    },
+    onError: (error) => {
+      if (!voiceDraftAllowed.current) return;
+      setVoiceError(error === "not-allowed" || error === "service-not-allowed"
+        ? "Microphone permission was denied. Allow it in your browser or type your message."
+        : error === "audio-capture"
+          ? "No microphone is available. Type your message instead."
+          : "Voice input failed. Try again or type your message.");
+    },
+  });
+  const { abort: abortVoice } = voice;
+  useEffect(() => {
+    if (!chatReady || sending) abortVoice();
+  }, [chatReady, sending, abortVoice]);
+
   // Auto-scroll to bottom whenever messages change
   useEffect(() => {
     if (scrollRef.current) {
@@ -494,10 +527,12 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   }, [storeMessages]);
 
   const clearChat = useCallback(() => {
+    abortVoice();
+    setVoiceError(null);
     clearMessages();
     setToolMeta(new Map());
     inputRef.current?.focus();
-  }, [clearMessages]);
+  }, [clearMessages, abortVoice]);
 
   // ── AI2 history: browse/search PAST stored sessions (read-only — never
   // touches the live conversation store). ──────────────────────────────────
@@ -564,6 +599,8 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
     const text = draft.trim();
     if (!text || sending || !chatReady) return;
 
+    abortVoice();
+    setVoiceError(null);
     setDraft("");
     setSending(true);
     addMessage("user", text);
@@ -652,7 +689,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
       abortRef.current = null;
       inputRef.current?.focus();
     }
-  }, [draft, sending, chatReady, addMessage, setStreaming, analysisContext]);
+  }, [draft, sending, chatReady, addMessage, setStreaming, analysisContext, abortVoice]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -959,26 +996,53 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
       )}
 
       {/* COMPOSE BAR */}
-      <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-border-default bg-surface-card shrink-0">
-        <Input
-          ref={inputRef}
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={chatReady ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
-          disabled={!chatReady || sending}
-          className="h-10 flex-1 text-sm bg-surface-card border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-accent/50 disabled:opacity-60"
-        />
-        <Button
-          size="sm"
-          onClick={() => void sendMessage()}
-          disabled={!chatReady || !draft.trim() || sending}
-          className="bg-accent text-white rounded-md px-4 h-10 shrink-0 hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          aria-label="Send message"
-        >
-          <Send size={14} />
-        </Button>
+      <div className="px-2 py-1.5 border-t border-border-default bg-surface-card shrink-0 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <Input
+            ref={inputRef}
+            type="text"
+            aria-label="AI conversation draft"
+            aria-describedby={voiceHintId}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={chatReady ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
+            disabled={!chatReady || sending}
+            className="h-10 flex-1 text-sm bg-surface-card border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-accent/50 disabled:opacity-60"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={voice.isListening ? "Stop voice input" : "Start voice input"}
+            aria-pressed={voice.isListening}
+            disabled={!voice.isSupported || !chatReady || sending}
+            onClick={() => {
+              setVoiceError(null);
+              if (voice.isListening) voice.stopListening();
+              else voice.startListening();
+            }}
+            className="h-10 w-10 shrink-0"
+          >
+            {voice.isListening ? <Square size={14} aria-hidden="true" /> : <Mic size={14} aria-hidden="true" />}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void sendMessage()}
+            disabled={!chatReady || !draft.trim() || sending}
+            className="bg-accent text-accent-foreground rounded-md px-4 h-10 shrink-0 hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            aria-label="Send message"
+          >
+            <Send size={14} />
+          </Button>
+        </div>
+        <p id={voiceHintId} className="text-xxs text-text-muted">
+          {voice.isSupported
+            ? "Dictate a draft, review it, then Send. Order proposals need your approval. Your browser may send audio to its speech service."
+            : "Voice input is unavailable in this browser. Type your message."}
+        </p>
+        {voice.isListening && <p role="status" className="text-xs text-accent">Listening…</p>}
+        {voiceError && <p role="alert" className="text-xs text-loss">{voiceError}</p>}
       </div>
     </div>
   );

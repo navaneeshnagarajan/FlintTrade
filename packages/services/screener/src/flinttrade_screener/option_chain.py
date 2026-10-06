@@ -1,6 +1,6 @@
 """Option chain fetcher and analyzer.
 
-Fetches live option chain via OpenAlgo /api/v1/optionchain, parses into
+Fetches live option chain via broker /api/v1/optionchain, parses into
 structured strike data, and supports all F&O exchanges:
 - NFO: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, stock options
 - BFO: SENSEX, BANKEX, SENSEX50
@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import OptionChainStrike
-from flinttrade_core.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.screener.option_chain")
 
@@ -109,7 +109,7 @@ class OptionChainSnapshot:
 # Lot sizes for common underlyings
 LOT_SIZES: dict[str, int] = {
     # NFO — Index options
-    "NIFTY": 75,
+    "NIFTY": 65,
     "BANKNIFTY": 30,
     "FINNIFTY": 40,
     "MIDCPNIFTY": 50,
@@ -175,7 +175,7 @@ class OptionChainAnalyzer:
         near_atm = snapshot.strikes_near_atm(5)
     """
 
-    def __init__(self, client: OpenAlgoClient) -> None:
+    def __init__(self, client: BrokerClient) -> None:
         self._client = client
 
     def fetch(

@@ -141,16 +141,17 @@ def _safety() -> SafetySystem:
     return SafetySystem(SafetyConfig(check_market_hours=False))
 
 
-_DEFAULT_OPENALGO_CLIENT = object()
+_DEFAULT_BROKER_CLIENT = object()
 
 
 def _make_app(
     *,
     enabled: bool = True,
     adapter: _NoIoAdapter | None = None,
-    adapter_id: str = "openalgo",
-    openalgo_client: object = _DEFAULT_OPENALGO_CLIENT,
-    execution_default: str | None = None, backend_lease_factory
+    adapter_id: str = "dhan",
+    broker_client: object = _DEFAULT_BROKER_CLIENT,
+    execution_default: str | None = None,
+    backend_lease_factory,
 ) -> tuple[Flask, _NoIoAdapter]:
     from flinttrade_gateway.routing_config import RoutingConfig
 
@@ -159,26 +160,31 @@ def _make_app(
     app.config["TESTING"] = True
     app.config["SMART_ROUTING"] = {"enabled": enabled, "twap_window_seconds": 1, "twap_slices": 2}
     router_config = None
+    execution_default = execution_default or f"{adapter_id}:default"
     if execution_default is not None:
-        router_config = RoutingConfig.from_workspace({
-            "registered": [execution_default],
-            "execution": {"default": execution_default},
-            "data": {
-                "ticks": execution_default,
-                "historical": execution_default,
-                "option_chains": execution_default,
-                "quote": execution_default,
-            },
-        })
-    app.config["BROKER_ROUTER"] = BrokerRouter({adapter_id: adapter}, _session, config=router_config, backend_lease_proof=backend_lease_factory())
-    if openalgo_client is _DEFAULT_OPENALGO_CLIENT:
-        openalgo_client = _FakeClient(asks=[(100.0, 500)], bids=[(99.5, 500)])
-    app.config["OPENALGO_CLIENT"] = openalgo_client
-    if adapter_id != "openalgo":
+        router_config = RoutingConfig.from_workspace(
+            {
+                "registered": [execution_default],
+                "execution": {"default": execution_default},
+                "data": {
+                    "ticks": execution_default,
+                    "historical": execution_default,
+                    "option_chains": execution_default,
+                    "quote": execution_default,
+                },
+            }
+        )
+    app.config["BROKER_ROUTER"] = BrokerRouter(
+        {adapter_id: adapter}, _session, config=router_config, backend_lease_proof=backend_lease_factory()
+    )
+    if broker_client is _DEFAULT_BROKER_CLIENT:
+        broker_client = _FakeClient(asks=[(100.0, 500)], bids=[(99.5, 500)])
+    app.config["BROKER_CLIENT"] = broker_client
+    if adapter_id:
         app.config["NATIVE_ADAPTERS"] = {adapter_id: adapter}
         registry = MagicMock()
-        registry.get_session_for.side_effect = (
-            lambda requested_adapter, account_id: _session(None, requested_adapter, account_id)
+        registry.get_session_for.side_effect = lambda requested_adapter, account_id: _session(
+            None, requested_adapter, account_id
         )
         app.config["REGISTRY"] = registry
     app.config["SAFETY"] = _safety()
@@ -226,7 +232,7 @@ def test_disabled_flag_403(live_auth, *, backend_lease_factory):
 
 def test_no_jwt_401(monkeypatch, *, backend_lease_factory):
     monkeypatch.setattr(order_routes_mod, "_decode_request_payload", lambda: None)
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
@@ -275,7 +281,7 @@ def test_practice_mode_403(monkeypatch, *, backend_lease_factory):
         "_decode_request_payload",
         lambda: {"mode": "practice", "sub": "user-1", "jti": "jti-1"},
     )
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
@@ -285,25 +291,34 @@ def test_practice_mode_403(monkeypatch, *, backend_lease_factory):
 
 
 def test_validation_400(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     assert client.post("/api/v1/orders/smart-route", json={}).status_code == 400
-    assert client.post(
-        "/api/v1/orders/smart-route",
-        json={"symbol": "X", "exchange": "NSE", "action": "HOLD", "quantity": 10},
-    ).status_code == 400
-    assert client.post(
-        "/api/v1/orders/smart-route",
-        json={"symbol": "X", "exchange": "NSE", "action": "BUY", "quantity": 0},
-    ).status_code == 400
-    assert client.post(
-        "/api/v1/orders/smart-route",
-        json={"symbol": "X", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "now"},
-    ).status_code == 400
+    assert (
+        client.post(
+            "/api/v1/orders/smart-route",
+            json={"symbol": "X", "exchange": "NSE", "action": "HOLD", "quantity": 10},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/v1/orders/smart-route",
+            json={"symbol": "X", "exchange": "NSE", "action": "BUY", "quantity": 0},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/v1/orders/smart-route",
+            json={"symbol": "X", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "now"},
+        ).status_code
+        == 400
+    )
 
 
 def test_router_unavailable_503(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     app.config["BROKER_ROUTER"] = None
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
@@ -313,7 +328,7 @@ def test_router_unavailable_503(live_auth, *, backend_lease_factory):
 
 
 def test_unvalidated_safety_runtime_503(live_auth, *, backend_lease_factory):
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
     app.config["SAFETY_CONFIG_READY"] = False
 
     response = app.test_client().post(
@@ -354,15 +369,17 @@ def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeyp
 
         def check_order(self, _order, **kwargs):
             self.calls.append(kwargs)
-            return [SimpleNamespace(
-                passed=False,
-                layer="L3_PORTFOLIO",
-                reason="prospective delta exceeds limit",
-            )]
+            return [
+                SimpleNamespace(
+                    passed=False,
+                    layer="L3_PORTFOLIO",
+                    reason="prospective delta exceeds limit",
+                )
+            ]
 
     monkeypatch.setattr(l2_state, "gather_safety_state", _prospective_state)
     safety = _BlockingSafety()
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
     app.config["SAFETY"] = safety
 
     response = app.test_client().post(
@@ -377,52 +394,44 @@ def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeyp
 
 
 def test_unknown_job_404(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     resp = app.test_client().get("/api/v1/orders/smart-route/nope")
     assert resp.status_code == 404
 
 
+def _assert_place_required(resp, adapter=None) -> None:
+    """A valid smart-route body is refused before any child is submitted."""
+    assert resp.status_code == 501
+    assert resp.get_json()["message"] == "Orders are placed through /api/v1/orders/place."
+    if adapter is not None:
+        assert adapter.orders == []
+
+
 # ---------------------------------------------------------------------------
-# End-to-end through the REAL gate + router
+# Valid smart-route bodies refuse before a job can submit
 # ---------------------------------------------------------------------------
 
 
 def test_high_urgency_places_one_gated_child(live_auth, *, backend_lease_factory):
-    """A high-urgency order yields one child placed through the real gate."""
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+    """A high-urgency order does not start a child place."""
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
-            "quantity": 10, "urgency": "high",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 10,
+            "urgency": "high",
         },
     )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["data"]["job_id"]
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "done"
-    assert final["completed"] is True
-    assert final["filled_quantity"] == 10
-    assert len(final["child_orders"]) == 1
-    assert final["child_orders"][0]["status"] == "placed"
-    assert final["child_orders"][0]["order_id"] == "OID-1"
-
-    # The adapter saw exactly one typed child order — and it can ONLY have
-    # been reached through BrokerRouter (token-guarded), proving the child
-    # traversed gate_order → BrokerRouter → adapter.
-    assert len(adapter.orders) == 1
-    assert adapter.orders[0].quantity == "10"
+    _assert_place_required(resp, adapter)
 
 
-def test_native_high_urgency_does_not_require_openalgo_client(live_auth, *, backend_lease_factory):
-    """Native high urgency can execute through BrokerRouter without bridge data."""
-    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None, backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+def test_native_high_urgency_does_not_require_broker_client(live_auth, *, backend_lease_factory):
+    """A native high-urgency body does not reach the broker."""
+    app, adapter = _make_app(adapter_id="upstox", broker_client=None, backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -434,25 +443,18 @@ def test_native_high_urgency_does_not_require_openalgo_client(live_auth, *, back
             "account_id": "U1",
         },
     )
-
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "done"
-    assert final["filled_quantity"] == 3
-    assert len(adapter.orders) == 1
-    assert adapter.orders[0].quantity == "3"
+    _assert_place_required(resp, adapter)
 
 
 def test_omitted_target_uses_configured_execution_default(live_auth, *, backend_lease_factory):
-    """Direct API callers inherit brokers.execution.default when target fields are absent."""
+    """An omitted target still does not submit a smart-route child."""
     app, adapter = _make_app(
         adapter_id="upstox",
-        openalgo_client=None,
-        execution_default="upstox:U1", backend_lease_factory=backend_lease_factory
+        broker_client=None,
+        execution_default="upstox:U1",
+        backend_lease_factory=backend_lease_factory,
     )
-    client = app.test_client()
-
-    resp = client.post(
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -462,22 +464,14 @@ def test_omitted_target_uses_configured_execution_default(live_auth, *, backend_
             "urgency": "high",
         },
     )
-
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "done"
-    assert len(adapter.orders) == 1
-    assert adapter.orders[0].quantity == "3"
-    assert adapter.sessions[0].adapter_id == "upstox"
-    assert adapter.sessions[0].account_id == "U1"
+    _assert_place_required(resp, adapter)
+    assert adapter.sessions == []
 
 
-def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth, *, backend_lease_factory):
-    """Native medium urgency is depth-aware; no bridge depth means no dispatch."""
-    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None, backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+def test_native_medium_urgency_fails_closed_without_dhan_depth(live_auth, *, backend_lease_factory):
+    """Medium urgency does not dispatch when the route refuses first."""
+    app, adapter = _make_app(adapter_id="upstox", broker_client=None, backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -489,43 +483,28 @@ def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth, *,
             "account_id": "U1",
         },
     )
-
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "error"
-    assert "no market depth available" in final["error"]
-    assert adapter.orders == []
+    _assert_place_required(resp, adapter)
 
 
 def test_twap_splits_into_gated_slices(live_auth, *, backend_lease_factory):
-    """Low urgency TWAP: each slice is its own independently gated child."""
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap_slices=2, window=1s
-    client = app.test_client()
-
-    resp = client.post(
+    """Low urgency does not submit TWAP slices from this route."""
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL",
-            "quantity": 10, "urgency": "low",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "SELL",
+            "quantity": 10,
+            "urgency": "low",
         },
     )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["data"]["job_id"]
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "done"
-    assert final["filled_quantity"] == 10
-    assert [c["status"] for c in final["child_orders"]] == ["placed", "placed"]
-    # Two distinct gated dispatches — one SafetyContext each (the one-shot
-    # gate cannot be reused, so two placements REQUIRE two mints).
-    assert len(adapter.orders) == 2
-    assert sorted(int(o.quantity) for o in adapter.orders) == [5, 5]
+    _assert_place_required(resp, adapter)
 
 
 def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth, *, backend_lease_factory):
-    app, stale_adapter = _make_app( backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-    response = client.post(
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
+    response = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -535,54 +514,23 @@ def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth, *, back
             "urgency": "low",
         },
     )
-    assert response.status_code == 202
-    job_id = response.get_json()["data"]["job_id"]
-
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and not stale_adapter.orders:
-        time.sleep(0.02)
-    assert len(stale_adapter.orders) == 1
-
-    stale_router = app.config["BROKER_ROUTER"]
-    current_adapter = _NoIoAdapter()
-    app.config["BROKER_ROUTER"] = BrokerRouter({"openalgo": current_adapter}, _session, backend_lease_proof=backend_lease_factory())
-    assert stale_router.revoke_and_drain(timeout=0.5) is True
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "done"
-    assert len(stale_adapter.orders) == 1
-    assert len(current_adapter.orders) == 1
+    _assert_place_required(response, adapter)
 
 
 def test_status_shows_children_mid_flight(live_auth, *, backend_lease_factory):
-    """The live snapshot must expose children WHILE the route runs — TWAP
-    jobs take minutes and the widget polls. Pins the result_observer wiring
-    (deleting it would keep every end-state test green while live polling
-    silently regressed to an empty list until completion)."""
-    app, _adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap window 1s / 2 slices
-    client = app.test_client()
-
-    resp = client.post(
+    """The route does not create a job whose children can appear mid-flight."""
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
-            "quantity": 10, "urgency": "low",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 10,
+            "urgency": "low",
         },
     )
-    job_id = resp.get_json()["data"]["job_id"]
-
-    saw_mid_flight_child = False
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        data = client.get(f"/api/v1/orders/smart-route/{job_id}").get_json()["data"]
-        if data["status"] == "running" and len(data["child_orders"]) >= 1:
-            saw_mid_flight_child = True
-            break
-        if data["status"] != "running":
-            break
-        time.sleep(0.02)
-    assert saw_mid_flight_child, "snapshot never showed children mid-flight (result_observer regressed)"
-    _wait_done(client, job_id)
+    _assert_place_required(resp, adapter)
 
 
 def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path, *, backend_lease_factory):
@@ -607,23 +555,23 @@ def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path, *
 
 
 def test_jobs_list_returns_snapshots(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     resp = client.post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
-            "quantity": 4, "urgency": "high",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 4,
+            "urgency": "high",
         },
     )
-    job_id = resp.get_json()["data"]["job_id"]
-    _wait_done(client, job_id)
+    _assert_place_required(resp, adapter)
 
     listing = client.get("/api/v1/orders/smart-route")
     assert listing.status_code == 200
-    jobs = listing.get_json()["data"]
-    assert jobs[0]["job_id"] == job_id
-    assert jobs[0]["symbol"] == "RELIANCE"
+    assert listing.get_json()["data"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -645,8 +593,11 @@ def _child_order(qty: int = 10) -> Order:
 
 def _ctx() -> RequestContext:
     return RequestContext(
-        jti="jti-1", actor_type="human", actor_id="user-1", mode="live",
-        selector="openalgo:default",
+        jti="jti-1",
+        actor_type="human",
+        actor_id="user-1",
+        mode="live",
+        selector="dhan:default",
     )
 
 
@@ -670,12 +621,14 @@ def _portfolio_state(
         total_balance=100000.0,
         daily_pnl=0.0,
         starting_capital=100000.0,
-        prospective=(ProspectiveSafetyInputs(
-            positions=current_positions,
-            used_margin=0.0,
-            net_delta=prospective_net_delta,
-            net_vega=prospective_net_vega,
-        ),),
+        prospective=(
+            ProspectiveSafetyInputs(
+                positions=current_positions,
+                used_margin=0.0,
+                net_delta=prospective_net_delta,
+                net_vega=prospective_net_vega,
+            ),
+        ),
     )
 
 
@@ -692,6 +645,7 @@ async def test_executor_blocks_child_on_safety_layer(*, backend_lease_factory):
                 passed = False
                 layer = "L2"
                 reason = "position limit"
+
             return [_R()]
 
     adapter = _NoIoAdapter()
@@ -699,9 +653,9 @@ async def test_executor_blocks_child_on_safety_layer(*, backend_lease_factory):
     safety.check_order = _BlockingSafety().check_order
     executor = mod.GatedChildExecutor(
         safety=safety,
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=_passing_portfolio_provider,
     )
@@ -718,11 +672,13 @@ async def test_executor_checks_prospective_greeks_before_dispatch(*, backend_lea
 
         def check_order(self, _order, **kwargs):
             self.calls.append(kwargs)
-            return [SimpleNamespace(
-                passed=False,
-                layer="L3_PORTFOLIO",
-                reason="prospective delta exceeds limit",
-            )]
+            return [
+                SimpleNamespace(
+                    passed=False,
+                    layer="L3_PORTFOLIO",
+                    reason="prospective delta exceeds limit",
+                )
+            ]
 
     adapter = _NoIoAdapter()
     recorder = _ProspectiveBlockingSafety()
@@ -730,9 +686,9 @@ async def test_executor_checks_prospective_greeks_before_dispatch(*, backend_lea
     safety.check_order = recorder.check_order
     executor = mod.GatedChildExecutor(
         safety=safety,
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=lambda _order, _reservations: _async_value(
             _portfolio_state(prospective_net_delta=750.0, prospective_net_vega=12000.0)
@@ -752,6 +708,7 @@ async def test_executor_fails_closed_on_router_refusal(*, backend_lease_factory)
 
     class _RefusingRouter:
         backend_lease_proof = backend_lease_factory()
+
         async def place_order(self, *args, **kwargs):
             raise SafetyBypassError("verification failed")
 
@@ -759,7 +716,7 @@ async def test_executor_fails_closed_on_router_refusal(*, backend_lease_factory)
         safety=_safety(),
         router=_RefusingRouter(),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=_passing_portfolio_provider,
     )
@@ -772,9 +729,9 @@ async def test_executor_passes_real_gate_and_returns_orderid(*, backend_lease_fa
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=_passing_portfolio_provider,
     )
@@ -788,8 +745,11 @@ async def test_child_executor_refuses_revoked_backend(backend_lease_factory):
     proof = backend_lease_factory()
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
-        safety=_safety(), router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=proof),
-        request_ctx=_ctx(), adapter_id="openalgo", account_id="default",
+        safety=_safety(),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=proof),
+        request_ctx=_ctx(),
+        adapter_id="dhan",
+        account_id="default",
         portfolio_state_provider=_passing_portfolio_provider,
     )
     proof.revoke()
@@ -801,20 +761,20 @@ async def test_child_executor_refuses_revoked_backend(backend_lease_factory):
 async def test_executor_resolves_the_current_router_for_each_child(*, backend_lease_factory):
     stale_adapter = _NoIoAdapter()
     current_adapter = _NoIoAdapter()
-    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session, backend_lease_proof=backend_lease_factory())
+    stale_router = BrokerRouter({"dhan": stale_adapter}, _session, backend_lease_proof=backend_lease_factory())
     current_router = stale_router
     executor = mod.GatedChildExecutor(
         safety=_safety(),
         router=stale_router,
         router_provider=lambda: current_router,
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=_passing_portfolio_provider,
     )
 
     first = await executor.route_order(_child_order(1))
-    current_router = BrokerRouter({"openalgo": current_adapter}, _session, backend_lease_proof=backend_lease_factory())
+    current_router = BrokerRouter({"dhan": current_adapter}, _session, backend_lease_proof=backend_lease_factory())
     second = await executor.route_order(_child_order(2))
 
     assert first.passed is True
@@ -825,14 +785,14 @@ async def test_executor_resolves_the_current_router_for_each_child(*, backend_le
 
 async def test_executor_fails_closed_when_current_router_was_removed(*, backend_lease_factory):
     stale_adapter = _NoIoAdapter()
-    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session, backend_lease_proof=backend_lease_factory())
+    stale_router = BrokerRouter({"dhan": stale_adapter}, _session, backend_lease_proof=backend_lease_factory())
     current_router = None
     executor = mod.GatedChildExecutor(
         safety=_safety(),
         router=stale_router,
         router_provider=lambda: current_router,
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=_passing_portfolio_provider,
     )
@@ -852,9 +812,9 @@ async def test_executor_enforces_l2_from_portfolio_provider(*, backend_lease_fac
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
         safety=SafetySystem(SafetyConfig(check_market_hours=False, max_positions=1)),
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=lambda _order, _reservations: _async_value(
             _portfolio_state([Position(symbol="INFY", exchange="NSE", product="MIS", quantity="50")])
@@ -875,9 +835,9 @@ async def test_executor_portfolio_provider_failure_blocks_child(*, backend_lease
 
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         portfolio_state_provider=_boom,
     )
@@ -887,49 +847,11 @@ async def test_executor_portfolio_provider_failure_blocks_child(*, backend_lease
     assert adapter.orders == []
 
 
-async def test_gather_portfolio_state_scoped_to_selector():
-    """The async gatherer reads OpenAlgo only for OpenAlgo selectors."""
-    from flinttrade_core.models import Position
-
-    class _Client:
-        async def positionbook(self):
-            return [Position(symbol="INFY", exchange="NSE", product="MIS", quantity="10")]
-
-        async def funds(self):
-            return SimpleNamespace(
-                used_margin="5",
-                total_balance="10",
-                opening_risk_capital="10",
-            )
-
-        async def tradebook(self):
-            return []
-
-        async def orderbook(self):
-            return []
-
-        async def holdings(self):
-            return []
-
-        async def multi_quotes(self, _symbols):
-            return [
-                SimpleNamespace(
-                    symbol="INFY",
-                    exchange="NSE",
-                    ltp=100,
-                    prev_close=100,
-                    previous_close_trusted=True,
-                )
-            ]
-
-    state = await mod.gather_portfolio_state(_Client(), "openalgo")
-    assert len(state.positions) == 1
-    assert state.used_margin == 5.0
-    assert state.total_balance == 10.0
-    with pytest.raises(PortfolioSafetyStateError, match="reader"):
-        await mod.gather_portfolio_state(_Client(), "dhan")
-    with pytest.raises(PortfolioSafetyStateError, match="reader"):
-        await mod.gather_portfolio_state(None, "openalgo")
+async def test_gather_portfolio_state_requires_native_account_authority():
+    """An ordinary client object cannot stand in for a native account reader."""
+    for adapter in ("dhan", "upstox"):
+        with pytest.raises(PortfolioSafetyStateError, match="reader"):
+            await mod.gather_portfolio_state(_FakeClient(), adapter)
 
 
 async def test_gather_portfolio_state_uses_native_adapter_and_account():
@@ -937,16 +859,14 @@ async def test_gather_portfolio_state_uses_native_adapter_and_account():
     from flinttrade_core.models import Position
 
     client = MagicMock()
-    client.positionbook = AsyncMock(side_effect=AssertionError("must not read OpenAlgo for native L2"))
-    client.funds = AsyncMock(side_effect=AssertionError("must not read OpenAlgo for native L2"))
+    client.positionbook = AsyncMock(side_effect=AssertionError("must not read native broker for native L2"))
+    client.funds = AsyncMock(side_effect=AssertionError("must not read native broker for native L2"))
 
     session = object()
     registry = MagicMock()
     registry.get_session_for.return_value = session
     adapter = MagicMock()
-    adapter.positions = AsyncMock(
-        return_value=[Position(symbol="TCS", exchange="NSE", product="MIS", quantity="25")]
-    )
+    adapter.positions = AsyncMock(return_value=[Position(symbol="TCS", exchange="NSE", product="MIS", quantity="25")])
     adapter.funds = AsyncMock(
         return_value={
             "used_margin": "9",
@@ -996,9 +916,9 @@ async def test_executor_pre_dispatch_check_aborts_before_the_gate(*, backend_lea
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         pre_dispatch_check=lambda: "session token revoked (logout or mode change)",
     )
@@ -1023,9 +943,9 @@ async def test_executor_rechecks_cancel_after_awaited_portfolio_read(*, backend_
 
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
-        adapter_id="openalgo",
+        adapter_id="dhan",
         account_id="default",
         pre_dispatch_check=lambda: cancel_reason[0] if cancel_reason else None,
         portfolio_state_provider=_blocked_portfolio_state,
@@ -1043,7 +963,7 @@ async def test_executor_rechecks_cancel_after_awaited_portfolio_read(*, backend_
 
 def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth, *, backend_lease_factory):
     """Runtime shutdown cancels and joins workers before routing retirement."""
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
     job = mod._SmartJob(job_id="owned-worker", params={"symbol": "INFY", "action": "BUY"})  # noqa: SLF001
     worker_started = threading.Event()
 
@@ -1073,8 +993,7 @@ def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth, *, bac
             "urgency": "high",
         },
     )
-    assert response.status_code == 503
-    assert adapter.orders == []
+    _assert_place_required(response, adapter)
 
 
 # ---------------------------------------------------------------------------
@@ -1083,60 +1002,42 @@ def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth, *, bac
 
 
 def test_cancel_endpoint_aborts_a_running_twap(live_auth, *, backend_lease_factory):
-    """Cancelling between TWAP slices stops further children."""
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap window 1s / 2 slices → ~1s between slices
-    client = app.test_client()
-
-    resp = client.post(
+    """A TWAP body is refused, so there is no running job to cancel."""
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
-            "quantity": 10, "urgency": "low",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 10,
+            "urgency": "low",
         },
     )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["data"]["job_id"]
-
-    # Wait for the FIRST child to land, then cancel before the second slice.
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and len(adapter.orders) == 0:
-        time.sleep(0.02)
-    assert len(adapter.orders) >= 1
-
-    cancel = client.post(f"/api/v1/orders/smart-route/{job_id}/cancel")
-    assert cancel.status_code == 200
-    assert cancel.get_json()["data"]["cancel_requested"] is True
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "cancelled"
-    assert "cancelled" in final["error"]
-    assert len(adapter.orders) == 1  # the second slice never dispatched
+    _assert_place_required(resp, adapter)
 
 
 def test_revoked_jti_aborts_mid_route(live_auth, monkeypatch, *, backend_lease_factory):
-    """Logout / mode-downgrade revoke the jti — a running job must stop."""
+    """A revoked session does not let a smart-route body reach the broker."""
     import flinttrade_core.auth_routes as auth_routes_mod
 
     monkeypatch.setattr(auth_routes_mod, "_is_jti_revoked", lambda jti: True)
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
-            "quantity": 10, "urgency": "high",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 10,
+            "urgency": "high",
         },
     )
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "error"
-    assert "revoked" in final["error"]
-    assert adapter.orders == []  # not a single child reached the broker
+    _assert_place_required(resp, adapter)
 
 
 def test_cancel_unknown_job_404(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post("/api/v1/orders/smart-route/nope/cancel")
     assert resp.status_code == 404
 
@@ -1147,53 +1048,47 @@ def test_cancel_unknown_job_404(live_auth, *, backend_lease_factory):
 
 
 def test_running_job_cap_409(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     for i in range(mod._MAX_RUNNING_JOBS):  # noqa: SLF001
         mod._store_job(mod._SmartJob(job_id=f"running-{i}", params={"symbol": f"S{i}", "action": "BUY"}))  # noqa: SLF001
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 5},
     )
-    assert resp.status_code == 409
-    assert "Too many" in resp.get_json()["message"]
+    _assert_place_required(resp)
 
 
 def test_dup_guard_is_atomic_with_insert(live_auth, *, backend_lease_factory):
     """The cap/dup check and the job insert happen in ONE lock section, so a
     job registered before the executor is built already blocks a duplicate —
     closing the check-then-insert TOCTOU window."""
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     client = app.test_client()
-    # First submit registers the job atomically (status "running").
     r1 = client.post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "low"},
     )
-    assert r1.status_code == 202
-    # An immediate duplicate sees the already-registered running job and is refused.
+    _assert_place_required(r1)
     r2 = client.post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "low"},
     )
-    assert r2.status_code == 409
-    _wait_done(client, r1.get_json()["data"]["job_id"])
+    _assert_place_required(r2)
 
 
 def test_duplicate_symbol_action_409(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     mod._store_job(mod._SmartJob(job_id="dup-1", params={"symbol": "RELIANCE", "action": "BUY"}))  # noqa: SLF001
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 5},
     )
-    assert resp.status_code == 409
-    assert "already running" in resp.get_json()["message"]
-    # The OPPOSITE side is not a duplicate.
+    _assert_place_required(resp)
     resp2 = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 5, "urgency": "high"},
     )
-    assert resp2.status_code == 202
+    _assert_place_required(resp2)
 
 
 def test_store_eviction_never_drops_a_running_job():
@@ -1217,7 +1112,7 @@ def test_store_eviction_never_drops_a_running_job():
 
 def test_status_endpoints_require_auth(monkeypatch, *, backend_lease_factory):
     monkeypatch.setattr(order_routes_mod, "_decode_request_payload", lambda: None)
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, _ = _make_app(backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     assert client.get("/api/v1/orders/smart-route").status_code == 401
     assert client.get("/api/v1/orders/smart-route/xyz").status_code == 401
@@ -1230,11 +1125,8 @@ def test_status_endpoints_require_auth(monkeypatch, *, backend_lease_factory):
 
 
 def test_twap_children_use_distinct_safety_contexts(live_auth, *, backend_lease_factory):
-    """Each TWAP child must carry its OWN SafetyContext object — the one-shot
-    gate cannot be reused, so reuse would fail the second child."""
-    from flinttrade_engine.safety import SafetyContext
-
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    """TWAP children are not minted from this route."""
+    app, adapter = _make_app(backend_lease_factory=backend_lease_factory)
     router = app.config["BROKER_ROUTER"]
     seen_ctx: list[object] = []
     orig_place = router.place_order
@@ -1249,13 +1141,12 @@ def test_twap_children_use_distinct_safety_contexts(live_auth, *, backend_lease_
     resp = client.post(
         "/api/v1/orders/smart-route",
         json={
-            "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL",
-            "quantity": 10, "urgency": "low",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "SELL",
+            "quantity": 10,
+            "urgency": "low",
         },
     )
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "done"
-    assert len(seen_ctx) == 2
-    assert all(isinstance(c, SafetyContext) for c in seen_ctx)
-    assert seen_ctx[0] is not seen_ctx[1]
+    _assert_place_required(resp, adapter)
+    assert seen_ctx == []

@@ -1,23 +1,13 @@
-"""Tick-capture boot wiring + gate.
+"""Unavailable native capture plus retained local recorder lifecycle contracts.
 
-Live tick capture (``TickRecorder``) is a complete OpenAlgo-WS → DuckDB recorder
-that previously was never launched by the backend. This guards the wiring:
-
-* ``_tick_capture_enabled()`` is OFF unless ``FLINTTRADE_TICK_CAPTURE`` is set
-  (the recorder opens a WebSocket on boot, so it must be opt-in).
-* ``FlintTradeApp.start()`` constructs a ``TickRecorder`` and launches it as a
-  background task, gated by ``_tick_capture_enabled()``.
-* ``FlintTradeApp.stop()`` stops the recorder.
-
-The ``start()`` assertions are AST-based so they survive reformatting and do not
-require booting the app (which opens sockets and spawns threads).
+Old preferences cannot start a network recorder. Local ingestion, restart
+checkpoints, flush retention and orderly shutdown remain independently tested.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
-from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -38,10 +28,7 @@ def _find_method(tree: ast.AST, class_name: str, method_name: str) -> ast.AST | 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == class_name:
             for sub in node.body:
-                if (
-                    isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef))
-                    and sub.name == method_name
-                ):
+                if isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef)) and sub.name == method_name:
                     return sub
     return None
 
@@ -59,13 +46,13 @@ def _calls_named(scope: ast.AST, func_name: str) -> bool:
 
 
 @pytest.mark.unit
-def test_tick_capture_disabled_by_default() -> None:
+def test_tick_capture_unavailable_regardless_of_legacy_environment_flag() -> None:
     old = os.environ.pop("FLINTTRADE_TICK_CAPTURE", None)
     try:
         assert _tick_capture_enabled() is False
         for val in ("1", "true", "YES", "on"):
             os.environ["FLINTTRADE_TICK_CAPTURE"] = val
-            assert _tick_capture_enabled() is True
+            assert _tick_capture_enabled() is False
         os.environ["FLINTTRADE_TICK_CAPTURE"] = "false"
         assert _tick_capture_enabled() is False
     finally:
@@ -89,7 +76,7 @@ def test_tick_capture_explicit_env_false_overrides_workspace_true(tmp_path, monk
 
 @pytest.mark.unit
 @pytest.mark.parametrize("enabled", [True, "true"])
-def test_tick_capture_workspace_true_enables_when_env_is_absent(tmp_path, monkeypatch, enabled) -> None:
+def test_legacy_workspace_preference_cannot_enable_native_capture(tmp_path, monkeypatch, enabled) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_TICK_CAPTURE", raising=False)
     (tmp_path / "workspace.json").write_text(
@@ -97,33 +84,25 @@ def test_tick_capture_workspace_true_enables_when_env_is_absent(tmp_path, monkey
         encoding="utf-8",
     )
 
-    assert _tick_capture_enabled() is True
+    assert _tick_capture_enabled() is False
 
 
 @pytest.mark.unit
-def test_start_launches_gated_tick_recorder() -> None:
+def test_start_does_not_construct_or_launch_an_unavailable_tick_recorder() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
     start = _find_method(tree, "FlintTradeApp", "_start_owned")
-    assert start is not None, "FlintTradeApp._start_owned not found"
-
-    assert _calls_named(start, "_tick_capture_enabled"), (
-        "Tick capture must be gated by _tick_capture_enabled() in _start_owned()"
+    assert start is not None
+    assert not _calls_named(start, "_build_tick_recorder")
+    assert not _calls_named(start, "TickRecorder")
+    assert not _calls_named(start, "create_live_market_orderflow_aggregator")
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "recorder"
+        and node.func.attr == "run"
+        for node in ast.walk(start)
     )
-    assert _calls_named(start, "_build_tick_recorder"), (
-        "_start_owned() must construct the recorder through the runtime-tested seam"
-    )
-    assert _calls_named(start, "create_task"), (
-        "_start_owned() must launch the recorder via asyncio.create_task so it runs "
-        "as a background task on the event loop"
-    )
-    source_lines = APP_PY.read_text(encoding="utf-8").splitlines()
-    start_source = "\n".join(source_lines[start.lineno - 1 : start.end_lineno])
-    lifecycle = start_source.index("with _tick_capture_lifecycle_lock(flask_app):")
-    refreshed = start_source.index("capture_settings = Settings.from_env()")
-    restored = start_source.index("_prepare_tick_orderflow_state(")
-    built = start_source.index("settings=capture_settings")
-    published = start_source.index('flask_app.config["TICK_RECORDER"] = recorder')
-    assert lifecycle < refreshed < restored < built < published
 
 
 @pytest.mark.unit
@@ -250,11 +229,7 @@ def test_build_tick_recorder_uses_exact_settings_watchlist_and_existing_hub() ->
         {"exchange": "nse", "symbol": "reliance"},
         {"exchange": "NSE_INDEX", "symbol": "nifty"},
     ]
-    settings = Settings(
-        openalgo_host="https://openalgo.local:5000",
-        openalgo_ws_port=8770,
-        openalgo_api_key="workspace-key",
-    )
+    settings = Settings()
     factory_calls: list[dict] = []
 
     def recorder_factory(**kwargs):
@@ -279,8 +254,8 @@ def test_build_tick_recorder_uses_exact_settings_watchlist_and_existing_hub() ->
     assert call["storage"] is storage
     assert call["storage_lock"] is storage_lock
     assert call["orderflow_aggregator"] is orderflow
-    assert call["ws_url"] == "wss://openalgo.local:8770"
-    assert call["api_key"] == "workspace-key"
+    assert "ws_url" not in call
+    assert "api_key" not in call
     assert call["ltp_sink"].__self__ is hub
     assert call["ltp_sink"].__func__ is FakeHub.process_tick
     assert recorder.watchlist is watchlist
@@ -301,7 +276,7 @@ def test_build_tick_recorder_composes_signal_and_practice_sinks() -> None:
         recorder_factory=factory,
         signal_hub=hub,
         sandbox_engine=sandbox,
-        settings=Settings(openalgo_api_key="workspace-key"),
+        settings=Settings(),
         storage=object(),
         storage_lock=object(),
         orderflow=object(),
@@ -312,12 +287,8 @@ def test_build_tick_recorder_composes_signal_and_practice_sinks() -> None:
 
     sink("NSE", "INFY", 1_500.0, 42, 1_720_000_000.0)
 
-    hub.process_tick.assert_called_once_with(
-        "NSE", "INFY", 1_500.0, 42, 1_720_000_000.0
-    )
-    sandbox.process_tick.assert_called_once_with(
-        "NSE", "INFY", 1_500.0, 42, 1_720_000_000.0
-    )
+    hub.process_tick.assert_called_once_with("NSE", "INFY", 1_500.0, 42, 1_720_000_000.0)
+    sandbox.process_tick.assert_called_once_with("NSE", "INFY", 1_500.0, 42, 1_720_000_000.0)
 
 
 @pytest.mark.unit
@@ -350,7 +321,7 @@ def test_build_tick_recorder_failure_does_not_reconfigure_signal_hub(failure_sta
         _build_tick_recorder(
             recorder_factory=recorder_factory,
             signal_hub=hub,
-            settings=Settings(openalgo_api_key="workspace-key"),
+            settings=Settings(),
             storage=object(),
             storage_lock=object(),
             orderflow=object(),
@@ -378,16 +349,7 @@ def test_start_sets_capture_intent_before_starting_flask_server() -> None:
 
 
 @pytest.mark.unit
-def test_start_uses_precise_live_market_orderflow_factory() -> None:
-    tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
-    start = _find_method(tree, "FlintTradeApp", "_start_owned")
-    assert start is not None
-
-    assert _calls_named(start, "create_live_market_orderflow_aggregator")
-
-
-@pytest.mark.unit
-def test_capture_failure_redacts_api_key_from_status_and_log(caplog) -> None:
+def test_capture_failure_excludes_external_payload_from_status_and_log(caplog) -> None:
     from flinttrade_core.app import _record_tick_capture_failure
 
     flask_app = Flask("capture_failure")
@@ -396,14 +358,13 @@ def test_capture_failure_redacts_api_key_from_status_and_log(caplog) -> None:
 
     _record_tick_capture_failure(
         flask_app,
-        RuntimeError(f"OpenAlgo rejected {api_key}"),
-        api_key,
+        RuntimeError(f"native broker rejected {api_key}"),
     )
 
-    assert flask_app.config["TICK_CAPTURE_ERROR"] == "OpenAlgo rejected [redacted]"
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "RuntimeError"
     assert api_key not in flask_app.config["TICK_CAPTURE_ERROR"]
     assert api_key not in caplog.text
-    assert "OpenAlgo rejected [redacted]" in caplog.text
+    assert "RuntimeError" in caplog.text
 
 
 @pytest.mark.unit
@@ -484,7 +445,6 @@ async def test_startup_rollback_retains_failed_flush_for_shutdown_retry() -> Non
         checkpoint_owner=checkpoint_owner,
         close_worker=None,
         startup_error=RuntimeError("startup failed"),
-        api_key="",
     )
 
     assert task.cancelled is True
@@ -514,11 +474,7 @@ def test_stop_stops_tick_recorder() -> None:
     stop_once = _find_method(tree, "FlintTradeApp", "_stop_once")
     assert stop_once is not None, "FlintTradeApp._stop_once not found"
     # The stop path must reference the recorder handle so it is shut down.
-    refs = [
-        n
-        for n in ast.walk(stop_once)
-        if isinstance(n, ast.Attribute) and n.attr == "_tick_recorder"
-    ]
+    refs = [n for n in ast.walk(stop_once) if isinstance(n, ast.Attribute) and n.attr == "_tick_recorder"]
     assert refs, "_stop_once() must stop/cancel the tick recorder (_tick_recorder)"
 
 
@@ -836,9 +792,7 @@ async def test_failed_strategy_shutdown_retains_dependencies_until_retry() -> No
     from flinttrade_core.app import FlintTradeApp
 
     app = FlintTradeApp.__new__(FlintTradeApp)
-    app.scheduler = MagicMock(
-        stop_all=AsyncMock(side_effect=[RuntimeError("scheduler failed"), None])
-    )
+    app.scheduler = MagicMock(stop_all=AsyncMock(side_effect=[RuntimeError("scheduler failed"), None]))
     app.cron = MagicMock()
     app.telegram = MagicMock()
     app._tick_recorder = None
@@ -906,7 +860,6 @@ def test_failed_recorder_completion_is_unpublished_and_redacted() -> None:
         flask_app,
         recorder,
         FailedTask(),
-        api_key="boot-secret",
         is_shutting_down=lambda: False,
     )
 
@@ -914,7 +867,7 @@ def test_failed_recorder_completion_is_unpublished_and_redacted() -> None:
     assert "TICK_STORAGE" not in flask_app.config
     assert "TICK_STORAGE_LOCK" not in flask_app.config
     assert "ORDERFLOW_AGGREGATOR" not in flask_app.config
-    assert flask_app.config["TICK_CAPTURE_ERROR"] == "fatal recorder error with [redacted] and [redacted]"
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "RuntimeError"
     assert unpublished is True
     assert storage_closed.wait(1)
     storage.close.assert_called_once_with()
@@ -949,7 +902,6 @@ def test_failed_recorder_completion_retains_storage_owner_when_close_fails() -> 
         flask_app,
         owner["recorder"],
         FailedTask(),
-        api_key="",
         on_unpublished=lambda: owner.__setitem__("recorder", None),
         on_storage_closed=lambda: owner.__setitem__("storage", None),
     )
@@ -989,7 +941,6 @@ def test_failed_recorder_completion_retains_unflushed_buffer_and_storage() -> No
         flask_app,
         recorder,
         FailedTask(),
-        api_key="",
         on_unpublished=lambda: None,
         on_storage_closed=lambda: owner.update(recorder=None, storage=None),
     )
@@ -1034,12 +985,14 @@ def test_failed_recorder_completion_treats_unknown_pending_count_as_retained(
         ORDERFLOW_AGGREGATOR=object(),
     )
 
-    assert _handle_tick_recorder_completion(
-        flask_app,
-        recorder,
-        FailedTask(),
-        api_key="",
-    ) is True
+    assert (
+        _handle_tick_recorder_completion(
+            flask_app,
+            recorder,
+            FailedTask(),
+        )
+        is True
+    )
 
     storage.close.assert_not_called()
 
@@ -1088,13 +1041,15 @@ def test_failed_recorder_completion_offloads_blocking_checkpoint_and_close() -> 
         ORDERFLOW_AGGREGATOR=object(),
     )
 
-    assert _handle_tick_recorder_completion(
-        flask_app,
-        recorder,
-        FailedTask(),
-        api_key="",
-        close_worker=worker,
-    ) is True
+    assert (
+        _handle_tick_recorder_completion(
+            flask_app,
+            recorder,
+            FailedTask(),
+            close_worker=worker,
+        )
+        is True
+    )
 
     try:
         # `worker.wait(0.01) is None` already carries what the removed
@@ -1178,95 +1133,12 @@ def test_normal_recorder_completion_during_shutdown_is_not_reported() -> None:
         flask_app,
         recorder,
         CompletedTask(),
-        api_key="boot-secret",
         is_shutting_down=lambda: True,
     )
 
     assert flask_app.config["TICK_RECORDER"] is recorder
     assert flask_app.config["TICK_CAPTURE_ERROR"] == ""
     assert unpublished is False
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) -> None:
-    import flinttrade_data.tick_recorder as recorder_module
-    from flinttrade_core.app import FlintTradeApp
-    from flinttrade_data.tick_recorder import TickRecorder
-
-    class FakeStorage:
-        def __init__(self) -> None:
-            self.batches: list[list[tuple]] = []
-
-        def insert_ticks_batch(self, rows) -> None:
-            self.batches.append(list(rows))
-
-    class BlockingWebSocket:
-        def __init__(self) -> None:
-            self.consume_started = asyncio.Event()
-
-        def __aiter__(self):
-            return self
-
-        async def send(self, _payload: str) -> None:
-            return None
-
-        async def __anext__(self):
-            self.consume_started.set()
-            await asyncio.Future()
-
-    class WebSocketContext:
-        def __init__(self, websocket) -> None:
-            self.websocket = websocket
-
-        async def __aenter__(self):
-            return self.websocket
-
-        async def __aexit__(self, exc_type, exc, traceback) -> bool:
-            return False
-
-    storage = FakeStorage()
-    websocket = BlockingWebSocket()
-    recorder = TickRecorder(storage=storage, ws_url="ws://openalgo.local:8770")
-    recorder.add_symbols([{"exchange": "NSE_INDEX", "symbol": "NIFTY"}])
-    recorder._process_tick({
-        "exchange": "NSE_INDEX",
-        "symbol": "NIFTY",
-        "data": {
-            "ltp": 24500.0,
-            "volume": 10,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
-    })
-    monkeypatch.setattr(
-        recorder_module.websockets,
-        "connect",
-        lambda *_args, **_kwargs: WebSocketContext(websocket),
-    )
-    monkeypatch.setattr(recorder, "_authenticate", AsyncMock())
-    recorder_task = asyncio.create_task(recorder.run())
-    await asyncio.wait_for(websocket.consume_started.wait(), timeout=1.0)
-
-    app = FlintTradeApp.__new__(FlintTradeApp)
-    app.scheduler = MagicMock(stop_all=AsyncMock())
-    app.cron = MagicMock()
-    app.telegram = None
-    app._tick_recorder = recorder
-    app._tick_recorder_task = recorder_task
-    app._reconciliation_runner = None
-    app._reconciliation_task = None
-    app.audit = MagicMock()
-    app.client = MagicMock(close=AsyncMock())
-    app.version = "test"
-    app._stop_event = MagicMock()
-
-    await app.stop()
-
-    assert recorder_task.done()
-    assert recorder.is_running is False
-    assert len(storage.batches) == 1
-    assert len(storage.batches[0]) == 1
-    assert storage.batches[0][0][1:3] == ("NIFTY", "NSE_INDEX")
 
 
 @pytest.mark.unit
@@ -1301,7 +1173,7 @@ async def test_failed_tick_task_fails_shutdown_after_cleanup_without_leaking_api
     app._reconciliation_task = None
     app.audit = MagicMock()
     app.client = MagicMock(close=AsyncMock())
-    app.settings = Settings(openalgo_api_key="boot-secret")
+    app.settings = Settings()
     app.version = "test"
     app._stop_event = MagicMock()
     caplog.set_level(logging.WARNING, logger="flinttrade")
@@ -1337,18 +1209,23 @@ def test_workspace_config_readers(tmp_path, monkeypatch) -> None:
     assert _auto_sync_lookback_days() == 7
     assert len(_tick_capture_watchlist()) == 3  # default index trio
 
-    (tmp_path / "workspace.json").write_text(json.dumps({
-        "data": {
-            "tick_capture": {
-                "mode": "depth",
-                "symbols": [
-                    {"exchange": "nse", "symbol": "reliance"},
-                    {"bogus": True},
-                ],
-            },
-            "auto_sync": {"enabled": True, "lookback_days": 30},
-        },
-    }), encoding="utf-8")
+    (tmp_path / "workspace.json").write_text(
+        json.dumps(
+            {
+                "data": {
+                    "tick_capture": {
+                        "mode": "depth",
+                        "symbols": [
+                            {"exchange": "nse", "symbol": "reliance"},
+                            {"bogus": True},
+                        ],
+                    },
+                    "auto_sync": {"enabled": True, "lookback_days": 30},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert _tick_capture_mode() == "depth"
     assert _auto_sync_enabled() is True
@@ -1357,9 +1234,14 @@ def test_workspace_config_readers(tmp_path, monkeypatch) -> None:
     assert _tick_capture_watchlist() == [{"exchange": "NSE", "symbol": "RELIANCE"}]
 
     # Invalid mode falls back to quote, lookback clamps.
-    (tmp_path / "workspace.json").write_text(json.dumps({
-        "data": {"tick_capture": {"mode": "warp"}, "auto_sync": {"enabled": 1, "lookback_days": 900}},
-    }), encoding="utf-8")
+    (tmp_path / "workspace.json").write_text(
+        json.dumps(
+            {
+                "data": {"tick_capture": {"mode": "warp"}, "auto_sync": {"enabled": 1, "lookback_days": 900}},
+            }
+        ),
+        encoding="utf-8",
+    )
     assert _tick_capture_mode() == "quote"
     assert _auto_sync_enabled() is True
     assert _auto_sync_lookback_days() == 90

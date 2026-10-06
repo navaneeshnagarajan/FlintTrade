@@ -68,8 +68,8 @@ class TestQuestDBBridgeInsertTicks:
         from flinttrade_data.questdb_bridge import QuestDBBridge
 
         ticks = [
-            {"symbol": "NIFTY", "ltp": 22450.5},   # missing exchange → skipped
-            {"exchange": "NSE", "ltp": 2980.0},      # missing symbol → skipped
+            {"symbol": "NIFTY", "ltp": 22450.5},  # missing exchange → skipped
+            {"exchange": "NSE", "ltp": 2980.0},  # missing symbol → skipped
             {"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0},  # valid
         ]
 
@@ -172,8 +172,12 @@ class TestQuestDBBridgeAggregateOHLCV:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "columns": [
-                {"name": "timestamp"}, {"name": "open"}, {"name": "high"},
-                {"name": "low"}, {"name": "close"}, {"name": "volume"},
+                {"name": "timestamp"},
+                {"name": "open"},
+                {"name": "high"},
+                {"name": "low"},
+                {"name": "close"},
+                {"name": "volume"},
             ],
             "dataset": [["2026-04-08T09:15:00", 22400.0, 22500.0, 22350.0, 22450.0, 50000]],
         }
@@ -181,8 +185,10 @@ class TestQuestDBBridgeAggregateOHLCV:
         bridge = QuestDBBridge()
         with patch.object(bridge._http, "get", return_value=mock_resp) as mock_get:
             bars = bridge.aggregate_ohlcv(
-                "NIFTY", "5m",
-                "2026-04-08T09:15:00", "2026-04-08T15:30:00",
+                "NIFTY",
+                "5m",
+                "2026-04-08T09:15:00",
+                "2026-04-08T15:30:00",
             )
 
         assert len(bars) == 1

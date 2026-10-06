@@ -29,9 +29,9 @@ const storeState = vi.hoisted(() => ({
 
 // buildHeaders reads these stores imperatively on every call.
 vi.mock("@/stores/connectionStore", () => ({
-  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  //  models a normally-loaded app; the hydration
   // fail-closed window is covered by brokerTargets/api tests.
-  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey, openAlgoHydrated: true }) },
+  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey }) },
 }));
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: storeState.token }) },
@@ -40,6 +40,8 @@ vi.mock("@/stores/modeStore", () => ({
   useModeStore: { getState: () => ({ mode: storeState.mode }) },
 }));
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native" }>,
     selector: string | null,
@@ -107,7 +109,7 @@ beforeEach(() => {
   storeState.mode = "live";
   storeState.apiKey = "test-api-key";
   storeState.token = "test-jwt";
-  storeState.brokerState = { accounts: [], activeAccountId: null };
+  storeState.brokerState = { accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected" }], activeAccountId: "native:upstox:U1" };
   vi.stubGlobal("fetch", vi.fn());
 });
 
@@ -135,12 +137,12 @@ describe("forever orders", () => {
     expect(rows).toStrictEqual([{ order_id: "G1", symbol: "RELIANCE" }]);
   });
 
-  it("omits the query string for the default target and filters junk rows", async () => {
+  it("pins the selected native target and filters junk rows", async () => {
     fetchMock().mockResolvedValue(
       jsonResponse({ status: "success", data: [{ order_id: "G1" }, "garbage", null, 42] }),
     );
     const rows = await listForeverOrders();
-    expect(lastCall().url).toBe("/ft-api/api/v1/orders/forever");
+    expect(lastCall().url).toBe("/ft-api/api/v1/orders/forever?broker=upstox&account_id=U1");
     expect(rows).toStrictEqual([{ order_id: "G1" }]);
   });
 
@@ -179,7 +181,7 @@ describe("forever orders", () => {
       quantity1: 10,
     });
     const { url, init } = lastCall();
-    expect(url).toBe("/ft-api/api/v1/orders/forever");
+    expect(url).toBe("/ft-api/api/v1/orders/place");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
@@ -352,7 +354,7 @@ describe("conditional triggers", () => {
   it("lists from /orders/triggers", async () => {
     fetchMock().mockResolvedValue(jsonResponse({ status: "success", data: [] }));
     await listConditionalTriggers();
-    expect(lastCall().url).toBe("/ft-api/api/v1/orders/triggers");
+    expect(lastCall().url).toBe("/ft-api/api/v1/orders/triggers?broker=upstox&account_id=U1");
   });
 
   it("places with condition + orders in the body", async () => {
@@ -401,9 +403,17 @@ describe("multi / cancel-all / smart cancel", () => {
       broker: "upstox",
     });
     const { url, init } = lastCall();
-    expect(url).toBe("/ft-api/api/v1/orders/multi");
+    expect(url).toBe("/ft-api/api/v1/orders/place");
     expect(init.method).toBe("POST");
-    expect((lastBody().orders as unknown[]).length).toBe(1);
+    expect(lastBody()).toMatchObject({
+      symbol: "TCS",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 5,
+      pricetype: "MARKET",
+      broker: "upstox",
+    });
+    expect(lastBody().orders).toBeUndefined();
   });
 
   it("cancel-all posts broker + optional narrowing fields", async () => {
@@ -448,7 +458,7 @@ describe("error mapping", () => {
       jsonResponse(
         {
           status: "error",
-          message: "broker adapter 'openalgo' does not support the 'super_orders' listing",
+          message: "broker adapter 'upstox' does not support the 'super_orders' listing",
         },
         501,
       ),
@@ -483,12 +493,12 @@ describe("error mapping", () => {
 // ---------------------------------------------------------------------------
 
 describe("brokerOrderKeys", () => {
-  it("defaults to the openalgo/default selector and stays namespaced", () => {
+  it("defaults to the upstox/U1 selector and stays namespaced", () => {
     expect(brokerOrderKeys.forever.list()).toStrictEqual([
       "brokerOrders",
       "forever",
-      "openalgo",
-      "default",
+      "upstox",
+      "U1",
     ]);
     expect(brokerOrderKeys.superOrders.list({ broker: "dhan", account_id: "A1" })).toStrictEqual([
       "brokerOrders",

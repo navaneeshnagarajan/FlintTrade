@@ -1,29 +1,28 @@
 /**
- * AutomateSidebar — icon rail navigation for the Automation Hub.
+ * AutomateSidebar — labelled section navigation for Automate.
  *
- * 48px collapsed, ~168px expanded on hover via Framer Motion.
+ * Labels are always visible (the old 48px icon rail hid them until hover).
  * Status dots reflect live state (kill switch, running strategy count).
  */
 
-import { useState, useRef, useCallback } from "react";
-import { Workflow, Clock, Activity, FileText, Settings2, FileCode2, Webhook } from "lucide-react";
-import { motion } from "framer-motion";
+import { Clock, Activity, FileText, Settings2, FileCode2, Webhook } from "lucide-react";
+import { SectionNav } from "@/components/layout/SectionNav";
+import "./shared";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type SectionId = "flows" | "schedules" | "monitors" | "logs" | "strategies" | "settings" | "webhooks";
+export type SectionId = "schedules" | "monitors" | "logs" | "strategies" | "settings" | "webhooks";
 
 interface SectionDef {
   id: SectionId;
   label: string;
-  icon: typeof Workflow;
+  icon: typeof Clock;
   desc: string;
 }
 
 export const SECTIONS: SectionDef[] = [
-  { id: "flows",      label: "Flow Builder",       icon: Workflow,   desc: "Visual flow design and local drafts" },
   { id: "schedules",  label: "Schedules",           icon: Clock,      desc: "Cron jobs & timed executions" },
   { id: "monitors",   label: "Monitors",            icon: Activity,   desc: "Live strategy monitoring" },
   { id: "strategies", label: "Strategies",          icon: FileCode2,  desc: "Upload and run Python strategies" },
@@ -50,6 +49,19 @@ interface AutomateSidebarProps {
 // Component
 // ---------------------------------------------------------------------------
 
+function sectionDot(
+  id: SectionId,
+  killSwitchActive: boolean,
+  runningCount: number,
+  uploadedRunningCount: number,
+): string | null {
+  if (id === "settings" && killSwitchActive) return "ft-dot-kill";
+  if (id === "monitors" && runningCount > 0) return "ft-dot-running";
+  if (id === "strategies" && uploadedRunningCount > 0) return "ft-dot-running";
+  if (id === "schedules" && !killSwitchActive) return "ft-dot-paused";
+  return null;
+}
+
 export default function AutomateSidebar({
   activeSection,
   onSelect,
@@ -58,100 +70,25 @@ export default function AutomateSidebar({
   uploadedRunningCount,
   sections = SECTIONS,
 }: AutomateSidebarProps) {
-  const [expanded, setExpanded] = useState(false);
-  const navRef = useRef<HTMLElement>(null);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLElement>) => {
-      const keys = ["ArrowUp", "ArrowDown", "Home", "End"];
-      if (!keys.includes(e.key)) return;
-      e.preventDefault();
-      const tabs = navRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
-      if (!tabs || tabs.length === 0) return;
-      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
-      let next: number;
-      if (e.key === "ArrowDown") next = (idx + 1) % tabs.length;
-      else if (e.key === "ArrowUp") next = (idx - 1 + tabs.length) % tabs.length;
-      else if (e.key === "Home") next = 0;
-      else next = tabs.length - 1;
-      const nextTab = tabs[next];
-      nextTab?.focus();
-      const sectionId = sections[next]?.id;
-      if (sectionId) onSelect(sectionId);
-    },
-    [sections, onSelect],
-  );
+  const items = sections.map((section) => {
+    const dot = sectionDot(section.id, killSwitchActive, runningCount, uploadedRunningCount);
+    return {
+      id: section.id,
+      label: section.label,
+      icon: section.icon,
+      title: section.desc,
+      indicator: dot ? <span className={dot} aria-hidden="true" /> : undefined,
+    };
+  });
 
   return (
-    <motion.nav
-      ref={navRef}
-      role="tablist"
-      aria-orientation="vertical"
-      aria-label="Automation sections"
-      onHoverStart={() => setExpanded(true)}
-      onHoverEnd={() => setExpanded(false)}
-      onKeyDown={handleKeyDown}
-      animate={{ width: expanded ? 168 : 48 }}
-      transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
-      className="relative shrink-0 border-r border-border-default bg-surface-card overflow-hidden py-2 flex flex-col gap-0.5"
-      style={{ minWidth: 48 }}
-    >
-      {sections.map((section) => {
-        const Icon     = section.icon;
-        const isActive = activeSection === section.id;
-
-        const dotClass =
-          section.id === "settings" && killSwitchActive
-            ? "ft-dot-kill"
-            : section.id === "monitors" && runningCount > 0
-            ? "ft-dot-running"
-            : section.id === "strategies" && uploadedRunningCount > 0
-            ? "ft-dot-running"
-            : section.id === "schedules" && !killSwitchActive
-            ? "ft-dot-paused"
-            : null;
-
-        return (
-          <button
-            key={section.id}
-            type="button"
-            role="tab"
-            id={`automate-tab-${section.id}`}
-            aria-selected={isActive}
-            aria-controls={`automate-tabpanel-${section.id}`}
-            tabIndex={isActive ? 0 : -1}
-            onClick={() => onSelect(section.id)}
-            title={expanded ? undefined : section.label}
-            className={`
-              relative flex items-center gap-2.5 h-10 px-3 text-sm font-sans
-              transition-colors duration-150 border-l-2 overflow-hidden
-              ${
-                isActive
-                  ? "text-accent bg-accent/10 border-accent"
-                  : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
-              }
-            `}
-          >
-            <span className="shrink-0 flex items-center justify-center w-4 h-4 relative">
-              <Icon size={16} />
-              {dotClass && (
-                <span
-                  className={dotClass}
-                  style={{ position: "absolute", top: -3, right: -3 }}
-                />
-              )}
-            </span>
-
-            <motion.span
-              animate={{ opacity: expanded ? 1 : 0 }}
-              transition={{ duration: 0.12, ease: "easeOut" }}
-              className="whitespace-nowrap text-xs font-medium leading-none"
-            >
-              {section.label}
-            </motion.span>
-          </button>
-        );
-      })}
-    </motion.nav>
+    <SectionNav<SectionId>
+      groups={[{ id: "automate", items }]}
+      value={activeSection}
+      onChange={onSelect}
+      label="Automation sections"
+      idPrefix="automate"
+      data-testid="automate-section-nav"
+    />
   );
 }

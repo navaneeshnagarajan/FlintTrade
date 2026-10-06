@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   mode: "explore",
-  host: "http://openalgo-a.test",
+  host: "http://retired-a.test",
   apiKey: "",
   accounts: [] as Array<{
     account_id: string;
@@ -62,7 +62,7 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import { useBrokerCapabilities } from "../useBrokerCapabilities";
-import { connectionScopeFingerprint } from "../useDataScope";
+
 
 function makeWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -73,14 +73,14 @@ function makeWrapper(queryClient: QueryClient) {
 describe("useBrokerCapabilities cache authority", () => {
   beforeEach(() => {
     state.mode = "explore";
-    state.host = "http://openalgo-a.test";
+    state.host = "http://retired-a.test";
     state.apiKey = "";
     state.accounts = [];
     state.activeAccountId = null;
     mocks.getBrokerCapabilities.mockClear();
   });
 
-  it("refetches across mode, native broker, and OpenAlgo authority changes", async () => {
+  it("refetches for native brokers while stale transport settings never retarget authority", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -100,14 +100,14 @@ describe("useBrokerCapabilities cache authority", () => {
     rerender();
     await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(3));
 
-    state.apiKey = "configured-openalgo-key";
+    state.apiKey = "stale-key";
     rerender();
-    await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(4));
+    expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(3);
 
-    state.host = "http://openalgo-b.test";
+    state.host = "http://retired-b.test";
     state.apiKey = "different-configured-key";
     rerender();
-    await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(5));
+    expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(3);
     for (const [signal] of mocks.getBrokerCapabilities.mock.calls) {
       expect(signal).toBeInstanceOf(AbortSignal);
     }
@@ -115,8 +115,6 @@ describe("useBrokerCapabilities cache authority", () => {
       "explore:mock",
       "live:native:upstox",
       "live:native:dhan",
-      `live:openalgo:${connectionScopeFingerprint("http://openalgo-a.test", "configured-openalgo-key")}`,
-      `live:openalgo:${connectionScopeFingerprint("http://openalgo-b.test", "different-configured-key")}`,
     ]);
   });
 

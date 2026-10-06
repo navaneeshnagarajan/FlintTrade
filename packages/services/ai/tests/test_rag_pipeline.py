@@ -131,7 +131,7 @@ class TestDocumentLoader:
 
     def test_infer_type_api_docs(self) -> None:
         loader = DocumentLoader()
-        assert loader._infer_type("openalgo_api_reference.txt") == "api_docs"
+        assert loader._infer_type("broker_api_reference.txt") == "api_docs"
 
     def test_infer_type_trade_journal(self) -> None:
         loader = DocumentLoader()
@@ -993,3 +993,10 @@ class TestLegacyRAGCompatibility:
             doc_type=None,
             similarity_threshold=pytest.approx(0.7),
         )
+
+
+def test_chunk_overlap_larger_than_window_still_covers_document_tail():
+    chunks = TextChunker(chunk_size=2, overlap=100).chunk_text("ABCDEFGHIJKLMNO")
+    assert chunks[-1].endswith("MNO")
+    assert all(len(chunk) <= 8 for chunk in chunks)
+    assert len(chunks) <= len("ABCDEFGHIJKLMNO")

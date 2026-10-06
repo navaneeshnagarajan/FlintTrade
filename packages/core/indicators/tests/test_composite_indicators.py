@@ -212,9 +212,7 @@ class TestSqueezeMomentum:
         from flinttrade_indicators.momentum import squeeze_momentum
 
         high, low, close, _ = _ohlcv(200)
-        mom_vals, squeeze_on = squeeze_momentum(
-            high, low, close, bb_period=14, kc_period=14, mom_period=8
-        )
+        mom_vals, squeeze_on = squeeze_momentum(high, low, close, bb_period=14, kc_period=14, mom_period=8)
         assert mom_vals.shape == (200,)
         assert squeeze_on.shape == (200,)
 

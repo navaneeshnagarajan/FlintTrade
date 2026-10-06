@@ -4,8 +4,7 @@
 
 import { Settings, GitBranch, ExternalLink } from "lucide-react";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
-import { widgetCatalog } from "@/layout/widgetFactory";
-import { dependencies } from "../../../package.json";
+import { VersionInventory } from "./VersionInventory";
 import { SectionTitle } from "./shared";
 
 export function AboutSection() {
@@ -26,10 +25,9 @@ export function AboutSection() {
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
-          Native-first trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
-          FlintTrade has its own backend, native gateway contract, {widgetCatalog.length} widgets, and an optional
-          OpenAlgo-compatible bridge, and ships as a native desktop app for macOS, Windows, and Linux.
-          Monorepo with 18 package surfaces across Python, React, Electron, shared UI, and Rust.
+          Research markets, practise strategies with simulated funds, and manage your trading workspace.
+          Connect supported brokers when you are ready; live trading remains subject to account permissions and safety checks.
+          FlintTrade runs on your own machine.
         </p>
       </div>
 
@@ -56,16 +54,7 @@ export function AboutSection() {
             <span>Technology stack — versions and dependency purposes</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>
-          <a
-            href="https://github.com/navaneeshnagarajan/openalgo"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <ExternalLink size={12} className="flex-none text-text-muted" />
-            <span>OpenAlgo — optional broker bridge</span>
-            <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
-          </a>
+
           <a
             href="https://www.gnu.org/licenses/agpl-3.0.html"
             target="_blank"
@@ -110,32 +99,7 @@ export function AboutSection() {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Terminal dependencies</p>
-        <p className="text-xs text-text-secondary">
-          Declared version ranges from this build. The lockfile records exact resolved versions.
-        </p>
-        <div className="rounded border border-border-default overflow-hidden">
-          <table className="w-full text-xs">
-            <tbody>
-              {[
-                ["React", dependencies.react, "Interface"],
-                ["FlexLayout", dependencies["flexlayout-react"], "Workspace panels"],
-                ["TanStack Query", dependencies["@tanstack/react-query"], "API data cache"],
-                ["TanStack Table", dependencies["@tanstack/react-table"], "Financial tables"],
-                ["Lightweight Charts", dependencies["lightweight-charts"], "Price charts"],
-                ["Plotly", dependencies["plotly.js-dist-min"], "Analytical charts"],
-              ].map(([name, version, purpose]) => (
-                <tr key={name} className="border-b border-border-default last:border-0">
-                  <th scope="row" className="px-3 py-1.5 text-left font-normal text-text-muted">{name}</th>
-                  <td className="px-3 py-1.5 text-text-primary font-mono">{version}</td>
-                  <td className="px-3 py-1.5 text-text-secondary">{purpose}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <VersionInventory />
     </div>
   );
 }

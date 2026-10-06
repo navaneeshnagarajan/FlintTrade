@@ -1,13 +1,4 @@
-/**
- * IndexStripWidget tests — the index cards extracted from the retired
- * Dashboard widget.
- *
- * Pins the data-honesty contract (the MarketSummary pattern): every level is
- * a live WebSocket tick from the Jotai atoms, a card with no tick says
- * "Awaiting tick" rather than inventing a number, and the header chip claims
- * "Live" only once the lead index has actually ticked. Explore mode gets the
- * same honest awaiting state — there are no demo prices to badge.
- */
+/** Index-card observations must disclose Example provenance and missing prices. */
 
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -15,6 +6,7 @@ import "@testing-library/jest-dom";
 import { createStore, Provider } from "jotai";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { useModeStore } from "@/stores/modeStore";
 import IndexStripWidget from "../IndexStripWidget";
 
 beforeAll(() => {
@@ -48,6 +40,7 @@ function renderWidget() {
 describe("IndexStripWidget", () => {
   beforeEach(() => {
     store = createStore();
+    useModeStore.setState({ mode: "practice" });
   });
 
   it("renders all five index cards from the retired Dashboard", () => {
@@ -61,17 +54,17 @@ describe("IndexStripWidget", () => {
 
   it("shows an honest awaiting state with no fabricated levels when no tick has arrived", () => {
     renderWidget();
-    // Every card says so explicitly (the Explore / cold-start rendering).
-    expect(screen.getAllByText("Awaiting tick")).toHaveLength(5);
-    expect(screen.getAllByLabelText(/awaiting live price/i)).toHaveLength(5);
+    // Native cold-start has no observations.
+    expect(screen.getAllByText("Awaiting price")).toHaveLength(5);
+    expect(screen.getAllByLabelText(/awaiting native price/i)).toHaveLength(5);
     // No card renders a price or a sparkline that would imply one.
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     // The header badge does not claim live data.
-    expect(screen.getByRole("status")).toHaveTextContent("Awaiting ticks");
+    expect(screen.getByRole("status")).toHaveTextContent("Awaiting quotes");
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
-  it("renders a live card with change, change% and sparkline once a tick arrives", () => {
+  it("renders a native quote with change, change% and sparkline once a price arrives", () => {
     // 22150.4 against a 21965.15 previous close = +185.25 (+0.84%).
     seedTick("NSE_INDEX:NIFTY", {
       ltp: 22150.4,
@@ -86,11 +79,12 @@ describe("IndexStripWidget", () => {
     expect(screen.getByText("+185.25")).toBeInTheDocument();
     expect(screen.getByText(/\+0\.84%/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "NIFTY 50 OHLC sparkline" })).toBeInTheDocument();
-    // The badge flips to Live on evidence of the lead index tick.
-    expect(screen.getByRole("status")).toHaveTextContent("Live");
+    // The badge describes native provenance only with a usable lead observation.
+    expect(screen.getByRole("status")).toHaveTextContent("Native quotes");
+    expect(screen.getByRole("status")).toHaveAccessibleName("Index cards show native broker quotes from REST polling");
     // The other four cards still say they are waiting — a partially-populated
     // strip never claims data it does not have.
-    expect(screen.getAllByText("Awaiting tick")).toHaveLength(4);
+    expect(screen.getAllByText("Awaiting price")).toHaveLength(4);
   });
 
   it("colours a falling index as a loss with a signed change", () => {
@@ -102,11 +96,11 @@ describe("IndexStripWidget", () => {
     expect(change.parentElement).toHaveClass("text-loss");
   });
 
-  it("keeps the badge on Awaiting when only a non-lead index has ticked", () => {
-    // The chip's evidence is the lead (NIFTY) tick, mirroring MarketSummary.
+  it("keeps the badge awaiting when only a non-lead quote is available", () => {
+    // Each card displays its own observation; the chip checks the lead index.
     seedTick("BSE_INDEX:SENSEX", { ltp: 72400, prevClose: 72800 });
     renderWidget();
-    expect(screen.getByRole("status")).toHaveTextContent("Awaiting ticks");
+    expect(screen.getByRole("status")).toHaveTextContent("Awaiting quotes");
   });
 
   it("flags a VIX level above 20 with the warning border", () => {
@@ -122,11 +116,30 @@ describe("IndexStripWidget", () => {
   });
 
   it("treats a tick without a usable previous close as awaiting, not as a level", () => {
-    // LTP-mode WebSocket sends no close; until usePrevClose merges prevClose
-    // in, a change% would be fabricated — so the card must keep waiting.
+    // A partial quote has no session reference; its change would be fabricated.
     seedTick("NSE_INDEX:NIFTY", { ltp: 22150.4 });
     renderWidget();
-    expect(screen.getAllByText("Awaiting tick")).toHaveLength(5);
+    expect(screen.getAllByText("Awaiting price")).toHaveLength(5);
     expect(screen.queryByText("22,150.4")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Awaiting quotes");
+  });
+
+  it("labels simulated Example observations without claiming Live or WebSocket data", () => {
+    useModeStore.setState({ mode: "explore" });
+    seedTick("NSE_INDEX:NIFTY", { ltp: 22150.4, prevClose: 21965.15 });
+    renderWidget();
+    expect(screen.getByText("22,150.4")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Example");
+    expect(screen.getByRole("status")).toHaveAccessibleName("Index cards show simulated Example prices");
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryByText("Native quotes")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText(/awaiting example price/i)).toHaveLength(4);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 0])("rejects unusable lead price %s", (ltp) => {
+    seedTick("NSE_INDEX:NIFTY", { ltp, prevClose: 21965.15 });
+    renderWidget();
+    expect(screen.getByRole("status")).toHaveTextContent("Awaiting quotes");
+    expect(screen.getAllByText("Awaiting price")).toHaveLength(5);
   });
 });

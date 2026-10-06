@@ -21,10 +21,7 @@ def _find_method(tree: ast.AST, class_name: str, method_name: str) -> ast.AST | 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == class_name:
             for sub in node.body:
-                if (
-                    isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef))
-                    and sub.name == method_name
-                ):
+                if isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef)) and sub.name == method_name:
                     return sub
     return None
 
@@ -47,8 +44,7 @@ def test_flinttrade_app_start_arms_cron_through_calendar_owner() -> None:
         and node.func.value.id == "self"
     ]
     assert arms_calendar_runtime, (
-        "FlintTradeApp._start_owned() must arm market-sensitive schedulers after an "
-        "authoritative calendar is loaded."
+        "FlintTradeApp._start_owned() must arm market-sensitive schedulers after an authoritative calendar is loaded."
     )
 
     calls = [
@@ -87,9 +83,7 @@ def test_flinttrade_app_start_injects_the_overnight_optimiser() -> None:
     constructs_optimiser = [
         node
         for node in ast.walk(start)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "OvernightOptimiser"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OvernightOptimiser"
     ]
     assert constructs_optimiser, (
         "FlintTradeApp._start_owned() must construct an OvernightOptimiser so the "

@@ -1,4 +1,3 @@
-import { gatewayApi } from "@/services/gatewayApi";
 import {
   listNativeAccounts,
   removeNativeAccount,
@@ -6,7 +5,7 @@ import {
   setPrimaryNativeAccount,
   type NativeAccount,
 } from "@/services/ftApi.native";
-import { findBrokerAccountMatch } from "@/stores/brokerStore";
+import { resolveNativeDataAccount } from "@/lib/marketDataScope";
 import type { AccountStatus, BrokerAccount } from "@/types/broker";
 
 export type BrokerAccountRef = Pick<BrokerAccount, "account_id" | "broker" | "source">;
@@ -41,36 +40,15 @@ export function nativeToBrokerAccount(account: NativeAccount): BrokerAccount {
   };
 }
 
-export async function listGatewayBrokerAccounts(signal?: AbortSignal): Promise<BrokerAccount[]> {
-  return gatewayApi.listAccounts(signal);
-}
-
 export async function listNativeBrokerAccounts(signal?: AbortSignal): Promise<BrokerAccount[]> {
   return (await listNativeAccounts(signal)).map(nativeToBrokerAccount);
 }
 
 export async function listBrokerAccounts(
-  previous: BrokerAccount[] = [],
+  _previous: BrokerAccount[] = [],
   signal?: AbortSignal,
 ): Promise<BrokerAccount[]> {
-  const [gatewayResult, nativeResult] = await Promise.allSettled([
-    listGatewayBrokerAccounts(signal),
-    listNativeBrokerAccounts(signal),
-  ]);
-
-  if (gatewayResult.status === "rejected" && nativeResult.status === "rejected") {
-    throw gatewayResult.reason instanceof Error
-      ? gatewayResult.reason
-      : new Error("Could not list broker accounts");
-  }
-
-  const gatewayAccounts = gatewayResult.status === "fulfilled"
-    ? gatewayResult.value
-    : previous.filter((a) => a.source !== "native");
-  const nativeAccounts = nativeResult.status === "fulfilled"
-    ? nativeResult.value
-    : previous.filter((a) => a.source === "native");
-  return [...gatewayAccounts, ...nativeAccounts];
+  return listNativeBrokerAccounts(signal);
 }
 
 export async function listLiveNativeReadAccounts(signal?: AbortSignal): Promise<NativeReadAccountRef[]> {
@@ -88,27 +66,13 @@ export function selectNativeReadAccount(
   brokerAccounts: BrokerAccount[],
   activeAccountId: string | null,
 ): NativeReadAccountRef | undefined {
-  const active = findBrokerAccountMatch(brokerAccounts, activeAccountId);
-  if (activeAccountId) {
-    if (!active || (active.source ?? "gateway") !== "native") return undefined;
-    const selected = accounts.find((account) => (
-      account.account_id === active.account_id && account.adapter_id === active.broker
-    ));
-    // Fail closed when the SELECTED native account has no live session (daily
-    // token lapsed, dropped after a probe error): silently falling back to the
-    // primary/first account would render a DIFFERENT real account's funds and
-    // positions under the operator's selection with no affordance. Returning
-    // undefined lets the caller surface the needs-relogin state instead.
-    return selected;
-  }
-
-  const nativeBrokerAccounts = brokerAccounts.filter((account) => account.source === "native");
-  const selectedBrokerAccount = nativeBrokerAccounts.find((account) => account.is_primary)
-    ?? (nativeBrokerAccounts.length === 1 ? nativeBrokerAccounts[0] : undefined);
-  if (!selectedBrokerAccount) return undefined;
+  const selected = resolveNativeDataAccount(brokerAccounts, activeAccountId);
+  if (!selected) return undefined;
+  // Intersect the chosen identity with fresh live sessions. Never fall back to
+  // another account when that identity has no session: its data would appear
+  // under the wrong selection and cache key.
   return accounts.find((account) => (
-    account.account_id === selectedBrokerAccount.account_id
-    && account.adapter_id === selectedBrokerAccount.broker
+    account.account_id === selected.account_id && account.adapter_id === selected.broker
   ));
 }
 
@@ -117,7 +81,7 @@ export async function removeBrokerAccount(account: BrokerAccountRef, idempotency
     await removeNativeAccount(account.broker, account.account_id, idempotencyKey);
     return;
   }
-  await gatewayApi.removeAccount(account.account_id, idempotencyKey);
+  throw new Error("Only native broker accounts are supported.");
 }
 
 export async function reconnectBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<void> {
@@ -125,7 +89,7 @@ export async function reconnectBrokerAccount(account: BrokerAccountRef, idempote
     await reloginNativeAccount(account.broker, account.account_id, undefined, idempotencyKey);
     return;
   }
-  await gatewayApi.reconnectAccount(account.account_id, idempotencyKey);
+  throw new Error("Only native broker accounts are supported.");
 }
 
 export async function setPrimaryBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<void> {
@@ -133,5 +97,5 @@ export async function setPrimaryBrokerAccount(account: BrokerAccountRef, idempot
     await setPrimaryNativeAccount(account.broker, account.account_id, idempotencyKey);
     return;
   }
-  await gatewayApi.setPrimary(account.account_id, idempotencyKey);
+  throw new Error("Only native broker accounts are supported.");
 }

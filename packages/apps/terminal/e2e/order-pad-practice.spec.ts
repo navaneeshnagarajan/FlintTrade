@@ -122,19 +122,8 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await page.clock.install({ time: controlledTime });
   await page.clock.pauseAt(controlledTime);
   await seedOrderPadWorkspace(page);
-  syntheticApi.register({
-    name: "list gateway accounts for the Practice workspace",
-    method: "GET",
-    path: "/ft-api/v1/accounts",
-    // TanStack now propagates its AbortSignal through account discovery. In
-    // React StrictMode the development-only first mount may therefore abort
-    // and remount instead of sharing the original in-flight request.
-    expectedCalls: { minimum: 1, maximum: 2 },
-    handler: (request) => {
-      expectAuthenticatedGet(request);
-      return { json: { accounts: [] } };
-    },
-  });
+  // This desk discovers native accounts through the endpoint below. Leave
+  // unused gateway-account routes unregistered so any new request fails closed.
   syntheticApi.register({
     name: "list native accounts for Practice market-data resolution",
     method: "GET",
@@ -151,10 +140,11 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { accounts: [] } };
     },
   });
+
   syntheticApi.register({
-    name: "hydrate blank OpenAlgo configuration",
+    name: "read Practice sandbox funds",
     method: "GET",
-    path: "/ft-api/v1/config/openalgo",
+    path: "/ft-api/v1/sandbox/funds",
     expectedCalls: 2,
     handler: (request) => {
       expectAuthenticatedGet(request);
@@ -162,33 +152,14 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
         json: {
           status: "success",
           data: {
-            api_key_configured: false,
-            host: "",
-            port: "",
-            ws_port: "",
-          },
-        },
-      };
-    },
-  });
-  syntheticApi.register({
-    name: "read Practice sandbox capital",
-    method: "GET",
-    path: "/ft-api/v1/sandbox/capital",
-    expectedCalls: 2,
-    handler: (request) => {
-      expectAuthenticatedGet(request);
-      return {
-        json: {
-          status: "success",
-          data: {
-            capital: {
-              initial: 100_000,
-              current: 100_000,
-              available: 100_000,
+            funds: {
+              starting_capital: 100_000,
+              available_balance: 100_000,
               used_margin: 0,
-              realised_pnl: 0,
-              unrealised_pnl: 0,
+              realized_pnl: 0,
+              current_balance: 100_000,
+              ledger_balance: 100_000,
+              futures_mtm_in_ledger: false,
             },
           },
         },
@@ -205,10 +176,48 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { status: "success", data: { positions: [] } } };
     },
   });
+  syntheticApi.register({
+    name: "read empty Practice sandbox orders",
+    method: "GET",
+    path: "/ft-api/v1/sandbox/orders",
+    // The paused mount reads the book three times. A visible-desk rearm
+    // may add one more read before the assertion.
+    expectedCalls: { minimum: 3, maximum: 4 },
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return { json: { status: "success", data: { orders: [] } } };
+    },
+  });
   // The desk mounts Chat readiness beside the tutor pill. Strict Mode can
   // invoke each read twice; the place handler below stays the JWT check.
   registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 6 } });
   registerOperatorStatusProbes(syntheticApi, { expectedCalls: { minimum: 1, maximum: 4 } });
+  // Welcome probes this before the synthetic session exists. The Mode menu
+  // reads it again once that session is installed.
+  syntheticApi.register({
+    name: "welcome and Mode menu Live-arm status",
+    method: "GET",
+    path: "/ft-api/v1/auth/status",
+    expectedCalls: { minimum: 1, maximum: 4 },
+    handler: (request) => {
+      expect(request.postData()).toBeNull();
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization).toBe(`Bearer ${LIVE_AUTHORITY_TOKEN}`);
+      }
+      return {
+        json: {
+          status: "success",
+          data: {
+            is_setup: true,
+            is_locked: false,
+            has_pin: false,
+            totp_enabled: false,
+          },
+        },
+      };
+    },
+  });
   syntheticApi.register({
     name: "read inactive safety configuration",
     method: "GET",
@@ -277,6 +286,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
         price: 123.45,
         triggerPrice: 0,
         strategy: "FlintOrderPad",
+        rationale: "",
         order_type: "LIMIT",
         trigger_price: 0,
       });
@@ -293,11 +303,24 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await page.goto("/welcome");
   await installMismatchedPracticeAuthority(page);
 
+  // Await real module loading before spending the bounded virtual-time budget.
+  // Cold Vite transforms must not strand React/layout work behind a paused clock.
+  await page.evaluate(async () => {
+    const importModule = new Function("path", "return import(path)") as (
+      path: string,
+    ) => Promise<unknown>;
+    await Promise.all([
+      importModule("/src/routes/TerminalRoute.tsx"),
+      importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"),
+    ]);
+  });
+
   await expect(page).toHaveURL(/\/trade$/);
   const limitOrderType = page.getByRole("radio", { name: "LIMIT" });
   // Lazy widget imports can schedule immediate work after their network module
-  // resolves. Advance in bounded increments, never reaching the first poll.
-  for (let advanced = 0; advanced < 4_000 && !(await limitOrderType.isVisible()); advanced += 100) {
+  // resolves. Stay below usePositions' three-second stale window: a cold import
+  // must not age the shared cache and add a mount refetch before this journey.
+  for (let advanced = 0; advanced < 2_000 && !(await limitOrderType.isVisible()); advanced += 100) {
     await page.clock.runFor(100);
   }
   await expect(page.getByText("Order Pad", { exact: true }).first()).toBeVisible();

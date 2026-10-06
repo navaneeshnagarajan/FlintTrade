@@ -1,17 +1,19 @@
 /**
  * Thin probes for the operator incident model.
  *
- * Local ping and `/health` are the desk. `/health` is the HealthMonitor
- * one-liner (`status`: healthy, degraded, unhealthy). A 401 or 403 is not
- * a host fault — the probe falls back to the auth-exempt `/api/v1/health`
- * aggregator. The edge/CDN probe fetches the public site and the install
- * script. A throw on either, while `/api/v1/ping` is ok, is edge/CDN — not
- * a vendor outage and not a broker outage. A separate neutral fetch is the
- * public-internet probe for network_local. Chat uses the advisor chrome,
- * not a background LLM test.
+ * Signed-out liveness is `GET /api/v1/ping`. That answer is status, a
+ * timestamp, and the Laya heartbeat — no component, version, or path
+ * detail. `/health` is the HealthMonitor one-liner and is read only when a
+ * session token is already in memory. A 401 or 403 on that read is not a
+ * host fault; the probe falls back to ping. The edge/CDN probe fetches the
+ * public site and the install script. A throw on either, while
+ * `/api/v1/ping` is ok, is edge/CDN — not a vendor outage and not a broker
+ * outage. A separate neutral fetch is the public-internet probe for
+ * network_local. Chat uses the advisor chrome, not a background LLM test.
  */
 
 import { getBase } from "@/services/ftApi.helpers";
+import { useAuthStore } from "@/stores/authStore";
 import { transportReasonFromError } from "@/lib/operatorTransport";
 import type { TransportReason } from "@/lib/operatorIncident";
 import {
@@ -37,45 +39,208 @@ export type LayaHeartbeat = "ready" | "degraded" | "down";
 export interface PingProbe {
   localPing: "ok" | "transport" | "http_error";
   transportReason: TransportReason | null;
-  /** Null when the heartbeat did not name Laya. Never implied Ready. */
+  /** True only for a successful, recognised Laya heartbeat. Defaults do not confirm backend identity. */
+  layaHeartbeatValid: boolean;
+  /** Live-facing status. Null when the heartbeat did not name Laya. Never implied Ready. */
   laya: LayaHeartbeat | null;
+  /** Sidecar status for Practice. Null when the heartbeat omitted it. */
+  layaPractice: LayaHeartbeat | null;
+  /** True only when the heartbeat says Live is qualified. */
+  layaLiveQualified: boolean;
+  /** Machine-readable sidecar reason. Null when the heartbeat omitted a known code. */
+  layaReason: string | null;
+  /** Sidecar port from the heartbeat. 8000 when the field is absent. */
+  layaPort: number;
+  /** Bytes received while `layaReason` is `downloading`. Null otherwise. */
+  layaDownloadBytes: number | null;
+  /** Bytes expected while `layaReason` is `downloading`. Null otherwise. */
+  layaDownloadTotal: number | null;
+  /** True only when an Ollama ping says the runtime is still unconfirmed. Absent means false. */
+  layaChecking: boolean;
+  /** `ollama` only when the ping names that route. Trust only with layaHeartbeatValid. */
+  layaRoute: "ollama" | null;
+  /** True only when the ping says FlintTrade installed Ollama. Trust only with layaHeartbeatValid. */
+  layaManaged: boolean;
+}
+
+const LAYA_REASON_CODES = new Set([
+  "not_started",
+  "stopped",
+  "port_in_use",
+  "still_loading",
+  "downloading",
+  "download_failed",
+  "unreachable",
+  "wrong_revision",
+  "unverified",
+  "key_rejected",
+  "key_missing",
+]);
+
+function layaStatusValue(value: unknown): LayaHeartbeat | null {
+  if (value === "ready" || value === "degraded" || value === "down") return value;
+  return null;
 }
 
 export function layaHeartbeatFromBody(body: unknown): LayaHeartbeat | null {
   if (body === null || typeof body !== "object") return null;
-  const value = (body as { laya?: unknown }).laya;
-  if (value === "ready" || value === "degraded" || value === "down") return value;
-  return null;
+  return layaStatusValue((body as { laya?: unknown }).laya);
+}
+
+export function layaPracticeFromBody(body: unknown): LayaHeartbeat | null {
+  if (body === null || typeof body !== "object") return null;
+  return layaStatusValue((body as { laya_practice?: unknown }).laya_practice);
+}
+
+export function layaLiveQualifiedFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_live_qualified?: unknown }).laya_live_qualified === true;
+}
+
+export function layaReasonFromBody(body: unknown): string | null {
+  if (body === null || typeof body !== "object") return null;
+  const value = (body as { laya_reason?: unknown }).laya_reason;
+  if (typeof value !== "string" || !LAYA_REASON_CODES.has(value)) return null;
+  return value;
+}
+
+export function layaPortFromBody(body: unknown): number {
+  if (body === null || typeof body !== "object") return 8000;
+  const value = (body as { laya_port?: unknown }).laya_port;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535) return value;
+  return 8000;
+}
+
+function byteCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) return null;
+  return value;
+}
+
+/** True only for a boolean `true`. A missing field stays false, which is the sidecar ping. */
+export function layaCheckingFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_checking?: unknown }).laya_checking === true;
+}
+
+/** `ollama` only for that exact string. Any other value keeps the sidecar copy. */
+export function layaRouteFromBody(body: unknown): "ollama" | null {
+  if (body === null || typeof body !== "object") return null;
+  return (body as { laya_route?: unknown }).laya_route === "ollama" ? "ollama" : null;
+}
+
+/** True only for a boolean `true`. A missing field is not a managed install. */
+export function layaManagedFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_managed?: unknown }).laya_managed === true;
+}
+
+/** Done and total bytes. Both must be present, or both are null. */
+export function layaDownloadProgressFromBody(body: unknown): { done: number | null; total: number | null } {
+  if (body === null || typeof body !== "object") return { done: null, total: null };
+  const record = body as { laya_download_bytes?: unknown; laya_download_total?: unknown };
+  const done = byteCount(record.laya_download_bytes);
+  const total = byteCount(record.laya_download_total);
+  if (done === null || total === null) return { done: null, total: null };
+  return { done, total };
+}
+
+/** An omitted route selects the legacy sidecar only on a recognised Laya heartbeat. */
+function isLayaHeartbeat(body: unknown): boolean {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const record = body as { status?: unknown; laya?: unknown; laya_route?: unknown; laya_managed?: unknown };
+  if (record.status !== "ok" || layaStatusValue(record.laya) === null) return false;
+  if (record.laya_route === undefined) return true;
+  return record.laya_route === "ollama" && typeof record.laya_managed === "boolean";
 }
 
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {
   try {
     const resp = await fetchImpl(`${getBase()}/api/v1/ping`, { method: "GET", cache: "no-store" });
-    if (!resp.ok) return { localPing: "http_error", transportReason: null, laya: null };
+    if (!resp.ok) {
+      return {
+        localPing: "http_error",
+        layaHeartbeatValid: false,
+        transportReason: null,
+        laya: null,
+        layaPractice: null,
+        layaLiveQualified: false,
+        layaReason: null,
+        layaPort: 8000,
+        layaDownloadBytes: null,
+        layaDownloadTotal: null,
+        layaChecking: false,
+        layaRoute: null,
+        layaManaged: false,
+      };
+    }
     const body: unknown = await resp.json().catch(() => null);
-    return { localPing: "ok", transportReason: null, laya: layaHeartbeatFromBody(body) };
+    const progress = layaDownloadProgressFromBody(body);
+    return {
+      localPing: "ok",
+      layaHeartbeatValid: isLayaHeartbeat(body),
+      transportReason: null,
+      laya: layaHeartbeatFromBody(body),
+      layaPractice: layaPracticeFromBody(body),
+      layaLiveQualified: layaLiveQualifiedFromBody(body),
+      layaReason: layaReasonFromBody(body),
+      layaPort: layaPortFromBody(body),
+      layaDownloadBytes: progress.done,
+      layaDownloadTotal: progress.total,
+      layaChecking: layaCheckingFromBody(body),
+      layaRoute: layaRouteFromBody(body),
+      layaManaged: layaManagedFromBody(body),
+    };
   } catch (err) {
-    return { localPing: "transport", transportReason: transportReasonFromError(err), laya: null };
+    return {
+      localPing: "transport",
+      layaHeartbeatValid: false,
+      transportReason: transportReasonFromError(err),
+      laya: null,
+      layaPractice: null,
+      layaLiveQualified: false,
+      layaReason: null,
+      layaPort: 8000,
+      layaDownloadBytes: null,
+      layaDownloadTotal: null,
+      layaChecking: false,
+      layaRoute: null,
+      layaManaged: false,
+    };
   }
 }
 
 export type DeskHealth = "healthy" | "degraded" | "unhealthy" | "unknown";
 
+function sessionBearer(): string | null {
+  const token = useAuthStore.getState().token;
+  if (!token || token === "demo-user" || token === "dev-bypass") return null;
+  return token;
+}
+
 export async function probeDeskHealth(
   fetchImpl: typeof fetch = fetch,
 ): Promise<DeskHealth> {
-  const primary = await readDeskHealth(`${getBase()}/health`, fetchImpl);
-  if (primary !== "unauthorised") return primary;
-  const fallback = await readDeskHealth(`${getBase()}/api/v1/health`, fetchImpl);
-  return fallback === "unauthorised" ? "unknown" : fallback;
+  const token = sessionBearer();
+  if (token) {
+    const primary = await readDeskHealth(`${getBase()}/health`, fetchImpl, token);
+    if (primary !== "unauthorised") return primary;
+  }
+  const ping = await probeLocalPing(fetchImpl);
+  if (ping.localPing === "ok") return "healthy";
+  if (ping.localPing === "http_error") return "unhealthy";
+  return "unknown";
 }
 
 async function readDeskHealth(
   url: string,
   fetchImpl: typeof fetch,
+  token: string,
 ): Promise<DeskHealth | "unauthorised"> {
   try {
-    const resp = await fetchImpl(url, { cache: "no-store" });
+    const resp = await fetchImpl(url, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (resp.status === 401 || resp.status === 403) return "unauthorised";
     const body: unknown = await resp.json().catch(() => null);
     const status = healthStatusField(body);

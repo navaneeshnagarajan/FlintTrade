@@ -16,7 +16,7 @@ export interface WatchlistItem {
   exchange: string;
 }
 
-/** Partial quote shape from OpenAlgo — fields may be absent depending on mode */
+/** Partial quote shape from broker — fields may be absent depending on mode */
 export interface PartialQuote extends Partial<Quote> {
   prev_close?: number;
 }

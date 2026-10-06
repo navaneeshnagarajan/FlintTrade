@@ -4,7 +4,7 @@ Acceptance lock (2026-09-20):
 
 - Practice JWT places and records fills on the real ``SandboxEngine``
 - Desk/AI read those fills from the same sandbox book
-- Practice never wakes live broker / OpenAlgo / ``BrokerRouter`` handles
+- Practice never wakes live broker / native broker / ``BrokerRouter`` handles
 - A forged Live header or the routed live path cannot leak a live order
 
 This is the product tip for tracking PR #255. Live native placement stays
@@ -31,13 +31,14 @@ _PRACTICE_BODY = {
     "action": "BUY",
     "quantity": 1,
     "price": 100.0,
+    "price_basis": "ltp",
     "product": "MIS",
     "order_type": "MARKET",
 }
 
 
 class _LivePathSentinel:
-    """Fail-fast stand-in for live broker / OpenAlgo handles."""
+    """Fail-fast stand-in for live broker / native broker handles."""
 
     def __init__(self) -> None:
         self.accesses: list[str] = []
@@ -79,7 +80,7 @@ def _monday_app(db_path: Path) -> Flask:
     app.config["RATE_LIMITER"] = RateLimiter(global_rate=100, per_user_rate=10)
     app.config["BROKER_ROUTER"] = _LivePathSentinel()
     app.config["CLIENT"] = _LivePathSentinel()
-    app.config["OPENALGO_CLIENT"] = _LivePathSentinel()
+    app.config["BROKER_CLIENT"] = _LivePathSentinel()
     app.config["TICK_RECORDER"] = None
     app.register_blueprint(orders_bp)
     app.register_blueprint(data_sandbox_bp)
@@ -96,7 +97,7 @@ def _assert_live_path_dark(app: Flask) -> None:
     """Practice dispatch must never read live broker handles."""
     assert app.config["BROKER_ROUTER"].accesses == []
     assert app.config["CLIENT"].accesses == []
-    assert app.config["OPENALGO_CLIENT"].accesses == []
+    assert app.config["BROKER_CLIENT"].accesses == []
 
 
 @pytest.mark.unit

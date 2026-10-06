@@ -29,9 +29,7 @@ logger = logging.getLogger("flinttrade.historical.nse_session")
 
 _BROWSER_HEADERS: dict[str, str] = {
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-IN,en-GB;q=0.9,en;q=0.8",
@@ -230,8 +228,7 @@ class NSESession:
         if not nse_interval:
             return NSEDataResult(
                 symbol=symbol,
-                error=f"Unsupported interval '{interval}'. "
-                      f"Supported: {sorted(_INTERVAL_MAP)}",
+                error=f"Unsupported interval '{interval}'. Supported: {sorted(_INTERVAL_MAP)}",
             )
 
         params = {
@@ -254,7 +251,11 @@ class NSESession:
                 bars = self._parse_chart_response(payload)
                 logger.info(
                     "NSE chart: %s %s %s→%s — %d bars",
-                    symbol, interval, start, end, len(bars),
+                    symbol,
+                    interval,
+                    start,
+                    end,
+                    len(bars),
                 )
                 return NSEDataResult(symbol=symbol, bars=bars)
 
@@ -321,23 +322,27 @@ class NSESession:
                 if isinstance(candle, (list, tuple)) and len(candle) >= 5:
                     ts_raw, o, h, lo, c = candle[0], candle[1], candle[2], candle[3], candle[4]
                     vol = int(candle[5]) if len(candle) > 5 else 0
-                    bars.append(NSEBar(
-                        timestamp=str(ts_raw),
-                        open=float(o),
-                        high=float(h),
-                        low=float(lo),
-                        close=float(c),
-                        volume=vol,
-                    ))
+                    bars.append(
+                        NSEBar(
+                            timestamp=str(ts_raw),
+                            open=float(o),
+                            high=float(h),
+                            low=float(lo),
+                            close=float(c),
+                            volume=vol,
+                        )
+                    )
                 elif isinstance(candle, dict):
-                    bars.append(NSEBar(
-                        timestamp=str(candle.get("t") or candle.get("timestamp", "")),
-                        open=float(candle.get("o") or candle.get("open", 0)),
-                        high=float(candle.get("h") or candle.get("high", 0)),
-                        low=float(candle.get("l") or candle.get("low", 0)),
-                        close=float(candle.get("c") or candle.get("close", 0)),
-                        volume=int(candle.get("v") or candle.get("volume", 0)),
-                    ))
+                    bars.append(
+                        NSEBar(
+                            timestamp=str(candle.get("t") or candle.get("timestamp", "")),
+                            open=float(candle.get("o") or candle.get("open", 0)),
+                            high=float(candle.get("h") or candle.get("high", 0)),
+                            low=float(candle.get("l") or candle.get("low", 0)),
+                            close=float(candle.get("c") or candle.get("close", 0)),
+                            volume=int(candle.get("v") or candle.get("volume", 0)),
+                        )
+                    )
             except (TypeError, ValueError, IndexError) as exc:
                 logger.debug("Skipping malformed candle: %s — %s", candle, exc)
 
@@ -355,10 +360,12 @@ class NSESession:
 
         for item in items:
             if isinstance(item, dict):
-                matches.append({
-                    "symbol": item.get("symbol") or item.get("id", ""),
-                    "name": item.get("symbolName") or item.get("name", ""),
-                    "type": item.get("identifier") or item.get("type", ""),
-                })
+                matches.append(
+                    {
+                        "symbol": item.get("symbol") or item.get("id", ""),
+                        "name": item.get("symbolName") or item.get("name", ""),
+                        "type": item.get("identifier") or item.get("type", ""),
+                    }
+                )
 
         return matches

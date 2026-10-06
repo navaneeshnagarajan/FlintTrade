@@ -13,7 +13,7 @@ import logging
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -174,11 +174,83 @@ def _metadata_prune_cutoff(value: Any) -> str | None:
     return parsed.astimezone(UTC).isoformat()
 
 
-def _normalise_ts(value: Any) -> Any:
-    """Store aware timestamps as naive UTC for DuckDB TIMESTAMP columns."""
-    if isinstance(value, datetime) and value.tzinfo is not None:
+def ingest_broker_timestamp(value: Any, *, source_tz: tzinfo) -> datetime:
+    """Return one broker candle, close, or quote time as an aware UTC instant.
+
+    Indian brokers (Dhan, Kotak Neo, Upstox, Groww, INDmoney) publish a
+    wall clock in IST with no zone, for example ``2026-09-29 15:30:00``.
+    Pass :data:`IST` as ``source_tz`` for that clock. A value that already
+    carries a zone keeps it. An epoch number is an absolute instant.
+    """
+    if source_tz is None:
+        raise ValueError("timestamp has no zone")
+    if isinstance(value, bool):
+        raise ValueError("timestamp has no zone")
+    if isinstance(value, datetime):
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            return value.astimezone(UTC)
+        return value.replace(tzinfo=source_tz).astimezone(UTC)
+    if isinstance(value, (int, float)):
+        epoch = float(value)
+        if epoch != epoch or epoch in {float("inf"), float("-inf")}:
+            raise ValueError("timestamp has no zone")
+        return datetime.fromtimestamp(epoch, tz=UTC)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("timestamp has no zone")
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError as exc:
+            raise ValueError("timestamp has no zone") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            parsed = parsed.replace(tzinfo=source_tz)
+        return parsed.astimezone(UTC)
+    raise ValueError("timestamp has no zone")
+
+
+def _normalise_ts(value: Any, *, source_tz: tzinfo | None = None) -> datetime:
+    """Store one instant as naive UTC for a DuckDB TIMESTAMP column.
+
+    An aware datetime is converted to UTC. A zone-less datetime or
+    wall-clock string is interpreted in ``source_tz``. With neither a zone
+    on the value nor ``source_tz``, this raises instead of guessing.
+    Readers use :func:`read_stored_timestamp`.
+    """
+    if isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None:
         return value.astimezone(UTC).replace(tzinfo=None)
-    return value
+    if source_tz is None:
+        raise ValueError("timestamp has no zone")
+    return ingest_broker_timestamp(value, source_tz=source_tz).replace(tzinfo=None)
+
+
+def read_stored_timestamp(value: Any) -> datetime | None:
+    """Read one stored timestamp as an aware UTC datetime.
+
+    ``_normalise_ts`` persists an aware instant as naive UTC. DuckDB then
+    returns that zone-less value. Treating it as IST makes every age 5h30m
+    too old. A value that already carries a zone is converted to UTC.
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _timestamp_provenance(value: Any) -> str:
@@ -426,12 +498,8 @@ class StorageManager:
                 observed_row = conn.execute("SELECT COALESCE(MAX(ingest_seq), 0) FROM ticks").fetchone()
                 observed_high_water = int(observed_row[0]) if observed_row is not None else 0
                 stored_high_water = _metadata_high_water(existing_metadata.get(_TICK_HIGH_WATER_KEY))
-                stored_pruned_high_water = _metadata_high_water(
-                    existing_metadata.get(_TICK_PRUNED_HIGH_WATER_KEY)
-                )
-                stored_prune_cutoff = _metadata_prune_cutoff(
-                    existing_metadata.get(_TICK_PRUNED_BEFORE_KEY)
-                )
+                stored_pruned_high_water = _metadata_high_water(existing_metadata.get(_TICK_PRUNED_HIGH_WATER_KEY))
+                stored_prune_cutoff = _metadata_prune_cutoff(existing_metadata.get(_TICK_PRUNED_BEFORE_KEY))
                 recovered_pruned_high_water = (
                     stored_pruned_high_water
                     if stored_pruned_high_water is not None
@@ -448,9 +516,7 @@ class StorageManager:
                     recovered_prune_cutoff = _NO_PRUNE_CUTOFF
                 if recovered_prune_cutoff is None:
                     recovered_prune_cutoff = (
-                        _UNCERTAIN_PRUNE_CUTOFF
-                        if existing_metadata or observed_high_water > 0
-                        else _NO_PRUNE_CUTOFF
+                        _UNCERTAIN_PRUNE_CUTOFF if existing_metadata or observed_high_water > 0 else _NO_PRUNE_CUTOFF
                     )
                 if not had_store_identity or not lineage_metadata_complete:
                     new_store_id = str(uuid.uuid4())
@@ -553,13 +619,61 @@ class StorageManager:
     # Tick storage
     # ------------------------------------------------------------------
 
+    def record_broker_quote(
+        self,
+        ts: Any,
+        symbol: str,
+        exchange: str,
+        *,
+        source_tz: tzinfo,
+        mode: str = "quote",
+        ltp: float | None = None,
+        open_: float | None = None,
+        high: float | None = None,
+        low: float | None = None,
+        close: float | None = None,
+        volume: int | None = None,
+        bid: float | None = None,
+        ask: float | None = None,
+        oi: int | None = None,
+        prev_close: float | None = None,
+        depth_json: str | None = None,
+        timestamp_provenance: str = "source",
+    ) -> None:
+        """Store one broker candle, close, or quote.
+
+        Dhan, Kotak Neo, Upstox, Groww, and INDmoney wall clocks are IST
+        when they carry no zone. Practice closes use the same clock.
+        ``source_tz`` is applied before the row is normalised to UTC.
+        """
+        aware = ingest_broker_timestamp(ts, source_tz=source_tz)
+        self.insert_tick(
+            aware,
+            symbol,
+            exchange,
+            mode,
+            ltp=ltp,
+            open_=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            bid=bid,
+            ask=ask,
+            oi=oi,
+            prev_close=prev_close,
+            depth_json=depth_json,
+            timestamp_provenance=timestamp_provenance,
+        )
+
     def insert_tick(
         self,
-        ts: datetime,
+        ts: Any,
         symbol: str,
         exchange: str,
         mode: str,
         *,
+        source_tz: tzinfo | None = None,
         ltp: float | None = None,
         open_: float | None = None,
         high: float | None = None,
@@ -573,7 +687,11 @@ class StorageManager:
         depth_json: str | None = None,
         timestamp_provenance: str = "unknown",
     ) -> None:
-        """Insert a single tick row (append-only)."""
+        """Insert a single tick row (append-only).
+
+        ``ts`` must be timezone-aware, or ``source_tz`` must name the wall
+        clock of a zone-less broker timestamp.
+        """
         conn = self.connection
         conn.execute("BEGIN TRANSACTION")
         try:
@@ -584,7 +702,7 @@ class StorageManager:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    RETURNING ingest_seq""",
                 [
-                    _normalise_ts(ts),
+                    _normalise_ts(ts, source_tz=source_tz),
                     symbol,
                     exchange,
                     mode,
@@ -610,7 +728,7 @@ class StorageManager:
             conn.execute("ROLLBACK")
             raise
 
-    def insert_ticks_batch(self, rows: list[tuple]) -> None:
+    def insert_ticks_batch(self, rows: list[tuple], *, source_tz: tzinfo | None = None) -> None:
         """Bulk insert ticks ATOMICALLY. Each tuple matches the ticks column order.
 
         Provenance-aware rows contain 16 fields and end in ``"source"``.
@@ -633,7 +751,9 @@ class StorageManager:
                 row = (*row, "unknown")
             if len(row) != 16:
                 raise ValueError("tick rows must contain 15 legacy or 16 provenance-aware fields")
-            normalised_rows.append((_normalise_ts(row[0]), *row[1:15], _timestamp_provenance(row[15])))
+            normalised_rows.append(
+                (_normalise_ts(row[0], source_tz=source_tz), *row[1:15], _timestamp_provenance(row[15]))
+            )
         conn.execute("BEGIN TRANSACTION")
         try:
             conn.executemany(
@@ -1062,7 +1182,7 @@ class StorageManager:
 
     def insert_trade(
         self,
-        ts: datetime,
+        ts: Any,
         orderid: str,
         symbol: str,
         exchange: str,
@@ -1070,6 +1190,7 @@ class StorageManager:
         quantity: int,
         price: float,
         *,
+        source_tz: tzinfo | None = None,
         product: str = "",
         strategy: str = "",
         entry_price: float | None = None,
@@ -1078,14 +1199,18 @@ class StorageManager:
         slippage: float | None = None,
         fees: float | None = None,
     ) -> None:
-        """Insert a single trade row."""
+        """Insert a single trade row.
+
+        ``ts`` must be timezone-aware, or ``source_tz`` must name the wall
+        clock of a zone-less timestamp.
+        """
         self.connection.execute(
             """INSERT INTO trades
                (ts, orderid, symbol, exchange, action, quantity, price,
                 product, strategy, entry_price, exit_price, pnl, slippage, fees)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                _normalise_ts(ts),
+                _normalise_ts(ts, source_tz=source_tz),
                 orderid,
                 symbol,
                 exchange,

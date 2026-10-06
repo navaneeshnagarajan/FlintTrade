@@ -829,7 +829,7 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
   {
     key: "showOI",
     name: "OI Overlay",
-    description: "Open Interest histogram overlay fetched from OpenAlgo-compatible data.",
+    description: "Open Interest histogram overlay fetched from native broker-compatible data.",
     category: "Volume",
     defaultColor: "#6366f1",
     periods: [],

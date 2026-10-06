@@ -206,6 +206,7 @@ function FlowsTab() {
     ? longShortData
     : { is_sample_data: true, ratio: SAMPLE_FII_LONG_SHORT };
   const ratio = response?.ratio ?? SAMPLE_FII_LONG_SHORT;
+  const ratioIsSample = response?.is_sample_data !== false || !response?.ratio;
 
   const { cls, Icon } = useMemo(() => biasStyle(ratio.bias_label), [ratio.bias_label]);
   const biasFill = Math.max(0, Math.min(100, ratio.futures_bias));
@@ -235,6 +236,7 @@ function FlowsTab() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-text-primary">FII Long/Short</h3>
+          {ratioIsSample && <span className="text-xxs text-warning" role="status">Sample data</span>}
           <p className="text-[10px] text-text-muted">
             Participant OI · {ratio.trade_date || "—"}
             

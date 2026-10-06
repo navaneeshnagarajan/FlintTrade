@@ -7,6 +7,7 @@
  */
 
 import type { Position, Trade } from "@/types/api";
+import { isRestoredFromBackup } from "@/lib/restoredFills";
 
 /**
  * Booked realised P&L from a set of trades, pairing BUY↔SELL legs per symbol in
@@ -85,6 +86,8 @@ export interface RoundTrip {
   entryTime: string;
   exitTime: string;
   holdMinutes: number;
+  /** True when every fill in the trip carries the restore marker. */
+  restored: boolean;
 }
 
 function timeLabel(iso: string): string {
@@ -155,6 +158,7 @@ export function roundTripsFromTrades(trades: Trade[]): RoundTrip[] {
         entryTime: timeLabel(entryTs),
         exitTime: timeLabel(exitTs),
         holdMinutes: minutesBetween(entryTs, exitTs),
+        restored: sorted.length > 0 && sorted.every((leg) => isRestoredFromBackup(leg.strategy)),
       });
     }
   }
@@ -187,7 +191,7 @@ function toFiniteNumber(value: unknown): number | null {
 /**
  * Effective P&L for a single position.
  *
- * OpenAlgo's `pnl` field is wrong for some brokers (CLAUDE.md quirk 4), so for
+ * broker's `pnl` field is wrong for some brokers (CLAUDE.md quirk 4), so for
  * an open position this computes the mark-to-market locally as
  * `(ltp − averagePrice) × quantity` whenever those inputs are genuinely
  * available, and falls back to the broker-supplied `pnl` when the local

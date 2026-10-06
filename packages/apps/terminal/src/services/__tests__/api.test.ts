@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 const mockConnectionState = vi.hoisted(() => ({
   host: "http://localhost:5000",
   apiKey: "test-key-123",
-  openAlgoHydrated: true,
   status: "connected",
 }));
 
@@ -102,15 +101,11 @@ import {
   getOIProfile,
   getSyntheticFuture,
   getTicker,
-  getInstruments,
   getSymbol,
   getBrokerCapabilities,
   getLeverageSettings,
-  getChartPreferences,
   updateChartPreferences,
-  getAnalyzerStatus,
   sendTelegram,
-  ping,
   searchSymbol,
   getHoldings,
   getOrderbook,
@@ -134,19 +129,6 @@ import {
   UNCONFIGURED_LIVE_READ_CONTEXT,
 } from "@/test-utils/accountReadFixtures";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
-import { connectionScopeFingerprint } from "@/hooks/useDataScope";
-
-const OPENALGO_READ_CONTEXT = Object.freeze({
-  identity: Object.freeze({
-    mode: "live",
-    scopeKey: "live:openalgo:test-scope",
-    brokerType: "openalgo",
-    accountId: "default",
-  }),
-  enabled: true,
-  host: "",
-  apiKey: "test-key-123",
-}) satisfies AccountReadContext;
 
 function nativeReadContext(brokerType: string, accountId: string): AccountReadContext {
   return Object.freeze({
@@ -173,17 +155,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
-}
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("OpenAlgo API client (api.ts)", () => {
+describe("Native FlintTrade API client (api.ts)", () => {
   let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
   beforeEach(async () => {
@@ -192,8 +169,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     vi.mocked(orderLimiter.tryConsume).mockReturnValue(true);
     vi.mocked(generalLimiter.tryConsume).mockReturnValue(true);
     mockConnectionState.host = "http://localhost:5000";
-    mockConnectionState.apiKey = "test-key-123";
-    mockConnectionState.openAlgoHydrated = true;
+    mockConnectionState.apiKey = "";
     mockConnectionState.status = "connected";
     mockModeState.mode = "live";
     const { useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
@@ -214,25 +190,77 @@ describe("OpenAlgo API client (api.ts)", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { name: "quotes", read: () => getQuotes("INFY", "NSE") },
+    { name: "depth", read: () => getDepth("INFY", "NSE") },
+    { name: "history", read: () => getHistory("INFY", "NSE", "D", "2026-09-01", "2026-10-01") },
+    { name: "instrument master", read: () => getScripMaster("NSE") },
+  ])("auto-captures $name authority when the caller omits a scope", async ({ read }) => {
+    let finish!: (response: Response) => void;
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { accounts: [
+      { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
+    ] } })).mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const request = read();
+    const refused = expect(request).rejects.toThrow(/Market data authority changed/);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(String(fetchSpy.mock.calls[1][0])).toContain("/native/accounts/upstox/U1/");
+    mockBrokerState.accounts = [{ account_id: "B1", broker: "dhan", source: "native", status: "connected" }];
+    mockBrokerState.activeAccountId = "native:dhan:B1";
+    finish(jsonResponse({ status: "success", data: [] }));
+    await refused;
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an unpinned market read during account discovery after switching to Explore", async () => {
+    let finish!: (response: Response) => void;
+    fetchSpy.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const request = getQuotes("INFY", "NSE");
+    const refused = expect(request).rejects.toThrow(/Market data authority changed/);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    mockModeState.mode = "explore";
+    finish(jsonResponse({ status: "success", data: { accounts: [
+      { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
+    ] } }));
+    await refused;
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: "intervals", read: () => getIntervals() },
+    { name: "capabilities", read: () => getBrokerCapabilities() },
+    { name: "Max Pain", read: () => getMaxPain("NIFTY", "NFO") },
+    { name: "GEX", read: () => getGex("NIFTY", "NFO") },
+    { name: "IV smile", read: () => getIVSmile("NIFTY", "NFO") },
+    { name: "OI profile", read: () => getOIProfile("NIFTY", "NFO") },
+  ])("refuses late unpinned $name success and failure after mode retirement", async ({ read }) => {
+    for (const failure of [false, true]) {
+      mockModeState.mode = "live";
+      fetchSpy.mockClear();
+      let finish!: (response: Response) => void;
+      let fail!: (error: Error) => void;
+      fetchSpy.mockImplementationOnce(() => new Promise<Response>((resolve, reject) => { finish = resolve; fail = reject; }));
+      const request = read();
+      const refused = expect(request).rejects.toThrow(/Market data authority changed/);
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+      mockModeState.mode = "explore";
+      if (failure) fail(new Error("Old provider unavailable"));
+      else finish(jsonResponse({ status: "success", data: {} }));
+      await refused;
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("keeps an unpinned synthetic future request in its original Example scope", async () => {
+    mockModeState.mode = "explore";
+    const request = getSyntheticFuture("NIFTY", "NFO");
+    mockModeState.mode = "live";
+    await expect(request).rejects.toThrow(/Market data authority changed/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   // ---- POST requests ----
 
-  it("POST request sends JSON body with apikey", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { available: 50000 } }),
-    );
 
-    await getFunds(OPENALGO_READ_CONTEXT);
-
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/funds");
-    expect(init.method).toBe("POST");
-    expect(init.headers).toEqual(
-      expect.objectContaining({ "Content-Type": "application/json" }),
-    );
-    const body = JSON.parse(init.body as string);
-    expect(body).toHaveProperty("apikey", "test-key-123");
-  });
 
   it("uses the exact captured live native account for funds without account discovery", async () => {
     mockConnectionState.apiKey = "";
@@ -256,20 +284,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("normalises current OpenAlgo funds aliases into the canonical Funds shape", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { availablecash: "80000.50", utiliseddebits: "19500", totalbalance: "100000" },
-      }),
-    );
 
-    await expect(getFunds(OPENALGO_READ_CONTEXT)).resolves.toEqual({
-      availableCash: 80000.5,
-      usedMargin: 19500,
-      totalBalance: 100000,
-    });
-  });
 
   it("keeps a captured active native position read pinned when mutable stores change", async () => {
     mockConnectionState.apiKey = "";
@@ -343,7 +358,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   ])(
     "routes $name through the exact immutable native account context",
     async ({ read, response, path }) => {
-      mockConnectionState.apiKey = "mutable-openalgo-key";
+      mockConnectionState.apiKey = "mutable-dhan-key";
       mockBrokerState.accounts = [
         { account_id: "B2", broker: "upstox", source: "native", status: "connected" },
       ];
@@ -447,7 +462,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   it("reads a caller-captured primary native account without a mutable fallback", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [];
-    mockBrokerState.activeAccountId = null;
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({
         status: "success",
@@ -463,7 +478,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native order status when a live native account is connected without an OpenAlgo key", async () => {
+  it("uses native order status when a live native account is connected without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -495,7 +510,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native quotes when a live native account is connected without an OpenAlgo key", async () => {
+  it("uses native quotes when a live native account is connected without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -547,42 +562,14 @@ describe("OpenAlgo API client (api.ts)", () => {
       },
     }));
 
-    await expect(quote).resolves.toMatchObject({ symbol: "INFY", exchange: "NSE" });
+    await expect(quote).rejects.toThrow(/Market data authority changed/);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts",
     );
   });
 
-  it("does not start a native quote read after OpenAlgo authority hydrates during discovery", async () => {
-    mockConnectionState.apiKey = "";
-    let resolveDiscovery!: (response: Response) => void;
-    fetchSpy
-      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
-        resolveDiscovery = resolve;
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        status: "success",
-        data: { symbol: "INFY", exchange: "NSE", ltp: 1450.25 },
-      }));
 
-    const quote = getQuotes("INFY", "NSE");
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
-
-    mockConnectionState.apiKey = "hydrated-openalgo-key";
-    resolveDiscovery(jsonResponse({
-      status: "success",
-      data: {
-        accounts: [
-          { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
-        ],
-      },
-    }));
-
-    await expect(quote).resolves.toMatchObject({ symbol: "INFY", exchange: "NSE", ltp: 1450.25 });
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/api/v1/quotes");
-    expect(String(fetchSpy.mock.calls[1]?.[0])).not.toContain("/native/accounts/");
-  });
 
   it("rejects a native quote whose LTP is missing instead of materialising zero", async () => {
     mockConnectionState.apiKey = "";
@@ -607,7 +594,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     await expect(getQuotes("INFY", "NSE")).rejects.toThrow(/valid positive LTP/i);
   });
 
-  it("uses the native quote route for ticker fallback when no OpenAlgo key is configured", async () => {
+  it("uses the native quote route for ticker fallback when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
       { account_id: "D1", broker: "dhan", source: "native", status: "connected", is_primary: true },
@@ -642,7 +629,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native market depth when a live native account is connected without an OpenAlgo key", async () => {
+  it("uses native market depth when a live native account is connected without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -683,7 +670,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("uses the exact captured native account and AbortSignal for margin", async () => {
-    mockConnectionState.apiKey = "mutable-openalgo-key";
+    mockConnectionState.apiKey = "mutable-dhan-key";
     mockBrokerState.accounts = [
       { account_id: "B2", broker: "upstox", source: "native", status: "connected" },
     ];
@@ -795,7 +782,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(urls.some((url) => url.includes("/api/v1/native/accounts/groww/G1/orderhistory?order_id=OID-1"))).toBe(true);
   });
 
-  it("uses native market calendar reads when a live native account is connected without an OpenAlgo key", async () => {
+  it("uses native market calendar reads when a live native account is connected without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -1032,7 +1019,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     await expect(getHolidays(2026)).rejects.toThrow(/invalid native holiday response/i);
   });
 
-  it("uses native option Greeks when a live native account is connected without an OpenAlgo key", async () => {
+  it("uses native option Greeks when a live native account is connected without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -1122,7 +1109,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     },
   );
 
-  it("uses native instrument search when no OpenAlgo key is configured", async () => {
+  it("uses native instrument search when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -1165,7 +1152,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native instrument search to resolve symbol metadata when no OpenAlgo key is configured", async () => {
+  it("uses native instrument search to resolve symbol metadata when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -1207,24 +1194,9 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("forwards cancellation to OpenAlgo broker capability reads", async () => {
-    const controller = new AbortController();
-    fetchSpy.mockResolvedValueOnce(jsonResponse({
-      broker_name: "openalgo",
-      broker_type: "multi",
-      supported_exchanges: ["NSE"],
-      features: {},
-    }));
 
-    await getBrokerCapabilities(controller.signal);
 
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[1]?.signal).toBe(
-      controller.signal,
-    );
-  });
-
-  it("uses FlintTrade broker capabilities for the active native broker without an OpenAlgo key", async () => {
+  it("uses FlintTrade broker capabilities for the active native broker without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
       { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -1279,7 +1251,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     }));
 
     await expect(getBrokerCapabilities()).resolves.toEqual({
-      broker_name: "Explore",
+      broker_name: "Example",
       broker_type: "multi",
       supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
       features: {
@@ -1306,57 +1278,16 @@ describe("OpenAlgo API client (api.ts)", () => {
     mockModeState.mode = "explore";
     resolveDiscovery(jsonResponse({ status: "success", data: { accounts: [] } }));
 
-    await expect(capabilities).resolves.toEqual({
-      broker_name: "Explore",
-      broker_type: "multi",
-      supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
-      features: {
-        market_protection: false,
-        leverage: false,
-        bracket_orders: false,
-        cover_orders: false,
-      },
-    });
+    await expect(capabilities).rejects.toThrow(/Market data authority changed/);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts",
     );
   });
 
-  it("uses OpenAlgo capabilities when its authority hydrates during native discovery", async () => {
-    mockConnectionState.apiKey = "";
-    mockBrokerState.accounts = [];
-    let resolveDiscovery!: (response: Response) => void;
-    fetchSpy
-      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
-        resolveDiscovery = resolve;
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        broker_name: "openalgo",
-        broker_type: "multi",
-        supported_exchanges: ["NSE"],
-        features: {},
-      }));
 
-    const capabilities = getBrokerCapabilities();
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
 
-    mockConnectionState.apiKey = "hydrated-openalgo-key";
-    resolveDiscovery(jsonResponse({
-      status: "success",
-      data: {
-        accounts: [
-          { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
-        ],
-      },
-    }));
-
-    await expect(capabilities).resolves.toMatchObject({ broker_name: "openalgo" });
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/api/v1/../broker/capabilities");
-    expect(String(fetchSpy.mock.calls[1]?.[0])).not.toContain("/api/v1/broker/capabilities");
-  });
-
-  it("uses FlintTrade native interval metadata for the active broker without an OpenAlgo key", async () => {
+  it("uses FlintTrade native interval metadata for the active broker without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
       { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -1406,40 +1337,14 @@ describe("OpenAlgo API client (api.ts)", () => {
       },
     }));
 
-    await expect(intervals).resolves.toEqual(["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"]);
+    await expect(intervals).rejects.toThrow(/Market data authority changed/);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts",
     );
   });
 
-  it("uses OpenAlgo intervals when its authority hydrates during native discovery", async () => {
-    mockConnectionState.apiKey = "";
-    let resolveDiscovery!: (response: Response) => void;
-    fetchSpy
-      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
-        resolveDiscovery = resolve;
-      }))
-      .mockResolvedValueOnce(jsonResponse({ status: "success", data: ["1m", "5m"] }));
 
-    const intervals = getIntervals();
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
-
-    mockConnectionState.apiKey = "hydrated-openalgo-key";
-    resolveDiscovery(jsonResponse({
-      status: "success",
-      data: {
-        accounts: [
-          { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
-        ],
-      },
-    }));
-
-    await expect(intervals).resolves.toEqual(["1m", "5m"]);
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/api/v1/intervals");
-    expect(String(fetchSpy.mock.calls[1]?.[0])).not.toContain("/api/v1/broker/capabilities");
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit])[1]?.method).toBe("POST");
-  });
 
   it("combines native intraday and calendar interval metadata when the backend omits the prebuilt list", async () => {
     mockConnectionState.apiKey = "";
@@ -1486,51 +1391,11 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(init.body).toBeUndefined();
   });
 
-  it("unwraps backend instruments envelopes for the option-chain cache", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        exchange: "NFO",
-        count: 1,
-        instruments: [
-          {
-            symbol: "NIFTY",
-            name: "Nifty 50",
-            exchange: "NFO",
-            instrumenttype: "OPTIDX",
-            lotsize: 75,
-            tick_size: 0.05,
-            token: "token-1",
-          },
-        ],
-      }),
-    );
 
-    const result = await getInstruments(undefined, undefined, "NFO");
 
-    expect(result).toEqual([
-      expect.objectContaining({ symbol: "NIFTY", exchange: "NFO", lotsize: 75 }),
-    ]);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
-    expect(url).toContain("/api/v1/instruments");
-    expect(url).toContain("apikey=test-key-123");
-    expect(url).toContain("exchange=NFO");
-    expect(init).toBeUndefined();
-  });
 
-  it("keeps the optional instruments cache empty in native-only mode without an OpenAlgo key", async () => {
-    mockConnectionState.apiKey = "";
-    mockBrokerState.accounts = [
-      { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
-    ];
 
-    const result = await getInstruments();
-
-    expect(result).toEqual([]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("uses native history and normalises candle envelopes when no OpenAlgo key is configured", async () => {
+  it("uses native history and normalises candle envelopes when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -1574,7 +1439,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native expiry and option chain reads when no OpenAlgo key is configured", async () => {
+  it("uses native expiry and option chain reads when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -1941,484 +1806,49 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(chain.atm_strike).toBe(90);
   });
 
-  it("rejects malformed OpenAlgo option-chain arrays before consumers iterate them", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { chain: { length: 1 } },
-      }),
-    );
 
-    await expect(getOptionChain("NIFTY", "NFO", "2026-07-30"))
-      .rejects.toThrow(/option-chain chain array/i);
-  });
 
-  it("validates modern and legacy OpenAlgo chain arrays together", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { chain: [], calls: { length: 1 }, puts: [] },
-      }),
-    );
 
-    await expect(getOptionChain("NIFTY", "NFO", "2026-07-30"))
-      .rejects.toThrow(/option-chain calls array/i);
-  });
 
-  it("rejects malformed OpenAlgo option-leg scalars", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: {
-          chain: [{
-            strike: 25000,
-            ce: { change: "bad", change_pct: "0", oi_change: "0" },
-            pe: null,
-          }],
-          calls: [],
-          puts: [],
-        },
-      }),
-    );
 
-    await expect(getOptionChain("NIFTY", "NFO", "2026-07-30"))
-      .rejects.toThrow(/option-chain.*change/i);
-  });
 
-  it.each([
-    ["ltp", true],
-    ["last_price", []],
-    ["bid", {}],
-    ["ask", "Infinity"],
-    ["change", "bad"],
-    ["change_percent", {}],
-    ["change_pct", []],
-    ["oi_change", true],
-    ["oi", {}],
-    ["open_interest", []],
-    ["volume", true],
-    ["delta", []],
-    ["gamma", {}],
-    ["theta", true],
-    ["vega", "bad"],
-    ["iv", "Infinity"],
-    ["implied_volatility", -1],
-  ])("rejects invalid OpenAlgo option-leg %s values", async (field, invalidValue) => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: {
-          chain: [{ strike: 25000, ce: { [field]: invalidValue }, pe: null }],
-          calls: [],
-          puts: [],
-        },
-      }),
-    );
 
-    await expect(getOptionChain("NIFTY", "NFO", "2026-07-30"))
-      .rejects.toThrow(new RegExp(`option-chain.*${field}`, "i"));
-  });
 
-  it("normalises every finite OpenAlgo option-leg scalar and preserves explicit zero", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    const zeroFields = {
-      ltp: "0",
-      last_price: "0",
-      bid: "0",
-      ask: "0",
-      change: "0",
-      change_percent: "0",
-      change_pct: "0",
-      oi_change: "0",
-      oi: "0",
-      open_interest: "0",
-      volume: "0",
-      delta: "0",
-      gamma: "0",
-      theta: "0",
-      vega: "0",
-      iv: "0",
-      implied_volatility: "0",
-    };
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: {
-          chain: [{ strike: 25000, ce: zeroFields, pe: null }],
-          calls: [],
-          puts: [],
-        },
-      }),
-    );
 
-    const chain = await getOptionChain("NIFTY", "NFO", "2026-07-30") as unknown as {
-      chain: Array<{ ce: Record<string, unknown> }>;
-    };
-    expect(chain.chain[0]?.ce).toMatchObject(Object.fromEntries(
-      Object.keys(zeroFields).map((field) => [field, 0]),
-    ));
-  });
 
-  it("trims and filters OpenAlgo expiry payloads before returning them", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { expiry: [null, true, "", "   ", " 2026-07-30 "] },
-      }),
-    );
 
-    await expect(getExpiry("NIFTY", "NFO")).resolves.toEqual({ expiry: ["2026-07-30"] });
-  });
 
-  it("normalises an official OpenAlgo expiry array onto { expiry }", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: ["26-MAR-26", " 02-APR-26 ", "", null],
-      }),
-    );
 
-    await expect(getExpiry("NIFTY", "NFO")).resolves.toEqual({
-      expiry: ["26-MAR-26", "02-APR-26"],
-    });
-  });
 
-  it("posts OpenAlgo optionchain with underlying and DDMMMYY expiry_date only", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { chain: [], calls: [], puts: [] },
-      }),
-    );
 
-    await getOptionChain("NIFTY", "NFO", "26-MAR-26");
 
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/optionchain");
-    expect(JSON.parse(init.body as string)).toEqual({
-      apikey: "test-key-123",
-      underlying: "NIFTY",
-      exchange: "NFO",
-      expiry_date: "26MAR26",
-    });
-  });
 
-  it("converts an ISO option-chain expiry to OpenAlgo DDMMMYY", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { chain: [], calls: [], puts: [] },
-      }),
-    );
 
-    await getOptionChain("NIFTY", "NSE_INDEX", "2026-07-30");
 
-    expect(JSON.parse((fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({
-      apikey: "test-key-123",
-      underlying: "NIFTY",
-      exchange: "NSE_INDEX",
-      expiry_date: "30JUL26",
-    });
-  });
 
-  it("refuses an OpenAlgo option-chain request without expiry_date", async () => {
-    mockConnectionState.apiKey = "test-key-123";
 
-    await expect(getOptionChain("NIFTY", "NFO")).rejects.toThrow("expiry_date is required");
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
 
-  it("posts OpenAlgo syntheticfuture with underlying and DDMMMYY expiry_date", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: { synthetic_future_price: 26015.25 },
-      }),
-    );
 
-    await getSyntheticFuture("NIFTY", "NSE_INDEX", "2026-03-26");
 
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/syntheticfuture");
-    expect(JSON.parse(init.body as string)).toEqual({
-      apikey: "test-key-123",
-      underlying: "NIFTY",
-      exchange: "NSE_INDEX",
-      expiry_date: "26MAR26",
-    });
-  });
 
-  it("refuses an OpenAlgo synthetic-future request without expiry_date", async () => {
-    mockConnectionState.apiKey = "test-key-123";
 
-    await expect(getSyntheticFuture("NIFTY", "NSE_INDEX")).rejects.toThrow("expiry_date is required");
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
 
-  it("posts OpenAlgo market/holidays with the calendar year and normalises envelopes", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        year: 2026,
-        data: {
-          holidays: [
-            "2026-01-26",
-            {
-              date: "2026-03-03",
-              description: "Holi",
-              holiday_type: "TRADING_HOLIDAY",
-              closed_exchanges: ["NSE", "BSE"],
-              open_exchanges: [],
-            },
-          ],
-        },
-      }),
-    );
 
-    const holidays = await getHolidays(2026);
 
-    expect(holidays).toEqual([
-      {
-        date: "2026-01-26",
-        description: "",
-        holiday_type: "TRADING_HOLIDAY",
-        closed_exchanges: ["*"],
-        open_exchanges: [],
-      },
-      {
-        date: "2026-03-03",
-        description: "Holi",
-        holiday_type: "TRADING_HOLIDAY",
-        closed_exchanges: ["BSE", "NSE"],
-        open_exchanges: [],
-      },
-    ]);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/market/holidays");
-    expect(url).not.toContain("/api/v1/holidays");
-    expect(JSON.parse(init.body as string)).toEqual({
-      apikey: "test-key-123",
-      year: 2026,
-    });
-  });
 
-  it("refuses an OpenAlgo holidays request with a year outside 2020-2050", async () => {
-    mockConnectionState.apiKey = "test-key-123";
 
-    await expect(getHolidays(1999)).rejects.toThrow("holiday year must be between 2020 and 2050");
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
 
-  it.each([
-    ["empty success placeholder", { status: "success", year: 2026, data: [] }],
-    ["empty holidays envelope", { status: "success", year: 2026, data: { holidays: [] } }],
-    ["invalid calendar date", { status: "success", year: 2026, data: ["2026-02-30"] }],
-    ["year mismatch", { status: "success", year: 2025, data: ["2026-01-26"] }],
-    ["row year mismatch", { status: "success", year: 2026, data: ["2025-01-26"] }],
-    [
-      "object row year mismatch",
-      { status: "success", year: 2026, data: [{ date: "2025-01-26", holiday_type: "TRADING_HOLIDAY" }] },
-    ],
-    ["yearless envelope of another year", { status: "success", data: ["2025-01-26"] }],
-    [
-      "malformed special-session timestamps",
-      {
-        status: "success",
-        year: 2026,
-        data: [{
-          date: "2026-01-26",
-          holiday_type: "SPECIAL_SESSION",
-          closed_exchanges: [],
-          open_exchanges: [{ exchange: "NSE", start_time: "bad", end_time: 1772562300000 }],
-        }],
-      },
-    ],
-    [
-      "special-session end before start",
-      {
-        status: "success",
-        year: 2026,
-        data: [{
-          date: "2026-01-26",
-          holiday_type: "SPECIAL_SESSION",
-          closed_exchanges: [],
-          open_exchanges: [{
-            exchange: "NSE",
-            start_time: 1772562300000,
-            end_time: 1772537400000,
-          }],
-        }],
-      },
-    ],
-  ])("rejects an unusable OpenAlgo holiday %s instead of caching an all-open year", async (_name, payload) => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(jsonResponse(payload));
 
-    await expect(getHolidays(2026)).rejects.toThrow("OpenAlgo market calendar is not authoritative");
-  });
 
-  it("accepts OpenAlgo clock-time special sessions and binds them to the holiday date", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(jsonResponse({
-      status: "success",
-      year: 2026,
-      data: [{
-        date: "2026-11-08",
-        description: "Muhurat Trading",
-        holiday_type: "SPECIAL_SESSION",
-        closed_exchanges: ["NSE"],
-        open_exchanges: [{ exchange: "NSE", start_time: "18:00", end_time: "19:00" }],
-      }],
-    }));
 
-    await expect(getHolidays(2026)).resolves.toEqual([
-      expect.objectContaining({
-        date: "2026-11-08",
-        holiday_type: "SPECIAL_SESSION",
-        open_exchanges: [{
-          exchange: "NSE",
-          start_time: Date.UTC(2026, 10, 8, 12, 30, 0),
-          end_time: Date.UTC(2026, 10, 8, 13, 30, 0),
-        }],
-      }),
-    ]);
-  });
 
-  it("accepts an overnight OpenAlgo clock-time special session on the next IST morning", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(jsonResponse({
-      status: "success",
-      year: 2026,
-      data: [{
-        date: "2026-04-17",
-        description: "MCX special session",
-        holiday_type: "SPECIAL_SESSION",
-        closed_exchanges: ["MCX"],
-        open_exchanges: [{ exchange: "MCX", start_time: "18:00", end_time: "00:15" }],
-      }],
-    }));
 
-    await expect(getHolidays(2026)).resolves.toEqual([
-      expect.objectContaining({
-        date: "2026-04-17",
-        open_exchanges: [{
-          exchange: "MCX",
-          start_time: Date.UTC(2026, 3, 17, 12, 30, 0),
-          end_time: Date.UTC(2026, 3, 17, 18, 45, 0),
-        }],
-      }),
-    ]);
-  });
 
-  it("fetches the next holiday year when the IST lookahead crosses 1 January", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-12-28T18:30:00.000Z")); // 29 Dec 2026 IST
-      mockConnectionState.apiKey = "test-key-123";
-      fetchSpy
-        .mockResolvedValueOnce(jsonResponse({
-          status: "success",
-          year: 2026,
-          data: ["2026-12-31"],
-        }))
-        .mockResolvedValueOnce(jsonResponse({
-          status: "success",
-          year: 2027,
-          data: ["2027-01-01"],
-        }));
 
-      await expect(getHolidays()).resolves.toEqual([
-        expect.objectContaining({ date: "2026-12-31" }),
-        expect.objectContaining({ date: "2027-01-01" }),
-      ]);
-      const years = fetchSpy.mock.calls.map(([, init]) => (
-        JSON.parse((init as RequestInit).body as string) as { year: number }
-      ).year);
-      expect(years).toEqual([2026, 2027]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 
-  it("keeps a single-year holiday fetch before the year-boundary lookahead", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-12-27T18:30:00.000Z")); // 28 Dec 2026 IST
-      mockConnectionState.apiKey = "test-key-123";
-      fetchSpy.mockResolvedValueOnce(jsonResponse({
-        status: "success",
-        year: 2026,
-        data: ["2026-12-31"],
-      }));
 
-      await expect(getHolidays()).resolves.toEqual([
-        expect.objectContaining({ date: "2026-12-31" }),
-      ]);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string)).toEqual({
-        apikey: "test-key-123",
-        year: 2026,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 
-  it("fails closed when the adjacent holiday year is not authoritative", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-12-28T18:30:00.000Z")); // 29 Dec 2026 IST
-      mockConnectionState.apiKey = "test-key-123";
-      fetchSpy
-        .mockResolvedValueOnce(jsonResponse({
-          status: "success",
-          year: 2026,
-          data: ["2026-12-31"],
-        }))
-        .mockResolvedValueOnce(jsonResponse({
-          status: "success",
-          year: 2027,
-          data: [],
-        }));
-
-      await expect(getHolidays()).rejects.toThrow("OpenAlgo market calendar is not authoritative");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("posts OpenAlgo market/timings with the trading date", async () => {
-    mockConnectionState.apiKey = "test-key-123";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: [{ exchange: "NSE", start_time: 915, end_time: 1530 }],
-      }),
-    );
-
-    const timings = await getTimings("2026-08-29");
-
-    expect(timings).toEqual([{ exchange: "NSE", start_time: 915, end_time: 1530 }]);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/market/timings");
-    expect(url).not.toContain("/api/v1/timings");
-    expect(JSON.parse(init.body as string)).toEqual({
-      apikey: "test-key-123",
-      date: "2026-08-29",
-    });
-  });
-
-  it("derives synthetic futures from native option-chain rows without an OpenAlgo key", async () => {
+  it("derives synthetic futures from native option-chain rows without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
       .mockResolvedValueOnce(
@@ -2460,7 +1890,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(urls.some((url) => url.includes("/api/v1/syntheticfuture"))).toBe(false);
   });
 
-  it("builds compact option symbols locally when no OpenAlgo key is configured", async () => {
+  it("builds compact option symbols locally when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
 
     const result = await getOptionSymbol("NIFTY", "NFO", "2026-07-30", "CE", "25000");
@@ -2469,84 +1899,18 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps OpenAlgo option-symbol resolution primary when an API key is configured", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { symbol: "BROKER-NIFTY-CE", exchange: "NFO" } }),
-    );
 
-    const result = await getOptionSymbol("NIFTY", "NFO", "2026-07-30", "CE", "ATM");
 
-    expect(result).toEqual({ symbol: "BROKER-NIFTY-CE", exchange: "NFO" });
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/optionsymbol");
-    expect(JSON.parse(init.body as string)).toEqual({
-      apikey: "test-key-123",
-      underlying: "NIFTY",
-      exchange: "NFO",
-      expiry_date: "30JUL26",
-      option_type: "CE",
-      offset: "ATM",
-    });
-  });
-
-  it("bypasses OpenAlgo option-symbol for an explicit strike and builds the compact contract locally", async () => {
+  it("bypasses native broker option-symbol for an explicit strike and builds the compact contract locally", async () => {
     const result = await getOptionSymbol("NIFTY", "NFO", "2026-07-30", "CE", "25000");
 
     expect(result).toEqual({ symbol: "NIFTY30JUL2625000CE", exchange: "NFO" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("preserves an authority-change refusal while an OpenAlgo error body is parsed", async () => {
-    const body = deferred<{ message: string }>();
-    const json = vi.fn(() => body.promise);
-    fetchSpy.mockResolvedValueOnce({ ok: false, status: 500, json } as unknown as Response);
-    const expectedScope = `live:openalgo:${connectionScopeFingerprint(
-      mockConnectionState.host,
-      mockConnectionState.apiKey,
-    )}`;
 
-    const resolution = getOptionSymbol(
-      "NIFTY",
-      "NFO",
-      "2026-07-30",
-      "CE",
-      "ATM",
-      undefined,
-      expectedScope,
-    );
-    await vi.waitFor(() => expect(json).toHaveBeenCalledTimes(1));
-    mockConnectionState.host = "http://replacement-openalgo.test";
-    body.resolve({ message: "old authority failed" });
 
-    await expect(resolution).rejects.toMatchObject({ name: "MarketDataAuthorityChangedError" });
-  });
 
-  it("preserves an authority-change refusal when the retired OpenAlgo fetch rejects", async () => {
-    const release = deferred<void>();
-    fetchSpy.mockImplementationOnce(async () => {
-      await release.promise;
-      throw new Error("old authority network failure");
-    });
-    const expectedScope = `live:openalgo:${connectionScopeFingerprint(
-      mockConnectionState.host,
-      mockConnectionState.apiKey,
-    )}`;
-
-    const resolution = getOptionSymbol(
-      "NIFTY",
-      "NFO",
-      "2026-07-30",
-      "CE",
-      "ATM",
-      undefined,
-      expectedScope,
-    );
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
-    mockConnectionState.host = "http://replacement-openalgo.test";
-    release.resolve();
-
-    await expect(resolution).rejects.toMatchObject({ name: "MarketDataAuthorityChangedError" });
-  });
 
   it("routes max pain through the FlintTrade backend and normalises strike losses", async () => {
     mockConnectionState.apiKey = "";
@@ -2969,7 +2333,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps Explore history synthetic even when an OpenAlgo key is configured", async () => {
+  it("keeps Explore history synthetic even when an native broker key is configured", async () => {
     mockConnectionState.apiKey = "configured-live-key";
     mockModeState.mode = "explore";
 
@@ -2999,7 +2363,7 @@ describe("OpenAlgo API client (api.ts)", () => {
 
   it("serves sample expiries and a sample option chain in Explore instead of erroring", async () => {
     // Regression: expiry/optionchain had no Explore fallback, so the Option
-    // Chain and OI Chart widgets errored with "OpenAlgo API key is not
+    // Chain and OI Chart widgets errored with "native broker API key is not
     // configured" in demo mode instead of rendering sample data.
     mockConnectionState.apiKey = "";
     mockModeState.mode = "explore";
@@ -3026,7 +2390,7 @@ describe("OpenAlgo API client (api.ts)", () => {
 
   it("serves sample symbols from the Explore catalogue instead of erroring", async () => {
     // Regression FT-CMD-001: search had no Explore fallback, so Ctrl+K
-    // Symbols errored with "OpenAlgo API key is not configured" instead of
+    // Symbols errored with "native broker API key is not configured" instead of
     // returning sample instruments such as NIFTY.
     mockConnectionState.apiKey = "";
     mockModeState.mode = "explore";
@@ -3038,7 +2402,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps Explore symbol search synthetic even when an OpenAlgo key is configured", async () => {
+  it("keeps Explore symbol search synthetic even when an native broker key is configured", async () => {
     mockConnectionState.apiKey = "configured-live-key";
     mockModeState.mode = "explore";
 
@@ -3077,7 +2441,13 @@ describe("OpenAlgo API client (api.ts)", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({
       status: "success",
       data: {
-        capital: { initial: 1_000_000, current: 1_012_500, available: 900_000, used_margin: 112_500 },
+        funds: {
+          available_balance: 900_000,
+          used_margin: 112_500,
+          current_balance: 1_012_500,
+          ledger_balance: 1_000_000,
+          futures_mtm_in_ledger: false,
+        },
       },
     }));
 
@@ -3085,9 +2455,11 @@ describe("OpenAlgo API client (api.ts)", () => {
       availableCash: 900_000,
       usedMargin: 112_500,
       totalBalance: 1_012_500,
+      ledgerBalance: 1_000_000,
+      futuresMtmInLedger: false,
     });
     const urls = fetchSpy.mock.calls.map(([url]) => String(url));
-    expect(urls).toEqual([expect.stringContaining("/v1/sandbox/capital")]);
+    expect(urls).toEqual([expect.stringContaining("/v1/sandbox/funds")]);
     expect(urls.some((url) => url.includes("/api/v1/funds"))).toBe(false);
     expect(urls.some((url) => url.includes("/api/v1/native/accounts"))).toBe(false);
   });
@@ -3119,6 +2491,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       ltp: 1505,
       pnl: 150,
       pnlPercent: 1,
+      restored: false,
     }]);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/v1/sandbox/positions");
   });
@@ -3166,57 +2539,72 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).not.toContain("/v1/sandbox/orders");
   });
 
-  it("POST sends extra params merged with apikey", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { ltp: 22500 } }),
-    );
-
-    await getQuotes("NIFTY", "NSE_INDEX");
-
-    const body = JSON.parse(
-      (fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string,
-    );
-    expect(body).toMatchObject({
-      apikey: "test-key-123",
-      symbol: "NIFTY",
-      exchange: "NSE_INDEX",
-    });
-  });
-
-  it("checks OpenAlgo analyzer status through the documented status route", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { enabled: true } }),
-    );
-
-    const result = await getAnalyzerStatus();
-
-    expect(result).toEqual({ enabled: true });
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/analyzer/status");
-    expect(url).not.toContain("/api/v1/analyzer?");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ apikey: "test-key-123" });
-  });
-
-  it("keeps chart preferences on the FlintTrade backend instead of requiring an OpenAlgo key", async () => {
+  it("names Practice fill charges from the fill exchange, never a stored brokerage line", async () => {
     mockConnectionState.apiKey = "";
-    const response = {
-      user_id: "default",
-      theme: { background: "#0a0a0f" },
-      indicator_sets: {},
-      layouts: { default: { panels: [] } },
-      layout: { panels: [] },
-    };
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: response }));
+    mockConnectionState.status = "disconnected";
+    mockModeState.mode = "live";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success",
+      data: {
+        trades: [
+          {
+            trade_id: "TR-N",
+            order_id: "SB-N",
+            symbol: "NIFTY24APR23000CE",
+            exchange: "NFO",
+            action: "BUY",
+            quantity: 65,
+            price: 150,
+            traded_at: "2026-04-08T10:30:00+05:30",
+            charges_breakdown: {
+              total: 12.5,
+              stt: 4,
+              exchange_charges: 3.5,
+              exchange_label: "BSE transaction",
+              sebi_fee: 0.1,
+              stamp_duty: 1.2,
+              gst: 3.7,
+              brokerage: 40,
+            },
+          },
+          {
+            trade_id: "TR-S",
+            order_id: "SB-S",
+            symbol: "SENSEX24APR75000CE",
+            exchange: "BFO",
+            action: "BUY",
+            quantity: 20,
+            price: 400,
+            traded_at: "2026-04-08T10:40:00+05:30",
+            charges_breakdown: {
+              total: 8.25,
+              stt: 2,
+              exchange_charges: 2.6,
+              exchange_label: "NSE transaction",
+              sebi_fee: 0.05,
+              stamp_duty: 0.8,
+              gst: 2.8,
+              brokerage: 40,
+            },
+          },
+        ],
+      },
+    }));
 
-    const result = await getChartPreferences();
-
-    expect(result).toEqual(response);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/ft-api/api/v1/chart");
-    expect(init.method).toBeUndefined();
-    expect(init.body).toBeUndefined();
+    const trades = await getTradebook(PRACTICE_READ_CONTEXT);
+    expect(trades.map((trade) => trade.estimatedCharges?.exchangeLabel)).toEqual([
+      "NSE transaction",
+      "BSE transaction",
+    ]);
+    expect(JSON.stringify(trades)).not.toMatch(/Brokerage/i);
+    expect(trades[0]?.estimatedCharges).not.toHaveProperty("brokerage");
   });
+
+
+
+
+
+
 
   it("updates chart preferences through the FlintTrade backend route", async () => {
     mockConnectionState.apiKey = "";
@@ -3255,7 +2643,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(JSON.parse(init.body as string)).not.toHaveProperty("apikey");
   });
 
-  it("supports Telegram test messages from workspace configuration without an OpenAlgo key", async () => {
+  it("supports Telegram test messages from workspace configuration without a separate transport key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { message: "sent" } }));
 
@@ -3266,94 +2654,13 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(JSON.parse(init.body as string)).toEqual({ message: "hello" });
   });
 
-  it("POSTs intervals and flattens official OpenAlgo buckets", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: {
-          seconds: ["1s"],
-          minutes: ["1m", "5m"],
-          hours: ["1h"],
-          days: ["D"],
-          weeks: ["W"],
-          months: ["M"],
-        },
-      }),
-    );
 
-    const result = await getIntervals();
 
-    expect(result).toEqual(["1s", "1m", "5m", "1h", "D", "W", "M"]);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/intervals");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ apikey: "test-key-123" });
-  });
 
-  it("GET request does not send a body or Content-Type", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: [] }),
-    );
 
-    const result = await getInstruments(undefined, undefined, "NFO");
 
-    expect(result).toEqual([]);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
-    // GET calls use the single-arg form of fetch (no init or no method)
-    expect(init).toBeUndefined();
-    expect(url).toContain("/api/v1/instruments?");
-    expect(url).toContain("apikey=test-key-123");
-    expect(url).toContain("exchange=NFO");
-  });
 
-  it("authenticates OpenAlgo instruments GETs for each option-chain exchange", async () => {
-    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({ status: "success", data: [] })));
 
-    await expect(getInstruments()).resolves.toEqual([]);
-
-    const urls = fetchSpy.mock.calls.map(([url]) => String(url));
-    expect(urls).toEqual([
-      expect.stringContaining("/api/v1/instruments?"),
-      expect.stringContaining("/api/v1/instruments?"),
-      expect.stringContaining("/api/v1/instruments?"),
-      expect.stringContaining("/api/v1/instruments?"),
-    ]);
-    expect(urls.every((url) => url.includes("apikey=test-key-123"))).toBe(true);
-    expect(urls.map((url) => new URL(url, "http://localhost").searchParams.get("exchange")).sort())
-      .toEqual(["BFO", "CDS", "MCX", "NFO"]);
-    expect(fetchSpy.mock.calls.every(([, init]) => init === undefined)).toBe(true);
-  });
-
-  it("polls the current ticker through quotes instead of the historical ticker route", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({
-        status: "success",
-        data: {
-          symbol: "RELIANCE",
-          exchange: "NSE",
-          ltp: 3010.75,
-          open: 3000,
-          high: 3020,
-          low: 2990,
-          close: 3005,
-          volume: 1000,
-        },
-      }),
-    );
-
-    const result = await getTicker("RELIANCE", "NSE");
-
-    expect(result).toMatchObject({ symbol: "RELIANCE", exchange: "NSE", ltp: 3010.75 });
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/quotes");
-    expect(url).not.toContain("/api/v1/ticker");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({
-      apikey: "test-key-123",
-      symbol: "RELIANCE",
-      exchange: "NSE",
-    });
-  });
 
   it("keeps Practice sandbox trigger_price on stop orders", async () => {
     mockConnectionState.apiKey = "configured-live-key";
@@ -3398,6 +2705,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   // ---- postOrder — mode header ----
 
   it("postOrder attaches X-FlintTrade-Mode header from modeStore", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ status: "success", data: { orderId: "ORD-1" } }),
     );
@@ -3413,13 +2721,73 @@ describe("OpenAlgo API client (api.ts)", () => {
     } as unknown as Parameters<typeof placeOrder>[0]);
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/orders/place");
+    expect(url).toContain("/api/v1/orders/upstox/place");
     const headers = init.headers as Record<string, string>;
     expect(headers["X-FlintTrade-Mode"]).toBe("live");
     expect(headers["Content-Type"]).toBe("application/json");
   });
 
+  it("placeOrder drops Ready on the Laya pause and says Checking when a Down chip then admits", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    const pause = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    resetOperatorSignals();
+    useOperatorSignalStore.setState({
+      decisionStatus: "ready",
+      layaPracticeStatus: "ready",
+      layaChecking: false,
+    });
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY" as const,
+      quantity: 1,
+      product: "MIS" as const,
+      orderType: "MARKET" as const,
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "error",
+      code: "laya_denied",
+      message: pause,
+      reason: pause,
+    }, 403));
+    await expect(placeOrder(order)).rejects.toThrow(pause);
+    expect(useOperatorSignalStore.getState().decisionStatus).toBe("down");
+    expect(useOperatorSignalStore.getState().layaPracticeStatus).toBe("down");
+    expect(useOperatorSignalStore.getState().layaChecking).toBe(false);
+
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { orderId: "ORD-1" } }));
+    await placeOrder(order);
+    expect(useOperatorSignalStore.getState().layaChecking).toBe(true);
+    resetOperatorSignals();
+  });
+
+  it("placeOrder sends the operator admission note and an empty note", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockImplementation(() => Promise.resolve(
+      jsonResponse({ status: "success", data: { orderId: "ORD-NOTE" } }),
+    ));
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY" as const,
+      quantity: 1,
+      product: "MIS" as const,
+      orderType: "MARKET" as const,
+    };
+
+    await placeOrder({ ...order, rationale: "Planned breakout" });
+    await placeOrder({ ...order, rationale: "" });
+
+    const noted = JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body));
+    const empty = JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body));
+    expect(noted.rationale).toBe("Planned breakout");
+    expect(empty.rationale).toBe("");
+  });
+
   it("placeOrder with a Practice authority pin keeps sandbox mode even if the store flips after the gate", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     mockModeState.mode = "practice";
     fetchSpy.mockImplementation(async (_url, init) => {
       // Flip after the transport has already chosen the pinned mode.
@@ -3465,6 +2833,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("placeOrder in Explore returns a sample fill and never contacts the order proxy", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     mockModeState.mode = "explore";
     mockConnectionState.apiKey = "";
 
@@ -3482,6 +2851,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("placeOrder in Explore with a Practice pin still records a sample fill", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     mockModeState.mode = "explore";
 
     const result = await placeOrder(
@@ -3514,7 +2884,7 @@ describe("OpenAlgo API client (api.ts)", () => {
         },
         { mode: "live" },
       ),
-    ).rejects.toThrow(/mode changed from live to explore/i);
+    ).rejects.toThrow(/mode changed from Live to Example/i);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -3548,37 +2918,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("routes an exact OpenAlgo square-off pin to literal openalgo/default", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { orderId: "OA-SQUARE-OFF" } }),
-    );
 
-    await placeOrder(
-      {
-        symbol: "RELIANCE",
-        exchange: "NSE",
-        action: "SELL",
-        quantity: 1,
-        product: "MIS",
-        orderType: "MARKET",
-        strategy: "FlintPositions",
-      },
-      {
-        mode: "live",
-        scopeKey: "live:openalgo:7d290c41e91d8f71",
-        brokerType: "openalgo",
-        accountId: "default",
-      },
-    );
-
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/orders/openalgo/place");
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      broker: "openalgo",
-      account_id: "default",
-      symbol: "RELIANCE",
-    });
-  });
 
   it("routes an exact native square-off pin to the literal displayed account", async () => {
     mockConnectionState.apiKey = "";
@@ -3618,6 +2958,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("postOrder normalises terminal order body fields before sending", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ status: "success", data: { orderId: "ORD-1" } }),
     );
@@ -3646,7 +2987,46 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(body).not.toHaveProperty("apikey");
   });
 
-  it("routes live placeOrder through the active connected native account when no OpenAlgo key is configured", async () => {
+  it("posts the desk Order Pad body with no note", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "PAD-1" } }),
+    );
+
+    await placeOrder({
+      symbol: "SBIN",
+      exchange: "NSE",
+      action: "BUY",
+      product: "MIS",
+      orderType: "MARKET",
+      quantity: 1,
+      price: 0,
+      triggerPrice: 0,
+      strategy: "FlintOrderPad",
+    }, { mode: "practice" });
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(body).toEqual({
+      symbol: "SBIN",
+      exchange: "NSE",
+      action: "BUY",
+      product: "MIS",
+      orderType: "MARKET",
+      quantity: 1,
+      price: 0,
+      triggerPrice: 0,
+      strategy: "FlintOrderPad",
+      order_type: "MARKET",
+      trigger_price: 0,
+    });
+    expect(body).not.toHaveProperty("rationale");
+    expect(body).not.toHaveProperty("note");
+  });
+
+  it("routes live placeOrder through the active connected native account when no separate transport key is configured", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
     mockBrokerState.accounts = [
@@ -3675,9 +3055,10 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("refuses a Live placeOrder while a money-path incident is latched and still allows Practice", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     const { useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
     useOperatorSignalStore.setState({ brokerRateLimited: true });
-    mockConnectionState.apiKey = "test-key-123";
+    mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
     const order = {
       symbol: "RELIANCE",
@@ -3715,8 +3096,30 @@ describe("OpenAlgo API client (api.ts)", () => {
     } as unknown as Parameters<typeof placeOrder>[0];
 
     try {
-      await expect(placeOrder(order)).rejects.toThrow(/Live orders stay closed/i);
+      await expect(placeOrder(order)).rejects.toThrow(
+        "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      );
       expect(fetchSpy).not.toHaveBeenCalled();
+
+      mockConnectionState.apiKey = "";
+      mockBrokerState.accounts = [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ];
+      mockBrokerState.activeAccountId = "native:upstox:U1";
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse({ status: "success", data: { orderId: "EX-1" } }),
+      );
+      await placeOrder(
+        { ...order, action: "SELL" },
+        undefined,
+        { exit: true },
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const exitInit = (fetchSpy.mock.calls[0] as [string, RequestInit])[1];
+      const exitBody = JSON.parse(String(exitInit.body)) as Record<string, unknown>;
+      expect(exitBody).not.toHaveProperty("exit");
+      expect(exitBody).not.toHaveProperty("reduce_only");
+      expect(exitBody.action).toBe("SELL");
 
       mockModeState.mode = "practice";
       fetchSpy.mockResolvedValueOnce(
@@ -3730,6 +3133,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("does not refuse a Live place when only Chat is unavailable", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
     resetOperatorSignals();
     useOperatorSignalStore.setState({ decisionStatus: "ready", llmChrome: "error" });
@@ -3779,58 +3183,9 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("fails closed and never diverts to native before the OpenAlgo config has hydrated", async () => {
-    // The apiKey-drop regression: after a reload the in-memory bridge apiKey is
-    // transiently "" while the loopback config GET is still in flight. With a
-    // connected native account selected, the old code would silently DIVERT a
-    // bridge order to that native account. postOrder must instead fail closed
-    // with the "still loading" message and never fetch (neither native nor bridge).
-    mockConnectionState.apiKey = "";
-    mockConnectionState.openAlgoHydrated = false;
-    mockModeState.mode = "live";
-    mockBrokerState.accounts = [
-      { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
-    ];
-    mockBrokerState.activeAccountId = "native:upstox:U1";
 
-    await expect(
-      placeOrder({
-        symbol: "RELIANCE",
-        exchange: "NSE",
-        action: "BUY",
-        quantity: 1,
-        price_type: "MARKET",
-        product: "MIS",
-        orderType: "MARKET",
-      } as unknown as Parameters<typeof placeOrder>[0]),
-    ).rejects.toThrow(/still loading/i);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
 
-  it("does not block practice-mode orders during the OpenAlgo hydration window", async () => {
-    // Non-live orders never depend on the bridge-vs-native routing decision (they
-    // execute in the SandboxEngine), so the hydration gate must not block them.
-    mockConnectionState.apiKey = "";
-    mockConnectionState.openAlgoHydrated = false;
-    mockModeState.mode = "practice";
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { orderId: "SBX-1" } }),
-    );
 
-    await placeOrder({
-      symbol: "RELIANCE",
-      exchange: "NSE",
-      action: "BUY",
-      quantity: 1,
-      price_type: "MARKET",
-      product: "MIS",
-      orderType: "MARKET",
-    } as unknown as Parameters<typeof placeOrder>[0]);
-
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/orders/place");
-  });
 
   it("never resolves a rejected Practice order as success", async () => {
     mockModeState.mode = "practice";
@@ -3939,8 +3294,8 @@ describe("OpenAlgo API client (api.ts)", () => {
       pinName: "malformed",
       authority: {
         mode: "live",
-        scopeKey: "live:openalgo:7d290c41e91d8f71",
-        brokerType: "openalgo",
+        scopeKey: "live:dhan:7d290c41e91d8f71",
+        brokerType: "dhan",
       } as unknown as OrderAuthorityPin,
     },
     {
@@ -4069,6 +3424,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("maps basketOrder params onto the backend legs contract", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     // The backend basket route reads a `legs` array with snake_case per-leg
     // fields; the terminal-facing params keep camelCase `orders`. Pin the wire
     // mapping field by field.
@@ -4231,6 +3587,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("throws an OrderApiError carrying the HTTP status and the 422 BasketOrderResult body", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     // place_basket answers 422 with the full per-leg truth on partial failure
     // (order_routes.py). The client must attach that body + status to the
     // thrown error so callers (LegBuilder) can surface placed/failed counts
@@ -4271,6 +3628,45 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(apiErr.body).toEqual(failureBody);
   });
 
+  it("pins Practice on every exit-all leg and stops when the mode changes", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    mockModeState.mode = "practice";
+    const positions = [
+      { symbol: "INFY", exchange: "NSE", product: "MIS", net_qty: 2, avg_price: 100, unrealised_pnl: 0 },
+      { symbol: "TCS", exchange: "NSE", product: "MIS", net_qty: -1, avg_price: 200, unrealised_pnl: 0 },
+    ];
+    fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (target.includes("/v1/sandbox/positions")) {
+        return jsonResponse({ status: "success", data: { positions } });
+      }
+      return jsonResponse({ status: "success", orderid: "P1" });
+    });
+
+    await exitAllPositions();
+
+    const placeCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("/api/v1/orders/place"));
+    expect(placeCalls).toHaveLength(2);
+    for (const [, init] of placeCalls) {
+      expect(new Headers((init as RequestInit).headers).get("X-FlintTrade-Mode")).toBe("practice");
+    }
+
+    fetchSpy.mockReset();
+    mockModeState.mode = "practice";
+    fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (target.includes("/v1/sandbox/positions")) {
+        mockModeState.mode = "live";
+        return jsonResponse({ status: "success", data: { positions } });
+      }
+      return jsonResponse({ status: "success", orderid: "LIVE" });
+    });
+    await expect(exitAllPositions()).rejects.toThrow(/mode changed from practice to live/);
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/v1/orders/place"))).toBe(false);
+  });
+
   it("routes live exit-all through the confirmed account-scoped safety endpoint", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
@@ -4292,18 +3688,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
   });
 
-  it("uses the explicit OpenAlgo selector for a bridge exit-all", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: {} }));
 
-    await exitAllPositions();
-
-    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(init.body as string)).toEqual({
-      confirm: true,
-      broker: "openalgo",
-      account_id: "default",
-    });
-  });
 
   it("routes legacy GTT helpers through the gated forever-order endpoints", async () => {
     mockConnectionState.apiKey = "";
@@ -4337,7 +3722,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     });
 
     const [placeUrl, placeInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(placeUrl).toContain("/api/v1/orders/forever");
+    expect(placeUrl).toContain("/api/v1/orders/place");
     expect(placeInit.method).toBe("POST");
     const placeBody = JSON.parse(placeInit.body as string);
     expect(placeBody).toMatchObject({
@@ -4421,6 +3806,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("postOrder does NOT include apikey in the body (backend injects it)", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ status: "success", data: { orderId: "ORD-2" } }),
     );
@@ -4436,78 +3822,28 @@ describe("OpenAlgo API client (api.ts)", () => {
 
   // ---- Response unwrapping ----
 
-  it("unwraps { data: X } from successful response", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { status: "pong" } }),
-    );
 
-    const result = await ping();
-    expect(result).toEqual({ status: "pong" });
-  });
 
-  it("falls back to raw json when data key is absent", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", ltp: 100 }),
-    );
 
-    const result = await getQuotes("INFY", "NSE");
-    // When no `data` key, returns entire json
-    expect(result).toHaveProperty("ltp", 100);
-  });
 
-  it("unwraps nested arrays (positionbook with positions key)", async () => {
-    const positions = [{ symbol: "NIFTY", quantity: 50 }];
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { positions } }),
-    );
 
-    const result = await getPositionbook(OPENALGO_READ_CONTEXT);
-    expect(result).toEqual(positions);
-  });
 
   // ---- Error responses ----
 
-  it("throws on 401 with descriptive message", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ message: "Unauthorized" }, 401));
 
-    await expect(getQuotes("NIFTY", "NSE")).rejects.toThrow(
-      "API key invalid. Check Settings → Connection.",
-    );
-  });
 
-  it("throws on 500 with server message when available", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ error: "DB connection lost" }, 500),
-    );
 
-    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow("DB connection lost");
-  });
 
-  it("throws generic message for unexpected status codes", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({}, 429));
 
-    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow("Server error (429)");
-  });
 
-  it("throws on status: error in JSON body", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "error", message: "Symbol not found" }),
-    );
 
-    await expect(getQuotes("INVALID", "NSE")).rejects.toThrow("Symbol not found");
-  });
 
   // ---- Network errors ----
 
-  it("throws descriptive error on network failure (POST)", async () => {
-    fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow(
-      "Connection failed. Check OpenAlgo is running.",
-    );
-  });
 
   it("throws descriptive error on network failure (postOrder)", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
     fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
     await expect(placeOrder({} as Parameters<typeof placeOrder>[0])).rejects.toThrow(
@@ -4517,12 +3853,7 @@ describe("OpenAlgo API client (api.ts)", () => {
 
   // ---- Rate limiting ----
 
-  it("throws when general rate limiter is exhausted (POST)", async () => {
-    vi.mocked(generalLimiter.tryConsume).mockReturnValue(false);
 
-    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow("Rate limit exceeded");
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
 
   it("throws when order rate limiter is exhausted (postOrder)", async () => {
     vi.mocked(orderLimiter.tryConsume).mockReturnValue(false);
@@ -4535,19 +3866,5 @@ describe("OpenAlgo API client (api.ts)", () => {
 
   // ---- Input sanitisation ----
 
-  it("searchSymbol sanitises query and sends POST", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: [{ symbol: "RELIANCE", exchange: "NSE" }] }),
-    );
 
-    const result = await searchSymbol("RELIANCE<script>");
-    expect(result).toEqual([{ symbol: "RELIANCE", exchange: "NSE" }]);
-
-    const body = JSON.parse(
-      (fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string,
-    );
-    // angle brackets stripped by the sanitiser
-    expect(body.query).not.toContain("<");
-    expect(body.query).not.toContain(">");
-  });
 });

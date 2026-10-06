@@ -131,7 +131,6 @@ function safetyAccountTarget(): SafetyAccountTarget | undefined {
   const apiKey = useConnectionStore.getState().apiKey;
   const nativeTarget = pickNativeBrokerOrderTarget(mode, apiKey);
   if (nativeTarget) return nativeTarget;
-  if (mode === "live" && apiKey.trim()) return { broker: "openalgo", account_id: "default" };
   return undefined;
 }
 

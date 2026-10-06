@@ -5,14 +5,30 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAdvisorLlmStatus } from "@/hooks/useAdvisorLlmStatus";
-import { probeDeskHealth, probeLocalPing, probePublicInternet, probePublicSite } from "@/lib/operatorProbes";
+import { LAYA_STATUS_POLL_MS } from "@/lib/layaStatus";
+import {
+  probeDeskHealth,
+  probeLocalPing,
+  probePublicInternet,
+  probePublicSite,
+  type PingProbe,
+} from "@/lib/operatorProbes";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
+
+interface LayaPingSample {
+  probe: PingProbe;
+  epoch: number;
+}
 
 export function OperatorIncidentProbes() {
   const ping = useQuery({
     queryKey: ["operator", "ping"],
-    queryFn: () => probeLocalPing(),
-    refetchInterval: 30_000,
+    queryFn: async (): Promise<LayaPingSample> => {
+      const epoch = useOperatorSignalStore.getState().layaEpoch;
+      return { probe: await probeLocalPing(), epoch };
+    },
+    refetchInterval: LAYA_STATUS_POLL_MS,
+    refetchIntervalInBackground: true,
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -44,8 +60,26 @@ export function OperatorIncidentProbes() {
   useEffect(() => {
     if (!ping.data) return;
     const store = useOperatorSignalStore.getState();
-    store.setPing(ping.data);
-    store.setDecisionStatus(ping.data.laya ?? "down");
+    if (ping.data.epoch !== store.layaEpoch) return;
+    const sample = ping.data.probe;
+    const validHeartbeat = sample.localPing === "ok" && sample.layaHeartbeatValid;
+    // Failed/invalid reads can revoke readiness, but cannot select another backend
+    // or turn an unmanaged Ollama install into a sidecar Start action.
+    if (validHeartbeat) {
+      store.setLayaRoute(sample.layaRoute);
+      store.setLayaManaged(sample.layaManaged === true);
+      store.setLayaPort(sample.layaPort);
+    }
+    store.setLayaChecking(validHeartbeat && sample.layaChecking === true);
+    store.setPing(sample);
+    store.setDecisionStatus(validHeartbeat ? sample.laya ?? "down" : "down");
+    store.setLayaPracticeStatus(validHeartbeat ? sample.layaPractice ?? "down" : "down");
+    store.setLayaLiveQualified(validHeartbeat && sample.layaLiveQualified);
+    store.setLayaReason(validHeartbeat ? sample.layaReason : null);
+    store.setLayaDownloadProgress(
+      validHeartbeat ? sample.layaDownloadBytes : null,
+      validHeartbeat ? sample.layaDownloadTotal : null,
+    );
   }, [ping.data]);
 
   useEffect(() => {

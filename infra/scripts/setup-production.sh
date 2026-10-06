@@ -82,13 +82,11 @@ sudo "$VENV_DIR/bin/python" "$INSTALL_DIR/scripts/broker_sdk_environment.py" rep
 echo "Installing node workspace and building the terminal..."
 flinttrade_build_terminal "$INSTALL_DIR"
 
-# Create a minimal server fallback env file if not present. OpenAlgo and broker
 # settings should be completed in the app Setup/Settings UI.
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo "Creating minimal server fallback .env..."
     sudo tee "$INSTALL_DIR/.env" >/dev/null <<'EOF'
 # FlintTrade server fallback environment.
-# Use Setup/Settings for OpenAlgo and broker configuration.
 EOF
     echo ""
     echo "Runtime configuration is completed from the app UI after startup."

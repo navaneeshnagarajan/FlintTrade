@@ -77,7 +77,7 @@ async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order(*, bac
         return True
 
     router = BrokerRouter(
-        {"openalgo": adapter},
+        {"broker": adapter},
         session_provider,
         consume_gate=consume_gate, backend_lease_proof=backend_lease_factory()
     )
@@ -86,13 +86,13 @@ async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order(*, bac
         actor_type="agent",
         actor_id="strategy:ema",
         mode="live",
-        selector="openalgo:default",
+        selector="broker:default",
     )
     dispatcher = GatedStrategyDispatcher(
         safety=_passing_safety(),
         request_context_provider=lambda: request_ctx,
         router_provider=lambda: router,
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
@@ -118,7 +118,7 @@ async def test_live_dispatch_without_selector_fails_with_typed_runtime_error() -
         safety=_passing_safety(),
         request_context_provider=lambda: request_ctx,
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
@@ -165,7 +165,7 @@ async def test_live_dispatch_checks_prospective_greeks_before_router() -> None:
         actor_type="agent",
         actor_id="strategy:greeks",
         mode="live",
-        selector="openalgo:default",
+        selector="broker:default",
     )
     recorder = _BlockingSafety()
     safety = _passing_safety()
@@ -174,7 +174,7 @@ async def test_live_dispatch_checks_prospective_greeks_before_router() -> None:
         safety=safety,
         request_context_provider=lambda: request_ctx,
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_prospective_state,
     )
@@ -199,16 +199,16 @@ async def test_scheduled_agent_dispatch_refuses_revoked_backend(backend_lease_fa
     proof = backend_lease_factory()
     adapter = _TokenCheckingAdapter()
     router = BrokerRouter(
-        {"openalgo": adapter}, lambda *_: SimpleNamespace(is_read_only=False, algo_id=""),
+        {"broker": adapter}, lambda *_: SimpleNamespace(is_read_only=False, algo_id=""),
         backend_lease_proof=proof,
     )
     request_ctx = RequestContext(
         jti="revoked-strategy", actor_type="agent", actor_id="strategy:synthetic",
-        mode="live", selector="openalgo:default",
+        mode="live", selector="broker:default",
     )
     dispatcher = GatedStrategyDispatcher(
         safety=_passing_safety(), request_context_provider=lambda: request_ctx,
-        router_provider=lambda: router, adapter_id="openalgo", account_id="default",
+        router_provider=lambda: router, adapter_id="broker", account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
     proof.revoke()
@@ -233,13 +233,13 @@ def _automate_dispatcher(safety: object) -> GatedStrategyDispatcher:
         actor_type="agent",
         actor_id="strategy:laya",
         mode="live",
-        selector="openalgo:default",
+        selector="broker:default",
     )
     return GatedStrategyDispatcher(
         safety=safety,
         request_context_provider=lambda: request_ctx,
         router_provider=lambda: MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
         portfolio_state_provider=_portfolio_state,
     )
@@ -260,6 +260,84 @@ async def test_degraded_automate_clamp_does_not_shrink_and_place() -> None:
     process_laya().set_status(DecisionStatus.DEGRADED)
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
-    with pytest.raises(RuntimeError, match=r"Qty reduced to 1 \(Laya limit\)"):
+    with pytest.raises(RuntimeError, match=r"Not placed\. Laya allows up to 1\."):
         await dispatcher.dispatch_order(Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="2"))
+    safety.check_order.assert_not_called()
+
+
+def _allowing_answers() -> dict[str, object]:
+    return {
+        "rationale": {"probabilities": {"A": 0.9, "B": 0.1}},
+        "tilt": {"probabilities": {"A": 0.1, "B": 0.9}},
+        "side": {"probabilities": {"A": 0.1, "B": 0.9}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_model_deny_never_reaches_safety() -> None:
+    seen: list[str] = []
+
+    class _Host:
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            seen.append(state)
+            answers = _allowing_answers()
+            answers["tilt"] = {"probabilities": {"A": 0.97, "B": 0.03}}
+            return {"answers": answers}
+
+    process_laya().set_decision_client(_Host())
+    safety = MagicMock()
+    dispatcher = _automate_dispatcher(safety)
+    order = Order(
+        symbol="RELIANCE",
+        exchange="NSE",
+        action="BUY",
+        quantity="1",
+        admission_note="Chasing the loss from the last trade.",
+    )
+    with pytest.raises(RuntimeError, match="tilt or revenge"):
+        await dispatcher.dispatch_order(order)
+    safety.check_order.assert_not_called()
+    assert seen == ["Order side: BUY\nNote:\nChasing the loss from the last trade."]
+
+
+@pytest.mark.asyncio
+async def test_admission_runs_off_the_event_loop() -> None:
+    import asyncio
+    import time
+
+    events: list[str] = []
+
+    class _Slow:
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            events.append("decide-start")
+            time.sleep(0.3)
+            events.append("decide-end")
+            answers = _allowing_answers()
+            answers["tilt"] = {"probabilities": {"A": 0.97, "B": 0.03}}
+            return {"answers": answers}
+
+    process_laya().set_decision_client(_Slow())
+    safety = MagicMock()
+    dispatcher = _automate_dispatcher(safety)
+    order = Order(
+        symbol="RELIANCE",
+        exchange="NSE",
+        action="BUY",
+        quantity="1",
+        admission_note="Buying the planned breakout.",
+    )
+
+    async def _watch() -> None:
+        await asyncio.sleep(0.05)
+        events.append("loop")
+
+    watch = asyncio.create_task(_watch())
+    task = asyncio.create_task(dispatcher.dispatch_order(order))
+    await watch
+    assert "decide-start" in events
+    assert "loop" in events
+    assert "decide-end" not in events
+    with pytest.raises(RuntimeError, match="tilt or revenge"):
+        await task
+    assert events.index("loop") < events.index("decide-end")
     safety.check_order.assert_not_called()

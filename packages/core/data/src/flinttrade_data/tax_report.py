@@ -30,6 +30,7 @@ Usage::
     gen = TaxReportGenerator()
     summary = gen.compute_pnl_by_segment(trades, fy="2025-26")
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,8 +49,8 @@ LTCG_THRESHOLD_DAYS = 365
 LTCG_EXEMPTION = 125_000.0
 
 # Tax rates
-LTCG_RATE = 0.125        # 12.5%
-STCG_RATE = 0.20         # 20%
+LTCG_RATE = 0.125  # 12.5%
+STCG_RATE = 0.20  # 20%
 BUSINESS_INCOME_RATE = 0.30  # estimated slab rate for business income
 
 # STT rates. Derivative rates are selected using each transaction date.
@@ -67,9 +68,7 @@ TAX_ESTIMATE_METHODOLOGY = (
     "Indicative estimate from realised P&L only: equity LTCG and STCG use the modelled capital-gains rates, "
     "while net positive business income uses an illustrative 30% slab-rate assumption."
 )
-STT_METHODOLOGY = (
-    "STT is calculated per transaction date on the applicable taxable value; the existing equity treatment is unchanged."
-)
+STT_METHODOLOGY = "STT is calculated per transaction date on the applicable taxable value; the existing equity treatment is unchanged."
 STT_RATE_PROVENANCE = (
     "Derivative sell-side option/futures rates are 0.0625%/0.0125% before 1 October 2024, 0.1%/0.02% from "
     "1 October 2024 through 31 March 2026, and 0.15%/0.05% from 1 April 2026; the effective-date changes follow "
@@ -105,6 +104,7 @@ def _derivative_stt_rates(transaction_date: str) -> tuple[float, float]:
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
+
 
 @dataclass
 class TaxableTransaction:
@@ -175,6 +175,7 @@ class TaxSummary:
 
 # ── Generator ────────────────────────────────────────────────────────────────
 
+
 class TaxReportGenerator:
     """Generate indicative tax P&L reports from trade history.
 
@@ -182,7 +183,8 @@ class TaxReportGenerator:
     """
 
     def classify_trades(
-        self, trades: list[TaxableTransaction],
+        self,
+        trades: list[TaxableTransaction],
     ) -> dict[str, list[TaxableTransaction]]:
         """Classify trades into segment buckets.
 
@@ -338,7 +340,9 @@ class TaxReportGenerator:
         return False
 
     def compute_pnl_by_segment(
-        self, trades: list[TaxableTransaction], fy: str = "",
+        self,
+        trades: list[TaxableTransaction],
+        fy: str = "",
     ) -> TaxSummary:
         """Compute P&L broken down by segment and estimate tax liability.
 
@@ -396,13 +400,23 @@ class TaxReportGenerator:
         logger.info(
             "Tax report FY %s: LTCG=%.2f STCG=%.2f Intraday=%.2f F&O=%.2f "
             "Commodity=%.2f STT=%.2f Turnover=%.2f Tax=%.2f Audit=%s",
-            fy, equity_ltcg, equity_stcg, intraday_pnl, fno_pnl,
-            commodity_pnl, stt, turnover, tax_liability, audit_required,
+            fy,
+            equity_ltcg,
+            equity_stcg,
+            intraday_pnl,
+            fno_pnl,
+            commodity_pnl,
+            stt,
+            turnover,
+            tax_liability,
+            audit_required,
         )
         return summary
 
     def generate_report(
-        self, trades: list[TaxableTransaction], fy: str,
+        self,
+        trades: list[TaxableTransaction],
+        fy: str,
     ) -> dict[str, Any]:
         """Generate a full tax report with summary and per-segment breakdown.
 
@@ -431,9 +445,7 @@ class TaxReportGenerator:
                         "quantity": t.quantity,
                         "price": t.price,
                         "buy_price": t.buy_price,
-                        "pnl": round((t.price - t.buy_price) * t.quantity, 2)
-                        if t.action.upper() == "SELL"
-                        else 0.0,
+                        "pnl": round((t.price - t.buy_price) * t.quantity, 2) if t.action.upper() == "SELL" else 0.0,
                         "holding_period_days": t.holding_period_days,
                     }
                     for t in seg_trades

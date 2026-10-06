@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import json
+import socket
 import subprocess
 import tomllib
 from pathlib import Path
@@ -16,6 +19,7 @@ def _write_brokers_lock(
     root: Path,
     *,
     version: str = checker.KOTAK_VERSION,
+    release_version: str = "3.0.7",
     main_commit: str = checker.RUNTIME_MAIN_COMMIT,
     release_tag: str = checker.RELEASE_TAG,
     release_commit: str = checker.RELEASE_COMMIT,
@@ -27,6 +31,7 @@ def _write_brokers_lock(
                 "[[broker]]",
                 'name = "kotakneoapi"',
                 f'version = "{version}"',
+                f'release_version = "{release_version}"',
                 f'source_commit = "{main_commit}"',
                 f'release_tag = "{release_tag}"',
                 f'release_commit = "{release_commit}"',
@@ -54,13 +59,14 @@ def _snapshot(
     revision: str = checker.RUNTIME_MAIN_COMMIT,
     *,
     url: str = checker.KOTAK_REPO,
+    version: str = checker.KOTAK_VERSION,
     requested_revision: str | None = None,
 ) -> dict[str, object]:
     requested = revision if requested_revision is None else requested_revision
     return {
         "distributions": {
             "kotakneoapi": {
-                "version": "3.0.7",
+                "version": version,
                 "direct_url": {
                     "url": url,
                     "vcs_info": {
@@ -77,11 +83,85 @@ def _snapshot(
         "environment_root": "/contract/env",
         "cwd_files": [],
         "contract_ok": True,
+        "read_contract_ok": True,
+        "read_failure_contract_ok": True,
+        "feed_cancellation_contract_ok": True,
     }
 
 
 def test_validate_probe_accepts_exact_git_distribution() -> None:
     checker.validate_probe_result(_snapshot(), checker.TRACKS[0])
+
+
+def _probe_loop_classes():
+    nodes = ast.parse(checker._PROBE_SCRIPT).body
+    classes = [
+        node for node in nodes if isinstance(node, ast.ClassDef) and node.name in {"NoIOSelector", "NoSocketEventLoop"}
+    ]
+    assert len(classes) == 2
+    imports = ast.parse("import asyncio\nimport selectors\n").body
+    namespace = {}
+    exec(
+        compile(ast.Module(body=[*imports, *classes], type_ignores=[]), "<real-offline-probe-loop>", "exec"), namespace
+    )
+    return namespace["NoIOSelector"], namespace["NoSocketEventLoop"]
+
+
+def test_actual_probe_loop_preserves_task_cancellation_without_a_socket(monkeypatch) -> None:
+    _, loop_class = _probe_loop_classes()
+
+    def forbidden_socketpair(*_args, **_kwargs):
+        pytest.fail("the offline probe must not construct a wake-up socketpair")
+
+    monkeypatch.setattr(socket, "socketpair", forbidden_socketpair)
+
+    async def probe():
+        started = asyncio.Event()
+
+        async def receiver():
+            started.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(receiver())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert task.cancelled()
+
+    with asyncio.Runner(loop_factory=loop_class) as runner:
+        runner.run(probe())
+
+
+def test_actual_probe_loop_refuses_io_stalls_and_unbounded_progress() -> None:
+    selector_class, loop_class = _probe_loop_classes()
+    loop = loop_class()
+    try:
+        for method in (
+            "add_reader",
+            "add_writer",
+            "sock_recv",
+            "sock_recv_into",
+            "sock_recvfrom",
+            "sock_recvfrom_into",
+            "sock_sendall",
+            "sock_sendto",
+            "sock_connect",
+            "sock_accept",
+            "sock_sendfile",
+        ):
+            with pytest.raises(AssertionError, match="real I/O is forbidden"):
+                getattr(loop, method)(None)
+    finally:
+        loop.close()
+
+    with pytest.raises(AssertionError, match="stalled"):
+        selector_class().select(None)
+    selector = selector_class()
+    for _ in range(256):
+        assert selector.select(0) == []
+    with pytest.raises(AssertionError, match="scheduling bound"):
+        selector.select(0)
 
 
 @pytest.mark.parametrize(
@@ -120,23 +200,25 @@ def test_validate_probe_accepts_exact_git_distribution() -> None:
             "requested revision",
         ),
         (
-            lambda row: row["distributions"]["kotakneoapi"]["direct_url"]["vcs_info"].update(
-                requested_revision="main"
-            ),
+            lambda row: row["distributions"]["kotakneoapi"]["direct_url"]["vcs_info"].update(requested_revision="main"),
             "requested revision",
         ),
         (lambda row: row.update(distribution_counts={"kotakneoapi": 2}), "ambiguous"),
         (lambda row: row.pop("distribution_counts"), "ambiguous"),
         (lambda row: row["namespace_owners"].append("some-other-dist"), "namespace"),
         (
-            lambda row: row["distributions"].update(
-                {"neo-api-client": {"version": "2.0.0", "direct_url": None}}
-            ),
+            lambda row: row["distributions"].update({"neo-api-client": {"version": "2.0.0", "direct_url": None}}),
             "neo-api-client",
         ),
         (lambda row: row.update(module_path="/checkout/neo_api_client/__init__.py"), "environment"),
         (lambda row: row["cwd_files"].append("logs/neo-api-client.log"), "log"),
         (lambda row: row.update(contract_ok=False), "contract"),
+        (lambda row: row.update(read_contract_ok=False), "read contract"),
+        (lambda row: row.pop("read_contract_ok"), "read contract"),
+        (lambda row: row.update(read_failure_contract_ok=False), "read failure contract"),
+        (lambda row: row.pop("read_failure_contract_ok"), "read failure contract"),
+        (lambda row: row.update(feed_cancellation_contract_ok=False), "feed cancellation contract"),
+        (lambda row: row.pop("feed_cancellation_contract_ok"), "feed cancellation contract"),
     ],
 )
 def test_validate_probe_rejects_unattested_or_ambiguous_install(mutate, message: str) -> None:
@@ -148,10 +230,10 @@ def test_validate_probe_rejects_unattested_or_ambiguous_install(mutate, message:
 
 
 def test_release_track_requires_the_peeled_release_commit() -> None:
-    checker.validate_probe_result(_snapshot(checker.RELEASE_COMMIT), checker.TRACKS[1])
+    checker.validate_probe_result(_snapshot(checker.RELEASE_COMMIT, version="3.0.7"), checker.TRACKS[1])
 
     with pytest.raises(checker.ContractError, match="commit"):
-        checker.validate_probe_result(_snapshot(checker.RUNTIME_MAIN_COMMIT), checker.TRACKS[1])
+        checker.validate_probe_result(_snapshot(checker.RUNTIME_MAIN_COMMIT, version="3.0.7"), checker.TRACKS[1])
 
 
 def test_contract_config_is_derived_from_the_authoritative_broker_lock(tmp_path: Path) -> None:
@@ -162,11 +244,43 @@ def test_contract_config_is_derived_from_the_authoritative_broker_lock(tmp_path:
     assert config == checker.ContractConfig(
         repo_url=checker.KOTAK_REPO,
         version=checker.KOTAK_VERSION,
+        release_version="3.0.7",
         runtime_main_commit=checker.RUNTIME_MAIN_COMMIT,
         release_tag=checker.RELEASE_TAG,
         release_commit=checker.RELEASE_COMMIT,
     )
     assert checker.build_tracks(config)[1].release_tag == checker.RELEASE_TAG
+
+
+def test_contract_keeps_runtime_and_release_versions_independent(tmp_path: Path) -> None:
+    _write_brokers_lock(tmp_path, version="3.0.8", release_version="3.0.7")
+
+    runtime, release = checker.build_tracks(checker.load_contract_config(tmp_path))
+
+    assert runtime.version == "3.0.8"
+    assert release.version == "3.0.7"
+    state = _snapshot(runtime.revision)
+    state["distributions"]["kotakneoapi"]["version"] = "3.0.8"
+    checker.validate_probe_result(state, runtime)
+    with pytest.raises(checker.ContractError, match="version"):
+        checker.validate_probe_result(state, release)
+
+
+@pytest.mark.parametrize("release_version", ["", "3.0.7rc1", "v3.0.7"])
+def test_contract_rejects_nonstable_release_versions(tmp_path: Path, release_version: str) -> None:
+    _write_brokers_lock(tmp_path, release_version=release_version)
+
+    with pytest.raises(checker.ContractError, match="release version"):
+        checker.load_contract_config(tmp_path)
+
+
+def test_contract_requires_explicit_release_version(tmp_path: Path) -> None:
+    _write_brokers_lock(tmp_path)
+    path = tmp_path / "brokers.lock"
+    path.write_text(path.read_text().replace('release_version = "3.0.7"\n', ""))
+
+    with pytest.raises(checker.ContractError, match="release version"):
+        checker.load_contract_config(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -216,6 +330,128 @@ def test_subprocess_environment_scrubs_credentials_and_isolates_home(tmp_path: P
         "PYTHONPATH",
     ):
         assert forbidden not in environment
+
+
+def test_probe_keeps_sdk_cache_outside_its_no_file_working_directory(tmp_path: Path) -> None:
+    track = checker.TRACKS[0]
+    target = tmp_path / "sdk-env"
+
+    def run(args, **kwargs):
+        command = list(map(str, args))
+        if "-c" not in command:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        home = Path(kwargs["env"]["HOME"])
+        assert home.is_dir()
+        assert home.is_relative_to(tmp_path)
+        assert not home.is_relative_to(kwargs["cwd"])
+        state = _snapshot(version=track.version)
+        state["environment_root"] = str(target)
+        state["module_path"] = str(target / "lib/neo_api_client/__init__.py")
+        return subprocess.CompletedProcess(command, 0, json.dumps(state), "")
+
+    checker._probe_track(track, target, tmp_path, run=run, repo=checker.REPO, base_env={})
+
+
+def test_release_contract_preserves_source_with_exact_release_dependency(tmp_path: Path) -> None:
+    track = checker.TRACKS[1]
+    target = tmp_path / "sdk-env"
+    source = checker.REPO / "packages/integrations/gateway"
+    original_metadata = (source / "pyproject.toml").read_text()
+    tracked = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--",
+            "packages/integrations/gateway/pyproject.toml",
+            "packages/integrations/gateway/src/",
+        ],
+        cwd=checker.REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+    tracked = {Path(path).relative_to("packages/integrations/gateway") for path in tracked if path and (checker.REPO / path).is_file()}
+    release_projects = []
+
+    def run(args, **kwargs):
+        command = list(map(str, args))
+        if command[:2] == ["git", "ls-files"]:
+            return subprocess.run(command, cwd=kwargs["cwd"], capture_output=True, text=True, check=False)
+        if "--editable" in command:
+            gateway = Path(command[-1])
+            metadata = (gateway / "pyproject.toml").read_text()
+            assert '"kotakneoapi==3.0.7"' in metadata
+            assert metadata.replace('"kotakneoapi==3.0.7"', '"kotakneoapi==3.0.8"') == original_metadata
+            assert gateway.is_relative_to(tmp_path)
+            assert {path.relative_to(gateway) for path in gateway.rglob("*") if path.is_file()} == tracked
+            for relative in tracked - {Path("pyproject.toml")}:
+                assert (gateway / relative).read_bytes() == (source / relative).read_bytes()
+            release_projects.append(gateway)
+        if "-c" in command:
+            state = _snapshot(track.revision, version="3.0.7")
+            state["environment_root"] = str(target)
+            state["module_path"] = str(target / "lib/neo_api_client/__init__.py")
+            return subprocess.CompletedProcess(command, 0, json.dumps(state), "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    checker._probe_track(track, target, tmp_path, run=run, repo=checker.REPO, base_env={})
+
+    assert len(release_projects) == 1
+    assert (source / "pyproject.toml").read_text() == original_metadata
+
+
+@pytest.mark.parametrize(
+    "dependency", ['"kotakneoapi>=3.0.8"', '"kotakneoapi==3.0.7"', '"kotakneoapi==3.0.8", "kotakneoapi==3.0.8"']
+)
+def test_release_copy_refuses_to_edit_an_unexpected_dependency(tmp_path: Path, dependency: str) -> None:
+    repo = tmp_path / "repo"
+    source = repo / "packages/integrations/gateway"
+    source.mkdir(parents=True)
+    _write_brokers_lock(repo)
+    original = f"[project]\ndependencies = [{dependency}]\n"
+    (source / "pyproject.toml").write_text(original)
+
+    def run(*args, **kwargs):
+        pytest.fail("unexpected dependency must be rejected before reading tracked source")
+
+    with pytest.raises(checker.ContractError, match="exactly one exact runtime SDK dependency"):
+        checker._release_gateway_project(checker.TRACKS[1], tmp_path / "workspace", repo=repo, run=run, env={})
+
+    assert (source / "pyproject.toml").read_text() == original
+    assert not (tmp_path / "workspace").exists()
+
+
+def test_release_copy_excludes_untracked_local_data_and_preserves_source(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    source = repo / "packages/integrations/gateway"
+    (source / "src/example").mkdir(parents=True)
+    _write_brokers_lock(repo)
+    metadata = '[project]\ndependencies = ["kotakneoapi==3.0.8", "flinttrade-engine"]\n'
+    (source / "pyproject.toml").write_text(metadata)
+    code = b"VALUE = 1\n"
+    (source / "src/example/__init__.py").write_bytes(code)
+    (source / "src/local-config.json").write_text('{"synthetic_local_only": true}\n')
+    (source / "build-data").mkdir()
+    (source / "build-data/local.json").write_text("{}\n")
+
+    def run(args, **kwargs):
+        assert list(args)[:3] == ["git", "ls-files", "-z"]
+        files = "packages/integrations/gateway/pyproject.toml\0packages/integrations/gateway/src/example/__init__.py\0"
+        return subprocess.CompletedProcess(args, 0, files, "")
+
+    target = checker._release_gateway_project(checker.TRACKS[1], tmp_path / "workspace", repo=repo, run=run, env={})
+
+    assert {path.relative_to(target) for path in target.rglob("*") if path.is_file()} == {
+        Path("pyproject.toml"),
+        Path("src/example/__init__.py"),
+    }
+    assert (target / "pyproject.toml").read_text().replace("3.0.7", "3.0.8") == metadata
+    assert (target / "src/example/__init__.py").read_bytes() == code
+    assert (source / "pyproject.toml").read_text() == metadata
+    assert (source / "src/example/__init__.py").read_bytes() == code
+    assert (source / "src/local-config.json").exists()
+    assert (source / "build-data/local.json").exists()
 
 
 def test_build_track_commands_install_locked_base_then_one_git_sdk_then_editables(tmp_path: Path) -> None:
@@ -308,10 +544,7 @@ def test_scan_result_rejects_conflicting_or_duplicate_summaries() -> None:
     result = subprocess.CompletedProcess(
         ["scanner"],
         0,
-        (
-            "0 error(s), 0 warning(s) across 7 file(s).\n"
-            "1 error(s), 2 warning(s) across 7 file(s).\n"
-        ),
+        ("0 error(s), 0 warning(s) across 7 file(s).\n1 error(s), 2 warning(s) across 7 file(s).\n"),
         "",
     )
 

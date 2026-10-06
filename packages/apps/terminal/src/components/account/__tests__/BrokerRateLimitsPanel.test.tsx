@@ -29,25 +29,25 @@ function renderPanel() {
 describe("BrokerRateLimitsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGet.mockResolvedValue({ openalgo: { order: 10, data: 5 } });
-    mockSet.mockResolvedValue({ openalgo: { order: 3, data: 5 } });
+    mockGet.mockResolvedValue({ dhan: { order: 10, data: 5 } });
+    mockSet.mockResolvedValue({ dhan: { order: 3, data: 5 } });
   });
 
   it("shows each broker's live order/data limits", async () => {
     renderPanel();
-    expect(await screen.findByText("openalgo")).toBeInTheDocument();
-    expect(screen.getByLabelText(/openalgo order rate/i)).toHaveValue("10");
-    expect(screen.getByLabelText(/openalgo data rate/i)).toHaveValue("5");
+    expect(await screen.findByText("dhan")).toBeInTheDocument();
+    expect(screen.getByLabelText(/dhan order rate/i)).toHaveValue("10");
+    expect(screen.getByLabelText(/dhan data rate/i)).toHaveValue("5");
   });
 
   it("saves an edited limit through the gateway", async () => {
     renderPanel();
-    await screen.findByText("openalgo");
+    await screen.findByText("dhan");
 
-    fireEvent.change(screen.getByLabelText(/openalgo order rate/i), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: /save openalgo rate limits/i }));
+    fireEvent.change(screen.getByLabelText(/dhan order rate/i), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /save dhan rate limits/i }));
 
-    await waitFor(() => expect(mockSet).toHaveBeenCalledWith("openalgo", 3, 5));
+    await waitFor(() => expect(mockSet).toHaveBeenCalledWith("dhan", 3, 5));
   });
 
   it("shows an honest empty state when no limiter is active", async () => {
@@ -58,9 +58,9 @@ describe("BrokerRateLimitsPanel", () => {
 
   it("blocks saving a negative rate", async () => {
     renderPanel();
-    await screen.findByText("openalgo");
-    fireEvent.change(screen.getByLabelText(/openalgo order rate/i), { target: { value: "-2" } });
-    expect(screen.getByRole("button", { name: /save openalgo rate limits/i })).toBeDisabled();
+    await screen.findByText("dhan");
+    fireEvent.change(screen.getByLabelText(/dhan order rate/i), { target: { value: "-2" } });
+    expect(screen.getByRole("button", { name: /save dhan rate limits/i })).toBeDisabled();
     expect(mockSet).not.toHaveBeenCalled();
   });
 });

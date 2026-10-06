@@ -1,7 +1,7 @@
 """Margin calculator — per-account margin requirements and availability.
 
 Adapts AlgoMirror's margin_calculator.py patterns. Fetches margin info from
-each account's OpenAlgo instance and calculates whether orders can be placed.
+each account's broker instance and calculates whether orders can be placed.
 Supports all product types (CNC, MIS, NRML) and all exchanges.
 """
 
@@ -10,8 +10,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
-
-import httpx
 
 from .account_manager import BrokerAccount
 
@@ -87,28 +85,13 @@ class MarginCalculator:
     """
 
     # ------------------------------------------------------------------
-    # Fetch margin from OpenAlgo
+    # Fetch margin from broker
     # ------------------------------------------------------------------
 
     @staticmethod
     def get_margin_info(account: BrokerAccount) -> MarginInfo:
-        """Fetch available margin for an account via OpenAlgo /api/v1/funds."""
-        result = MarginInfo(account_id=account.account_id)
-        url = f"{account.openalgo_host.rstrip('/')}/api/v1/funds"
-        try:
-            with httpx.Client(timeout=10.0) as http:
-                resp = http.post(url, json={"apikey": account.api_key})
-                if resp.status_code == 200:
-                    data = resp.json()
-                    result.available_balance = float(data.get("available_balance", 0))
-                    result.used_margin = float(data.get("used_margin", 0))
-                    result.total_balance = float(data.get("total_balance", 0))
-                    if result.total_balance > 0:
-                        result.utilization_pct = (result.used_margin / result.total_balance) * 100
-        except Exception as exc:
-            logger.error("Margin fetch failed for %s: %s", account.account_id, exc)
-
-        return result
+        """Refuse reads until native copy-account margin authority is implemented."""
+        raise RuntimeError("Native copy-trading margin reader is unavailable")
 
     @staticmethod
     def get_margin_info_batch(accounts: list[BrokerAccount]) -> dict[str, MarginInfo]:
@@ -167,23 +150,9 @@ class MarginCalculator:
         account: BrokerAccount,
         positions: list[dict[str, Any]],
     ) -> float:
-        """Get exact margin from OpenAlgo /api/v1/margin endpoint.
-
-        The positions list follows the OpenAlgo margin API format.
+        """Refuse remote margin estimation until native copy-account authority exists.
         """
-        url = f"{account.openalgo_host.rstrip('/')}/api/v1/margin"
-        try:
-            with httpx.Client(timeout=10.0) as http:
-                resp = http.post(url, json={
-                    "apikey": account.api_key,
-                    "positions": positions,
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return float(data.get("required_margin", data.get("margin", 0)))
-        except Exception as exc:
-            logger.error("Margin API call failed for %s: %s", account.account_id, exc)
-        return 0.0
+        raise RuntimeError("Native copy-trading margin estimator is unavailable")
 
     # ------------------------------------------------------------------
     # Multi-leg margin with hedge benefit

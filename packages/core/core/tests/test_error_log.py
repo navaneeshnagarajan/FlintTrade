@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/core/tests/test_error_log.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,7 @@ from flinttrade_core.error_log import ErrorLog, _sanitise, IST
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_log() -> ErrorLog:
     """Return an in-memory ErrorLog instance."""
     return ErrorLog(":memory:")
@@ -26,6 +28,7 @@ def _make_log() -> ErrorLog:
 # ---------------------------------------------------------------------------
 # _sanitise() unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestSanitise:
     """Unit tests for the _sanitise() helper function."""
@@ -98,6 +101,7 @@ class TestSanitise:
 # ErrorLog — schema and lifecycle
 # ---------------------------------------------------------------------------
 
+
 class TestErrorLogSchema:
     """Verify the DuckDB schema is initialised correctly."""
 
@@ -151,6 +155,7 @@ class TestErrorLogSchema:
 # ---------------------------------------------------------------------------
 # ErrorLog.log()
 # ---------------------------------------------------------------------------
+
 
 class TestErrorLogWrite:
     """Tests for the log() write path."""
@@ -280,6 +285,7 @@ class TestErrorLogWrite:
 # ErrorLog.recent()
 # ---------------------------------------------------------------------------
 
+
 class TestErrorLogRecent:
     """Tests for the recent() read path."""
 
@@ -397,6 +403,7 @@ class TestErrorLogRecentMetadata:
 # ErrorLog.count()
 # ---------------------------------------------------------------------------
 
+
 class TestErrorLogCount:
     """Tests for the count() method."""
 
@@ -446,6 +453,7 @@ _TEST_API_KEY = "test-error-log-routes-key"
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
     from _pytest.monkeypatch import MonkeyPatch
+
     mp = MonkeyPatch()
     yield mp
     mp.undo()
@@ -454,7 +462,7 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def flask_app(monkeypatch_module):
     """Flask app with admin blueprint and a pre-seeded in-memory error log."""
-    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
     monkeypatch_module.setenv("FLINTTRADE_DEV", "1")
     from flinttrade_core.app import create_flask_app
 
@@ -520,8 +528,13 @@ class TestAdminErrorsRoute:
         resp = client.get("/v1/admin/errors?limit=1", headers=_auth())
         entry = resp.get_json()["data"]["errors"][0]
         for field_name in (
-            "entry_id", "timestamp", "route", "method",
-            "status_code", "error_class", "error_message",
+            "entry_id",
+            "timestamp",
+            "route",
+            "method",
+            "status_code",
+            "error_class",
+            "error_message",
         ):
             assert field_name in entry, f"Missing field: {field_name}"
 

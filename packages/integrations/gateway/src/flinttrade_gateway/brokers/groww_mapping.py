@@ -340,7 +340,7 @@ def exchange_segment(exchange: Any) -> tuple[str, str]:
     return ("BSE", "CASH") if ex == "BSE" else ("NSE", "CASH")
 
 
-def openalgo_exchange(exchange: Any, segment: Any = "") -> str:
+def native_broker_exchange(exchange: Any, segment: Any = "") -> str:
     ex = _upper(exchange)
     seg = _upper(segment)
     if seg == "COMMODITY" or ex == "MCX":

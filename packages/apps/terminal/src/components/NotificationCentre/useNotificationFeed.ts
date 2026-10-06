@@ -28,8 +28,8 @@ const VALID_CATEGORIES: NotificationCategory[] = ["alert", "order", "system", "a
 
 const MODE_NOTIFICATIONS: Record<AppMode, { title: string; body: string }> = {
   explore: {
-    title: "Explore mode",
-    body: "Showing sample data only — no broker connection or live orders.",
+    title: "Example",
+    body: "Showing Example only — no broker connection or live orders.",
   },
   practice: {
     title: "Practice mode active",
@@ -89,7 +89,7 @@ export function useNotificationFeed(): void {
             ? "Broker gateway error"
             : "Broker gateway disconnected",
         body: "Live data and order routing are paused until the connection is restored.",
-        action: { label: "Reconnect", href: "/settings#api" },
+        action: { label: "Reconnect", href: "/settings#brokers" },
       });
     }
     // `mode` gates the notification, so it belongs here. Re-running on a mode

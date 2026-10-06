@@ -2,7 +2,7 @@
  * tape.ts — pure tape-building and microstructure logic for the Tape &
  * Microstructure widget (W3).
  *
- * The OpenAlgo WebSocket carries quote ticks (LTP + cumulative volume), not
+ * The native polling registry carries quote ticks (LTP + cumulative volume), not
  * per-trade prints, so prints are INFERRED: a new print is emitted whenever the
  * LTP moves or cumulative volume increases, sized by the volume delta, with the
  * aggressor side inferred by the standard tick rule (uptick → buy, downtick →

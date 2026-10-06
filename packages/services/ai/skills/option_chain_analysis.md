@@ -52,4 +52,4 @@ description: Reading and trading option chains — OI, PCR, max pain, IV skew in
 3. Inspect pin risk near ATM strikes
 
 ## Data Source
-Use `/api/v1/optionchain` — returns strikes, call OI, put OI, call IV, put IV, LTP for each strike.
+Use the native option-chain reader — returns strikes, call OI, put OI, call IV, put IV, LTP for each strike.

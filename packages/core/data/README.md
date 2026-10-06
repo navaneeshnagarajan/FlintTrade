@@ -8,7 +8,7 @@
 
 ## Public surface
 
-- `src/flinttrade_data/tick_recorder.py — real-time tick capture to DuckDB`
+- `src/flinttrade_data/tick_recorder.py — local tick buffering/storage; native capture unavailable`
 - `src/flinttrade_data/audit_logger.py — append-only audit trail`
 - `src/flinttrade_data/questdb_bridge.py — ILP-based ingestion`
 
@@ -31,6 +31,10 @@ root workspace.
 ```bash
 python -m pytest packages/core/data/tests/ -v --import-mode=importlib
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

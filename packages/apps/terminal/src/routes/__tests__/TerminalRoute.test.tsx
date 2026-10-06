@@ -104,6 +104,10 @@ vi.mock("@/chrome/PresetPicker", () => ({
   default: () => <div data-testid="preset-picker" />,
 }));
 
+vi.mock("@/chrome/WorkspaceSwitcher", () => ({
+  default: () => <div data-testid="workspace-switcher" />,
+}));
+
 vi.mock("@/routes/trade/TradeBottomPanel", () => ({
   TradeBottomPanel: () => <div data-testid="trade-bottom-panel">Bottom</div>,
 }));
@@ -286,10 +290,16 @@ describe("TerminalRoute", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders without crashing and shows the sr-only heading", () => {
+  it("renders the desk toolbar with the page heading and canvas actions", () => {
     renderTerminalRoute();
 
-    expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Trade" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    const toolbar = screen.getByTestId("desk-toolbar");
+    expect(toolbar).toContainElement(screen.getByTestId("add-widget-button"));
+    expect(screen.getAllByTestId("add-widget-button")).toHaveLength(1);
+    expect(toolbar).toContainElement(screen.getByTestId("desk-layouts"));
+    expect(toolbar).toContainElement(screen.getByTestId("workspace-switcher"));
   });
 
   it("reports a transient workspace binding persistence failure instead of crashing", async () => {
@@ -343,6 +353,12 @@ describe("TerminalRoute", () => {
 
     expect(shell).toHaveClass("w-full", "min-w-0", "overflow-x-hidden");
     expect(shell).toHaveClass("box-border");
+  });
+
+  it("links the desk safety tray to Risk & Safety", () => {
+    renderTerminalRoute();
+    fireEvent.click(screen.getByRole("button", { name: "Risk & Safety" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/settings#risk");
   });
 
   it("keeps the kill switch in reserved trade-route layout space", () => {
@@ -399,6 +415,8 @@ describe("TerminalRoute", () => {
 
     expect(screen.getByRole("status", { name: /kill switch status: active/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /kill switch is active/i })).toHaveTextContent("Kill Active");
+    expect(screen.queryByText("L5 ACTIVE")).not.toBeInTheDocument();
+    expect(screen.getByText("Kill switch active")).toBeVisible();
   });
 
   it("renders an explicit loading state instead of inactive before L5 loads", () => {
@@ -595,6 +613,58 @@ describe("TerminalRoute", () => {
     expect(chartTab).toHaveAttribute("aria-selected", "true");
   });
 
+  it("shows + Widget once the desk has panels", async () => {
+    renderTerminalRoute();
+    expect(await screen.findByTestId("add-widget-button")).toHaveTextContent("+ Widget");
+  });
+
+  it("reuses the open Order Pad when Buy is dispatched again", async () => {
+    renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    const api = mockLayoutState.workspaceApi as unknown as WorkspaceApi;
+    const before = api.panelCount();
+
+    window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+      detail: {
+        widgetId: "orderpad",
+        title: "Order — SBIN",
+        props: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+      },
+    }));
+    expect(api.panelCount()).toBe(before + 1);
+
+    window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+      detail: {
+        widgetId: "orderpad",
+        title: "Order — INFY",
+        props: { symbol: "INFY", exchange: "NSE", action: "SELL" },
+      },
+    }));
+    expect(api.panelCount()).toBe(before + 1);
+    const doc = JSON.stringify(api.toJSON());
+    expect(doc).toContain("INFY");
+    expect(doc).toContain("SELL");
+    expect(doc.match(/"component":"orderpad"/g)).toHaveLength(1);
+  });
+
+  it("does not add a second Order Pad when + Widget adds one without a symbol", async () => {
+    renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    const api = mockLayoutState.workspaceApi as unknown as WorkspaceApi;
+    const before = api.panelCount();
+
+    window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+      detail: { widgetId: "orderpad", title: "Order Pad" },
+    }));
+    expect(api.panelCount()).toBe(before + 1);
+
+    window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+      detail: { widgetId: "orderpad", title: "Order Pad" },
+    }));
+    expect(api.panelCount()).toBe(before + 1);
+    expect(JSON.stringify(api.toJSON()).match(/"component":"orderpad"/g)).toHaveLength(1);
+  });
+
   it("adds a widget when the command palette dispatches flinttrade:addWidget", async () => {
     renderTerminalRoute();
 
@@ -698,9 +768,10 @@ describe("TerminalRoute saved-layout restore", () => {
     renderTerminalRoute();
 
     await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
-    // Skill level is mocked intermediate — market-watch (watchlist/chart/ticker/indexstrip).
+    // Skill level is mocked intermediate — market-watch (watchlist/chart/positions/indexstrip).
     const doc = JSON.stringify(registeredApi().toJSON());
-    expect(doc).toContain('"ticker"');
+    expect(doc).toContain('"positions"');
+    expect(doc).not.toContain('"ticker"');
     expect(doc).not.toContain('"grid"');
   });
 

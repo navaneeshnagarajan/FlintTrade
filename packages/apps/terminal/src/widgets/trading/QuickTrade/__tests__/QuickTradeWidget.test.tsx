@@ -169,8 +169,8 @@ describe("QuickTradeWidget", () => {
 
   it("renders BUY and SELL buttons", () => {
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
-    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /sell 1 lots/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeTruthy();
   });
 
   it("shows limit price input when LIMIT order type is selected", () => {
@@ -221,7 +221,7 @@ describe("QuickTradeWidget", () => {
 
     await screen.findByText(/Lot size unverified — orders blocked/);
 
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
 
     await waitFor(() => {
       expect(screen.getByText(/is unverified — order not sent/)).toBeInTheDocument();
@@ -239,6 +239,20 @@ describe("QuickTradeWidget", () => {
     await waitFor(() => {
       expect(mockPlaceOrder).toHaveBeenCalledWith(
         expect.objectContaining({ symbol: "RELIANCE", action: "SELL", quantity: 5 }),
+      );
+    });
+  });
+
+  it("sends the admission note with the place", async () => {
+    renderQuickTrade({ symbol: "RELIANCE", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Planned breakout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /sell 1 lot of/i }));
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "SELL", quantity: 1, rationale: "Planned breakout" }),
       );
     });
   });
@@ -265,7 +279,7 @@ describe("QuickTradeWidget", () => {
   it("shows success status after successful order", async () => {
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     await waitFor(() => {
       expect(screen.getByRole("status")).toBeTruthy();
       expect(screen.getByText(/BUY order placed/i)).toBeTruthy();
@@ -276,7 +290,7 @@ describe("QuickTradeWidget", () => {
     mockPlaceOrder.mockRejectedValueOnce(new Error("Connection refused"));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
-    fireEvent.click(screen.getByRole("button", { name: /sell 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /sell 1 lot /i }));
     await waitFor(() => {
       expect(screen.getByRole("status")).toBeTruthy();
       expect(screen.getByText(/Connection refused/i)).toBeTruthy();
@@ -292,36 +306,40 @@ describe("QuickTradeWidget", () => {
     }));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     const denied = await screen.findByTestId("laya-denied");
     expect(denied).toHaveTextContent("Laya denied");
     expect(denied).toHaveTextContent("Quantity must be a positive whole number.");
     expect(denied).toHaveTextContent("Max quantity 1.");
-    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /sell 1 lots/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
   });
 
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
-    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      403,
+      {
       code: "laya_denied",
-      reason: "Laya is Down. Live orders are blocked.",
-      message: "Laya is Down. Live orders are blocked.",
-      limits: { max_quantity: 100 },
+      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
     }));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
-    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
-    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    const denied = await screen.findByTestId("laya-denied");
+    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).not.toHaveTextContent("Max quantity");
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
 
     act(() => {
       useOperatorSignalStore.setState({ decisionStatus: "ready" });
     });
 
     expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /sell 1 lots/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeEnabled();
   });
 
   it("refuses a LIMIT order with no price instead of sending it at zero", async () => {
@@ -331,7 +349,7 @@ describe("QuickTradeWidget", () => {
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /LIMIT/i }));
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     await waitFor(() => {
       expect(screen.getByText(/price above zero/i)).toBeTruthy();
     });
@@ -345,7 +363,7 @@ describe("QuickTradeWidget", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "22150.5" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     await waitFor(() => {
       expect(mockPlaceOrder).toHaveBeenCalledWith(
         expect.objectContaining({ orderType: "LIMIT", price: 22150.5 }),

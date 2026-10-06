@@ -60,12 +60,7 @@ describe("persistSetupChoices", () => {
     const destination = persistSetupChoices({
       persona: "investor",
       experience: "professional",
-      connection: {
-        host: "http://localhost:5000",
-        port: "5000",
-        apiKey: "test-api-key",
-        wsPort: "8765",
-      },
+      connection: { brokerConnected: true },
       tradingDefaults: {
         defaultExchange: "NSE",
         defaultProduct: "CNC",
@@ -119,15 +114,10 @@ describe("persistSetupChoices", () => {
     );
   });
 
-  it("does not persist the Direct Connect placeholder as OpenAlgo configuration", () => {
+  it("does not persist broker credentials when applying native setup", () => {
     const destination = persistSetupChoices({
       persona: "trader",
-      connection: {
-        host: "http://127.0.0.1:5100",
-        port: "5100",
-        apiKey: "direct-connect",
-        wsPort: "8765",
-      },
+      connection: { brokerConnected: true },
     });
 
     expect(destination).toBe("/trade");

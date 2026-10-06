@@ -99,11 +99,7 @@ def _assert_restore_path_components_safe(target_dir: Path, relative: PurePosixPa
             path_stat = current.lstat()
         except FileNotFoundError:
             break
-        if (
-            not stat.S_ISDIR(path_stat.st_mode)
-            or stat.S_ISLNK(path_stat.st_mode)
-            or _is_reparse_point(path_stat)
-        ):
+        if not stat.S_ISDIR(path_stat.st_mode) or stat.S_ISLNK(path_stat.st_mode) or _is_reparse_point(path_stat):
             raise BackupError("Restore archive targets an unsafe existing path")
 
 
@@ -120,7 +116,11 @@ def _validated_restore_members(
         if "\\" in member.name or "\x00" in member.name:
             raise BackupError("Restore archive contains an unsafe member path")
         relative = PurePosixPath(member.name)
-        if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in member.name.split("/")):
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in member.name.split("/"))
+        ):
             raise BackupError("Restore archive contains an unsafe member path")
         if relative.parts == (_MANIFEST_FILENAME,):
             if not member.isfile():
@@ -237,9 +237,7 @@ class WorkspaceBackup:
         if include_credentials:
             raise CoordinatedRestoreUnavailable
         if not self._workspace_dir.exists():
-            raise BackupError(
-                f"Workspace directory does not exist: {self._workspace_dir}"
-            )
+            raise BackupError(f"Workspace directory does not exist: {self._workspace_dir}")
 
         try:
             from flinttrade_core.installation_state import (  # noqa: PLC0415
@@ -298,8 +296,10 @@ class WorkspaceBackup:
             # Reopen the complete candidate using the same bounded reader as restore.
             with open_backup_archive(staged) as archive:
                 _validated_restore_members(
-                    archive.getmembers(), target_dir=self._workspace_dir.parent,
-                    workspace_basename=self._workspace_dir.name, disjoint=assert_installation_state_disjoint,
+                    archive.getmembers(),
+                    target_dir=self._workspace_dir.parent,
+                    workspace_basename=self._workspace_dir.name,
+                    disjoint=assert_installation_state_disjoint,
                 )
             durable_replace(staged, output_path)
         except Exception as exc:
@@ -415,8 +415,7 @@ class WorkspaceBackup:
                         dest = target_dir / member.name
                         if dest.exists() and member.isfile():
                             raise BackupError(
-                                f"Restore aborted — target file already exists: "
-                                f"{dest}. Use force=True to overwrite."
+                                f"Restore aborted — target file already exists: {dest}. Use force=True to overwrite."
                             )
 
                 target_dir.mkdir(parents=True, exist_ok=True)
@@ -436,12 +435,8 @@ class WorkspaceBackup:
             raise BackupError(f"Archive is corrupt or invalid: {exc}") from exc
 
         # Count results.
-        files_restored = sum(
-            1 for m in restorable_members if m.isfile() and m.name != _MANIFEST_FILENAME
-        )
-        dbs_restored = sum(
-            1 for m in restorable_members if m.isfile() and m.name.endswith(".duckdb")
-        )
+        files_restored = sum(1 for m in restorable_members if m.isfile() and m.name != _MANIFEST_FILENAME)
+        dbs_restored = sum(1 for m in restorable_members if m.isfile() and m.name.endswith(".duckdb"))
         total_size_bytes = sum(m.size for m in restorable_members if m.isfile())
         total_size_mb = round(total_size_bytes / (1024 * 1024), 3)
 
@@ -500,9 +495,7 @@ class WorkspaceBackup:
 
         return results
 
-    def backup_schedule(
-        self, interval_hours: int, retention_days: int
-    ) -> None:
+    def backup_schedule(self, interval_hours: int, retention_days: int) -> None:
         """Register a recurring backup job via APScheduler.
 
         Backs up every *interval_hours* hours and deletes archives older
@@ -520,8 +513,7 @@ class WorkspaceBackup:
             from apscheduler.schedulers.background import BackgroundScheduler  # noqa: PLC0415
         except ImportError as exc:
             raise BackupError(
-                "APScheduler is required for scheduled backups. "
-                "Install with: pip install apscheduler>=3.10"
+                "APScheduler is required for scheduled backups. Install with: pip install apscheduler>=3.10"
             ) from exc
 
         backup_dir = Path.home() / "flint-backups"

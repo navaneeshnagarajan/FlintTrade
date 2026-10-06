@@ -1,7 +1,7 @@
 /**
  * usePineRunner.ts
  *
- * React hook that fetches OHLCV history from OpenAlgo and runs the Pine Script
+ * React hook that fetches OHLCV history from broker and runs the Pine Script
  * executor against those bars. Follows FlintTrade state architecture:
  *   - getHistory() → REST API (TanStack Query is not used here since this is a
  *     one-shot imperative run, not a cached subscription)
@@ -116,7 +116,7 @@ export function usePineRunner(): UsePineRunnerReturn {
         const startDate = opts?.startDate ?? start;
         const endDate = opts?.endDate ?? end;
 
-        // OpenAlgo history endpoint — OHLCVBar[] from api.ts
+        // First-party native history contract — OHLCVBar[] from api.ts
         const rawBars = await getHistory(symbol, exchange, interval, startDate, endDate);
 
         if (!Array.isArray(rawBars) || rawBars.length === 0) {

@@ -77,7 +77,7 @@ export const SAMPLE_GAMMA_DENSITY: GammaDensityData = {
  * Put GEX: negative (dealers short gamma on puts → destabilising below ATM).
  */
 const GEX_ATM = 24000;
-const GEX_LOT = 75; // NIFTY lot size
+const GEX_LOT = 65; // Example NIFTY quantity for this sample. Not a live master read.
 
 function callGEX(strike: number): number {
   const dist = Math.abs(strike - GEX_ATM) / 500;

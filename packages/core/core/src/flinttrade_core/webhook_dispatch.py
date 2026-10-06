@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -23,7 +24,7 @@ from flinttrade_gateway.log_safety import account_ref, log_ref
 from flinttrade_gateway.routing_config import RoutingHint
 from flinttrade_webhooks.webhook_receiver import WebhookPayload
 
-from .order_routes import _body_to_order, _record_trade_journal
+from .order_routes import _body_to_order, _gtt_contract_refusal
 from .safety_config import SafetyRuntimeUnavailable, require_ready_safety
 
 logger = logging.getLogger("flinttrade.core.webhook_dispatch")
@@ -77,7 +78,7 @@ class WebhookOrderDispatcher:
         self._authority_provider = authority_provider
 
     async def place_order(self, payload: WebhookPayload) -> dict[str, Any]:
-        """Place a webhook-derived order through the gated broker router."""
+        """Place a signed webhook order through Laya, then Safety, then the router."""
         authority, authority_error = self._require_authority(payload, "place_order")
         if authority_error:
             return _error("place_order", payload, authority_error)
@@ -100,7 +101,21 @@ class WebhookOrderDispatcher:
             return _error("place_order", payload, body_error)
 
         safe_account = account_ref(account_id)
+        with self._app.app_context():
+            gtt_refusal = _gtt_contract_refusal({**body, "variety": payload.data.get("variety")})
+            if gtt_refusal is not None:
+                response, _status = gtt_refusal
+                refused_body = response.get_json(silent=True) or {}
+                refused = _error(
+                    "place_order",
+                    payload,
+                    str(refused_body.get("message") or "Not placed. GTT orders aren't supported right now."),
+                )
+                refused["code"] = refused_body.get("code") or "gtt_unsupported"
+                return refused
         acknowledgement_failed = False
+        result: Any = None
+        typed_order: Any = None
         try:
             typed_order = _body_to_order(body, variety=_variety_from_payload(payload))
             try:
@@ -112,12 +127,13 @@ class WebhookOrderDispatcher:
                     payload,
                     "Validated order safety configuration is unavailable; no order was sent.",
                 )
-            laya_block = _laya_automate_block(body)
+            laya_block = await asyncio.to_thread(_laya_automate_block, body)
             if laya_block is not None:
                 refused = _error("place_order", payload, str(laya_block["message"]))
                 refused["code"] = laya_block["code"]
                 refused["reason"] = laya_block["reason"]
-                refused["limits"] = laya_block["limits"]
+                if "limits" in laya_block:
+                    refused["limits"] = laya_block["limits"]
                 if "applied_quantity" in laya_block:
                     refused["applied_quantity"] = laya_block["applied_quantity"]
                 return refused
@@ -194,8 +210,7 @@ class WebhookOrderDispatcher:
                     # reservation and surface a placed-with-warning result.
                     acknowledgement_failed = True
                     logger.critical(
-                        "Webhook order placed but reservation acknowledgement failed | "
-                        "source=%s adapter=%s account=%s",
+                        "Webhook order placed but reservation acknowledgement failed | source=%s adapter=%s account=%s",
                         payload.source,
                         adapter_id,
                         safe_account,
@@ -258,18 +273,9 @@ class WebhookOrderDispatcher:
             return _error("place_order", payload, "Webhook order dispatch failed.")
 
         audit_event = (
-            "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED"
-            if acknowledgement_failed
-            else "WEBHOOK_ORDER_PLACED"
+            "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED" if acknowledgement_failed else "WEBHOOK_ORDER_PLACED"
         )
         self._audit(audit_event, adapter_id, account_id, authority.actor_id, payload, result)
-        self._journal(
-            typed_order,
-            str(result),
-            adapter_id=adapter_id,
-            account_id=account_id,
-            strategy=f"webhook:{payload.source}",
-        )
         logger.info(
             "Webhook place dispatched | source=%s adapter=%s account=%s symbol=%s",
             payload.source,
@@ -490,22 +496,6 @@ class WebhookOrderDispatcher:
         except Exception:
             logger.debug("webhook audit stamp failed", exc_info=True)
 
-    def _journal(
-        self,
-        typed_order: Any,
-        order_id: str,
-        *,
-        adapter_id: str,
-        account_id: str,
-        strategy: str,
-    ) -> None:
-        try:
-            with self._app.app_context():
-                _record_trade_journal(typed_order, order_id, strategy=strategy)
-        except Exception:
-            logger.debug("webhook trade journal stamp failed", exc_info=True)
-
-
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
@@ -531,11 +521,16 @@ def _payload_to_order_body(payload: WebhookPayload) -> tuple[dict[str, Any], str
         return {}, "Webhook order requires side/action BUY or SELL."
 
     body = {key: payload.data[key] for key in _ORDER_FIELDS if key in payload.data}
-    body.update({
-        "symbol": payload.symbol,
-        "exchange": payload.exchange or payload.data.get("exchange") or "NSE",
-        "action": side,
-    })
+    for key in ("rationale", "note"):
+        if key in payload.data:
+            body[key] = payload.data[key]
+    body.update(
+        {
+            "symbol": payload.symbol,
+            "exchange": payload.exchange or payload.data.get("exchange") or "NSE",
+            "action": side,
+        }
+    )
     price_error = _validate_order_prices(body)
     if price_error:
         return {}, price_error

@@ -23,7 +23,9 @@ Safety model (do not weaken):
 
         "ai": {"autonomous_agent": {"enabled": true}}
 
-    Live mode only; one session at a time.
+    Live retains operator-approved entry intents. Practice delegates to the
+    app-owned durable supervisor and canonical Laya/sandbox admission; it
+    never constructs a Live executor or borrows Live broker write authority.
 """
 
 from __future__ import annotations
@@ -190,6 +192,9 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     """
     deadline = monotonic() + max(0.0, float(timeout))
     _shutdown_event(app).set()
+    from .practice_agent_runtime import shutdown_practice_agent  # noqa: PLC0415
+
+    practice_stopped = shutdown_practice_agent(app, timeout=max(0.0, deadline - monotonic()))
     with _RUNNER_LOCK:
         trader = _RUNNER.get("trader")
         thread = _RUNNER.get("thread")
@@ -198,7 +203,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         if not _join_learning_cleanup_owners(deadline=deadline):
             logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
             return False
-        return True
+        return practice_stopped
     if trader is None or thread is None:
         logger.error("Autonomous agent ownership is incomplete during shutdown")
         return False
@@ -237,7 +242,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     if not _join_learning_cleanup_owners(deadline=deadline):
         logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
         return False
-    return True
+    return practice_stopped
 
 
 def _agent_flag_enabled() -> bool:
@@ -316,9 +321,7 @@ def _build_learning_memory() -> Any | None:
         from flinttrade_ai.memory import MemoryBackendConfig, create_memory_backend  # noqa: PLC0415
 
         try:
-            return create_memory_backend(
-                MemoryBackendConfig(persist_dir=str(workspace_dir() / "agent_memory"))
-            )
+            return create_memory_backend(MemoryBackendConfig(persist_dir=str(workspace_dir() / "agent_memory")))
         except Exception:
             logger.warning(
                 "Persistent agent memory unavailable — lessons persist only for this "
@@ -330,9 +333,7 @@ def _build_learning_memory() -> Any | None:
             # the trader before the next session could ever read them.
             global _FALLBACK_LEARNING_MEMORY
             if _FALLBACK_LEARNING_MEMORY is None:
-                _FALLBACK_LEARNING_MEMORY = create_memory_backend(
-                    MemoryBackendConfig(backend="hierarchical")
-                )
+                _FALLBACK_LEARNING_MEMORY = create_memory_backend(MemoryBackendConfig(backend="hierarchical"))
             return _FALLBACK_LEARNING_MEMORY
     except Exception:  # pragma: no cover — learning is never order-critical
         logger.warning("Agent learning memory unavailable", exc_info=True)
@@ -374,10 +375,12 @@ def authorise_action_center_request(*, require_live_unlock: bool = False) -> tup
         _payload, denied = _require_live_payload(require_unlock=True)
         return denied
     if _decode_request_payload() is None:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT",
+            }
+        ), 401
     return None
 
 
@@ -394,6 +397,7 @@ def dispatch_action_center_approval(approval: Any) -> Any:
 
     from .order_routes import (  # noqa: PLC0415
         _dispatch_live_order,
+        _gtt_contract_refusal,
         _require_live_payload,
     )
 
@@ -456,15 +460,16 @@ def dispatch_action_center_approval(approval: Any) -> Any:
     order_params = dict(getattr(approval, "order_params", {}) or {})
     embedded_broker = str(order_params.get("broker") or "").strip().lower()
     embedded_account = str(order_params.get("account_id") or "").strip()
-    if (embedded_broker and embedded_broker != adapter_id) or (
-        embedded_account and embedded_account != account_id
-    ):
+    if (embedded_broker and embedded_broker != adapter_id) or (embedded_account and embedded_account != account_id):
         return ApprovalDispatchResult.refused(
             409,
             "The persisted order target conflicts with its immutable selector; the entry was not sent.",
         )
     order_params["broker"] = adapter_id
     order_params["account_id"] = account_id
+    note = str(getattr(approval, "reason", "") or "").strip()
+    if note and "rationale" not in order_params:
+        order_params["rationale"] = note
 
     context = dict(getattr(approval, "intent_context", {}) or {})
     try:
@@ -483,6 +488,15 @@ def dispatch_action_center_approval(approval: Any) -> Any:
         return ApprovalDispatchResult.refused(
             400,
             "The persisted entry context is incomplete; the entry was not sent.",
+        )
+
+    gtt_refusal = _gtt_contract_refusal(order_params)
+    if gtt_refusal is not None:
+        response, status_code = gtt_refusal
+        body = response.get_json(silent=True) or {}
+        return ApprovalDispatchResult.refused(
+            status_code,
+            str(body.get("message") or "Not placed. GTT orders aren't supported right now."),
         )
 
     response, status_code = _dispatch_live_order(
@@ -550,19 +564,21 @@ def _snapshot() -> dict[str, Any]:
     }
     if trader is not None:
         state = trader.state
-        snap.update({
-            "agent_status": str(getattr(trader.status, "value", trader.status)),
-            "daily_pnl": state.daily_pnl,
-            "cycle_count": state.cycle_count,
-            "active_positions": dict(state.active_positions),
-            "position_details": {k: dict(v) for k, v in state.position_details.items()},
-            "trade_counts": dict(state.trade_counts),
-            "last_signals": {k: str(v) for k, v in state.last_signals.items()},
-            "squared_off": state.squared_off,
-            "stop_loss_hit": state.stop_loss_hit,
-            "shutdown_complete": bool(getattr(trader, "shutdown_complete", False)),
-            "stop_failure": str(getattr(trader, "stop_failure", "") or ""),
-        })
+        snap.update(
+            {
+                "agent_status": str(getattr(trader.status, "value", trader.status)),
+                "daily_pnl": state.daily_pnl,
+                "cycle_count": state.cycle_count,
+                "active_positions": dict(state.active_positions),
+                "position_details": {k: dict(v) for k, v in state.position_details.items()},
+                "trade_counts": dict(state.trade_counts),
+                "last_signals": {k: str(v) for k, v in state.last_signals.items()},
+                "squared_off": state.squared_off,
+                "stop_loss_hit": state.stop_loss_hit,
+                "shutdown_complete": bool(getattr(trader, "shutdown_complete", False)),
+                "stop_failure": str(getattr(trader, "stop_failure", "") or ""),
+            }
+        )
     return snap
 
 
@@ -588,7 +604,6 @@ def start_agent() -> tuple[Any, int]:
         _decode_request_payload,
         _gated_target,
         _is_live_mode_unlocked,
-        _record_trade_journal,
         _require_live_safety,
         _safety_runtime_unavailable_response,
     )
@@ -596,49 +611,67 @@ def start_agent() -> tuple[Any, int]:
 
     app_obj = current_app._get_current_object()  # noqa: SLF001
     if _shutdown_event(app_obj).is_set():
-        return jsonify({
-            "status": "error",
-            "message": "The application is shutting down; no new agent session can start.",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The application is shutting down; no new agent session can start.",
+            }
+        ), 503
+
+    initial_payload = _decode_request_payload()
+    if initial_payload and initial_payload.get("mode") == "practice":
+        from .practice_agent_runtime import start_practice_agent  # noqa: PLC0415
+
+        return start_practice_agent()
 
     if not _agent_flag_enabled():
-        return jsonify({
-            "status": "error",
-            "message": (
-                "The autonomous agent is disabled. Enable it via workspace.json "
-                "ai.autonomous_agent.enabled (it places real orders in live mode)."
-            ),
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "The autonomous agent is disabled. Enable it via workspace.json "
+                    "ai.autonomous_agent.enabled (it places real orders in live mode)."
+                ),
+            }
+        ), 403
 
     payload = _decode_request_payload()
     if not payload:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT",
+            }
+        ), 401
 
     if payload.get("mode") != _MODE_LIVE:
-        return jsonify({
-            "status": "error",
-            "message": "The autonomous agent trades live only — switch to live mode first.",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The autonomous agent trades live only — switch to live mode first.",
+            }
+        ), 403
 
     if not _is_live_mode_unlocked():
-        return jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Live mode not unlocked — verify PIN first",
+            }
+        ), 403
 
     router = current_app.config.get("BROKER_ROUTER")
-    client = current_app.config.get("OPENALGO_CLIENT")
+    client = current_app.config.get("BROKER_CLIENT")
     if router is None or client is None:
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Order routing unavailable — workspace.json brokers configuration is "
-                "missing or invalid. Check the startup logs, then restart."
-            ),
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "Order routing unavailable — workspace.json brokers configuration is "
+                    "missing or invalid. Check the startup logs, then restart."
+                ),
+            }
+        ), 503
 
     try:
         safety = _require_live_safety()
@@ -648,19 +681,23 @@ def start_agent() -> tuple[Any, int]:
 
     approval_queue = current_app.config.get("PENDING_ORDER_QUEUE")
     if approval_queue is None or not callable(getattr(approval_queue, "enqueue", None)):
-        return jsonify({
-            "status": "error",
-            "message": "Action Centre approval storage is unavailable; the agent remains disabled.",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Action Centre approval storage is unavailable; the agent remains disabled.",
+            }
+        ), 503
 
     time_scheduler = current_app.config.get("TIME_SCHEDULER")
     get_market_session = getattr(time_scheduler, "get_market_session", None)
     market_clock = getattr(time_scheduler, "now_ist", None)
     if not callable(get_market_session) or not callable(market_clock):
-        return jsonify({
-            "status": "error",
-            "message": "Market calendar unavailable — autonomous trading remains disabled.",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Market calendar unavailable — autonomous trading remains disabled.",
+            }
+        ), 503
 
     body: dict[str, Any] = request.get_json(silent=True) or {}
     symbols = [str(s).strip().upper() for s in (body.get("symbols") or []) if str(s).strip()]
@@ -679,22 +716,26 @@ def start_agent() -> tuple[Any, int]:
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "numeric agent parameters are invalid"}), 400
     if max_position_size <= 0 or max_trades <= 0 or cycle_interval <= 0:
-        return jsonify({
-            "status": "error",
-            "message": "max_position_size, max_trades_per_symbol and cycle_interval_sec must be positive",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "max_position_size, max_trades_per_symbol and cycle_interval_sec must be positive",
+            }
+        ), 400
 
     # Fail fast on the ACL: the agent is its own principal, and an agent whose
     # every order would be refused must not start at all.
     if not _acl_grants_agent(adapter_id, account_id):
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"The agent actor '{_AGENT_ACTOR_ID}' is not authorised for "
-                f"{adapter_id}:{account_id}. Add it to workspace.json "
-                f"brokers.account_acls['{adapter_id}']['{account_id}'] to grant access."
-            ),
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    f"The agent actor '{_AGENT_ACTOR_ID}' is not authorised for "
+                    f"{adapter_id}:{account_id}. Add it to workspace.json "
+                    f"brokers.account_acls['{adapter_id}']['{account_id}'] to grant access."
+                ),
+            }
+        ), 403
 
     # Claim the single-session slot ATOMICALLY before any slow construction
     # (LLM client, trader). Without the "starting" sentinel the alive-check and
@@ -704,16 +745,20 @@ def start_agent() -> tuple[Any, int]:
     # is rolled back on any failure below so a crashed start never wedges the slot.
     with _RUNNER_LOCK:
         if _shutdown_event(app_obj).is_set():
-            return jsonify({
-                "status": "error",
-                "message": "The application is shutting down; no new agent session can start.",
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "The application is shutting down; no new agent session can start.",
+                }
+            ), 503
         thread = _RUNNER.get("thread")
         if (thread is not None and thread.is_alive()) or _RUNNER.get("starting"):
-            return jsonify({
-                "status": "error",
-                "message": "An agent session is already running — stop it first.",
-            }), 409
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "An agent session is already running — stop it first.",
+                }
+            ), 409
         _RUNNER["starting"] = True
 
     def _release_slot() -> None:
@@ -725,10 +770,12 @@ def start_agent() -> tuple[Any, int]:
     except Exception as exc:
         _release_slot()
         logger.warning("LLM client unavailable: %s", exc)
-        return jsonify({
-            "status": "error",
-            "message": "LLM client unavailable — configure a provider in Settings",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "LLM client unavailable — configure a provider in Settings",
+            }
+        ), 503
 
     # Everything from here to registration runs under ONE try so ANY failure
     # (config reads, RequestContext, the closures, executor/trader) releases
@@ -742,12 +789,6 @@ def start_agent() -> tuple[Any, int]:
             mode=_MODE_LIVE,
             selector=f"{adapter_id}:{account_id}",
         )
-
-        journal_store = current_app.config.get("TRADE_STORAGE")
-        def _journal_write(order: Any, orderid: str) -> None:
-            with app_obj.app_context():
-                if journal_store is not None:
-                    _record_trade_journal(order, orderid, strategy="AutonomousAgent")
 
         # Mid-flight brake: the session outlives this HTTP request, so the
         # operator's logout / live→practice downgrade (both revoke the starting
@@ -799,46 +840,111 @@ def start_agent() -> tuple[Any, int]:
             adapter_id=adapter_id,
             account_id=account_id,
             audit=current_app.config.get("AUDIT"),
-            journal_write=_journal_write,
             pre_dispatch_check=_pre_dispatch_check,
             portfolio_state_provider=_agent_safety_state_provider,
         )
 
+        # One generation per symbol, allocated before I/O so a lost response
+        # keeps its identity. The lock lives in the worker, not across an await:
+        # cancellation or callers on different event loops cannot split it.
+        entry_intents: dict[str, tuple[str, str]] = {}
+        entry_intent_lock = threading.Lock()
+
         async def _entry_intent_sink(order: Any, intent_context: dict[str, Any]) -> dict[str, str]:
-            """Persist an entry intent without retaining auth or gate material."""
+            """Persist a retry-safe intention without retaining auth or gate material."""
+            import hashlib  # noqa: PLC0415
+            import json  # noqa: PLC0415
+
             from flinttrade_engine.action_center import ActionCenterError  # noqa: PLC0415
 
             model_dump = getattr(order, "model_dump", None)
             if not callable(model_dump):
                 raise TypeError("Autonomous-agent entry order is not serialisable")
-            order_params = model_dump(mode="json")
-            signal = str(intent_context.get("signal") or "ENTRY").upper()
-            request_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"flinttrade:agent-entry:{producer_ref}:{getattr(order, 'symbol', '')}",
-                )
-            )
-            try:
-                approval = await asyncio.to_thread(
-                    approval_queue.enqueue,
-                    order_params=order_params,
-                    reason=f"Autonomous-agent {signal} entry requires operator approval",
-                    request_id=request_id,
-                    adapter_id=adapter_id,
-                    account_id=account_id,
-                    source="autonomous-agent",
-                    intent_type="entry",
-                    producer_ref=producer_ref,
-                    intent_context=intent_context,
-                )
-            except ActionCenterError:
-                approval = await asyncio.to_thread(approval_queue.get, request_id)
+            # Snapshot both the full order semantics and its risk/rationale context.
+            # A caller mutating a dictionary after submission cannot change identity.
+            serialised = json.dumps([model_dump(mode="json"), intent_context], sort_keys=True, allow_nan=False)
+            order_params, context = json.loads(serialised)
+            fingerprint = hashlib.sha256(serialised.encode()).hexdigest()
+            symbol = str(order_params.get("symbol") or "").strip().upper()
+            signal = str(context.get("signal") or "ENTRY").upper()
+
+            def _validate_existing(approval: Any, request_id: str, expected: str) -> None:
                 if (
-                    str(getattr(approval, "producer_ref", "")) != producer_ref
-                    or str(getattr(approval, "status", "")) not in {"pending", "dispatching"}
+                    str(getattr(approval, "id", "")) != request_id
+                    or str(getattr(approval, "producer_ref", "")) != producer_ref
+                    or str(getattr(approval, "adapter_id", "")) != adapter_id
+                    or str(getattr(approval, "account_id", "")) != account_id
+                    or str(getattr(approval, "source", "")) != "autonomous-agent"
+                    or str(getattr(approval, "intent_type", "")) != "entry"
+                    or hashlib.sha256(
+                        json.dumps(
+                            [getattr(approval, "order_params", None), getattr(approval, "intent_context", None)],
+                            sort_keys=True,
+                            allow_nan=False,
+                        ).encode()
+                    ).hexdigest()
+                    != expected
                 ):
-                    raise
+                    raise ActionCenterError("Existing autonomous-agent intention conflicts with its persisted payload")
+
+            def _persist() -> Any:
+                with entry_intent_lock:
+                    previous = entry_intents.get(symbol)
+                    if previous is not None:
+                        request_id, expected = previous
+                        try:
+                            approval = approval_queue.get(request_id)
+                        except ActionCenterError:
+                            # A failed first insert/read cannot justify a new UUID.
+                            # Retry the same insert, whose primary key prevents duplicates.
+                            approval = None
+                        if approval is not None:
+                            _validate_existing(approval, request_id, expected)
+                            status = str(approval.status)
+                            if status not in {"pending", "dispatching"}:
+                                if getattr(approval, "outcome_uncertain", False):
+                                    raise ActionCenterError("Entry outcome is uncertain; reconciliation is required")
+                                if status == "approved":
+                                    # Live responses acknowledge submission only. Tracking
+                                    # removal and learning records do not prove a filled exit
+                                    # correlated to this generation; never risk a second entry.
+                                    raise ActionCenterError(
+                                        "Approved Live entry requires fill reconciliation before another intention"
+                                    )
+                                if status not in {"rejected", "expired", "failed"}:
+                                    raise ActionCenterError("Entry status is unknown; reconciliation is required")
+                                previous = None
+                        if previous is not None:
+                            if fingerprint != expected:
+                                raise ActionCenterError(
+                                    "A different entry intention is already pending for this symbol"
+                                )
+                            if approval is not None:
+                                return approval
+
+                    if previous is None:
+                        request_id = str(uuid.uuid4())
+                        entry_intents[symbol] = (request_id, fingerprint)
+                    try:
+                        return approval_queue.enqueue(
+                            order_params=order_params,
+                            reason=f"Autonomous-agent {signal} entry requires operator approval",
+                            request_id=request_id,
+                            adapter_id=adapter_id,
+                            account_id=account_id,
+                            source="autonomous-agent",
+                            intent_type="entry",
+                            producer_ref=producer_ref,
+                            intent_context=context,
+                        )
+                    except ActionCenterError:
+                        approval = approval_queue.get(request_id)
+                        _validate_existing(approval, request_id, fingerprint)
+                        if str(approval.status) not in {"pending", "dispatching"}:
+                            raise
+                        return approval
+
+            approval = await asyncio.to_thread(_persist)
             return {
                 "id": str(getattr(approval, "id", "") or ""),
                 "status": str(getattr(approval, "status", "pending") or "pending"),
@@ -871,7 +977,7 @@ def start_agent() -> tuple[Any, int]:
 
         trader = _trader_factory(
             llm_client=llm,
-            openalgo_client=client,
+            broker_client=client,
             config=config,
             vault=_build_vault(),
             order_executor=executor,
@@ -885,10 +991,12 @@ def start_agent() -> tuple[Any, int]:
     except Exception:
         _release_slot()
         logger.exception("Agent session construction failed")
-        return jsonify({
-            "status": "error",
-            "message": "Could not start the agent session",
-        }), 500
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Could not start the agent session",
+            }
+        ), 500
 
     async def _run_session() -> None:
         with _RUNNER_LOCK:
@@ -931,28 +1039,38 @@ def start_agent() -> tuple[Any, int]:
     with _RUNNER_LOCK:
         if _shutdown_event(app_obj).is_set():
             _RUNNER.pop("starting", None)
-            return jsonify({
-                "status": "error",
-                "message": "The application is shutting down; no new agent session can start.",
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "The application is shutting down; no new agent session can start.",
+                }
+            ), 503
         _RUNNER.clear()  # replace the slot wholesale (drops the "starting" sentinel)
-        _RUNNER.update({
-            "trader": trader,
-            "thread": session_thread,
-            "producer_ref": producer_ref,
-            "started_at": datetime.now(UTC).isoformat(),
-            "params": {
-                "symbols": symbols, "exchange": exchange, "product": product,
-                "broker": adapter_id, "account_id": account_id,
-                "max_position_size": max_position_size,
-                "cycle_interval_sec": cycle_interval,
-            },
-        })
+        _RUNNER.update(
+            {
+                "trader": trader,
+                "thread": session_thread,
+                "producer_ref": producer_ref,
+                "started_at": datetime.now(UTC).isoformat(),
+                "params": {
+                    "symbols": symbols,
+                    "exchange": exchange,
+                    "product": product,
+                    "broker": adapter_id,
+                    "account_id": account_id,
+                    "max_position_size": max_position_size,
+                    "cycle_interval_sec": cycle_interval,
+                },
+            }
+        )
         session_thread.start()
 
     logger.info(
         "Agent session started | symbols=%s exchange=%s adapter=%s account=%s",
-        symbols, exchange, adapter_id, account_id,
+        symbols,
+        exchange,
+        adapter_id,
+        account_id,
     )
     return jsonify({"status": "success", "data": _snapshot()}), 202
 
@@ -966,10 +1084,12 @@ def _require_auth() -> tuple[Any, int] | None:
     from .order_routes import _decode_request_payload  # noqa: PLC0415
 
     if _decode_request_payload() is None:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authentication required — provide a valid JWT",
+            }
+        ), 401
     return None
 
 
@@ -983,6 +1103,12 @@ def stop_agent() -> tuple[Any, int]:
     denied = _require_auth()
     if denied is not None:
         return denied
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    if (_decode_request_payload() or {}).get("mode") == "practice":
+        from .practice_agent_runtime import stop_practice_agent  # noqa: PLC0415
+
+        return stop_practice_agent()
     body: dict[str, Any] = request.get_json(silent=True) or {}
     square_off = bool(body.get("square_off", True))
 
@@ -1003,4 +1129,33 @@ def agent_status() -> tuple[Any, int]:
     denied = _require_auth()
     if denied is not None:
         return denied
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    if (_decode_request_payload() or {}).get("mode") == "practice":
+        from .practice_agent_runtime import practice_agent_status  # noqa: PLC0415
+
+        return practice_agent_status()
     return jsonify({"status": "success", "data": _snapshot()}), 200
+
+
+@agent_bp.route("/practice/runs", methods=["GET"])
+def practice_runs() -> tuple[Any, int]:
+    """Read durable Practice evidence under a full Practice session."""
+    from .practice_agent_runtime import list_practice_runs  # noqa: PLC0415
+
+    return list_practice_runs()
+
+
+@agent_bp.route("/practice/runs/<run_id>/events", methods=["GET"])
+def practice_events(run_id: str) -> tuple[Any, int]:
+    from .practice_agent_runtime import practice_run_events  # noqa: PLC0415
+
+    return practice_run_events(run_id)
+
+
+@agent_bp.route("/practice/runs/<run_id>/resolve", methods=["POST"])
+def practice_resolve(run_id: str) -> tuple[Any, int]:
+    """Acknowledge interruption only after the runtime proves a flat sandbox."""
+    from .practice_agent_runtime import resolve_practice_run  # noqa: PLC0415
+
+    return resolve_practice_run(run_id)

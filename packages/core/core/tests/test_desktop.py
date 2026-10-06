@@ -50,7 +50,7 @@ def _stub_transactional_build(
     """Install deterministic desktop build owners and fail after tick acquisition."""
     import flinttrade_core.config as config_module
     import flinttrade_core.local_ai_routes as local_ai_routes
-    import flinttrade_core.openalgo_client as client_module
+    import flinttrade_core.broker_client as client_module
     import flinttrade_core.smart_order_routes as smart_order_routes
     import flinttrade_data.audit_logger as audit_module
 
@@ -80,7 +80,7 @@ def _stub_transactional_build(
 
     monkeypatch.setattr(audit_module, "AuditLogger", Audit)
     monkeypatch.setattr(config_module.Settings, "from_env", staticmethod(lambda: object()))
-    monkeypatch.setattr(client_module, "OpenAlgoClient", Client)
+    monkeypatch.setattr(client_module, "BrokerClient", Client)
     monkeypatch.setattr(desktop, "create_flask_app", create_app)
     monkeypatch.setattr(
         local_ai_routes,
@@ -91,8 +91,7 @@ def _stub_transactional_build(
         local_ai_routes,
         "shutdown_local_ai_runtime",
         lambda runtime_app, **_kwargs: (
-            runtime_app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
-            and not events.append("local-ai-stop")
+            runtime_app.config["RUNTIME_ACCEPTING_REQUESTS"] is False and not events.append("local-ai-stop")
         ),
     )
     monkeypatch.setattr(
@@ -250,10 +249,7 @@ def test_desktop_lease_release_failure_is_generic_and_retains_authority(
         assert secret not in rendered
         assert raised.value.__cause__ is None
         assert raised.value.__context__ is None
-        assert any(
-            retained is lease
-            for retained in backend_instance._RETAINED_FAILED_LEASES
-        )
+        assert any(retained is lease for retained in backend_instance._RETAINED_FAILED_LEASES)
     finally:
         raw_lease.release_allowed = True
         backend_instance.release_retained_backend_instance_lease(lease)
@@ -392,7 +388,9 @@ def test_desktop_arms_rotation_scheduler_before_ready_handshake(
     monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
 
-    desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
+    desktop._serve_owned(
+        5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready")
+    )
 
     assert events.index("scheduler-start") < events.index("ready") < events.index("serve")
     assert events.count("scheduler-start") == 1
@@ -429,7 +427,9 @@ def test_desktop_rotation_start_failure_never_signals_ready_or_serves(
         RuntimeError,
         match=r"Desktop backend startup failed \(RuntimeError\)",
     ) as raised:
-        desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
+        desktop._serve_owned(
+            5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready")
+        )
 
     assert raised.value.__cause__ is None
     assert events == ["scheduler-start", "server-close"]
@@ -604,7 +604,9 @@ def test_desktop_does_not_start_an_already_running_rotation_scheduler_twice(
     monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
 
-    desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
+    desktop._serve_owned(
+        5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready")
+    )
 
     assert events == ["ready", "serve", "scheduler-stop"]
 
@@ -636,7 +638,9 @@ def test_desktop_quiesces_ditto_before_each_router_retirement(
         lambda _app: events.append("router") or True,
     )
 
-    desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
+    desktop._serve_owned(
+        5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready")
+    )
 
     assert events == [
         "ready",
@@ -1009,9 +1013,7 @@ def test_desktop_build_failure_rolls_back_acquired_owners_in_reverse_order(
         pass
 
     _stub_transactional_build(monkeypatch, events)
-    desktop._configure_tick_capture.side_effect = ExternalStartupError(
-        f"provider rejected {secret}"
-    )
+    desktop._configure_tick_capture.side_effect = ExternalStartupError(f"provider rejected {secret}")
 
     with pytest.raises(
         RuntimeError,
@@ -1202,7 +1204,7 @@ def test_desktop_pre_app_rollback_retains_executable_owner_without_secret_chain(
     backend_lease_proof,
 ) -> None:
     import flinttrade_core.config as config_module
-    import flinttrade_core.openalgo_client as client_module
+    import flinttrade_core.broker_client as client_module
     import flinttrade_data.audit_logger as audit_module
 
     events: list[str] = []
@@ -1232,7 +1234,7 @@ def test_desktop_pre_app_rollback_retains_executable_owner_without_secret_chain(
 
     monkeypatch.setattr(audit_module, "AuditLogger", Audit)
     monkeypatch.setattr(config_module.Settings, "from_env", staticmethod(lambda: object()))
-    monkeypatch.setattr(client_module, "OpenAlgoClient", Client)
+    monkeypatch.setattr(client_module, "BrokerClient", Client)
     monkeypatch.setattr(desktop, "client_close_sync", close_client)
     monkeypatch.setattr(
         desktop,
@@ -1266,7 +1268,7 @@ def test_desktop_construction_diagnostics_expose_classes_not_external_payloads(
 ) -> None:
     import flinttrade_core.config as config_module
     import flinttrade_core.local_ai_routes as local_ai_routes
-    import flinttrade_core.openalgo_client as client_module
+    import flinttrade_core.broker_client as client_module
     import flinttrade_core.smart_order_routes as smart_order_routes
     import flinttrade_data.audit_logger as audit_module
 
@@ -1289,7 +1291,7 @@ def test_desktop_construction_diagnostics_expose_classes_not_external_payloads(
     flask_app.config["SAFETY_CONFIG_READY"] = False
     monkeypatch.setattr(audit_module, "AuditLogger", fail_audit)
     monkeypatch.setattr(config_module.Settings, "from_env", staticmethod(lambda: object()))
-    monkeypatch.setattr(client_module, "OpenAlgoClient", fail_client)
+    monkeypatch.setattr(client_module, "BrokerClient", fail_client)
     monkeypatch.setattr(desktop, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(local_ai_routes, "start_configured_local_ai_runtime", lambda _app: True)
     monkeypatch.setattr(smart_order_routes, "start_smart_order_jobs", lambda: True)
@@ -1312,7 +1314,7 @@ def test_desktop_safety_construction_diagnostic_omits_external_payload(
 ) -> None:
     import flinttrade_core.config as config_module
     import flinttrade_core.local_ai_routes as local_ai_routes
-    import flinttrade_core.openalgo_client as client_module
+    import flinttrade_core.broker_client as client_module
     import flinttrade_core.smart_order_routes as smart_order_routes
     import flinttrade_data.audit_logger as audit_module
 
@@ -1326,7 +1328,7 @@ def test_desktop_safety_construction_diagnostic_omits_external_payload(
     flask_app.config.update(SAFETY_CONFIG_READY=True, SAFETY=safety)
     monkeypatch.setattr(audit_module, "AuditLogger", MagicMock)
     monkeypatch.setattr(config_module.Settings, "from_env", staticmethod(lambda: object()))
-    monkeypatch.setattr(client_module, "OpenAlgoClient", lambda _settings: object())
+    monkeypatch.setattr(client_module, "BrokerClient", lambda _settings: object())
     monkeypatch.setattr(desktop, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(local_ai_routes, "start_configured_local_ai_runtime", lambda _app: True)
     monkeypatch.setattr(smart_order_routes, "start_smart_order_jobs", lambda: True)

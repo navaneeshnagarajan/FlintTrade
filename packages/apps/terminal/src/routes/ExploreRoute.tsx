@@ -41,7 +41,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { motionConfig } from "@/lib/motion";
 import SpotlightTour from "@/components/demo/ExploreTour";
 import type { TourStep } from "@/components/demo/ExploreTour";
-import { markDemoSessionActive } from "@/lib/demoSession";
+import { EXAMPLE_USER_DISPLAY_NAME, markDemoSessionActive } from "@/lib/demoSession";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -316,8 +316,8 @@ function AutomatePreview() {
       </div>
       <div className="flex items-center justify-between rounded-md bg-surface-base px-2.5 py-2.5 text-xs">
         <div>
-          <div className="text-text-primary font-medium">Webhook Flows</div>
-          <div className="text-xxs text-text-muted">54-node flow builder</div>
+          <div className="text-text-primary font-medium">Webhook Registry</div>
+          <div className="text-xxs text-text-muted">Signed custom webhook endpoints</div>
         </div>
         <Badge className="bg-neutral-bg text-neutral-text text-xxs border-0">
           Ready
@@ -413,7 +413,7 @@ const MODULES: ModuleDef[] = [
     icon: Workflow,
     iconColor: "text-rose-400",
     title: "Automate",
-    subtitle: "Flow builder, cron scheduler, Telegram kill switch",
+    subtitle: "Cron scheduler, strategy monitors, Telegram kill switch",
     route: "/automate",
     preview: <AutomatePreview />,
   },
@@ -473,7 +473,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
         type="button"
         onClick={() => onNavigate(module.route, module.title)}
         className="relative text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-lg"
-        aria-label={`Explore ${module.title} module`}
+        aria-label={`Example ${module.title} module`}
       >
         {/*
          * HoverCard: provides the cursor-tracking spotlight gradient.
@@ -541,23 +541,23 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
 const EXPLORE_TOUR_STEPS: TourStep[] = [
   {
     target: null,
-    title: "Welcome to Explore Mode",
+    title: "Welcome",
     description:
-      "This is a fully interactive preview of FlintTrade using sample data. No broker connection is needed. Let us walk you through the key sections.",
+      "This is a fully interactive preview of FlintTrade using example data. No broker connection is needed. Let us walk you through the key sections.",
     placement: "bottom",
   },
   {
-    target: "[aria-label='Explore navigation']",
+    target: "[aria-label='Demo (example data) navigation']",
     title: "Navigation & Setup",
     description:
-      "Use the setup wizard to connect the recommended OpenAlgo bridge or a verified native broker. Settings keeps those connections editable later.",
+      "Use the setup wizard to connect a supported native broker. Settings keeps those connections editable later.",
     placement: "bottom",
   },
   {
     target: "#explore-main",
     title: "Module Cards",
     description:
-      "Each card represents a full module — Trade, Invest, Learn, Lab, Automate, and AI. Click any card to open the module with sample data.",
+      "Each card represents a full module — Trade, Invest, Learn, Lab, Automate, and AI. Click any card to open the module with example data.",
     placement: "bottom",
   },
   {
@@ -571,7 +571,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: ".rounded-lg.border.border-border-default.bg-surface-card",
     title: "Ready to Go Live?",
     description:
-      "Set up the recommended OpenAlgo bridge or a verified native broker. Takes about 2 minutes.",
+      "Set up a supported native broker. Takes about 2 minutes.",
     placement: "top",
   },
 ];
@@ -601,7 +601,7 @@ export default function ExploreRoute() {
   const startExploreMode = useCallback(() => {
     useModeStore.getState().setMode("explore");
     markDemoSessionActive();
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    useAuthStore.getState().setLoggedIn("demo-user", EXAMPLE_USER_DISPLAY_NAME, "");
     navigate("/home");
   }, [navigate]);
 
@@ -615,12 +615,12 @@ export default function ExploreRoute() {
   return (
     <>
       <PublicRouteShell
-        mainLabel="Explore mode"
-        eyebrow="Explore"
-        title="Explore FlintTrade"
-        subtitle="Open every module with simulated data, then connect OpenAlgo or a verified native broker when you are ready for live data."
+        mainLabel="Demo (example data)"
+        eyebrow="Demo (example data)"
+        title="Demo (example data)"
+        subtitle="Open every module with example data, then connect a supported native broker when you are ready for live data."
         actions={
-          <nav aria-label="Explore navigation" className="flex items-center gap-2">
+          <nav aria-label="Demo (example data) navigation" className="flex items-center gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -628,7 +628,7 @@ export default function ExploreRoute() {
               className="text-xs text-text-muted hover:text-text-primary"
               onClick={startExploreMode}
             >
-              Enter Explore
+              Demo (example data)
             </Button>
             <Button
               variant="ghost"
@@ -654,7 +654,7 @@ export default function ExploreRoute() {
           <div className="mx-auto flex max-w-2xl items-start gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-left shadow-xl shadow-black/10 backdrop-blur-xl">
             <Info className="mt-0.5 size-4 shrink-0 text-accent" />
             <p className="text-xs leading-relaxed text-accent">
-              <strong>Explore Mode</strong> - all data shown is sample only. Connect a broker in Settings to see live data.
+              <strong>Example</strong> only. Connect a broker in Settings to see live prices.
             </p>
           </div>
 
@@ -675,7 +675,7 @@ export default function ExploreRoute() {
                 className="w-full sm:w-auto"
                 onClick={startExploreMode}
               >
-                Enter Explore
+                Demo (example data)
                 <ArrowRight className="size-3.5" aria-hidden="true" />
               </Button>
               <Button
@@ -739,7 +739,7 @@ export default function ExploreRoute() {
                       Ready to start?
                     </h2>
                     <p className="mt-1 text-sm text-text-muted">
-                      Set up your workspace in 2 minutes, then connect the recommended OpenAlgo bridge or a verified native broker.
+                      Set up your workspace in 2 minutes, then connect a supported native broker.
                     </p>
                   </div>
                 </div>

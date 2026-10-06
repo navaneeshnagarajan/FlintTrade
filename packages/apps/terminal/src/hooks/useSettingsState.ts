@@ -8,19 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { useConnectionStore } from "@/stores/connectionStore";
-import { resetWsService } from "@/services/websocket";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
-import {
-  applyOpenAlgoConfigToConnectionCache,
-  openAlgoRestPortFromHost,
-  openAlgoWsPortFromUrl,
-} from "@/hooks/useOpenAlgoConfigHydration";
-import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import {
   persistLlmConfigPatch,
   readLlmConfig,
-  isAcceptedLlmConfigStatus,
   type LlmConfigPatch,
   type LlmConfigResponse,
 } from "@/services/ftApi.llm";
@@ -37,20 +28,7 @@ export interface GeneralData {
   fontSize: "small" | "normal" | "large";
 }
 
-export interface ConnectionData {
-  host: string;
-  port: string;
-  wsPort: string;
-  apiKeyConfigured: boolean;
-  apiKeyLast4: string;
-}
 
-export interface SavedConnectionData {
-  host: string;
-  port: string;
-  apiKey: string;
-  wsPort: string;
-}
 
 export interface TradingData {
   exchange: string;
@@ -108,9 +86,6 @@ export interface SettingsLlmReadiness {
 export async function probeSettingsLlmReadiness(): Promise<SettingsLlmReadiness> {
   try {
     const payload = await readLlmConfig();
-    if (!isAcceptedLlmConfigStatus(payload.status)) {
-      return { hydration: llmHydrationFailureState(), provider: "" };
-    }
     const provider = String(payload.data?.provider ?? "").trim();
     return {
       hydration: provider ? "ready" : "empty",
@@ -143,7 +118,6 @@ export interface DataPathsData {
   archiveStoragePath: string;
 }
 
-export { isAcceptedOpenAlgoConfigStatus } from "@/services/ftApi.openalgo";
 
 /**
  * Debounce window for persisting LLM config edits.
@@ -171,7 +145,6 @@ export interface SettingsState {
   llmCredentialLast4: string;
   telegram: TelegramData;
   dataPaths: DataPathsData;
-  connection: ConnectionData;
   restarting: boolean;
 
   // Actions
@@ -189,7 +162,6 @@ export interface SettingsState {
   removeLLMCredential: () => Promise<void>;
   updateTelegram: (field: keyof TelegramData, value: string | boolean) => void;
   updateDataPaths: (field: keyof DataPathsData, value: string) => void;
-  acceptConnection: (connection: SavedConnectionData) => void;
   handleRestart: (onDone?: (msg: string) => void) => void;
   retryLlmHydration: () => void;
 }
@@ -213,11 +185,6 @@ export function useSettingsState(): SettingsState {
   const telegram    = useSettingsStore((s) => s.telegram);
   const dataPaths   = useSettingsStore((s) => s.dataPaths);
 
-  // ---- connectionStore selectors ----
-  const connHost    = useConnectionStore((s) => s.host);
-  const connApiKey  = useConnectionStore((s) => s.apiKey);
-  const connWsUrl   = useConnectionStore((s) => s.wsUrl);
-
   // ---- restart state (local — not persisted) ----
   const [restarting, setRestarting] = useState(false);
   const [llmSaveState, setLlmSaveState] = useState<LlmSaveState>("saved");
@@ -228,14 +195,7 @@ export function useSettingsState(): SettingsState {
     configured: false,
     last4: "",
   });
-  const [connectionCredentialMetadata, setConnectionCredentialMetadata] = useState({
-    configured: false,
-    last4: "",
-  });
-  const [connRestPort, setConnRestPort] = useState("");
   const restartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const connectionRevisionRef = useRef(0);
-  const pendingLlmPatchRef = useRef<Partial<LlmData>>({});
   // LLM edits accumulated since the last backend flush, plus the debounce timer.
   // Persistence is debounced (never per keystroke) — see LLM_PERSIST_DEBOUNCE_MS.
   const unsavedLlmPatchRef = useRef<Partial<LlmData>>({});
@@ -258,7 +218,6 @@ export function useSettingsState(): SettingsState {
   });
 
   const applyLlmCredentialMetadata = useCallback((payload: LlmConfigResponse) => {
-    if (!isAcceptedLlmConfigStatus(payload.status)) return;
     const data = payload.data ?? {};
     if (typeof data.api_key_configured !== "boolean") return;
     setLlmCredentialMetadata({
@@ -273,33 +232,6 @@ export function useSettingsState(): SettingsState {
     return () => { if (restartRef.current) clearTimeout(restartRef.current); };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const connectionRevision = connectionRevisionRef.current;
-    void readOpenAlgoConfig()
-      .then((payload) => {
-        if (
-          cancelled
-          || connectionRevision !== connectionRevisionRef.current
-          || payload.status !== "success"
-        ) return;
-        const data = payload.data ?? {};
-        const host = String(data.host ?? "");
-        const hostPort = openAlgoRestPortFromHost(host);
-        setConnRestPort(hostPort || String(data.port ?? "5000"));
-        setConnectionCredentialMetadata({
-          configured: data.api_key_configured === true || Boolean(data.api_key),
-          last4: String(data.api_key_last4 ?? ""),
-        });
-        applyOpenAlgoConfigToConnectionCache(data);
-      })
-      .catch((err) => {
-        console.warn("[settings] failed to hydrate OpenAlgo config:", err);
-      });
-
-    return () => { cancelled = true; };
-  }, []);
-
   const retryLlmHydration = useCallback(() => {
     llmHydratedRef.current = false;
     setLlmHydrationState("loading");
@@ -312,11 +244,6 @@ export function useSettingsState(): SettingsState {
     void readLlmConfig()
       .then((payload) => {
         if (cancelled || providerRevision !== llmProviderRevisionRef.current) return;
-        if (!isAcceptedLlmConfigStatus(payload.status)) {
-          llmHydratedRef.current = false;
-          setLlmHydrationState(llmHydrationFailureState());
-          return;
-        }
         applyLlmCredentialMetadata(payload);
         if (!useSettingsStore.getState().llmSetupPending) {
           const data = payload.data ?? {};
@@ -380,7 +307,6 @@ export function useSettingsState(): SettingsState {
   }, []);
 
   const applyAuthoritativeLlm = useCallback((payload: LlmConfigResponse) => {
-    if (!isAcceptedLlmConfigStatus(payload.status)) return;
     applyLlmCredentialMetadata(payload);
     const data = payload.data ?? {};
     const current = useSettingsStore.getState().llm;
@@ -647,15 +573,11 @@ export function useSettingsState(): SettingsState {
       && normaliseLlmHost(currentProvider, value).trim()
         !== normaliseLlmHost(currentProvider, currentLlm.host).trim();
     if (hostDestinationChanged) llmFieldRevisionsRef.current.apiKey += 1;
-    // Reflect the edit in the store immediately (responsive field) and record
-    // it for both the late-hydration merge and the pending backend flush.
-    const pendingPatch = { ...pendingLlmPatchRef.current, [field]: value };
+    // Reflect the edit in the store immediately to keep the field responsive.
     const localPatch: Partial<LlmData> = { [field]: value };
     if (hostDestinationChanged) {
-      delete pendingPatch.apiKey;
       localPatch.apiKey = "";
     }
-    pendingLlmPatchRef.current = pendingPatch;
     useSettingsStore.getState().setLLM(localPatch);
 
     const invalidHost = field === "host" && providerConfig?.requiresHost && !value.trim();
@@ -707,23 +629,9 @@ export function useSettingsState(): SettingsState {
     useSettingsStore.getState().setDataPaths({ [field]: value });
   }, []);
 
-  const acceptConnection = useCallback((connection: SavedConnectionData) => {
-    connectionRevisionRef.current += 1;
-    setConnRestPort(connection.port);
-    const cachedApiKey = useConnectionStore.getState().apiKey;
-    setConnectionCredentialMetadata((current) => {
-      const acceptedApiKey = connection.apiKey.trim() || cachedApiKey;
-      return {
-        configured: Boolean(acceptedApiKey) || current.configured,
-        last4: acceptedApiKey ? acceptedApiKey.slice(-4) : current.last4,
-      };
-    });
-  }, []);
-
   const handleRestart = useCallback((onDone?: (msg: string) => void) => {
     if (restarting) return;
     setRestarting(true);
-    resetWsService();
     restartRef.current = setTimeout(() => {
       setRestarting(false);
       onDone?.("Services restarted");
@@ -793,16 +701,6 @@ export function useSettingsState(): SettingsState {
     [dataPaths],
   );
 
-  const connection = useMemo<ConnectionData>(() => {
-    return {
-      host: connHost,
-      port: connRestPort || openAlgoRestPortFromHost(connHost) || "5000",
-      wsPort: openAlgoWsPortFromUrl(connWsUrl),
-      apiKeyConfigured: connectionCredentialMetadata.configured || Boolean(connApiKey),
-      apiKeyLast4: connectionCredentialMetadata.last4 || connApiKey.slice(-4),
-    };
-  }, [connHost, connRestPort, connApiKey, connWsUrl, connectionCredentialMetadata]);
-
   return {
     general,
     trading,
@@ -819,7 +717,6 @@ export function useSettingsState(): SettingsState {
       : "",
     telegram: telegramData,
     dataPaths: dataPathsData,
-    connection,
     restarting,
     updateGeneral,
     updateTradingDefaults,
@@ -829,7 +726,6 @@ export function useSettingsState(): SettingsState {
     removeLLMCredential,
     updateTelegram,
     updateDataPaths,
-    acceptConnection,
     handleRestart,
     retryLlmHydration,
   };

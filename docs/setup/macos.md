@@ -1,7 +1,7 @@
 # FlintTrade on macOS
 
-> FlintTrade `v0.0.1` is not production ready; use Explore and Practice
-> modes before connecting any live broker workflow.
+> FlintTrade `v0.0.1` is not production ready; use Practice and example data
+> before connecting any live broker workflow.
 
 ## One-line install (recommended — no prerequisites)
 
@@ -19,11 +19,6 @@ checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a
 The Electron desktop shell keeps its own checkout at `~/.flinttrade/src/FlintTrade`
 and its own `~/.local/bin/flinttrade` launcher, so the two installs never
 collide and can be run in either order.
-
-Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
-configuration is handled in the app; no `.env` file is required. Your workspace
-lives at `~/Library/Application Support/flinttrade/` (override with
-`FLINTTRADE_WORKSPACE_DIR`, or `FLINTTRADE_HOME`).
 
 ### If the site is unreachable (repo-direct fallback)
 
@@ -120,10 +115,6 @@ required. If the site is unreachable, run it repo-direct with
      choose **Open**, then **Open** again in the dialog — needed once per
      install.
 
-   Subsequent launches work normally either way.
-4. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
-   in the app; no `.env` file is required.
-
 Manual Finder copies do not have the identity receipt written by the
 one-command installer. To uninstall one, quit FlintTrade and move
 `FlintTrade.app` from Applications to Trash. This retains the workspace,
@@ -199,5 +190,3 @@ git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 docker compose up
 ```
-
-Note: For background-service supervision on macOS, write a launchd plist that runs `python scripts/ft.py start` from your repo root. A sample plist may be added to `infra/launchd/` in a future release; until then, the systemd unit at `infra/systemd/openalgo.service` is the closest reference.

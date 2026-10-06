@@ -134,6 +134,7 @@ def _redacted_operational(entry: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of *entry* safe for the operational stream (non-mutating)."""
     return {**entry, "message": redact_identity(entry.get("message", ""))}
 
+
 # ---------------------------------------------------------------------------
 # Shared ring buffer
 # ---------------------------------------------------------------------------
@@ -381,9 +382,5 @@ def recent_logs() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "n must be a positive integer"}), 400
 
     buf = LogBuffer()
-    entries = [
-        _redacted_operational(entry)
-        for entry in buf.recent(n)
-        if _operational_visible(entry)
-    ]
+    entries = [_redacted_operational(entry) for entry in buf.recent(n) if _operational_visible(entry)]
     return jsonify({"status": "success", "data": {"entries": entries}}), 200

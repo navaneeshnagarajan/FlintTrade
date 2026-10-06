@@ -139,9 +139,17 @@ def active_sdk_entries(entries: list[dict[str, Any]]) -> list[dict[str, str]]:
             # digest) — PyPI may add files to an existing release.
             row["sha256"] = sha256
         if name == "kotakneoapi":
+            release_version = entry.get("release_version")
+            if not isinstance(release_version, str) or re.fullmatch(r"\d+\.\d+\.\d+", release_version) is None:
+                raise ValueError("Kotak Neo release_version must be an explicit stable version")
+            row["release_version"] = release_version
             for field in (
-                "source_tree", "release_tag", "release_commit", "release_tree",
-                "release_wheel_sha256", "release_sdist_sha256",
+                "source_tree",
+                "release_tag",
+                "release_commit",
+                "release_tree",
+                "release_wheel_sha256",
+                "release_sdist_sha256",
             ):
                 value = str(entry.get(field, "")).strip()
                 if value:
@@ -312,6 +320,8 @@ def build_readme(manifest: dict[str, Any]) -> str:
     ]
     for entry in manifest["sdks"]:
         lines.append(f"- {entry['package']} {entry['version']}")
+        if entry.get("release_version"):
+            lines.append(f"  - release compatibility baseline: {entry['release_version']}")
         if entry.get("git"):
             lines.append(f"  - git: {entry['git']['path']} @ {entry['git']['describe']}")
             if "git_current" in entry:
@@ -328,7 +338,9 @@ def build_readme(manifest: dict[str, Any]) -> str:
     if manifest.get("drift"):
         lines.extend(["", "## Drift", ""])
         for entry in manifest["drift"]:
-            lines.append(f"- {entry['package']}: locked {entry['locked']} vs upstream {entry['upstream']} ({entry['source']})")
+            lines.append(
+                f"- {entry['package']}: locked {entry['locked']} vs upstream {entry['upstream']} ({entry['source']})"
+            )
     if manifest.get("sdkless_brokers"):
         lines.extend(["", "## SDK-Less Brokers", ""])
         for entry in manifest["sdkless_brokers"]:
@@ -369,6 +381,8 @@ def sync(
             "source_commit": entry["source_commit"],
             "notes": source.notes,
         }
+        if entry.get("release_version"):
+            sdk_record["release_version"] = entry["release_version"]
         if source.git_url:
             git = sync_git_mirror(source, audit_root)
             sdk_record["git"] = git
@@ -398,28 +412,29 @@ def sync(
                             {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
                         )
         if source.pypi_name:
+            release_version = entry.get("release_version", entry["version"])
             latest = latest_pypi_version(source.pypi_name, opener)
             sdk_record["pypi_latest_version"] = latest
-            sdk_record["pypi_current"] = latest == entry["version"]
-            if latest != entry["version"]:
+            sdk_record["pypi_current"] = latest == release_version
+            if latest != release_version:
                 manifest["drift"].append(
                     {
                         "package": entry["name"],
                         "source": "pypi",
-                        "locked": entry["version"],
+                        "locked": release_version,
                         "upstream": latest,
                     }
                 )
             sdk_record["pypi"] = download_pypi_artifact(
                 source.pypi_name,
-                entry["version"],
+                release_version,
                 pypi_dir,
                 opener,
                 pinned_sha=entry.get("sha256", ""),
             )
             if entry["name"] == "kotakneoapi":
                 release = pypi_release_json(source.pypi_name, opener)
-                files = release.get("releases", {}).get(entry["version"], [])
+                files = release.get("releases", {}).get(release_version, [])
                 for packagetype, field, drift_source in (
                     ("bdist_wheel", "release_wheel_sha256", "release-wheel"),
                     ("sdist", "release_sdist_sha256", "release-sdist"),
@@ -486,7 +501,9 @@ def main(argv: list[str] | None = None) -> int:
     if manifest.get("drift"):
         print("drift detected:")
         for entry in manifest["drift"]:
-            print(f" - {entry['package']}: locked {entry['locked']} vs upstream {entry['upstream']} ({entry['source']})")
+            print(
+                f" - {entry['package']}: locked {entry['locked']} vs upstream {entry['upstream']} ({entry['source']})"
+            )
     return 1 if args.fail_on_drift and manifest.get("drift") else 0
 
 

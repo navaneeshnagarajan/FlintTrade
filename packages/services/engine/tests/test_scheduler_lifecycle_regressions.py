@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from flinttrade_core.models import OHLCV, Order, Quote
+from flinttrade_engine import scheduler as scheduler_module
 from flinttrade_engine.scheduler import StrategyRunner, StrategyScheduler, TimeScheduler
 from flinttrade_engine.strategy import BaseStrategy
 from flinttrade_engine.laya import DecisionStatus, process_laya
@@ -141,7 +142,7 @@ def _live_dispatcher(*, account_id: str = "default") -> GatedStrategyDispatcher:
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=lambda: None,
         router_provider=lambda: None,
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id=account_id,
     )
 
@@ -435,6 +436,33 @@ async def test_timed_out_sync_stop_hook_remains_owned_without_blocking_loop() ->
 
 
 @pytest.mark.asyncio
+async def test_sync_hook_returned_before_deadline_survives_late_loop_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A finished sync hook must not time out while the loop is still observing it.
+
+    The lifecycle deadline still rejects a hook that is running when the
+    deadline passes. Only the gap after the worker has returned is ignored.
+    """
+    strategy = _TestStrategy(name="late-observe")
+    runner = _runner(strategy, lifecycle_timeout=0.02)
+    real_to_thread = asyncio.to_thread
+
+    async def observe_late(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        result = await real_to_thread(func, *args, **kwargs)
+        await asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(scheduler_module.asyncio, "to_thread", observe_late)
+
+    await runner.start()
+    assert strategy.state.value == "ACTIVE"
+    await runner.stop()
+    assert strategy.state.value == "STOPPED"
+    assert runner.cleanup_required is False
+
+
+@pytest.mark.asyncio
 async def test_square_off_sync_stop_timeout_retains_owned_worker() -> None:
     strategy = _TestStrategy(name="square-off-stop")
     runner = _runner(strategy, lifecycle_timeout=0.02)
@@ -601,7 +629,9 @@ async def test_threadsafe_stop_all_runs_on_bound_runtime_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_all_drains_a_timed_out_start_before_late_activation_can_escape() -> None:
+async def test_start_all_drains_a_timed_out_start_before_late_activation_can_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scheduler = StrategyScheduler(client=MagicMock())
     strategy = _TestStrategy(name="aggregate-late-start")
     start_entered = threading.Event()
@@ -610,7 +640,7 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
 
     def delayed_start() -> None:
         start_entered.set()
-        if not release_start.wait(timeout=1.0):
+        if not release_start.wait(timeout=_LIFECYCLE_SETTLE_TIMEOUT):
             raise AssertionError("timed out waiting to release the start hook")
         original_start()
 
@@ -619,12 +649,22 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
     runner.scheduler = _open_time_scheduler()
     runner.client.quotes = AsyncMock(return_value=None)
     runner.lifecycle_timeout = 0.1
+    rollback_delay = scheduler._terminal_drain_timeout(runner) * 2
+    # Only startup should use the short failure budget. The real drain must
+    # have time to settle even when rollback is delayed on a busy CI worker.
+    # Patch its budget before it is captured, not after rollback has entered.
+    monkeypatch.setattr(
+        StrategyScheduler,
+        "_terminal_drain_timeout",
+        staticmethod(lambda _runner: _LIFECYCLE_SETTLE_TIMEOUT),
+    )
 
     rollback_entered = asyncio.Event()
     allow_rollback = asyncio.Event()
     original_runner_stop = runner.stop
 
     async def observed_stop() -> None:
+        runner.lifecycle_timeout = _LIFECYCLE_SETTLE_TIMEOUT
         rollback_entered.set()
         await allow_rollback.wait()
         await original_runner_stop()
@@ -633,12 +673,16 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
 
     start_all = asyncio.create_task(scheduler.start_all())
     try:
-        assert await asyncio.to_thread(start_entered.wait, 1.0)
-        await asyncio.wait_for(rollback_entered.wait(), timeout=1.0)
+        assert await asyncio.to_thread(start_entered.wait, _LIFECYCLE_SETTLE_TIMEOUT)
+        await asyncio.wait_for(rollback_entered.wait(), timeout=_LIFECYCLE_SETTLE_TIMEOUT)
         assert start_all.done() is False
 
+        # Deterministically exceed the unpatched, startup-derived drain budget.
+        await asyncio.sleep(rollback_delay)
+        assert start_all.done() is False
         release_start.set()
         allow_rollback.set()
+        await _assert_settles(start_all, "rollback did not drain the late start hook")
         result = (await asyncio.gather(start_all, return_exceptions=True))[0]
 
         assert isinstance(result, TimeoutError)
@@ -739,6 +783,66 @@ async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions()
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_publish_grace_times_out_while_the_default_executor_is_full() -> None:
+    """A full default executor must not swallow the lifecycle grace.
+
+    The grace used to call ``asyncio.to_thread`` on the same pool that runs
+    synchronous hooks. Filling that pool with workers that never return left
+    the grace queued, so the lifecycle timeout never started.
+    """
+    loop = asyncio.get_running_loop()
+    await asyncio.to_thread(lambda: None)
+    executor = loop._default_executor
+    assert executor is not None
+    release_pool = threading.Event()
+    running = 0
+    running_lock = threading.Lock()
+
+    def block_pool_worker() -> None:
+        nonlocal running
+        with running_lock:
+            running += 1
+        release_pool.wait()
+
+    for _ in range(executor._max_workers):
+        loop.run_in_executor(None, block_pool_worker)
+    for _ in range(500):
+        if running >= executor._max_workers:
+            break
+        await asyncio.sleep(0.01)
+    assert running >= executor._max_workers
+
+    scheduler = StrategyScheduler(client=MagicMock())
+    strategy = _TestStrategy(name="executor-full")
+    runner = scheduler.register(strategy)
+    runner.scheduler = _open_time_scheduler()
+    runner.client.quotes = AsyncMock(return_value=None)
+    runner.lifecycle_timeout = 0.05
+    release_hook = threading.Event()
+
+    def never_returning_start() -> None:
+        release_hook.wait()
+
+    strategy.start = never_returning_start
+    start = asyncio.create_task(scheduler.start_one(strategy.name))
+    try:
+        done, _pending = await asyncio.wait({start}, timeout=2.0)
+        assert start in done, "a full default executor stalled the lifecycle grace"
+        result = (await asyncio.gather(start, return_exceptions=True))[0]
+        assert isinstance(result, TimeoutError)
+    finally:
+        release_pool.set()
+        release_hook.set()
+        await asyncio.gather(start, return_exceptions=True)
+        start_hook = runner._start_hook_task
+        if start_hook is not None:
+            await asyncio.wait_for(start_hook, timeout=_LIFECYCLE_SETTLE_TIMEOUT)
+        if runner.has_live_owner:
+            await runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_failed_start_drain_honours_its_cleanup_deadline() -> None:
     scheduler = StrategyScheduler(client=MagicMock())
     strategy = _TestStrategy(name="bounded-drain")
@@ -754,11 +858,12 @@ async def test_failed_start_drain_honours_its_cleanup_deadline() -> None:
         release_hook.wait()
 
     strategy.start = blocked_start
-    start_hook, worker_active = runner._create_lifecycle_hook_task(strategy.start)
+    start_hook, worker_active, settlement = runner._create_lifecycle_hook_task(strategy.start)
     with runner._ownership_lock:
         runner._cleanup_required = True
         runner._start_hook_task = start_hook
         runner._start_hook_worker_active = worker_active
+        runner._start_hook_settlement = settlement
     try:
         assert await asyncio.to_thread(hook_entered.wait, 0.5)
         started = asyncio.get_running_loop().time()
@@ -1730,7 +1835,7 @@ def test_scheduler_rejects_live_strategy_with_raw_broker_mutation_handle() -> No
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1758,7 +1863,7 @@ def test_scheduler_rejects_live_strategy_with_arbitrarily_named_raw_broker_handl
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1786,7 +1891,7 @@ def test_scheduler_rejects_live_strategy_with_retained_bound_broker_write() -> N
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1814,7 +1919,7 @@ def test_scheduler_rejects_live_strategy_with_partial_wrapped_broker_write() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1847,7 +1952,7 @@ def test_scheduler_rejects_live_strategy_with_closure_wrapped_broker_write() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1882,7 +1987,7 @@ def test_scheduler_rejects_live_strategy_with_callable_broker_wrapper() -> None:
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1917,7 +2022,7 @@ def test_scheduler_rejects_live_strategy_with_class_held_callable_broker_wrapper
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1949,7 +2054,7 @@ def test_scheduler_rejects_live_strategy_with_nested_cyclic_broker_handle() -> N
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -1981,7 +2086,7 @@ def test_scheduler_rejects_live_strategy_with_class_held_broker_handle() -> None
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2004,14 +2109,14 @@ def test_scheduler_rejects_live_strategy_with_unauthorised_dispatcher() -> None:
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     unauthorised = GatedStrategyDispatcher(
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="other",
     )
     strategy = LiveStrategy(
@@ -2039,7 +2144,7 @@ def test_scheduler_rejects_live_strategy_with_dispatch_order_lookalike() -> None
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2072,7 +2177,7 @@ def test_scheduler_rejects_live_strategy_with_module_global_broker_write(monkeyp
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2112,7 +2217,7 @@ def test_scheduler_rejects_live_strategy_with_weakref_slotted_callable() -> None
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2151,7 +2256,7 @@ def test_scheduler_rejects_live_strategy_with_shadowed_instance_dictionary() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2184,7 +2289,7 @@ def test_scheduler_rejects_live_strategy_with_dynamic_global_lookup(monkeypatch)
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2217,7 +2322,7 @@ def test_scheduler_rejects_live_strategy_with_nested_function_global_writer(monk
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2241,7 +2346,7 @@ def test_scheduler_rejects_live_strategy_when_capability_graph_exceeds_bounds() 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(
@@ -2268,7 +2373,7 @@ def test_scheduler_accepts_live_strategy_retaining_only_managed_dispatcher() -> 
         safety=SafetySystem(SafetyConfig()),
         request_context_provider=MagicMock(),
         router_provider=MagicMock(),
-        adapter_id="openalgo",
+        adapter_id="broker",
         account_id="default",
     )
     strategy = LiveStrategy(

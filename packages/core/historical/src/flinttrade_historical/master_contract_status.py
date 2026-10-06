@@ -1,7 +1,7 @@
 """Master contract sync status tracker.
 
 Records when broker master contracts (instrument lists) were last downloaded
-from OpenAlgo and exposes helpers to detect stale contracts that need
+from native broker and exposes helpers to detect stale contracts that need
 re-syncing.
 
 DuckDB is used for persistence — same database as the OHLCV pipeline so all
@@ -136,7 +136,10 @@ class MasterContractStatus:
         )
         logger.info(
             "MasterContractStatus: recorded sync %s/%s — %d symbols, checksum=%s",
-            broker, exchange, symbol_count, checksum[:8],
+            broker,
+            exchange,
+            symbol_count,
+            checksum[:8],
         )
 
     # ------------------------------------------------------------------
@@ -191,7 +194,11 @@ class MasterContractStatus:
         stale = age_hours > max_age_hours
         logger.debug(
             "needs_sync(%s, %s): age=%.1fh max=%dh → %s",
-            broker, exchange, age_hours, max_age_hours, stale,
+            broker,
+            exchange,
+            age_hours,
+            max_age_hours,
+            stale,
         )
         return stale
 
@@ -245,7 +252,9 @@ class MasterContractStatus:
 
         logger.debug(
             "stale_contracts(max_age_hours=%d): %d stale out of %d total",
-            max_age_hours, len(stale), len(self.all_statuses()),
+            max_age_hours,
+            len(stale),
+            len(self.all_statuses()),
         )
         return stale
 

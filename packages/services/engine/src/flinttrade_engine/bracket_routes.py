@@ -30,8 +30,9 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify
 
+from flinttrade_core.order_input import json_object_body, normalise_order_type_fields
 from flinttrade_core.rate_limiter import rate_limit
 
 from .bracket_order import BracketOrderError, BracketPrincipal
@@ -69,7 +70,7 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
     Explicit ``broker``/``account_id`` request fields win; otherwise the
     configured ``brokers.execution.default`` selector is used (mirroring the
     core order routes' target resolution), falling back to
-    ``("openalgo", "default")``.
+    ``an explicit configured account``.
 
     Args:
         params: Mapping-like request body carrying optional ``broker`` and
@@ -79,8 +80,10 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
         The ``(adapter_id, account_id)`` tuple.
     """
     if str(params.get("broker") or "").strip() or str(params.get("account_id") or "").strip():
-        adapter_id = str(params.get("broker") or "openalgo").strip().lower()
+        adapter_id = str(params.get("broker") or "").strip().lower()
         account_id = str(params.get("account_id") or "default").strip() or "default"
+        if not adapter_id:
+            raise ValueError("An explicit native broker is required")
         return adapter_id, account_id
 
     router = current_app.config.get("BROKER_ROUTER")
@@ -92,7 +95,7 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
             return parse_selector(selector)
         except ValueError:
             logger.warning("Ignoring malformed brokers.execution.default selector")
-    return "openalgo", "default"
+    raise ValueError("No execution broker account configured")
 
 
 def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
@@ -126,12 +129,13 @@ def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
 @require_live_unlocked
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_bracket() -> Response:
-    """Place a bracket order — entry plus ONE protective exit leg.
+    """Place a bracket: entry plus exactly one protective exit leg.
 
-    Every leg traverses the gated live chain (SafetySystem L1–L5 →
-    ``gate_order`` one-shot HMAC ``SafetyContext`` → ``BrokerRouter``).
-    Practice-mode JWTs are refused with 403 ``practice_unsupported`` by the
-    route guard — the sandbox cannot execute multi-leg brackets.
+    Each leg is admitted through Laya, then placed by the bracket service
+    through SafetySystem, ``gate_order``, and ``BrokerRouter``. Practice-mode
+    JWTs are refused with 403 ``practice_unsupported`` by the route guard.
+    GTT and broker-held varieties are refused before that admission. An OCO
+    pair and a trailing stop stay refused.
 
     Supported today: entry + EXACTLY ONE of ``stoploss`` (stop-loss exit leg)
     or ``target`` (limit exit leg). Refused honestly with HTTP 422:
@@ -157,7 +161,7 @@ def place_bracket() -> Response:
                 "product": "MIS"
             },
             "stoploss": 22000.0,
-            "broker": "openalgo",
+            "broker": "",
             "account_id": "default"
         }
 
@@ -166,16 +170,14 @@ def place_bracket() -> Response:
 
     Returns:
         201 with bracket details on success; 400 on bad input; 401/403 from
-        the mode guard; 422 for unsupported/failed placement — a bracket with
-        ``status="partial"`` in ``data`` means the entry leg is live but
-        UNPROTECTED (the exit leg failed) and needs operator action; 503 when
-        the service or broker routing is unavailable.
+        the mode guard; 422 for an OCO pair, a trailing stop, GTT, or a
+        broker-held variety; 503 when the bracket service is not configured.
     """
     svc, err = _service_required()
     if err:
         return err
 
-    body: dict[str, Any] = request.get_json(silent=True) or {}
+    body: dict[str, Any] = json_object_body()
 
     entry = body.get("entry")
     if not entry or not isinstance(entry, dict):
@@ -250,7 +252,67 @@ def place_bracket() -> Response:
             400,
         )
 
-    principal = _request_principal(body)
+    from flinttrade_core.order_routes import (  # noqa: PLC0415
+        _gtt_contract_refusal,
+        _gtt_variety_token,
+        _laya_place_response,
+    )
+
+    variety = body.get("variety") if body.get("variety") is not None else entry.get("variety")
+    gtt_refusal = _gtt_contract_refusal({"variety": variety})
+    if gtt_refusal is not None:
+        return gtt_refusal
+    if _gtt_variety_token(variety) in {"super", "forever"}:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "broker_held_unsupported",
+                    "message": (
+                        "Not placed. Broker-held bracket legs aren't supported. "
+                        "Use one stop-loss or one target."
+                    ),
+                }
+            ),
+            422,
+        )
+
+    try:
+        entry = normalise_order_type_fields(entry)
+    except ValueError:
+        return jsonify({"status": "error", "message": "order_type and pricetype must agree"}), 400
+    if not str(entry.get("order_type") or entry.get("pricetype") or "").strip():
+        # Blank/null aliases use the same price-based default as omitted aliases.
+        try:
+            price = float(entry.get("price", 0))
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "Entry price must be a number"}), 400
+        entry["order_type"] = entry["pricetype"] = "MARKET" if price == 0 else "LIMIT"
+
+    entry_action = str(entry.get("action") or "").strip().upper()
+    exit_action = "SELL" if entry_action == "BUY" else "BUY"
+    exit_price = stoploss if stoploss is not None else target
+    exit_body = {
+        "symbol": entry.get("symbol"),
+        "exchange": entry.get("exchange"),
+        "action": exit_action,
+        "quantity": entry.get("quantity"),
+        "product": entry.get("product") or "MIS",
+        "price": exit_price,
+        "trigger_price": exit_price if stoploss is not None else 0,
+        "pricetype": "SL" if stoploss is not None else "LIMIT",
+    }
+    entry_block = _laya_place_response(dict(entry), mode="live", source="operator")
+    if entry_block is not None:
+        return entry_block
+    exit_block = _laya_place_response(exit_body, mode="live", source="operator")
+    if exit_block is not None:
+        return exit_block
+
+    try:
+        principal = _request_principal(body)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Native execution account not configured"}), 503
     result = svc.place_bracket(
         entry,
         stoploss=stoploss,
@@ -265,8 +327,6 @@ def place_bracket() -> Response:
             "message": result.message,
             "error": result.error,
         }
-        # A "partial" bracket (entry live, exit leg failed) MUST reach the
-        # caller so the unprotected position is visible and actionable.
         if result.bracket is not None:
             payload["data"] = result.bracket.to_dict()
         return jsonify(payload), 422
@@ -354,7 +414,10 @@ def cancel_bracket(bracket_id: str) -> Response:
     if bracket is None:
         return jsonify({"status": "error", "message": f"Bracket '{bracket_id}' not found"}), 404
 
-    principal = _request_principal(request.get_json(silent=True) or {})
+    try:
+        principal = _request_principal(json_object_body())
+    except ValueError:
+        return jsonify({"status": "error", "message": "Native execution account not configured"}), 503
     try:
         cancelled = svc.cancel_bracket(bracket_id, principal=principal)
     except BracketOrderError as exc:

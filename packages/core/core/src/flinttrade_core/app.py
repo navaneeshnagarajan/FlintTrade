@@ -1,7 +1,6 @@
 """FlintTrade application entry point — wires all packages together.
 
-Includes a lightweight Flask API server (port 5100) for FlintTrade-specific
-endpoints that are separate from the OpenAlgo API (port 5000).
+Includes the FlintTrade Flask API server (port 5100).
 
 Usage:
     python packages/core/core/src/app.py
@@ -39,7 +38,6 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
-from functools import wraps
 from pathlib import Path
 from typing import Any, ContextManager
 
@@ -99,14 +97,14 @@ from .backend_instance import (  # noqa: E402
     release_retained_backend_instance_lease,
     retain_backend_instance_lease,
 )
-from .config import DEFAULT_OPENALGO_PORT, DEFAULT_OPENALGO_WS_PORT, Settings, openalgo_ws_base_url  # noqa: E402
+from .config import Settings  # noqa: E402
 from .csp import (  # noqa: E402
     build_csp_header as _build_csp_header,
     csp_report_bp as _csp_report_bp,
     generate_nonce as _generate_csp_nonce,
     inject_csp_nonce as _inject_csp_nonce,
 )
-from .openalgo_client import OpenAlgoClient  # noqa: E402
+from .broker_client import BrokerClient  # noqa: E402
 from .request_observability import (  # noqa: E402
     current_safe_request_summary,
     project_safe_request,
@@ -131,7 +129,9 @@ if _GATEWAY_SRC not in sys.path:
     sys.path.append(_GATEWAY_SRC)
 
 from flinttrade_gateway.registry import (  # noqa: E402
-    BrokerRegistry, RegistryPublicationOwner, ManagedSessionAuthority, create_owned_registry,
+    BrokerRegistry,
+    RegistryPublicationOwner,
+    create_owned_registry,
 )
 from flinttrade_gateway.credentials import CredentialStore  # noqa: E402
 from flinttrade_gateway.auth import gateway_bp  # noqa: E402
@@ -171,6 +171,7 @@ def _acquire_werkzeug_fallback_log_suppression() -> _WerkzeugFallbackLogSuppress
         _WERKZEUG_FALLBACK_LOG_OWNERS += 1
         werkzeug_logger.disabled = True
     return _WerkzeugFallbackLogSuppressionLease()
+
 
 DEFAULT_BACKEND_PORT = 5100
 
@@ -395,23 +396,8 @@ def _rag_runtime_enabled() -> bool:
 
 
 def _tick_capture_enabled() -> bool:
-    """Return whether the startup path should launch live tick capture.
-
-    The environment setting is authoritative when present, including explicit
-    false. Otherwise, read the UI-owned workspace setting. Capture stays off
-    by default because the recorder opens an OpenAlgo WebSocket on boot.
-    """
-    raw = os.environ.get("FLINTTRADE_TICK_CAPTURE")
-    if raw is None:
-        raw = _read_workspace_section("data", "tick_capture", "enabled")
-    if isinstance(raw, bool):
-        return raw
-    return str(raw or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    """Report native network capture capability; old preferences cannot enable it."""
+    return False
 
 
 _TICK_CAPTURE_LIFECYCLE_LOCK = "TICK_CAPTURE_LIFECYCLE_LOCK"
@@ -426,24 +412,21 @@ def _tick_capture_lifecycle_lock(flask_app: Flask) -> threading.RLock:
     return lock
 
 
-def _set_tick_capture_intent(flask_app: Flask, enabled: bool) -> None:
-    """Expose capture intent before the API server accepts status requests."""
+def _set_tick_capture_intent(flask_app: Flask) -> None:
+    """Publish unavailable native capture before the API accepts status requests."""
     with _tick_capture_lifecycle_lock(flask_app):
-        flask_app.config["TICK_CAPTURE_ENABLED"] = enabled
+        flask_app.config["TICK_CAPTURE_ENABLED"] = False
         flask_app.config["TICK_CAPTURE_ERROR"] = ""
 
 
-def _sanitise_tick_capture_error(error: Any, api_key: str) -> str:
-    """Return a single-line startup diagnostic without the OpenAlgo API key."""
-    diagnostic = str(error).strip() or type(error).__name__
-    if api_key:
-        diagnostic = diagnostic.replace(api_key, "[redacted]")
-    return " ".join(diagnostic.splitlines())
+def _sanitise_tick_capture_error(error: Any) -> str:
+    """Keep external failure payloads out of diagnostics."""
+    return type(error).__name__ if isinstance(error, BaseException) else "Tick capture unavailable"
 
 
-def _record_tick_capture_failure(flask_app: Flask, error: Any, api_key: str) -> None:
+def _record_tick_capture_failure(flask_app: Flask, error: Any) -> None:
     """Persist and log a redacted tick-capture startup failure."""
-    diagnostic = _sanitise_tick_capture_error(error, api_key)
+    diagnostic = _sanitise_tick_capture_error(error)
     with _tick_capture_lifecycle_lock(flask_app):
         flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
     logger.warning("Tick capture failed to start (%s); not recording ticks", diagnostic)
@@ -539,6 +522,7 @@ async def _join_cancelled_task(
     if isinstance(task, asyncio.Future):
         waiter = task
     else:
+
         async def await_owned() -> None:
             await task
 
@@ -652,7 +636,6 @@ async def _rollback_tick_capture_startup(
     checkpoint_owner: Any | None,
     close_worker: _BoundedTickStorageCloseWorker | None,
     startup_error: BaseException,
-    api_key: str,
     deadline: _LifecycleDeadline | None = None,
 ) -> bool:
     """Fail capture closed while retaining any storage that still owns ticks."""
@@ -665,7 +648,7 @@ async def _rollback_tick_capture_startup(
                 value = sanitise_error(value)
         except Exception:
             pass
-        return _sanitise_tick_capture_error(value, api_key)
+        return _sanitise_tick_capture_error(value)
 
     diagnostic = sanitise(startup_error)
     if recorder is not None:
@@ -858,9 +841,7 @@ class _OrderFlowCheckpointOwner:
                     checkpoint.cursor.ingest_seq,
                 )
                 self.storage.validate_tick_replay_cursor(checkpoint_replay_cursor)
-            elif recovery is not None and (
-                recovery.reason != "pristine_store_replacement" or cursor.ingest_seq == 0
-            ):
+            elif recovery is not None and (recovery.reason != "pristine_store_replacement" or cursor.ingest_seq == 0):
                 handoff_from_store_id = checkpoint.cursor.store_id
                 checkpoint_replay_cursor = TickReplayCursor(
                     cursor.store_id,
@@ -1270,7 +1251,6 @@ def _handle_tick_recorder_completion(
     recorder: Any,
     task: Any,
     *,
-    api_key: str,
     is_shutting_down: Callable[[], bool] | None = None,
     on_unpublished: Callable[[], None] | None = None,
     before_storage_close: Callable[[], None] | None = None,
@@ -1290,12 +1270,7 @@ def _handle_tick_recorder_completion(
     except asyncio.CancelledError:
         return False
     failure = error if error is not None else RuntimeError("Tick recorder stopped unexpectedly")
-    sanitise_error = getattr(recorder, "sanitise_error", None)
-    try:
-        diagnostic_source = sanitise_error(failure) if callable(sanitise_error) else failure
-    except Exception:
-        diagnostic_source = failure
-    diagnostic = _sanitise_tick_capture_error(diagnostic_source, api_key)
+    diagnostic = _sanitise_tick_capture_error(failure)
     storage: Any | None = None
     storage_lock: Any | None = None
     with _tick_capture_lifecycle_lock(flask_app):
@@ -1324,6 +1299,7 @@ def _handle_tick_recorder_completion(
         logger.warning("Tick capture stopped unexpectedly (%s); not recording ticks", diagnostic)
         return True
     if close_worker is None:
+
         def close_owned_storage() -> None:
             if before_storage_close is not None:
                 before_storage_close()
@@ -1360,6 +1336,7 @@ def _build_tick_recorder(
     ltp_sink = signal_sink
     sandbox_sink = getattr(sandbox_engine, "process_tick", None)
     if callable(sandbox_sink):
+
         def composed_ltp_sink(
             exchange: str,
             symbol: str,
@@ -1374,11 +1351,9 @@ def _build_tick_recorder(
 
     recorder = recorder_factory(
         storage=storage,
-        ws_url=openalgo_ws_base_url(settings),
         storage_lock=storage_lock,
         orderflow_aggregator=orderflow,
         post_flush_callback=post_flush_callback,
-        api_key=settings.openalgo_api_key,
         ltp_sink=ltp_sink,
     )
     recorder.add_symbols(watchlist, mode=mode)
@@ -1547,94 +1522,6 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
         return None
 
 
-def _reconnect_saved_accounts(
-    registry: BrokerRegistry,
-    credential_store: CredentialStore,
-    reconnect_logger: logging.Logger,
-    *,
-    registry_publication_owner: RegistryPublicationOwner | None = None,
-    workspace_path: Path | None = None,
-    execution_default_selector: Any | None = None,
-    mutation_admission: MutationAdmission = require_broker_account_mutations,
-) -> None:
-    """Reconnect previously saved broker accounts on startup.
-
-    Iterates over every account persisted in the CredentialStore and attempts
-    to re-authenticate each one against the registry.  Failures are logged as
-    warnings so that a single bad account does not block the rest.
-
-    Args:
-        registry: The live BrokerRegistry to populate with sessions.
-        credential_store: The CredentialStore that holds persisted credentials.
-        reconnect_logger: Logger instance to use for progress messages.
-    """
-    try:
-        mutation_admission()
-    except BrokerAccountCutoverUnavailable as exc:
-        reconnect_logger.info("Saved broker reconnect unavailable: %s", exc)
-        return
-    from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
-    from flinttrade_gateway.log_safety import account_ref  # noqa: PLC0415
-    from flinttrade_gateway.session import BrokerSession  # noqa: PLC0415
-
-    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
-    from flinttrade_core.broker_identity import BrokerSelector
-    from flinttrade_core.workspace_migrations import read_workspace_snapshot, broker_workspace_version
-
-    owner = registry_publication_owner
-    if type(owner) is not RegistryPublicationOwner or not owner.owns(registry) or workspace_path is None:
-        raise RegistrySessionUnavailable
-    workspace = read_workspace_snapshot(workspace_path)
-    owner.set_execution_default_projection(execution_default_selector, workspace_version=workspace.version)
-    saved = credential_store.list_accounts()
-    if not saved:
-        reconnect_logger.info("No saved broker accounts to reconnect")
-        return
-
-    reconnect_logger.info("Reconnecting %d saved broker account(s)...", len(saved))
-    for acct in saved:
-        account_id: str = acct["account_id"]
-        broker: str = acct["broker"]
-        adapter_id = str(acct.get("adapter_id") or broker)
-        label: str = acct["label"]
-        info = BROKER_CATALOG.get(adapter_id) or BROKER_CATALOG.get(broker)
-        safe_account = account_ref(account_id)
-        if info is not None and info.native:
-            reconnect_logger.info("  Skipped native account: %s (%s)", safe_account, adapter_id)
-            continue
-        try:
-            selector = BrokerSelector(adapter_id, account_id)
-            expected = registry.snapshot_selector(selector)
-            version = credential_version_reader(credential_store)(selector)
-            creds = credential_store.retrieve_credentials(selector)
-            workspace = read_workspace_snapshot(workspace_path)
-            authority = ManagedSessionAuthority(version, workspace.version, broker_workspace_version(workspace))
-            session = BrokerSession(account_id, broker, label)
-            candidate = owner.prepare_session_candidate(selector, session, expected_registry=expected,
-                authority=authority, broker=broker, label=label)
-            try:
-                session.authenticate(creds)
-            except BaseException:
-                owner.abandon_prepared_candidate(candidate)
-                from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
-                try:
-                    owner.remove_session_for_exact(selector, expected_registry=expected)
-                except RegistryVersionConflict:
-                    pass  # A concurrent successor is not this replay attempt's session.
-                raise
-            current = read_workspace_snapshot(workspace_path)
-            owner.publish_prepared_candidate(candidate, current_authority=ManagedSessionAuthority(
-                credential_version_reader(credential_store)(selector), current.version, broker_workspace_version(current)))
-            reconnect_logger.info("  Connected: %s (%s)", safe_account, broker)
-        except Exception as exc:
-            reconnect_logger.warning(
-                "  Failed: %s (%s; %s)",
-                safe_account,
-                broker,
-                type(exc).__name__,
-            )
-
-
 def _read_version() -> str:
     """Return the central FlintTrade product version tag."""
     return APP_VERSION_TAG
@@ -1646,66 +1533,7 @@ def _read_version() -> str:
 # ---------------------------------------------------------------------------
 
 _MASTER_PASSWORD: str | None = None
-_API_KEY_PEPPER: str | None = None
 _SAFETY_GATE_SECRET: bytes | None = None
-
-
-def _get_api_key_pepper() -> str:
-    """Get or generate the OpenAlgo-compatible ``API_KEY_PEPPER``.
-
-    Source of truth (NO environment variable — secrets out of env):
-      1. Persisted hardened secret at ``<workspace>/api_key_pepper``.
-      2. Generate a fresh ``secrets.token_urlsafe(64)``, persist it hardened.
-    The value is re-exported to ``os.environ`` only as an in-process transport
-    for the upstream OpenAlgo modules (their ``utils.config`` reads env).
-
-    Upstream OpenAlgo's v2.0.0.6 hardening rejected the publicly leaked
-    placeholder pepper and auto-rotates on first run. FlintTrade's broker
-    shim (``packages/integrations/gateway/src/shims/config_shim.py``) re-exports this
-    value as ``utils.config.API_KEY_PEPPER`` so the OpenAlgo broker
-    modules get the same pepper on both code paths.
-
-    Returns the secret string; subsequent calls within the same process
-    return the cached value. A best-effort persist on disk is attempted
-    so restarts pick up the same pepper.
-    """
-    global _API_KEY_PEPPER
-    if _API_KEY_PEPPER:
-        return _API_KEY_PEPPER
-
-    # Source of truth is the hardened at-rest file — NEVER the API_KEY_PEPPER env
-    # var (secrets out of env, decision B/C). The pepper is an app-generated
-    # random, so auto-generating it on first run is fine (unlike the operator's
-    # master passphrase). It IS re-exported into os.environ below purely as an
-    # in-process transport for the upstream OpenAlgo broker modules, whose
-    # ``utils.config`` can only read API_KEY_PEPPER from the environment — the
-    # value originates from the hardened file, never from a committed .env.
-    pepper_file = _workspace_dir() / "api_key_pepper"
-    try:
-        if pepper_file.exists():
-            stored = pepper_file.read_text().strip()
-            if stored:
-                _API_KEY_PEPPER = stored
-                os.environ["API_KEY_PEPPER"] = stored  # in-process OpenAlgo transport
-                return _API_KEY_PEPPER
-    except OSError:
-        pass
-
-    new_pepper = secrets.token_urlsafe(64)
-    try:
-        pepper_file.parent.mkdir(parents=True, exist_ok=True)
-        _write_secret_text(pepper_file, new_pepper)  # SC-04: icacls/0600 owner-only
-        logger.info("Generated new API_KEY_PEPPER (hardened) at %s", pepper_file)
-    except OSError as exc:
-        logger.warning(
-            "Could not persist API_KEY_PEPPER to %s: %s — using ephemeral value",
-            pepper_file,
-            exc,
-        )
-
-    _API_KEY_PEPPER = new_pepper
-    os.environ["API_KEY_PEPPER"] = new_pepper  # in-process OpenAlgo transport
-    return _API_KEY_PEPPER
 
 
 def _get_safety_gate_secret_bytes() -> bytes:
@@ -1837,67 +1665,8 @@ def _get_master_password() -> str:
 
 
 # ---------------------------------------------------------------------------
-# workspace.json reader — OpenAlgo overrides from user config
+# workspace.json reader — native broker overrides from user config
 # ---------------------------------------------------------------------------
-
-
-def _read_openalgo_from_workspace() -> dict[str, Any]:
-    """Read OpenAlgo overrides from the active workspace's ``workspace.json``.
-
-    Returns a dict with any of ``api_key``, ``host``, ``port``, ``ws_port`` keys that
-    are present and non-empty.  Returns an empty dict if the file is
-    missing, unreadable, or doesn't contain an ``openalgo`` section.
-
-    workspace.json wins over .env because it's user-edited through the UI
-    (Setup wizard, Settings page) while .env is the dev-machine fallback.
-    """
-    import json  # noqa: PLC0415
-
-    try:
-        from .workspace import Workspace  # noqa: PLC0415
-
-        ws = Workspace()
-        path = ws.config_path
-    except Exception:
-        # Fallback: direct workspace.json path (respects FLINTTRADE_WORKSPACE_DIR)
-        path = _workspace_dir() / "workspace.json"
-
-    if not path.exists():
-        return {}
-
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Could not read workspace.json at %s: %s", path, exc)
-        return {}
-
-    openalgo = data.get("openalgo") or {}
-    if not isinstance(openalgo, dict):
-        return {}
-
-    result: dict[str, Any] = {}
-    for key in ("api_key", "host", "port", "ws_port"):
-        val = openalgo.get(key)
-        if val:
-            result[key] = val
-    return result
-
-
-def _log_workspace_openalgo_overrides() -> None:
-    """Log UI-owned OpenAlgo overrides available in workspace.json.
-
-    Settings reads these values directly from the workspace. They are no
-    longer copied into ``os.environ`` as native-runtime configuration.
-    """
-    overrides = _read_openalgo_from_workspace()
-    if not overrides:
-        return
-
-    logger.info(
-        "OpenAlgo settings available from workspace.json (%s)",
-        ", ".join(sorted(overrides.keys())),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -2124,7 +1893,6 @@ def _build_reconcile_targets_provider(
     credential-replay login step) are picked up on the runner's next cycle: a
     registered selector yields a target only when its adapter is active in
     ``active_adapters`` AND the registry holds an adapter-layer session for it.
-    OpenAlgo participates through the same adapter contract as native brokers.
 
     Args:
         registry: The broker registry holding adapter-layer sessions.
@@ -2199,6 +1967,7 @@ def credential_version_reader(store: CredentialStore) -> Callable:
         if not state.present or not state.credential_present or state.origin != "managed":
             raise RegistrySessionUnavailable
         return state.version
+
     return read
 
 
@@ -2215,7 +1984,7 @@ class _BrokerRuntimeDependencies:
     lifecycle_store: Any | None
     workspace_snapshot: Any | None
     workspace_path: Path | None
-    openalgo_client: Any | None
+    broker_client: Any | None
     native_adapters: dict[str, Any]
     registry_publication_owner: RegistryPublicationOwner | None = None
     read_owner: Any | None = None
@@ -2226,7 +1995,7 @@ def _prepare_broker_dependencies(
     brokers_config: dict[str, Any],
     *,
     adapters: dict[str, Any] | None = None,
-    openalgo_client: Any | None = None,
+    broker_client: Any | None = None,
     native_attest_ok: Callable[[str], bool] | None = None,
     native_has_credentials: Callable[[str], bool] | None = None,
     native_adapter_kwargs: Callable[[str], dict[str, Any]] | None = None,
@@ -2235,6 +2004,8 @@ def _prepare_broker_dependencies(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    coherence_verifier: Callable | None = None,
+    enrollment_required: Callable[[], bool] | None = None,
 ) -> _BrokerRuntimeDependencies:
     """Prepare the single provider, adapter map and limiter shared by reads and writes.
 
@@ -2243,17 +2014,11 @@ def _prepare_broker_dependencies(
     :class:`AuthenticatingSessionProvider` over the config's ``account_acls``.
     Write-side ``SafetyGate`` construction remains in ``_build_broker_router_from_dependencies``.
 
-    When ``openalgo_client`` is supplied, an :class:`OpenAlgoAdapter` is
-    registered under the ``openalgo`` adapter id and a Session is put in the
-    registry for exact ``openalgo:default`` in ``registered``. This is the
-    frozen local compatibility exception until Task 9B.3; the actor still
-    needs an entry in ``account_acls`` to be authorised.
-
     Native SDK adapters activate the moment their prerequisites hold: when both
     ``native_attest_ok`` (SDK installed + pinned-match) and
     ``native_has_credentials`` (vault holds creds) are supplied, the native
     selectors in ``registered`` are run through ``build_native_adapters`` and the
-    survivors registered alongside OpenAlgo. With either callable omitted — the
+    survivors registered alongside other native adapters. With either callable omitted — the
     default — no native is constructed, so the natives stay dormant exactly as
     before. ``adapters`` still lets a caller inject adapters directly (and wins
     over the factory for the same id). A registered native has no live Session
@@ -2271,7 +2036,7 @@ def _prepare_broker_dependencies(
     )
     from flinttrade_gateway.routing_config import RoutingConfig, RoutingConfigError  # noqa: PLC0415
     from flinttrade_gateway.session_provider import (  # noqa: PLC0415
-        AuthenticatingSessionProvider, ConnectedSessionClientResolver,
+        AuthenticatingSessionProvider,
     )
 
     execution = brokers_config.get("execution") if isinstance(brokers_config, dict) else None
@@ -2291,21 +2056,20 @@ def _prepare_broker_dependencies(
     else:
         config = RoutingConfig.from_workspace(brokers_config)
     from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
-    from flinttrade_core.broker_identity import BrokerSelector, parse_broker_selector
-    from flinttrade_core.workspace_migrations import read_workspace_snapshot
+    from flinttrade_core.broker_identity import parse_broker_selector
 
     owner = registry_publication_owner
     if owner is not None and (type(owner) is not RegistryPublicationOwner or not owner.owns(registry)):
         raise RegistrySessionUnavailable
 
-    def compatibility_authority():
-        if owner is None or workspace_path is None:
-            raise RegistrySessionUnavailable
-        return owner.seal_openalgo_default_compatibility_authority(read_workspace_snapshot(workspace_path))
-
     session_provider = AuthenticatingSessionProvider(
-        registry, config.account_acls, workspace_snapshot=workspace_snapshot, workspace_path=workspace_path,
-        credential_version_for=credential_version_for, compatibility_authority_for=compatibility_authority,
+        registry,
+        config.account_acls,
+        workspace_snapshot=workspace_snapshot,
+        workspace_path=workspace_path,
+        credential_version_for=credential_version_for,
+        coherence_verifier=coherence_verifier,
+        enrollment_required=enrollment_required,
     )
     if owner is not None and workspace_snapshot is not None and workspace_snapshot.version is not None:
         owner.set_execution_default_projection(
@@ -2342,36 +2106,8 @@ def _prepare_broker_dependencies(
             resolved_adapters.setdefault(adapter_id, adapter)
         if activated:
             logger.info("Native adapters activated: %s", ", ".join(sorted(activated)))
-    if openalgo_client is not None and "openalgo" not in resolved_adapters:
-        from flinttrade_gateway.brokers._base import Session as _AdapterSession  # noqa: PLC0415
-        from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter  # noqa: PLC0415
-
-        resolved_adapters["openalgo"] = OpenAlgoAdapter(
-            session_clients=ConnectedSessionClientResolver(session_provider, registry),
-            local_state_provider=lifecycle_store,
-        )
-        if "openalgo:default" in config.registered:
-            if owner is None or workspace_snapshot is None or workspace_path is None:
-                raise RegistrySessionUnavailable
-            if not isinstance(openalgo_client, OpenAlgoClient) or not openalgo_client.matches_workspace_openalgo(workspace_snapshot):
-                raise RegistrySessionUnavailable
-            authority = owner.seal_openalgo_default_compatibility_authority(workspace_snapshot)
-            receipt = owner.prepare_openalgo_default_compatibility_candidate(
-                _AdapterSession("", 4_102_444_800.0, account_id="default", adapter_id="openalgo"),
-                expected_registry=registry.snapshot_selector(BrokerSelector("openalgo", "default")),
-                authority=authority, client=openalgo_client, broker=None, label="OpenAlgo",
-            )
-            current = read_workspace_snapshot(workspace_path)
-            if not openalgo_client.matches_workspace_openalgo(current):
-                owner.abandon_prepared_candidate(receipt)
-                raise RegistrySessionUnavailable
-            owner.publish_prepared_candidate(receipt,
-                current_authority=owner.seal_openalgo_default_compatibility_authority(current))
-
     native_adapters = {
-        adapter_id: adapter
-        for adapter_id, adapter in resolved_adapters.items()
-        if is_native_broker(adapter_id)
+        adapter_id: adapter for adapter_id, adapter in resolved_adapters.items() if is_native_broker(adapter_id)
     }
 
     # Per-broker API rate limiter (DATA & INFRA: customizable rate limits). Built
@@ -2404,7 +2140,7 @@ def _prepare_broker_dependencies(
         lifecycle_store=lifecycle_store,
         workspace_snapshot=workspace_snapshot,
         workspace_path=workspace_path,
-        openalgo_client=openalgo_client,
+        broker_client=broker_client,
         native_adapters=native_adapters,
         registry_publication_owner=registry_publication_owner,
     )
@@ -2504,7 +2240,7 @@ def build_broker_router(
     brokers_config: dict[str, Any],
     *,
     adapters: dict[str, Any] | None = None,
-    openalgo_client: Any | None = None,
+    broker_client: Any | None = None,
     native_attest_ok: Callable[[str], bool] | None = None,
     native_has_credentials: Callable[[str], bool] | None = None,
     native_adapter_kwargs: Callable[[str], dict[str, Any]] | None = None,
@@ -2516,6 +2252,8 @@ def build_broker_router(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    coherence_verifier: Callable | None = None,
+    enrollment_required: Callable[[], bool] | None = None,
     backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Construct a router through exactly one shared dependency preparation."""
@@ -2524,7 +2262,7 @@ def build_broker_router(
         registry,
         brokers_config,
         adapters=adapters,
-        openalgo_client=openalgo_client,
+        broker_client=broker_client,
         native_attest_ok=native_attest_ok,
         native_has_credentials=native_has_credentials,
         native_adapter_kwargs=native_adapter_kwargs,
@@ -2533,6 +2271,8 @@ def build_broker_router(
         workspace_path=workspace_path,
         registry_publication_owner=registry_publication_owner,
         credential_version_for=credential_version_for,
+        coherence_verifier=coherence_verifier,
+        enrollment_required=enrollment_required,
     )
     if on_native_activated is not None:
         try:
@@ -2545,7 +2285,9 @@ def build_broker_router(
         except Exception as exc:  # pragma: no cover - observability only
             logger.warning("Adapter activation sink failed (%s)", type(exc).__name__)
     return _build_broker_router_from_dependencies(
-        dependencies, write_admission=write_admission, backend_lease_proof=backend_lease_proof,
+        dependencies,
+        write_admission=write_admission,
+        backend_lease_proof=backend_lease_proof,
     )
 
 
@@ -2556,6 +2298,169 @@ def _broker_router_drain_timeout(app: Flask) -> float:
         return max(0.0, float(raw_timeout))
     except (TypeError, ValueError):
         return 10.0
+
+
+def broker_account_lifecycle_owner_for(app: Flask, workspace_path: Path) -> Any:
+    """Explicit inert composition seam; native routes/schedulers never invoke it."""
+    from .broker_account_lifecycle import BrokerAccountLifecycleOwner  # noqa: PLC0415
+
+    proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
+    existing = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if existing is not None:
+        if type(existing) is not BrokerAccountLifecycleOwner:
+            raise RuntimeError("account_lifecycle_owner_invalid")
+        existing.assert_bound(workspace_path, proof)
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    with lock:
+        owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+        if owner is None:
+            owner = BrokerAccountLifecycleOwner(
+                workspace_path,
+                app.config.get("BACKEND_LEASE_PROOF"),
+                retire_generations=lambda timeout: retire_broker_dependencies(app, timeout=timeout),
+                rebuild_lock=lock,
+            )
+            app.extensions["flinttrade.broker_account_lifecycle_owner"] = owner
+        elif type(owner) is not BrokerAccountLifecycleOwner:
+            raise RuntimeError("account_lifecycle_owner_invalid")
+        owner.assert_bound(workspace_path, app.config.get("BACKEND_LEASE_PROOF"))
+        return owner
+
+
+def _account_publication_allowed(app: Flask) -> bool:
+    """Consult custody under the already-shared rebuild/publication fence."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    return owner is None or owner.legacy_publication_allowed()
+
+
+def _broker_generation_snapshot(app: Flask) -> tuple[Any, Any, Any, Any]:
+    return (
+        app.extensions.get("flinttrade_broker_dependencies"),
+        app.extensions.get("flinttrade_broker_dependencies_draining"),
+        app.config.get("BROKER_ROUTER"),
+        app.config.get("BROKER_ROUTER_DRAINING"),
+    )
+
+
+def _begin_enrolled_broker_rebuild(app: Flask) -> Any:
+    """Capture exact original objects in an explicit runtime-only owner intent."""
+    owner = app.extensions["flinttrade.broker_account_lifecycle_owner"]
+    owner.current_rebuild()  # Process fence before any possibly inherited application lock.
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    if not lock.acquire(timeout=_broker_router_drain_timeout(app)):
+        raise RuntimeError("account_rebuild_busy")
+    try:
+        original = _broker_generation_snapshot(app)
+        phase = {"drained": False}
+
+        def retire(timeout: float) -> bool:
+            drained = _retire_owned_broker_dependencies(app, timeout=timeout, expected=original)
+            if drained:
+                phase["drained"] = True
+            return drained
+
+        def current() -> bool:
+            expected = (None, None, None, None) if phase["drained"] else original
+            return all(left is right for left, right in zip(_broker_generation_snapshot(app), expected, strict=True))
+
+        return owner.begin_rebuild(retire_generations=retire, publication_current=current)
+
+    finally:
+        lock.release()
+
+
+def _publish_enrolled_configuration(app: Flask, callback: Callable[[], Any]) -> Any:
+    """Fence only short local config publication, after exact unlocked retirement."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if owner is None:
+        return callback()
+    token = owner.current_rebuild()
+    if token is None:
+        raise RuntimeError("account_rebuild_lease_invalid")
+    return owner.publish_rebuild_if_current(token, callback)
+
+
+def _retire_owned_broker_dependencies(
+    app: Flask, *, timeout: float, expected: tuple[Any, Any, Any, Any] | None = None
+) -> bool:
+    """Detach/revoke exact generations, release the fence, then wait and revalidate."""
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    deadline = time.monotonic() + timeout
+    if not lock.acquire(timeout=timeout):
+        return False
+    try:
+        active, draining, active_router, router = _broker_generation_snapshot(app)
+        if expected is not None:
+            original_active, original_draining, original_router, original_draining_router = expected
+            target = original_active if original_active is not None else original_draining
+            target_router = original_router if original_router is not None else original_draining_router
+            if (
+                (active is not None and active is not original_active)
+                or (draining is not None and draining is not target)
+                or (active_router is not None and active_router is not original_router)
+                or (router is not None and router is not target_router)
+            ):
+                return False
+            draining, router = target, target_router
+        elif active is not None:
+            if draining is not None and draining is not active:
+                return False
+            draining = active
+        if expected is None and active_router is not None:
+            if router is not None and router is not active_router:
+                return False
+            router = active_router
+        app.extensions.pop("flinttrade_broker_dependencies", None)
+        if draining is not None:
+            app.extensions["flinttrade_broker_dependencies_draining"] = draining
+        app.config["BROKER_ROUTER"] = None
+        if router is not None:
+            app.config["BROKER_ROUTER_DRAINING"] = router
+        app.config["NATIVE_ADAPTERS"] = {}
+        app.config["ACTIVE_BROKER_ADAPTERS"] = {}
+        app.config["RECONCILE_TARGETS"] = None
+    finally:
+        lock.release()
+
+    def drain(owner: Any, method: str, wait: float) -> bool:
+        if owner is None:
+            return True
+        callback = getattr(owner, method, None)
+        try:
+            return bool(callback(timeout=wait)) if callable(callback) else False
+        except Exception as exc:  # noqa: BLE001 - retain exact resources, never render SDK details
+            logger.critical("Owned broker retirement failed (%s)", type(exc).__name__)
+            return False
+
+    reads = getattr(draining, "read_owner", None)
+    reads_done = drain(reads, "close", 0.0)
+    writes_done = drain(router, "revoke_and_drain", 0.0)
+    remaining = max(0.0, deadline - time.monotonic())
+    if not reads_done and remaining > 0:
+        reads_done = drain(reads, "close", remaining)
+    remaining = max(0.0, deadline - time.monotonic())
+    if not writes_done and remaining > 0:
+        writes_done = drain(router, "revoke_and_drain", remaining)
+    if not reads_done or not writes_done:
+        return False
+    if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        return False
+    try:
+        active_now, draining_now, router_now, draining_router_now = _broker_generation_snapshot(app)
+        if (
+            active_now is not None
+            or router_now is not None
+            or (draining_now is not None and draining_now is not draining)
+            or (draining_router_now is not None and draining_router_now is not router)
+        ):
+            return False
+        if draining_now is draining:
+            app.extensions.pop("flinttrade_broker_dependencies_draining", None)
+        if draining_router_now is router:
+            app.config["BROKER_ROUTER_DRAINING"] = None
+        return True
+    finally:
+        lock.release()
 
 
 def retire_broker_router_generation(app: Flask, *, timeout: float | None = None) -> bool:
@@ -2615,6 +2520,13 @@ def retire_broker_router_generation(app: Flask, *, timeout: float | None = None)
 
 def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> bool:
     """Invalidate and drain the exact shared read/write dependency generation."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if owner is not None:
+        drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
+        token = owner.current_rebuild()
+        if token is not None and drain_timeout > 0:
+            return owner.retire_rebuild_generations(token, drain_timeout)
+        return _retire_owned_broker_dependencies(app, timeout=drain_timeout)
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
     deadline = time.monotonic() + drain_timeout
@@ -2695,6 +2607,15 @@ def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> b
 
 
 def _publish_broker_dependencies(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
+    """Publish under the common lifecycle/rebuild fence when explicitly composed."""
+    lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    with lock:
+        if not _account_publication_allowed(app):
+            return False
+        return _publish_broker_dependencies_locked(app, dependencies)
+
+
+def _publish_broker_dependencies_locked(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
     """Publish one validated dependency record and borrowed compatibility views."""
     if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True:
         return False
@@ -2712,7 +2633,7 @@ def _publish_broker_dependencies(app: Flask, dependencies: _BrokerRuntimeDepende
     ):
         return False
     app.extensions["flinttrade_broker_dependencies"] = dependencies
-    app.config["OPENALGO_CLIENT"] = dependencies.openalgo_client
+    app.config["BROKER_CLIENT"] = dependencies.broker_client
     app.config["SMART_ROUTING"] = dict(dependencies.brokers_config.get("smart_routing") or {})
     app.config["NATIVE_ADAPTERS"] = dependencies.native_adapters
     app.config["ACTIVE_BROKER_ADAPTERS"] = dependencies.adapters
@@ -2727,7 +2648,7 @@ def broker_reads_published_without_writes(
     *,
     previous_dependencies: Any,
     registry: Any,
-    openalgo_client: Any,
+    broker_client: Any,
 ) -> bool:
     """Verify one newly published read generation with writes intentionally off."""
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
@@ -2739,12 +2660,12 @@ def broker_reads_published_without_writes(
             type(dependencies) is not _BrokerRuntimeDependencies
             or dependencies is previous_dependencies
             or dependencies.registry is not registry
-            or dependencies.openalgo_client is not openalgo_client
+            or dependencies.broker_client is not broker_client
             or dependencies.read_owner is None
             or app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True
             or app.config.get("REGISTRY") is not registry
-            or app.config.get("CLIENT") is not openalgo_client
-            or app.config.get("OPENALGO_CLIENT") is not openalgo_client
+            or app.config.get("CLIENT") is not broker_client
+            or app.config.get("BROKER_CLIENT") is not broker_client
             or app.config.get("ACTIVE_BROKER_ADAPTERS") is not dependencies.adapters
             or app.config.get("BROKER_ROUTER") is not None
             or app.config.get("BROKER_ROUTER_DRAINING") is not None
@@ -2845,6 +2766,8 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
             retire_broker_dependencies(app, timeout=0.0)
 
     try:
+        if not _account_publication_allowed(app):
+            return False
         if app.extensions.get("flinttrade_broker_dependencies") is not dependencies:
             return False
         if (
@@ -2890,11 +2813,7 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
             retire_stale_dependency()
             return False
         final_readiness = _broker_write_readiness(app)
-        if (
-            final_readiness is None
-            or final_readiness[0] is not safety
-            or not execution_default_is_available()
-        ):
+        if final_readiness is None or final_readiness[0] is not safety or not execution_default_is_available():
             logger.critical("BrokerRouter candidate discarded because write readiness changed")
             return False
         app.config["BROKER_ROUTER"] = router
@@ -2904,11 +2823,35 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
         rebuild_lock.release()
 
 
-def configure_broker_router(
+def configure_broker_router(app: Flask, registry: Any, credential_store: Any, broker_client: Any) -> bool:
+    """Enrolled rebuilds own a runtime intent across unlocked drain and final publication."""
+    owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if owner is None:
+        return _configure_broker_router_locked(app, registry, credential_store, broker_client)
+    try:
+        token = _begin_enrolled_broker_rebuild(app)
+    except RuntimeError:
+        return False
+    try:
+        if not owner.retire_rebuild_generations(token, _broker_router_drain_timeout(app)):
+            return False
+        return owner.publish_rebuild_if_current(
+            token,
+            lambda: _configure_broker_router_locked(app, registry, credential_store, broker_client, retire_first=False),
+        )
+    except RuntimeError:
+        return False
+    finally:
+        owner.end_rebuild(token)
+
+
+def _configure_broker_router_locked(
     app: Flask,
     registry: Any,
     credential_store: Any,
-    openalgo_client: Any,
+    broker_client: Any,
+    *,
+    retire_first: bool = True,
 ) -> bool:
     """Refresh shared broker dependencies once, then independently attempt writes."""
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
@@ -2917,11 +2860,13 @@ def configure_broker_router(
         logger.critical("BrokerRouter rebuild timed out waiting for the routing-generation lease")
         return False
     try:
+        if not _account_publication_allowed(app):
+            return False
         if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
             logger.warning("BrokerRouter rebuild refused while the runtime is shutting down")
             retire_broker_dependencies(app)
             return False
-        if not retire_broker_dependencies(app, timeout=rebuild_timeout):
+        if retire_first and not retire_broker_dependencies(app, timeout=rebuild_timeout):
             logger.critical("Broker dependency refresh aborted because the prior generation did not drain")
             return False
 
@@ -2938,6 +2883,26 @@ def configure_broker_router(
             target_workspace = _workspace_dir()
             run_migrations(target_workspace)
             workspace_snapshot = read_workspace_snapshot(target_workspace)
+            enrollment_required = (
+                credential_store.account_protocol_enrolled if type(credential_store) is CredentialStore else None
+            )
+            coherence_verifier = None
+            if (
+                "_broker_account_store" in workspace_snapshot.config
+                or enrollment_required is not None
+                and enrollment_required()
+            ):
+                from flinttrade_gateway.account_transaction_store import AccountTransactionStore  # noqa: PLC0415
+                from .broker_account_workspace import BrokerAccountWorkspace  # noqa: PLC0415
+
+                proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
+                account_store = AccountTransactionStore(
+                    credential_store,
+                    workspace_path=target_workspace,
+                    backend_proof=proof,
+                )
+                coherence_verifier = BrokerAccountWorkspace(target_workspace, account_store, proof).assert_coherent
+                workspace_snapshot = coherence_verifier()
             brokers_cfg = workspace_snapshot.as_dict().get("brokers")
             effective_brokers = brokers_cfg or default_workspace_config()["brokers"]
             native_attest_ok, native_has_credentials = _native_activation_checks(credential_store)
@@ -2953,14 +2918,12 @@ def configure_broker_router(
                 None,
             )
             if callable(bind_audit_verifier):
-                bind_audit_verifier(
-                    verify_audit_receipt if callable(verify_audit_receipt) else None
-                )
+                bind_audit_verifier(verify_audit_receipt if callable(verify_audit_receipt) else None)
             app.config["ORDER_LIFECYCLE_LEDGER"] = local_state_provider
             dependencies = _prepare_broker_dependencies(
                 registry,
                 effective_brokers,
-                openalgo_client=openalgo_client,
+                broker_client=broker_client,
                 native_attest_ok=native_attest_ok,
                 native_has_credentials=native_has_credentials,
                 native_adapter_kwargs=_native_adapter_kwargs_for(local_state_provider),
@@ -2969,6 +2932,8 @@ def configure_broker_router(
                 workspace_path=target_workspace,
                 registry_publication_owner=registry_publication_owner_for(app, registry),
                 credential_version_for=credential_version_reader(credential_store),
+                coherence_verifier=coherence_verifier,
+                enrollment_required=enrollment_required,
             )
             from flinttrade_gateway.broker_read_service import create_broker_read_owner  # noqa: PLC0415
 
@@ -2992,9 +2957,10 @@ def configure_broker_router(
         # Every session resolved by the candidate is rebound to this exact global
         # broker authority. Do not publish if any workspace writer raced the build.
         try:
-            broker_authority_unchanged = (
-                broker_workspace_version(read_workspace_snapshot(target_workspace))
-                == broker_workspace_version(workspace_snapshot)
+            broker_authority_unchanged = broker_workspace_version(
+                coherence_verifier() if coherence_verifier is not None else read_workspace_snapshot(target_workspace)
+            ) == broker_workspace_version(workspace_snapshot) and (
+                coherence_verifier is not None or enrollment_required is None or not enrollment_required()
             )
         except Exception:
             broker_authority_unchanged = False
@@ -3098,8 +3064,7 @@ def _bind_runtime_emergency_dispatcher(
         run_awaitable=run_sync,
         generation_lease_provider=generation_lease_provider,
         intent_journal=(
-            app.config.get("EMERGENCY_INTENT_JOURNAL_WRAPPER")
-            or app.config.get("EMERGENCY_INTENT_JOURNAL")
+            app.config.get("EMERGENCY_INTENT_JOURNAL_WRAPPER") or app.config.get("EMERGENCY_INTENT_JOURNAL")
         ),
     )
     safety.bind_emergency_dispatcher(dispatcher)
@@ -3201,7 +3166,7 @@ def _wire_ml_signal_runtime(
     """Register the canonical scheduled ML producer when it was configured."""
     pipeline = app.config.get("ML_SIGNAL_PIPELINE")
     if pipeline is None:
-        logger.info("Scheduled ML signals inactive - no OpenAlgo-backed producer")
+        logger.info("Scheduled ML signals inactive - no native broker-backed producer")
         return False
 
     from flinttrade_ai.signal_routes import make_ml_signal_job  # noqa: PLC0415
@@ -3377,74 +3342,9 @@ def _wire_ml_signal_runtime(
     return True
 
 
-def _open_ditto_credential_store() -> CredentialStore:
-    """Finish the one-time legacy snapshot before opening the canonical vault."""
-    from .installation_state import InstallationState  # noqa: PLC0415
-    from .workspace import ditto_accounts_path  # noqa: PLC0415
-
-    state = InstallationState()
-    with state.ditto_fence():
-        ditto_accounts_path(installation_state_root=state.root)
-        return CredentialStore(_workspace_dir() / "ditto_credentials.db", _get_master_password())
-
-
 def _configure_ditto_runtime(app: Flask, safety: Any) -> None:
-    """Configure the process-owned, fail-closed Ditto orchestration runtime."""
-    store = app.config.get("DITTO_CREDENTIAL_STORE")
-    if store is None:
-        app.config["DITTO_RUNTIME"] = None
-        return
-
-    try:
-        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
-        from flinttrade_ditto.runtime import (  # noqa: PLC0415
-            DittoCapabilityUnavailable,
-            DittoRouterOwner,
-            DittoRuntime,
-        )
-
-        def account_provider() -> list[Any]:
-            current_store = app.config.get("DITTO_CREDENTIAL_STORE")
-            if current_store is None:
-                raise DittoCapabilityUnavailable("Ditto credential vault is unavailable")
-            with AccountManager(credential_store=current_store) as manager:
-                return manager.list_accounts()
-
-        def router_owner_factory(accounts: list[Any], actor_id: str) -> Any:
-            journal = app.config.get("EMERGENCY_INTENT_JOURNAL")
-            daily_pnl_state = app.config.get("DAILY_PNL_STATE_STORE")
-            write_admission = getattr(safety, "broker_write_admission", None)
-            if (
-                not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True)
-                or app.config.get("EMERGENCY_INTENT_JOURNAL_READY") is not True
-                or app.config.get("DAILY_PNL_STATE_READY") is not True
-                or app.config.get("SAFETY_CONFIG_READY") is not True
-                or app.config.get("EMERGENCY_RUNTIME_READY") is not True
-                or app.config.get("EMERGENCY_DISPATCHER") is None
-                or app.config.get("SAFETY") is not safety
-                or journal is None
-                or daily_pnl_state is None
-                or not callable(write_admission)
-                or getattr(safety, "order_reservations_durable", False) is not True
-            ):
-                raise DittoCapabilityUnavailable("validated safety runtime is unavailable")
-            return DittoRouterOwner(
-                accounts,
-                actor_id,
-                write_admission=write_admission,
-                intent_journal=journal,
-                safety_system=safety,
-                time_scheduler=app.config.get("TIME_SCHEDULER"),
-                lifecycle_store=app.config.get("ORDER_LIFECYCLE_LEDGER"),
-            )
-
-        app.config["DITTO_RUNTIME"] = DittoRuntime(
-            account_provider=account_provider,
-            router_owner_factory=router_owner_factory,
-        )
-    except Exception as exc:  # noqa: BLE001 - Ditto remains optional and fail-closed
-        app.config["DITTO_RUNTIME"] = None
-        logger.warning("Ditto runtime unavailable (%s)", type(exc).__name__)
+    """Native copy trading awaits its approved session-ownership design."""
+    app.config["DITTO_RUNTIME"] = None
 
 
 def shutdown_ditto_runtime(app: Flask, *, timeout: float = 5.0) -> bool:
@@ -3560,7 +3460,7 @@ def create_flask_app(
     scheduler: Any | None = None,
     cron: Any | None = None,
     audit: AuditLogger | None = None,
-    client: OpenAlgoClient | None = None,
+    client: BrokerClient | None = None,
     registry: BrokerRegistry | None = None,
     credential_store: CredentialStore | None = None,
     contract_manager: ContractManager | None = None,
@@ -3583,7 +3483,7 @@ def create_flask_app(
         scheduler: StrategyScheduler instance for strategy lifecycle endpoints.
         cron: CronManager instance for cron job management endpoints.
         audit: AuditLogger instance for audit log endpoints.
-        client: OpenAlgoClient instance for MCP bridge and backtest data.
+        client: BrokerClient instance for MCP bridge and backtest data.
         registry: BrokerRegistry for multi-broker account management; injection requires its matching publication owner.
         registry_publication_owner: Exact owner of an injected registry; omit both to create an internal matched pair.
         credential_store: CredentialStore for encrypted credential persistence.
@@ -3602,17 +3502,31 @@ def create_flask_app(
     runtime_ready = backend_lease_proof is not None
     if runtime_ready:
         require_backend_lease_proof(backend_lease_proof)
-    elif any(value is not None for value in (
-        client, registry, registry_publication_owner, credential_store, scheduler, cron,
-        telegram, cron_strategy_scheduler, time_scheduler,
-    )):
+    elif any(
+        value is not None
+        for value in (
+            client,
+            registry,
+            registry_publication_owner,
+            credential_store,
+            scheduler,
+            cron,
+            telegram,
+            cron_strategy_scheduler,
+            time_scheduler,
+        )
+    ):
         raise BackendLeaseUnavailable
     if runtime_ready and registry is None and registry_publication_owner is None:
-        registry, registry_publication_owner = create_owned_registry(mutation_admission=broker_account_mutation_admission)
+        registry, registry_publication_owner = create_owned_registry(
+            mutation_admission=broker_account_mutation_admission
+        )
     elif runtime_ready and (
-        type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry)
+        type(registry_publication_owner) is not RegistryPublicationOwner
+        or not registry_publication_owner.owns(registry)
     ):
         from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
         raise RegistrySessionUnavailable
 
     if safety is None:
@@ -3642,7 +3556,7 @@ def create_flask_app(
     # ------------------------------------------------------------------
     # Pre-init hygiene:
     #   * Clear stale DuckDB .wal files from a previous crashed process.
-    #   * Log workspace.json OpenAlgo overrides when present; Settings reads
+    #   * Log workspace.json native broker overrides when present; Settings reads
     #     those values directly and uses .env only as a fallback.
     # Both are best-effort — failures here must never prevent startup.
     # ------------------------------------------------------------------
@@ -3652,9 +3566,17 @@ def create_flask_app(
         logger.warning("DuckDB WAL cleanup failed (%s)", type(exc).__name__)
 
     try:
-        _log_workspace_openalgo_overrides()
+        pass
     except Exception as exc:
         logger.warning("workspace.json override failed (%s)", type(exc).__name__)
+
+    if runtime_ready and not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
+            from flinttrade_core.instrument_lot_master import start_instrument_master_refresh  # noqa: PLC0415
+
+            start_instrument_master_refresh()
+        except Exception as exc:  # noqa: BLE001 - the shipped excerpt remains usable
+            logger.warning("Instrument master refresh did not start (%s)", type(exc).__name__)
 
     # ------------------------------------------------------------------
     # Static frontend — serve the built React bundle from
@@ -3679,9 +3601,7 @@ def create_flask_app(
         try:
             resolved_dist_path = _dist_path.resolve(strict=True)
             resolved_dist_index = _dist_index.resolve(strict=True)
-            _frontend_available = (
-                resolved_dist_index.is_file() and resolved_dist_path in resolved_dist_index.parents
-            )
+            _frontend_available = resolved_dist_index.is_file() and resolved_dist_path in resolved_dist_index.parents
             _frontend_path_invalid = not _frontend_available
         except (OSError, RuntimeError, ValueError):
             _frontend_path_invalid = True
@@ -3732,16 +3652,6 @@ def create_flask_app(
     app.config["BACKEND_LEASE_PROOF"] = backend_lease_proof
     app.config["BACKEND_LEASE_READY"] = runtime_ready
 
-    def _guard_backend_broker_mutations() -> Any | None:
-        if request.method in {"GET", "HEAD", "OPTIONS"}:
-            return None
-        if request.path in {"/v1/config/openalgo", "/v1/test-connection"}:
-            try:
-                require_backend_lease_proof(backend_lease_proof)
-            except BackendLeaseUnavailable:
-                app.config["BACKEND_LEASE_READY"] = False
-                return jsonify({"error": "backend_lease_unavailable"}), 503
-        return None
     app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = broker_account_mutation_admission
     if service_provider_catalogue is None:
         from flinttrade_ai.service_profiles import ai_service_descriptors  # noqa: PLC0415
@@ -3906,8 +3816,6 @@ def create_flask_app(
     # so `request.remote_addr` reflects the original client IP.
     # Default is FALSE because trusting forwarded headers from an
     # untrusted upstream would let any client spoof its source IP.
-    # Mirrors the upstream OpenAlgo behaviour added in v2.0.0.7
-    # (see TRUST_PROXY_HEADERS in .local/external/openalgo/utils/ip_helper.py).
     # ------------------------------------------------------------------
     if os.environ.get("TRUST_PROXY_HEADERS", "").lower() in {"1", "true", "yes", "on"}:
         try:
@@ -4004,6 +3912,7 @@ def create_flask_app(
     # ------------------------------------------------------------------
     _glitchtip_dsn = os.environ.get("GLITCHTIP_DSN", "")
     if _glitchtip_dsn:
+
         def _drop_secret_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
             return None if current_safe_request_summary() is not None or sentry_event_is_secret(event) else event
 
@@ -4044,13 +3953,17 @@ def create_flask_app(
     app.config["CRON"] = cron
     app.config["AUDIT"] = audit
     app.config["AUDIT_LOGGER"] = audit
+    if client is None:
+        client = BrokerClient()
     app.config["CLIENT"] = client
+    if isinstance(client, BrokerClient):
+        client.bind(app)
     # The runtime-owned Telegram bot (may be None in tests) — the settings
     # route uses it to apply a saved config without a full backend restart.
     app.config["TELEGRAM_BOT"] = telegram
-    # Read-only OpenAlgo consumers must remain available even when this process
+    # Read-only native broker consumers must remain available even when this process
     # has no emergency runtime and live BrokerRouter publication fails closed.
-    app.config["OPENALGO_CLIENT"] = client
+    app.config["BROKER_CLIENT"] = client
 
     from .service_connection_routes import (  # noqa: PLC0415
         apply_service_connection_cache_policy,
@@ -4059,6 +3972,7 @@ def create_flask_app(
         install_service_connection_rate_limits,
         service_connection_bp,
     )
+
     app.config["SERVICE_CONNECTION_STORE"] = service_connection_store
     app.config["SERVICE_CONNECTION_STORE_LOCK"] = threading.Lock()
 
@@ -4078,12 +3992,6 @@ def create_flask_app(
 
     # --- Gateway initialization ---
     app.extensions["flinttrade.registry_publication_owner"] = registry_publication_owner
-
-    # Ensure API_KEY_PEPPER is set in os.environ BEFORE the OpenAlgo
-    # broker modules are imported via the gateway shim. Upstream's
-    # ``utils.config.API_KEY_PEPPER`` is captured at import time, so a
-    # later os.environ tweak is too late.
-    _get_api_key_pepper()
 
     # Bind the dedicated safety-gate HMAC secret (contract §8.0b) BEFORE the
     # broker router is built and before any SafetyContext can be minted/verified.
@@ -4178,18 +4086,8 @@ def create_flask_app(
         app.config["SMART_ROUTING"] = {}
         logger.warning("Smart-routing settings unavailable (%s); feature remains disabled", type(exc).__name__)
 
-    # Ditto multi-account api_keys live in a Ditto-scoped vault (the canonical
-    # CredentialStore crypto: per-row salt + PBKDF2 from the master password),
-    # NOT the shared native store — whose boot reconnect would otherwise try to
-    # authenticate each ditto:openalgo row as a bridge session. Optional: a
-    # missing vault must never block startup (Ditto routes 503 without it).
-    try:
-        app.config["DITTO_CREDENTIAL_STORE"] = _open_ditto_credential_store() if runtime_ready else None
-    except Exception as exc:  # noqa: BLE001 - Ditto is optional
-        logger.warning("Ditto credential vault unavailable (%s)", type(exc).__name__)
-        app.config["DITTO_CREDENTIAL_STORE"] = None
-    if runtime_ready:
-        _configure_ditto_runtime(app, safety)
+    # Native copy trading remains explicitly unavailable.
+    _configure_ditto_runtime(app, safety)
 
     # --- Broker router (selector-bound principal; contract §13 / §11.4) ---
     # Best-effort like the other startup steps: a malformed brokers block must
@@ -4211,6 +4109,7 @@ def create_flask_app(
                 "Emergency dispatcher failed startup binding (%s); live routing remains disabled",
                 type(exc).__name__,
             )
+    app.config["BROKER_ROUTER"] = None
     if runtime_ready:
         configure_broker_router(app, registry, credential_store, client)
     else:
@@ -4348,14 +4247,11 @@ def create_flask_app(
     app.config["LOGIN_ACTIVITY"] = _LoginActivity(str(_login_db))
     app.config["SESSION_TRACKER"] = _SessionTracker(str(_login_db))
 
-    # Shared trade-journal store (DuckDB). The gated order dispatch writes every
-    # executed live order here and the /trades/journal route reads the SAME
-    # store, so the journal + P&L analytics populate in Live (previously the
-    # producer was missing → permanently empty journal). One shared, pre-
-    # initialised connection keeps the per-order cost to a single INSERT (latency
-    # is paramount). A lock serialises the writer against the route's reads —
-    # DuckDB connections are not safe for concurrent use. Best-effort: a storage
-    # failure degrades to "no journalling", never blocks boot.
+    # Shared execution-journal store (DuckDB), retained for existing records and
+    # /trades/journal reads. Native fill ingestion is not connected yet: gated
+    # submission acknowledgements belong in the audit, not this fill store.
+    # The shared lock protects the connection because DuckDB connections are not
+    # safe for concurrent use. Storage failure never blocks boot.
     try:
         from flinttrade_data.storage import StorageManager as _TradeStore  # noqa: PLC0415
 
@@ -4390,30 +4286,6 @@ def create_flask_app(
         logger.warning("Trade journal unavailable; /api/v1/journal returns 503", exc_info=True)
         app.config["JOURNAL"] = None
     app.register_blueprint(journal_bp)
-
-    # FlowBuilder saved workflows (one JSON file per flow under
-    # <workspace_dir>/flows/). Backend persistence for the terminal's
-    # FlowBuilder saved-list (migrated off WebView localStorage). The blueprint
-    # is registered outside the try so a failed store construction genuinely
-    # yields the routes' 503 branch (never 404s); construction stays
-    # best-effort — a storage failure never blocks boot.
-    #
-    # Construct with NO base_dir on purpose: the store's own resolver runs the
-    # copy-once migration from the legacy/pre-workspace ``~/.flinttrade/flows``
-    # source. Passing an explicit directory (as this call used to) skipped it,
-    # leaving the migration dead in the only production construction there is.
-    from flinttrade_webhooks.flow_routes import flows_bp, init_flow_routes  # noqa: PLC0415
-
-    try:
-        from flinttrade_webhooks.flow_store import FlowFileStore  # noqa: PLC0415
-
-        _flow_store = FlowFileStore()
-        app.config["FLOW_STORE"] = _flow_store
-        init_flow_routes(_flow_store)
-    except Exception:  # defensive: never let the flow store break boot
-        logger.warning("Flow store unavailable; /api/v1/flows returns 503", exc_info=True)
-        app.config["FLOW_STORE"] = None
-    app.register_blueprint(flows_bp)
 
     # Register Order Flow blueprint (synthetic footprint data)
     from flinttrade_data.orderflow_routes import orderflow_bp  # noqa: PLC0415
@@ -4820,7 +4692,7 @@ def create_flask_app(
     # Register Order proxy blueprint (/v1/orders/*) — CRITICAL SAFETY LAYER.
     # All order requests from the frontend must pass through here so that
     # mode enforcement (explore/practice/live) is applied before any
-    # real-money order reaches OpenAlgo.
+    # real-money order reaches native broker.
     from .order_routes import orders_bp  # noqa: PLC0415
 
     app.register_blueprint(orders_bp)
@@ -4945,11 +4817,17 @@ def create_flask_app(
 
     app.register_blueprint(chart_prefs_bp)
 
+    # Public scrip lots. Cache first, then the shipped excerpt. Explore and
+    # Learn read this without a session; it is not an order path.
+    from .instrument_lot_routes import instrument_lots_bp  # noqa: PLC0415
+
+    app.register_blueprint(instrument_lots_bp)
+
     # Register Bracket Order blueprint (/api/v1/orders/bracket*) and construct
     # the service it delegates to. Every bracket leg WRITE traverses the same
     # gated chain as a human /place order — SafetySystem L1-L5 -> gate_order
     # (one-shot HMAC SafetyContext) -> BrokerRouter -> adapter — through the
-    # injected dispatchers; the service never holds a raw broker/OpenAlgo
+    # injected dispatchers; the service never holds a raw broker/native broker
     # client for writes (gateway/tests/test_no_legacy_order_path.py pins it).
     # Practice-mode JWTs are refused 403 practice_unsupported at the route
     # boundary (mode_guard.require_live_unlocked): the sandbox cannot execute
@@ -4984,20 +4862,10 @@ def create_flask_app(
 
     app.register_blueprint(position_bp)
 
-    # Register Voice Orders blueprint (/api/v1/voice/*)
-    from flinttrade_webhooks.voice_orders import voice_bp  # noqa: PLC0415
-
-    app.register_blueprint(voice_bp)
-
     # Register QuestDB bridge blueprint (/api/v1/data/questdb/*)
     from flinttrade_data.questdb_routes import questdb_bp  # noqa: PLC0415
 
     app.register_blueprint(questdb_bp)
-
-    # Register Excel bridge blueprint (/api/v1/integration/excel/*)
-    from flinttrade_webhooks.excel_routes import excel_bp  # noqa: PLC0415
-
-    app.register_blueprint(excel_bp)
 
     # ------------------------------------------------------------------
     # Blueprints discovered as defined-but-not-registered during the
@@ -5012,8 +4880,9 @@ def create_flask_app(
     #   health_bp                 — /health, /health/detail, /healthz, /readyz,
     #                               /api/v1/ping, /api/v1/health (K8s + LB probes
     #                               + aggregated subsystem health; canonical health
-    #                               surface; /api/v1/ping is already in
-    #                               `_PUBLIC_V1_PREFIXES`)
+    #                               surface; /healthz, /readyz, and /api/v1/ping are
+    #                               public and status-only. /health, /health/detail,
+    #                               and /api/v1/health stay behind a session.)
     #   optimiser_bp              — /v1/portfolio/{optimise,frontier}
     #   permutation_bp            — /v1/backtest/{permutation,walkforward}
     #   admin_action_center_bp    — /admin/action-center/{pending,approve,reject,history}
@@ -5106,50 +4975,9 @@ def create_flask_app(
     # .local/archive/user-multi-2026-06-10/.)
 
     # Reconnect saved accounts only after admission; pass explicit workspace intent.
-    try:
-        broker_account_mutation_admission()
-        from .broker_identity import parse_broker_selector
-        from .workspace_migrations import read_workspace_snapshot
-        replay_workspace = read_workspace_snapshot(_workspace_dir())
-        replay_default = replay_workspace.as_dict()["brokers"]["execution"]["default"]
-        _reconnect_saved_accounts(registry, credential_store, logger,
-            registry_publication_owner=registry_publication_owner, workspace_path=_workspace_dir(),
-            execution_default_selector=parse_broker_selector(replay_default) if replay_default else None,
-            mutation_admission=broker_account_mutation_admission)
-    except BrokerAccountCutoverUnavailable as exc:
-        logger.info("Saved broker reconnect unavailable: %s", exc)
-    except Exception as exc:
-        logger.error("Account reconnection failed (%s)", type(exc).__name__)
 
-    # Paths that are legitimately public (no API key needed):
-    # - Health check endpoint (also exempted by endpoint name in require_auth)
-    # - Admin introspect (already gated by FLINTTRADE_DEV in admin_routes)
-    # - OAuth callbacks (browser redirect — no API key in URL)
-    # - Frontend error reporting (/api/v1/errors — must be reachable before auth)
-    # - Signed external webhook POSTs (/v1/webhook/*) — HMAC/replay/endpoint
-    #   state is enforced inside webhook_routes before dispatch.
-    _PUBLIC_V1_PREFIXES = (
-        "/v1/admin/health",
-        "/v1/admin/introspect",
-        "/v1/auth/",  # Auth endpoints are public (login, setup, status)
-        "/v1/auth/callback",
-        "/v1/errors",  # Frontend error reporting — public, rate-limited.
-        # Blueprint mounted at /v1/errors (see
-        # frontend_error_routes.py:Blueprint(..., url_prefix="/v1")).
-        # Persists to ErrorLog (DuckDB) for post-mortem.
-        "/api/v1/errors",  # Same purpose, different sink: this path is
-        # handled by `operations_bp.receive_frontend_error`
-        # which forwards to structlog + Sentry/Glitchtip
-        # instead of DuckDB. Kept public so the React app
-        # and external automation can fire-and-forget
-        # error reports without an API key — neither sink
-        # leaks sensitive data
-        # back to the caller.
-        "/v1/changelog",  # Frontend changelog viewer — public, paired with /v1/errors.
-        "/api/v1/ping",  # Liveness probe — no auth required
-        "/v1/config/openalgo",  # Localhost-only; self-authenticates after setup
-        "/v1/test-connection",  # Setup wizard — public, localhost-only
-    )
+    # Public routes live in public_routes.PUBLIC_ROUTES. Everything else,
+    # including routes added later, requires a session JWT or API key.
 
     @app.after_request
     def _log_request(response: Any) -> Any:
@@ -5185,7 +5013,7 @@ def create_flask_app(
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-XSS-Protection", "1; mode=block")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
         response.headers.setdefault(
             "Content-Security-Policy",
             _build_csp_header(getattr(_flask_g, "csp_nonce", None)),
@@ -5194,25 +5022,16 @@ def create_flask_app(
 
     @app.before_request
     def require_auth() -> Any:
-        """Require API key authentication on all endpoints.
+        """Require a session JWT or API key on every route that is not public.
 
-        Only specific public paths are exempted:
-        - Health check and admin introspect (dev-gated)
-        - OAuth callback (browser redirect, no API key in URL)
-        - Static files and SPA HTML fallback (React bundle)
-        All other /v1/ endpoints require the same API key auth.
+        The allowlist is :data:`flinttrade_core.public_routes.PUBLIC_ROUTES`.
+        New routes are protected by this hook; they do not opt in per endpoint.
+        Operator and role checks registered later still apply after this one.
         """
-        # Allow health checks, static files, and non-API SPA fallback routes
-        # without auth.  The catch-all SPA endpoint also matches unknown API
-        # paths when a frontend build is present; those paths must retain the
-        # same authentication boundary as API-only deployments.
-        if request.endpoint in ("health_detail.health_aggregated", "static") or (
-            request.endpoint == "_spa_fallback"
-            and not any(request.path.startswith(prefix) for prefix in spa_api_prefixes)
-        ):
-            return None
-        # Allow OPTIONS for CORS preflight
-        if request.method == "OPTIONS":
+        from .public_routes import is_public_route  # noqa: PLC0415
+
+        # Static files, when Flask is serving them, are the shell — not the API.
+        if request.endpoint == "static":
             return None
         # The complete service-connection family is already covered by the
         # earlier, stronger loopback/proof/scope guard (including unmatched
@@ -5221,53 +5040,48 @@ def create_flask_app(
             return None
         if getattr(_flask_g, "credential_quarantine_guard_complete", False):
             return None
-        # External signal providers cannot send the FlintTrade API key. Keep
-        # only POST intake public; the route itself enforces HMAC signatures,
-        # replay defence, endpoint enabled-state, and fail-closed dispatch.
-        if request.method == "POST" and request.path.startswith("/v1/webhook/"):
-            return None
-        # Allow specific public /v1/ paths only
-        if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):
+        rule = request.url_rule.rule if request.url_rule is not None else request.path
+        # The catch-all SPA endpoint also matches unknown API paths when a
+        # frontend build is present; those paths keep the API auth boundary.
+        if is_public_route(request.method, rule, path=request.path):
             return None
 
         auth_header = request.headers.get("Authorization", "")
         bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
-        if bearer:
+        header_token = request.headers.get("X-FlintTrade-Token", "").strip()
+
+        def _is_session_token(token: str) -> bool:
+            if not token:
+                return False
             try:
                 from .auth_routes import decode_token  # noqa: PLC0415
 
-                payload = decode_token(bearer)
-                if payload.get("type") == "session":
-                    return None
+                payload = decode_token(token)
             except Exception:
-                # Preserve the legacy ``Authorization: Bearer <api-key>`` path
-                # below when the bearer is not a FlintTrade session JWT.
-                pass
+                return False
+            return payload.get("type") == "session"
+
+        # A session may arrive as Authorization or as the fallback header
+        # existing clients already send. The fallback is a session JWT only.
+        if _is_session_token(bearer) or _is_session_token(header_token):
+            return None
 
         api_key = request.headers.get("X-API-Key") or bearer
+        expected_key = os.environ.get("FLINTTRADE_API_KEY", "")
+        if expected_key and api_key and hmac.compare_digest(api_key, expected_key):
+            return None
 
-        expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
-        if not expected_key:
-            remote = request.remote_addr or ""
-            if remote in ("127.0.0.1", "::1", "localhost"):
-                logger.debug(
-                    "FLINTTRADE_API_KEY/OPENALGO_API_KEY not set — allowing loopback local request",
-                )
-                return None
-            logger.warning("FLINTTRADE_API_KEY/OPENALGO_API_KEY not set — remote requests will be rejected")
-            return jsonify({"status": "error", "message": "Backend API key not configured"}), 503
-
-        if not api_key or not hmac.compare_digest(api_key, expected_key):
-            # Record auth failure for brute-force detection
+        if expected_key:
+            # Record a presented-credential failure for brute-force detection.
+            # A missing session when no API key is configured is a 401, not a
+            # ban event: the desktop app polls before the operator signs in.
             try:
                 sec = app.config.get("SECURITY_MONITOR")
                 if sec:
                     sec.record_auth_failure(request.remote_addr or "unknown")
             except Exception as _exc:
                 logger.debug("suppressed: %s", _exc)
-            return jsonify({"status": "error", "message": "Unauthorized"}), 401
-
-        return None
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     @app.before_request
     def _require_json_content_type() -> Any:
@@ -5286,7 +5100,12 @@ def create_flask_app(
             ):
                 return None
             content_type = request.content_type or ""
-            if "json" not in content_type and "text/event-stream" not in content_type:
+            # Browsers post CSP reports without a session and without a JSON
+            # content type. The report endpoint stays status-only.
+            csp_report = request.path == "/csp-report" and (
+                "application/csp-report" in content_type or "application/reports+json" in content_type
+            )
+            if not csp_report and "json" not in content_type and "text/event-stream" not in content_type:
                 return jsonify(
                     {
                         "status": "error",
@@ -5359,373 +5178,12 @@ def create_flask_app(
     # MCP bridge — intentionally NOT wired here.
     #
     # A dormant bridge used to register an UNGATED ``place_order`` handler that
-    # built a fresh OpenAlgoClient and submitted live orders without passing
+    # built a fresh BrokerClient and submitted live orders without passing
     # through the SafetySystem / gate_order / BrokerRouter and mode guard. It
     # was unreachable today but a latent ungated-order risk, so it has been
     # removed. Any future MCP order path MUST route through the gated execution
-    # layer rather than calling OpenAlgoClient.place_order directly.
+    # layer rather than calling BrokerClient.place_order directly.
     # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Config persistence endpoint — /ft-api/v1/config/openalgo
-    # Accepts {api_key, host, port, ws_port, telegram_username} from the Setup
-    # wizard, persists them to workspace.json, and hot-reloads app.config["CLIENT"] so no
-    # process restart is needed.
-    # ------------------------------------------------------------------
-    # Registered at /v1/... (not /ft-api/v1/...) because the WSGI prefix
-    # stripper normalises /ft-api/v1/X → /v1/X before URL dispatch, and the
-    # Vite dev proxy does the same rewrite. So a single /v1/... registration
-    # is reachable from both environments.
-    openalgo_config_lock = threading.RLock()
-
-    def _serialise_openalgo_config(handler: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(handler)
-        def serialised(*args: Any, **kwargs: Any) -> Any:
-            with openalgo_config_lock:
-                rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
-                if not rebuild_lock.acquire(timeout=_broker_router_drain_timeout(app)):
-                    return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
-                try:
-                    return handler(*args, **kwargs)
-                finally:
-                    rebuild_lock.release()
-
-        return serialised
-
-    def _openalgo_config_request_authenticated() -> bool:
-        auth_header = request.headers.get("Authorization", "")
-        bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
-        if bearer:
-            try:
-                from .auth_routes import decode_token  # noqa: PLC0415
-
-                if decode_token(bearer).get("type") == "session":
-                    return True
-            except Exception:
-                pass
-
-        expected = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
-        supplied = request.headers.get("X-API-Key") or bearer
-        return bool(expected and supplied and secrets.compare_digest(str(supplied), expected))
-
-    @app.route("/v1/config/openalgo", methods=["GET", "POST"])
-    @limiter.limit("10 per minute")
-    @_serialise_openalgo_config
-    def _set_openalgo_config() -> Any:
-        """Persist OpenAlgo connection settings from the UI.
-
-        Security: writes and unauthenticated status probes are loopback-only.
-        Before the operator account exists, GET returns redacted metadata and
-        POST must carry an explicit OpenAlgo API key. After setup, both
-        methods require a session JWT or the configured backend/OpenAlgo API
-        key. An authenticated GET may cross the network so a remote web
-        terminal (e.g. over Tailscale) can rehydrate its OpenAlgo connection;
-        it is the only shape that returns the raw key.
-
-        Request JSON: ``{"api_key": "...", "host": "...", "port": 5000, "ws_port": 8765}``
-        """
-
-        def _coerce_port(value: Any, label: str) -> int:
-            try:
-                port_value = int(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"{label} must be an integer") from exc
-            if not 1 <= port_value <= 65535:
-                raise ValueError(f"{label} must be between 1 and 65535")
-            return port_value
-
-        remote = request.remote_addr or ""
-        remote_is_loopback = remote in ("127.0.0.1", "::1", "localhost")
-        authenticated = _openalgo_config_request_authenticated()
-        if not remote_is_loopback and (request.method != "GET" or not authenticated):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Only an authenticated GET may use this endpoint remotely",
-                }
-            ), 403
-
-        auth_service = app.config.get("AUTH_SERVICE")
-        try:
-            operator_is_setup = bool(auth_service is None or auth_service.is_setup())
-        except Exception:
-            operator_is_setup = True
-        if operator_is_setup and not authenticated:
-            return jsonify({"status": "error", "message": "Authentication required"}), 401
-
-        if request.method == "GET":
-            try:
-                from .workspace import Workspace  # noqa: PLC0415
-
-                ws = Workspace()
-                if not ws.config_path.exists():
-                    ws.initialise()
-                config = ws.as_dict()
-                openalgo = config.get("openalgo") if isinstance(config, dict) else {}
-                if not isinstance(openalgo, dict):
-                    openalgo = {}
-                api_key = str(openalgo.get("api_key", "") or "")
-                data = {
-                    "api_key_configured": bool(api_key),
-                    "api_key_last4": api_key[-4:] if api_key else "",
-                    "host": str(openalgo.get("host", "") or ""),
-                    "telegram_username": str(openalgo.get("telegram_username", "") or ""),
-                    "port": openalgo.get("port", DEFAULT_OPENALGO_PORT),
-                    "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
-                }
-                # The terminal needs the bridge key in memory for its direct
-                # OpenAlgo WebSocket. Only an authenticated operator session (or
-                # explicit backend API key) may rehydrate it; pre-setup status
-                # probes receive redacted metadata only.
-                if authenticated:
-                    data["api_key"] = api_key
-                return jsonify(
-                    {
-                        "status": "success",
-                        "data": data,
-                    }
-                ), 200
-            except Exception as exc:
-                logger.error("Failed to read OpenAlgo config from workspace.json: %s", exc)
-                return jsonify(
-                    {
-                        "status": "error",
-                        "message": "Could not read config",
-                    }
-                ), 500
-
-        payload = request.get_json(silent=True)
-        if not isinstance(payload, dict):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Request body must be a JSON object",
-                }
-            ), 400
-        has_api_key = "api_key" in payload
-        has_telegram_username = "telegram_username" in payload
-        has_host = "host" in payload
-        has_port = "port" in payload
-        has_ws_port = "ws_port" in payload
-        api_key = str(payload.get("api_key", "")).strip()
-        telegram_username = str(payload.get("telegram_username", "")).strip()
-        host = str(payload.get("host", "")).strip()
-        port = payload.get("port")
-        ws_port = payload.get("ws_port")
-
-        if not authenticated and (not has_api_key or not api_key):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Initial OpenAlgo setup must include the API key",
-                }
-            ), 401
-
-        if not any((has_api_key, has_telegram_username, has_host, has_port, has_ws_port)):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": (
-                        "At least one of api_key, telegram_username, host, port, "
-                        "or ws_port is required"
-                    ),
-                }
-            ), 400
-
-        try:
-            normalised_port = _coerce_port(port, "port") if has_port else None
-            normalised_ws_port = _coerce_port(ws_port, "ws_port") if has_ws_port else None
-        except ValueError:
-            # Fixed message — never echo exception text into a response.
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "port and ws_port must be integers between 1 and 65535",
-                }
-            ), 400
-
-        # Persist to workspace.json
-        try:
-            from .workspace import Workspace  # noqa: PLC0415
-
-            ws = Workspace()
-
-            candidate: dict[str, Settings] = {}
-
-            def update_openalgo(config: dict[str, Any]) -> None:
-                current_openalgo = config.get("openalgo")
-                openalgo = dict(current_openalgo) if isinstance(current_openalgo, dict) else {}
-                if has_api_key:
-                    openalgo["api_key"] = api_key
-                if has_telegram_username:
-                    openalgo["telegram_username"] = telegram_username
-                if has_host:
-                    openalgo["host"] = host
-                if has_port:
-                    openalgo["port"] = normalised_port
-                if has_ws_port:
-                    openalgo["ws_port"] = normalised_ws_port
-                config["openalgo"] = openalgo
-                candidate["settings"] = Settings.from_workspace_data(config)
-
-            # Validate before retiring a working router. The actual updater
-            # re-derives settings under workspace CAS from the latest state.
-            update_openalgo(ws.as_dict())
-            broker_change_requested = has_api_key or has_host or has_port or has_ws_port
-            old_client = app.config.get("CLIENT")
-            client_replacement_required = not isinstance(old_client, OpenAlgoClient)
-            dependency_refresh_requested = broker_change_requested or client_replacement_required
-            prior_dependencies = app.extensions.get("flinttrade_broker_dependencies")
-            if dependency_refresh_requested and not retire_broker_dependencies(app):
-                return jsonify({"status": "error", "message": "Broker routing could not drain"}), 503
-            ws.update(update_openalgo)
-            candidate_settings = candidate["settings"]
-        except (TypeError, ValueError):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "OpenAlgo settings are invalid",
-                }
-            ), 400
-        except Exception as exc:
-            logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Could not persist config",
-                }
-            ), 500
-
-        # Settings reads workspace.json directly; log the fresh UI-owned
-        # settings for diagnostics without copying secrets into os.environ.
-        try:
-            _log_workspace_openalgo_overrides()
-        except Exception:
-            pass
-
-        # Reconfigure the shared client in place. BrokerRouter, schedulers, cron
-        # and Telegram all retain this object, so replacing/closing it would
-        # strand live callers on stale credentials or a closed HTTP pool.
-        old_settings = getattr(old_client, "settings", None)
-        old_api_key_value = getattr(old_settings, "openalgo_api_key", "")
-        old_api_key = old_api_key_value if isinstance(old_api_key_value, str) else ""
-        broker_router_rebuilt: bool | None = None
-        try:
-            new_settings = candidate_settings
-            if isinstance(old_client, OpenAlgoClient):
-                new_client = old_client.reconfigure(new_settings)
-            else:
-                new_client = OpenAlgoClient(new_settings)
-            app.config["CLIENT"] = new_client
-            app.config["OPENALGO_CLIENT"] = new_client
-            broker_reads_refreshed_without_writes = False
-            if dependency_refresh_requested:
-                broker_router_rebuilt = configure_broker_router(app, registry, credential_store, new_client) is True
-                if broker_router_rebuilt is False:
-                    broker_reads_refreshed_without_writes = broker_reads_published_without_writes(
-                        app,
-                        previous_dependencies=prior_dependencies,
-                        registry=registry,
-                        openalgo_client=new_client,
-                    )
-        except Exception as exc:
-            diagnostic = _sanitise_tick_capture_error(exc, api_key)
-            diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
-            logger.warning("OpenAlgo config saved but client reinitialisation failed: %s", diagnostic)
-            return jsonify(
-                {
-                    "status": "partial",
-                    "message": "Config saved but client not reloaded",
-                }
-            ), 200
-
-        # The desktop and full-app boot paths both expose the active recorder on
-        # app.config. Reconfigure it only after Settings and the REST client are
-        # valid, so one save moves both transports to the same endpoint/key.
-        with _tick_capture_lifecycle_lock(app):
-            recorder = app.config.get("TICK_RECORDER")
-            if recorder is not None:
-                capture_reconfigured = False
-                try:
-                    # Register the new key with the desktop runtime before the
-                    # recorder can use it or fail, so every diagnostic is redacted.
-                    desktop_runtime = app.config.get("DESKTOP_TICK_CAPTURE_RUNTIME")
-                    update_runtime_api_key = getattr(desktop_runtime, "update_api_key", None)
-                    if callable(update_runtime_api_key):
-                        update_runtime_api_key(new_settings.openalgo_api_key)
-
-                    reconfigure_connection = getattr(recorder, "reconfigure_connection", None)
-                    if not callable(reconfigure_connection):
-                        raise RuntimeError("Tick recorder does not support connection reconfiguration")
-                    reconfigure_connection(
-                        ws_url=openalgo_ws_base_url(new_settings),
-                        api_key=new_settings.openalgo_api_key,
-                    )
-                    capture_reconfigured = True
-                    if app.config.get("TICK_RECORDER") is not recorder:
-                        diagnostic = str(app.config.get("TICK_CAPTURE_ERROR", "") or "").strip()
-                        if not diagnostic:
-                            diagnostic = "Tick recorder stopped during connection reconfiguration"
-                        diagnostic = _sanitise_tick_capture_error(diagnostic, new_settings.openalgo_api_key)
-                        diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
-                        app.config["TICK_CAPTURE_ERROR"] = diagnostic
-                        logger.warning("OpenAlgo config saved after tick recorder stopped (%s)", diagnostic)
-                        return jsonify(
-                            {
-                                "status": "partial",
-                                "message": "OpenAlgo config saved and client reloaded, but tick capture reload was incomplete",
-                                "data": {
-                                    "client_reloaded": True,
-                                    "broker_router_rebuilt": broker_router_rebuilt,
-                                    "tick_capture_reconfigured": False,
-                                },
-                            }
-                        ), 200
-                except Exception as exc:  # noqa: BLE001 - saved REST config remains usable
-                    diagnostic = _sanitise_tick_capture_error(exc, new_settings.openalgo_api_key)
-                    diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
-                    app.config["TICK_CAPTURE_ERROR"] = diagnostic
-                    logger.warning("OpenAlgo config saved but tick capture hot-reload failed (%s)", diagnostic)
-                    return jsonify(
-                        {
-                            "status": "partial",
-                            "message": "OpenAlgo config saved and client reloaded, but tick capture reload was incomplete",
-                            "data": {
-                                "client_reloaded": True,
-                                "broker_router_rebuilt": broker_router_rebuilt,
-                                "tick_capture_reconfigured": capture_reconfigured,
-                            },
-                        }
-                    ), 200
-                app.config["TICK_CAPTURE_ERROR"] = ""
-            elif app.config.get("TICK_CAPTURE_ENABLED") and app.config.get("TICK_CAPTURE_ERROR"):
-                return jsonify(
-                    {
-                        "status": "partial",
-                        "message": "OpenAlgo config saved and client reloaded, but tick capture requires a restart",
-                        "data": {
-                            "client_reloaded": True,
-                            "broker_router_rebuilt": broker_router_rebuilt,
-                            "tick_capture_reconfigured": False,
-                        },
-                    }
-                ), 200
-
-        if broker_router_rebuilt is False and not broker_reads_refreshed_without_writes:
-            return jsonify(
-                {
-                    "status": "partial",
-                    "message": "OpenAlgo config saved and client reloaded, but broker routing is unavailable",
-                    "data": {"client_reloaded": True, "broker_router_rebuilt": False},
-                }
-            ), 200
-
-        return jsonify(
-            {
-                "status": "ok",
-                "message": "OpenAlgo config saved and client reloaded",
-            }
-        ), 200
 
     @app.route("/v1/config/llm", methods=["GET", "POST"])
     @limiter.limit("10 per minute")
@@ -5742,9 +5200,7 @@ def create_flask_app(
 
         from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
 
-        denied = require_local_control_auth(
-            message="LLM configuration requires an authenticated session"
-        )
+        denied = require_local_control_auth(message="LLM configuration requires an authenticated session")
         if denied is not None:
             return denied
 
@@ -5800,9 +5256,7 @@ def create_flask_app(
 
         from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
 
-        denied = require_local_control_auth(
-            message="LLM configuration requires an authenticated session"
-        )
+        denied = require_local_control_auth(message="LLM configuration requires an authenticated session")
         if denied is not None:
             return denied
 
@@ -5876,9 +5330,7 @@ def create_flask_app(
 
         from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
 
-        denied = require_local_control_auth(
-            message="Telegram configuration requires an authenticated session"
-        )
+        denied = require_local_control_auth(message="Telegram configuration requires an authenticated session")
         if denied is not None:
             return denied
 
@@ -5945,126 +5397,6 @@ def create_flask_app(
         ), 200
 
     # ------------------------------------------------------------------
-    # Connection-test endpoint — /ft-api/v1/test-connection
-    # Used by the Setup wizard + Settings › Connection. The browser cannot
-    # call OpenAlgo's /api/v1/ping directly because OpenAlgo does not send
-    # CORS headers for our origin (and we will not modify OpenAlgo). We
-    # proxy the test through our backend so it runs server-to-server with
-    # no CORS involvement.
-    # ------------------------------------------------------------------
-    @app.route("/v1/test-connection", methods=["POST"])
-    @limiter.limit("10 per minute")
-    def _test_openalgo_connection() -> Any:
-        """Server-side OpenAlgo connectivity + auth test.
-
-        Accepts the exact ``{host, api_key}`` the user typed in the wizard,
-        pings OpenAlgo, and returns a structured result. HTTP status is
-        always 200 — the real outcome lives in the JSON body so the
-        frontend can distinguish reachable/unreachable/auth-failed without
-        tripping on HTTP error handling.
-        """
-        remote = request.remote_addr or ""
-        if remote not in ("127.0.0.1", "::1", "localhost"):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "This endpoint is only reachable from localhost",
-                }
-            ), 403
-
-        payload = request.get_json(silent=True) or {}
-        # Strip one or more trailing slashes; setup wizard sometimes posts
-        # the host with "/" or "//".
-        host = str(payload.get("host", "")).strip().rstrip("/")
-        api_key = str(payload.get("api_key", "")).strip()
-
-        if not host or not api_key:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "host and api_key are required",
-                }
-            ), 400
-
-        import httpx as _httpx  # noqa: PLC0415
-
-        try:
-            resp = _httpx.post(
-                f"{host}/api/v1/ping",
-                json={"apikey": api_key},
-                timeout=5.0,
-            )
-        except (_httpx.ConnectError, _httpx.ConnectTimeout) as exc:
-            logger.warning("OpenAlgo connection test could not reach configured host: %s", exc)
-            return jsonify(
-                {
-                    "status": "error",
-                    "reachable": False,
-                    "message": "Cannot reach OpenAlgo at the configured host",
-                }
-            ), 200
-        except _httpx.TimeoutException:
-            return jsonify(
-                {
-                    "status": "error",
-                    "reachable": False,
-                    "message": f"OpenAlgo at {host} did not respond within 5s",
-                }
-            ), 200
-        except Exception:  # noqa: BLE001
-            return jsonify(
-                {
-                    "status": "error",
-                    "reachable": False,
-                    "message": "Connection test failed",
-                }
-            ), 200
-
-        if resp.status_code == 200:
-            broker = "unknown"
-            try:
-                data = resp.json()
-                if isinstance(data, dict):
-                    broker = data.get("data", {}).get("broker") or data.get("broker") or "unknown"
-            except Exception:  # noqa: BLE001
-                pass
-            return jsonify(
-                {
-                    "status": "ok",
-                    "reachable": True,
-                    "authenticated": True,
-                    "broker": broker,
-                    "message": f"Connected — broker: {broker}",
-                }
-            ), 200
-
-        if resp.status_code in (401, 403):
-            msg = "Invalid API key"
-            try:
-                body = resp.json()
-                if isinstance(body, dict):
-                    msg = body.get("message", msg)
-            except Exception:  # noqa: BLE001
-                pass
-            return jsonify(
-                {
-                    "status": "error",
-                    "reachable": True,
-                    "authenticated": False,
-                    "http_status": resp.status_code,
-                    "message": f"Reachable but auth failed (HTTP {resp.status_code}): {msg}",
-                }
-            ), 200
-
-        return jsonify(
-            {
-                "status": "error",
-                "reachable": True,
-                "authenticated": False,
-                "http_status": resp.status_code,
-                "message": f"OpenAlgo returned unexpected HTTP {resp.status_code}",
-            }
-        ), 200
 
     # ------------------------------------------------------------------
     # SPA fallback — registered LAST so it only matches unclaimed routes.
@@ -6131,8 +5463,6 @@ def create_flask_app(
             # Otherwise serve index.html (SPA client-side routing) with the CSP nonce.
             return _serve_index_with_nonce()
 
-    # Preserve the existing auth/content-type/account-cutover precedence.
-    app.before_request(_guard_backend_broker_mutations)
     return app
 
 
@@ -6345,7 +5675,8 @@ def _start_rotation_scheduler(app: Flask, *, fail_closed: bool = False) -> None:
 
 
 def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) -> None:
-    """Stop new refresh jobs, revoke publication, and drain admitted refreshes."""
+    """Stop new refresh jobs, drain admitted refreshes, then retire broker dependencies."""
+    deadline = time.monotonic() + (30.0 if timeout is None else max(0.0, timeout))
     rotation_scheduler = app.config.get("ROTATION_SCHEDULER")
     scheduler_error: Exception | None = None
     if rotation_scheduler is not None and getattr(rotation_scheduler, "running", False):
@@ -6356,11 +5687,7 @@ def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) ->
 
     admission = app.config.get("NATIVE_ROTATION_ADMISSION")
     if admission is not None:
-        raw_timeout = (
-            app.config.get("NATIVE_ROTATION_SHUTDOWN_TIMEOUT_SECONDS", 30.0)
-            if timeout is None
-            else timeout
-        )
+        raw_timeout = app.config.get("NATIVE_ROTATION_SHUTDOWN_TIMEOUT_SECONDS", 30.0) if timeout is None else timeout
         try:
             drain_timeout = max(0.0, float(raw_timeout))
         except (TypeError, ValueError):
@@ -6368,8 +5695,13 @@ def _shutdown_rotation_scheduler(app: Flask, *, timeout: float | None = None) ->
         close_and_drain = getattr(admission, "close_and_drain", None)
         if not callable(close_and_drain):
             raise RuntimeError("native session rotation admission owner is invalid")
+        drain_timeout = min(drain_timeout, max(0.0, deadline - time.monotonic()))
         if not close_and_drain(drain_timeout):
             raise TimeoutError("native session rotation did not drain")
+
+    lifecycle_owner = app.extensions.get("flinttrade.broker_account_lifecycle_owner")
+    if lifecycle_owner is not None and not lifecycle_owner.close_and_drain(max(0.0, deadline - time.monotonic())):
+        raise TimeoutError("broker account lifecycle did not drain")
     if scheduler_error is not None:
         raise scheduler_error
 
@@ -6474,7 +5806,7 @@ class _AcquiredOwnerLedger:
 class FlintTradeApp:
     """Main application — creates and wires all FlintTrade subsystems.
 
-    Startup is resilient: if OpenAlgo is unreachable or optional services
+    Startup is resilient: if native broker is unreachable or optional services
     (Telegram, AI) are not configured, the app starts with warnings
     instead of crashing.
 
@@ -6510,7 +5842,7 @@ class FlintTradeApp:
 
         # Core — settings + API client
         self.settings = Settings.from_env()
-        self.client = OpenAlgoClient(self.settings)
+        self.client = BrokerClient(self.settings)
 
         # Engine — safety + scheduler (deferred to avoid circular import
         # between core↔engine at module level). Live order dispatch is the
@@ -6555,7 +5887,7 @@ class FlintTradeApp:
         from flinttrade_automation.cron_manager import CronManager  # noqa: PLC0415
 
         self.cron = CronManager(
-            openalgo_client=self.client,
+            broker_client=self.client,
             audit_logger=self.audit,
         )
 
@@ -6590,7 +5922,7 @@ class FlintTradeApp:
 
     def _initialise_lifecycle_state(self) -> None:
         """Allocate inert lifecycle bookkeeping without opening authorities."""
-        # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
+        # Local recorder ownership is retained for ingestion/flush lifecycle helpers.
         self._tick_recorder: Any | None = None
         self._tick_recorder_task: Any | None = None
         self._tick_storage: Any | None = None
@@ -6650,7 +5982,7 @@ class FlintTradeApp:
             await self.cron.load_holidays()
         except Exception as exc:
             logger.warning(
-                "Could not load holidays (OpenAlgo may be starting; %s)",
+                "Could not load an authoritative market calendar (%s)",
                 type(exc).__name__,
             )
             if fail_closed and not calendar_invalidated:
@@ -6669,9 +6001,7 @@ class FlintTradeApp:
         )
         if not fresh_generation or loaded_year != calendar_year:
             if getattr(self, "_calendar_unauthoritative_warned", False):
-                logger.debug(
-                    "Market calendar refresh still not authoritative; retaining a fail-closed year"
-                )
+                logger.debug("Market calendar refresh still not authoritative; retaining a fail-closed year")
             else:
                 logger.warning(
                     "Market calendar refresh did not produce current-year authority; retaining a fail-closed year"
@@ -6724,6 +6054,7 @@ class FlintTradeApp:
             return
         if not self._strategy_cron_started:
             if startup_owners is not None:
+
                 async def rollback_strategy_cron(_deadline: _LifecycleDeadline) -> bool:
                     await asyncio.to_thread(self.strategy_cron_scheduler.stop)
                     self._strategy_cron_started = False
@@ -6740,6 +6071,7 @@ class FlintTradeApp:
             self._cron_jobs_registered = True
         if not self._cron_started:
             if startup_owners is not None:
+
                 async def rollback_cron(_deadline: _LifecycleDeadline) -> bool:
                     await asyncio.to_thread(self.cron.stop)
                     self._cron_started = False
@@ -6799,9 +6131,7 @@ class FlintTradeApp:
             workers.pop(key, None)
         if error is not None:
             return False, type(error).__name__
-        if require_live_deadline_for_success and (
-            not deadline_was_live or deadline.remaining() <= 0.0
-        ):
+        if require_live_deadline_for_success and (not deadline_was_live or deadline.remaining() <= 0.0):
             return False, "TimeoutError"
         if require_truthy and not bool(result):
             return False, "TimeoutError"
@@ -6957,22 +6287,24 @@ class FlintTradeApp:
         # in any later constructor still owns its hardened directory handles.
         credential_store = getattr(self, "credential_store", None)
         if credential_store is not None and not await stop_sync(
-            "startup-credential-store", "credential store", credential_store.close,
+            "startup-credential-store",
+            "credential store",
+            credential_store.close,
         ):
             return False
 
-        async def close_openalgo_client() -> None:
+        async def close_broker_client() -> None:
             if self.client is None:
                 return
-            if isinstance(self.client, OpenAlgoClient):
+            if isinstance(self.client, BrokerClient):
                 await self.client.shutdown()
                 return
             await self.client.close()
 
         client_closed = await stop_async(
-            "startup-openalgo-client",
-            "OpenAlgo client",
-            close_openalgo_client,
+            "startup-broker-read-client",
+            "native broker client",
+            close_broker_client,
         )
         audit_closed = self.audit is None or await stop_sync(
             "startup-audit-logger",
@@ -7024,11 +6356,7 @@ class FlintTradeApp:
                     self._startup_recovery_pending = True
                     return False
             owners_released = ledger is None or await ledger.rollback(deadline)
-            dependencies_released = (
-                await self._rollback_startup_dependencies(deadline)
-                if owners_released
-                else False
-            )
+            dependencies_released = await self._rollback_startup_dependencies(deadline) if owners_released else False
             complete = bool(owners_released and dependencies_released)
             self._startup_recovery_pending = not complete
             if complete:
@@ -7042,7 +6370,7 @@ class FlintTradeApp:
 
         Claimed *before* this call installs an owner ledger. A rejected caller
         acquired nothing, so it must never reach the startup-rollback path: that
-        path releases the running runtime's owners and closes its OpenAlgo
+        path releases the running runtime's owners and closes its native broker
         client and audit logger, which would tear down a live backend because a
         duplicate start was requested.
 
@@ -7135,10 +6463,12 @@ class FlintTradeApp:
             telegram=self.telegram,
         )
         self._flask_app = flask_app
+
         def request_lease_shutdown() -> None:
             def schedule_stop() -> None:
                 task = runtime_loop.create_task(self.stop())
                 self._shutdown_request_task = task
+
             runtime_loop.call_soon_threadsafe(schedule_stop)
 
         _BackendLeaseRuntimeWatch(flask_app, self._backend_lease_proof, request_lease_shutdown).start()
@@ -7149,6 +6479,7 @@ class FlintTradeApp:
 
         local_ai_started = start_configured_local_ai_runtime(flask_app)
         if local_ai_started:
+
             async def rollback_local_ai(deadline: _LifecycleDeadline) -> bool:
                 return bool(
                     await asyncio.to_thread(
@@ -7175,8 +6506,7 @@ class FlintTradeApp:
                 return True
 
             startup_owners.acquire("Telegram", rollback_telegram)
-        tick_capture_enabled = _tick_capture_enabled()
-        _set_tick_capture_intent(flask_app, tick_capture_enabled)
+        _set_tick_capture_intent(flask_app)
         flask_server_owner = _run_flask_server(
             flask_app,
             port=_resolve_backend_port(),
@@ -7184,6 +6514,7 @@ class FlintTradeApp:
         )
         self._flask_server_owner = flask_server_owner
         if flask_server_owner is not None:
+
             async def rollback_flask_listener(deadline: _LifecycleDeadline) -> bool:
                 stopped = bool(
                     await asyncio.to_thread(
@@ -7332,179 +6663,7 @@ class FlintTradeApp:
                 type(exc).__name__,
             )
         if not calendar_loaded:
-            logger.warning(
-                "Market calendar unavailable; schedulers started with the current year blocked until retry"
-            )
-
-        # Live tick capture (opt-in). Uses its OWN StorageManager (a separate
-        # DuckDB file) so the recorder's async-loop writes never share a
-        # connection with the Flask-thread trade journal (DuckDB connections are
-        # not safe for concurrent use). Launched as a background task on this
-        # loop; auto-reconnects to the OpenAlgo WebSocket.
-        if tick_capture_enabled:
-            tick_storage: Any | None = None
-            tick_lock: Any | None = None
-            recorder: Any | None = None
-            recorder_task: asyncio.Task[Any] | None = None
-            checkpoint_owner: _OrderFlowCheckpointOwner | None = None
-            storage_close_worker: _BoundedTickStorageCloseWorker | None = None
-            capture_api_key = self.settings.openalgo_api_key
-            try:
-                from flinttrade_data.storage import StorageManager as _TickStore  # noqa: PLC0415
-                from flinttrade_data.tick_recorder import TickRecorder  # noqa: PLC0415
-
-                tick_db = str(_workspace_dir() / "ticks.duckdb")
-                tick_storage = _TickStore(tick_db)
-                tick_storage.initialise()
-                # One lock guards this tick store's single DuckDB connection: the
-                # recorder writes on the async loop, the nightly db_optimise job
-                # CHECKPOINTs it on the scheduler thread. Both must serialise.
-                tick_lock = threading.Lock()
-                # Live order-flow aggregator: fed from each tick and exposed to
-                # the orderflow route so the footprint widget shows REAL buy/sell
-                # delta (not synthetic) while tick capture is running.
-                from flinttrade_data.orderflow_aggregator import (  # noqa: PLC0415
-                    create_live_market_orderflow_aggregator,
-                )
-
-                orderflow = create_live_market_orderflow_aggregator()
-                with _tick_capture_lifecycle_lock(flask_app):
-                    # The Flask server is already accepting local setup requests.
-                    # Refresh inside the lifecycle lock so a concurrent config save
-                    # either precedes this build or reconfigures the published recorder.
-                    capture_settings = Settings.from_env()
-                    capture_api_key = capture_settings.openalgo_api_key
-                    watchlist = _tick_capture_watchlist()
-                    signal_hub = flask_app.config.get("SIGNAL_HUB")
-                    checkpoint_owner = _OrderFlowCheckpointOwner(
-                        tick_storage,
-                        orderflow,
-                        workspace_dir=_workspace_dir(),
-                        storage_lock=tick_lock,
-                    )
-                    restore_summary = _prepare_tick_orderflow_state(
-                        tick_storage,
-                        orderflow,
-                        watchlist,
-                        storage_lock=tick_lock,
-                        retention_days=90,
-                        checkpoint_owner=checkpoint_owner,
-                    )
-                    recorder = _build_tick_recorder(
-                        recorder_factory=TickRecorder,
-                        signal_hub=signal_hub,
-                        sandbox_engine=flask_app.config.get("DATA_SANDBOX_ENGINE"),
-                        settings=capture_settings,
-                        storage=tick_storage,
-                        storage_lock=tick_lock,
-                        orderflow=orderflow,
-                        watchlist=watchlist,
-                        mode=_tick_capture_mode(),
-                        post_flush_callback=checkpoint_owner.persist_locked,
-                    )
-                    recorder_task = asyncio.create_task(recorder.run())
-                    self._tick_recorder = recorder
-                    self._tick_recorder_task = recorder_task
-                    self._tick_storage = tick_storage
-                    self._tick_storage_lock = tick_lock
-                    self._orderflow_checkpoint_owner = checkpoint_owner
-
-                    def clear_closed_storage() -> None:
-                        with _tick_capture_lifecycle_lock(flask_app):
-                            if self._tick_storage is tick_storage:
-                                self._tick_recorder = None
-                                self._tick_storage = None
-                                self._tick_storage_lock = None
-                                self._orderflow_checkpoint_owner = None
-                                if self._tick_storage_close_worker is storage_close_worker:
-                                    self._tick_storage_close_worker = None
-
-                    storage_close_worker = _build_tick_storage_close_worker(
-                        recorder,
-                        tick_storage,
-                        tick_lock,
-                        checkpoint_owner,
-                        on_success=clear_closed_storage,
-                    )
-                    self._tick_storage_close_worker = storage_close_worker
-                    # Hand the tick store to the cron so nightly maintenance keeps the
-                    # highest-volume DuckDB file from growing unbounded. register_
-                    # builtin_jobs already ran, but the job resolves this lazily.
-                    self.cron.tick_storage = tick_storage
-                    self.cron.tick_storage_lock = tick_lock
-                    # Keep ~90 days of ticks by default so the store stays bounded;
-                    # the nightly tick_retention_job prunes older rows.
-                    self.cron.tick_retention_days = 90
-                    # Expose the recorder + store to the tick routes (status /
-                    # query / watchlist) so the terminal can see and manage capture.
-                    flask_app.config["ORDERFLOW_AGGREGATOR"] = orderflow
-                    flask_app.config["TICK_RECORDER"] = recorder
-                    flask_app.config["TICK_STORAGE"] = tick_storage
-                    flask_app.config["TICK_STORAGE_LOCK"] = tick_lock
-                    flask_app.config["TICK_CAPTURE_ERROR"] = ""
-
-                    def handle_recorder_completion(
-                        completed: Any,
-                        active: Any = recorder,
-                        key: str = capture_settings.openalgo_api_key,
-                    ) -> None:
-                        def unpublish_runtime_handles() -> None:
-                            self._tick_recorder_task = None
-                            self.cron.tick_storage = None
-                            self.cron.tick_storage_lock = None
-
-                        _handle_tick_recorder_completion(
-                            flask_app,
-                            active,
-                            completed,
-                            api_key=key,
-                            is_shutting_down=lambda: (
-                                self._stop_started or self._startup_rollback_in_progress
-                            ),
-                            on_unpublished=unpublish_runtime_handles,
-                            close_worker=storage_close_worker,
-                        )
-
-                    recorder_task.add_done_callback(handle_recorder_completion)
-                logger.info(
-                    "Live tick capture started → %s (pruned=%d restored=%d restore_failures=%d)",
-                    tick_db,
-                    restore_summary["pruned_ticks"],
-                    restore_summary["restored_ticks"],
-                    restore_summary["restore_failures"],
-                )
-
-                async def rollback_tick_capture(deadline: _LifecycleDeadline) -> bool:
-                    return await _rollback_tick_capture_startup(
-                        self,
-                        flask_app,
-                        recorder=recorder,
-                        recorder_task=recorder_task,
-                        storage=tick_storage,
-                        storage_lock=tick_lock,
-                        checkpoint_owner=checkpoint_owner,
-                        close_worker=storage_close_worker,
-                        startup_error=RuntimeError("application startup rolled back"),
-                        api_key=capture_api_key,
-                        deadline=deadline,
-                    )
-
-                startup_owners.acquire("tick recorder", rollback_tick_capture)
-            except Exception as exc:
-                rollback_complete = await _rollback_tick_capture_startup(
-                    self,
-                    flask_app,
-                    recorder=recorder,
-                    recorder_task=recorder_task,
-                    storage=tick_storage,
-                    storage_lock=tick_lock,
-                    checkpoint_owner=checkpoint_owner,
-                    close_worker=storage_close_worker,
-                    startup_error=exc,
-                    api_key=capture_api_key,
-                )
-                if not rollback_complete:
-                    raise RuntimeError("tick capture startup rollback incomplete") from exc
+            logger.warning("Market calendar unavailable; schedulers started with the current year blocked until retry")
 
         if await self._wait_for_shutdown_if_started():
             return
@@ -7565,49 +6724,6 @@ class FlintTradeApp:
             log_report(attest_all())
         except Exception as exc:  # pragma: no cover - never let attestation break boot
             logger.warning("Broker SDK attestation failed (%s)", type(exc).__name__)
-
-        # Verify OpenAlgo connectivity (non-fatal). Distinguish three
-        # cases so the boot log is not misleading: REACHABLE_AUTHENTICATED,
-        # REACHABLE_AUTH_FAILED, UNREACHABLE.
-        try:
-            import httpx  # noqa: PLC0415
-            from .exceptions import OpenAlgoAuthError  # noqa: PLC0415
-
-            try:
-                result = await self.client.ping()
-                broker = result.get("data", {}).get("broker", "unknown") if isinstance(result, dict) else "unknown"
-                logger.info(
-                    "FlintTrade %s started — OpenAlgo %s REACHABLE, authenticated (broker: %s)",
-                    self.version,
-                    self.settings.openalgo_host,
-                    broker,
-                )
-            except OpenAlgoAuthError as exc:
-                # Server responded but rejected the API key — reachable,
-                # auth failed.  Don't confuse users with "UNREACHABLE".
-                logger.warning(
-                    "FlintTrade %s started — OpenAlgo %s REACHABLE but AUTH FAILED "
-                    "(status %d; %s). Configure the API key in /setup or the active workspace's workspace.json.",
-                    self.version,
-                    self.settings.openalgo_host,
-                    exc.status_code,
-                    type(exc).__name__,
-                )
-            except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
-                logger.warning(
-                    "FlintTrade %s started — OpenAlgo %s UNREACHABLE (%s). "
-                    "Start OpenAlgo on that host/port and FlintTrade will reconnect on next call.",
-                    self.version,
-                    self.settings.openalgo_host,
-                    type(exc).__name__,
-                )
-        except Exception as exc:
-            logger.warning(
-                "FlintTrade %s started — OpenAlgo %s verification failed (%s).",
-                self.version,
-                self.settings.openalgo_host,
-                type(exc).__name__,
-            )
 
         # Wait for either successful teardown or a fail-closed shutdown error.
         await self._wait_for_shutdown_result()
@@ -7673,11 +6789,7 @@ class FlintTradeApp:
             return
 
         flask_app = getattr(self, "_flask_app", None)
-        raw_timeout = (
-            flask_app.config.get("RUNTIME_SHUTDOWN_TIMEOUT_SECONDS", 60.0)
-            if flask_app is not None
-            else 60.0
-        )
+        raw_timeout = flask_app.config.get("RUNTIME_SHUTDOWN_TIMEOUT_SECONDS", 60.0) if flask_app is not None else 60.0
         if timeout is not None:
             raw_timeout = timeout
         try:
@@ -7882,11 +6994,7 @@ class FlintTradeApp:
 
             cron_stopped = await stop_sync("cron", "cron", self.cron.stop)
             telegram = getattr(self, "telegram", None)
-            telegram_stopped = (
-                await stop_sync("telegram", "telegram", telegram.stop)
-                if telegram is not None
-                else True
-            )
+            telegram_stopped = await stop_sync("telegram", "telegram", telegram.stop) if telegram is not None else True
 
             from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
             from .smart_order_routes import shutdown_smart_order_jobs  # noqa: PLC0415
@@ -7973,11 +7081,7 @@ class FlintTradeApp:
         else:
             cron_stopped = await stop_sync("cron", "cron", self.cron.stop)
             telegram = getattr(self, "telegram", None)
-            telegram_stopped = (
-                await stop_sync("telegram", "telegram", telegram.stop)
-                if telegram is not None
-                else True
-            )
+            telegram_stopped = await stop_sync("telegram", "telegram", telegram.stop) if telegram is not None else True
             await stop_async("scheduler-quiesce", "scheduler", self.scheduler.stop_all)
 
         tick_recorder = self._tick_recorder
@@ -8008,11 +7112,7 @@ class FlintTradeApp:
             if joined and task_error is not None:
                 sanitise_error = getattr(tick_recorder, "sanitise_error", None)
                 try:
-                    diagnostic = (
-                        sanitise_error(task_error)
-                        if callable(sanitise_error)
-                        else type(task_error).__name__
-                    )
+                    diagnostic = sanitise_error(task_error) if callable(sanitise_error) else type(task_error).__name__
                 except Exception:  # pragma: no cover - diagnostics must not block shutdown
                     diagnostic = type(task_error).__name__
                 logger.warning(
@@ -8042,20 +7142,14 @@ class FlintTradeApp:
                     self._reconciliation_task = None
                 if self._reconciliation_runner is reconciliation_runner:
                     self._reconciliation_runner = None
-                if (
-                    flask_app is not None
-                    and flask_app.config.get("RECONCILIATION_RUNNER") is reconciliation_runner
-                ):
+                if flask_app is not None and flask_app.config.get("RECONCILIATION_RUNNER") is reconciliation_runner:
                     flask_app.config.pop("RECONCILIATION_RUNNER", None)
                 if task_error is not None:
                     errors.append(("reconciliation task", type(task_error).__name__))
         elif reconciliation_stopped and reconciliation_runner is not None:
             if self._reconciliation_runner is reconciliation_runner:
                 self._reconciliation_runner = None
-            if (
-                flask_app is not None
-                and flask_app.config.get("RECONCILIATION_RUNNER") is reconciliation_runner
-            ):
+            if flask_app is not None and flask_app.config.get("RECONCILIATION_RUNNER") is reconciliation_runner:
                 flask_app.config.pop("RECONCILIATION_RUNNER", None)
 
         if errors:
@@ -8070,9 +7164,7 @@ class FlintTradeApp:
                 await stop_sync(
                     "request-drain",
                     "active requests",
-                    lambda: wait_for_idle(
-                        configured_budget("RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS", 60.0)
-                    ),
+                    lambda: wait_for_idle(configured_budget("RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS", 60.0)),
                     require_truthy=True,
                 )
                 if callable(wait_for_idle)
@@ -8150,6 +7242,7 @@ class FlintTradeApp:
             self.cron.tick_storage = None
             self.cron.tick_storage_lock = None
             if tick_storage_close_worker is None:
+
                 def clear_closed_storage() -> None:
                     if self._tick_storage is tick_storage:
                         self._tick_recorder = None
@@ -8167,9 +7260,7 @@ class FlintTradeApp:
                 self._tick_storage_close_worker = tick_storage_close_worker
             tick_storage_close_worker.start()
             raw_close_timeout = (
-                flask_app.config.get("TICK_STORAGE_CLOSE_TIMEOUT_SECONDS", 3.0)
-                if flask_app is not None
-                else 3.0
+                flask_app.config.get("TICK_STORAGE_CLOSE_TIMEOUT_SECONDS", 3.0) if flask_app is not None else 3.0
             )
             try:
                 close_timeout = max(0.0, float(raw_close_timeout))
@@ -8233,13 +7324,13 @@ class FlintTradeApp:
             raise RuntimeError(f"shutdown encountered errors: {summary}")
 
         # Close API client and audit logger independently.
-        async def close_openalgo_client() -> None:
-            if isinstance(self.client, OpenAlgoClient):
+        async def close_broker_client() -> None:
+            if isinstance(self.client, BrokerClient):
                 await self.client.shutdown()
                 return
             await self.client.close()
 
-        await stop_async("openalgo-client", "OpenAlgo client", close_openalgo_client)
+        await stop_async("broker-read-client", "native broker client", close_broker_client)
         await stop_sync("audit-logger", "audit logger", self.audit.close)
         errors.extend(deferred_errors)
         if errors:
@@ -8356,12 +7447,11 @@ class FlintTradeApp:
             loop.run_until_complete(self.stop())
         finally:
             pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
-            runtime_incomplete = bool(pending) or getattr(self, "_startup_recovery_pending", False) or (
-                getattr(self, "_stop_started", False)
-                and not getattr(self, "_stop_completed", False)
-            ) or (
-                getattr(self, "_flask_app", None) is not None
-                and not getattr(self, "_stop_completed", False)
+            runtime_incomplete = (
+                bool(pending)
+                or getattr(self, "_startup_recovery_pending", False)
+                or (getattr(self, "_stop_started", False) and not getattr(self, "_stop_completed", False))
+                or (getattr(self, "_flask_app", None) is not None and not getattr(self, "_stop_completed", False))
             )
             asyncio.set_event_loop(None)
             if runtime_incomplete:

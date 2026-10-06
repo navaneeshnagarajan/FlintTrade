@@ -24,9 +24,7 @@ def test_profiles_cover_every_llm_enum_exactly_once() -> None:
 
 
 def test_nvidia_is_present_and_claude_oauth_is_an_auth_mode() -> None:
-    assert LLM_PROVIDER_BY_ID["nvidia"].endpoint_template == (
-        "https://integrate.api.nvidia.com/v1/chat/completions"
-    )
+    assert LLM_PROVIDER_BY_ID["nvidia"].endpoint_template == ("https://integrate.api.nvidia.com/v1/chat/completions")
     assert "oauth" in LLM_PROVIDER_BY_ID["anthropic"].auth_modes
     assert "claude-code-oauth" not in LLM_PROVIDER_BY_ID
 

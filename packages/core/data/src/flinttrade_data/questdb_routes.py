@@ -66,11 +66,13 @@ def health() -> tuple[Response, int]:
     if running:
         return jsonify({"status": "success", "data": {"running": True}}), 200
 
-    return jsonify({
-        "status": "error",
-        "message": "QuestDB is not reachable. Ensure it is running on the configured host.",
-        "data": {"running": False},
-    }), 503
+    return jsonify(
+        {
+            "status": "error",
+            "message": "QuestDB is not reachable. Ensure it is running on the configured host.",
+            "data": {"running": False},
+        }
+    ), 503
 
 
 # ---------------------------------------------------------------------------
@@ -140,10 +142,12 @@ def run_query() -> tuple[Response, int]:
     except QuestDBBridgeError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 
-    return jsonify({
-        "status": "success",
-        "data": {"rows": rows, "count": len(rows)},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"rows": rows, "count": len(rows)},
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------
@@ -174,20 +178,24 @@ def aggregate_ohlcv() -> tuple[Response, int]:
 
     missing = [f for f, v in [("symbol", symbol), ("interval", interval), ("start", start), ("end", end)] if not v]
     if missing:
-        return jsonify({
-            "status": "error",
-            "message": f"Missing required fields: {', '.join(missing)}",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Missing required fields: {', '.join(missing)}",
+            }
+        ), 400
 
     try:
         bars = bridge.aggregate_ohlcv(symbol, interval, start, end)
     except QuestDBBridgeError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 
-    return jsonify({
-        "status": "success",
-        "data": {"bars": bars, "count": len(bars)},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"bars": bars, "count": len(bars)},
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------
@@ -214,9 +222,11 @@ def get_latest_tick(symbol: str) -> tuple[Response, int]:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     if tick is None:
-        return jsonify({
-            "status": "error",
-            "message": f"No tick data found for symbol '{symbol}'",
-        }), 404
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"No tick data found for symbol '{symbol}'",
+            }
+        ), 404
 
     return jsonify({"status": "success", "data": tick}), 200

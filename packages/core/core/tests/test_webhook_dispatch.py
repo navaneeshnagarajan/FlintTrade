@@ -41,7 +41,7 @@ def _app(router: MagicMock, *, backend_lease_factory) -> Flask:
     app.config["BROKER_ROUTER"] = router
     app.config["SAFETY"] = _passing_safety()
     app.config["SAFETY_CONFIG_READY"] = True
-    app.config["OPENALGO_CLIENT"] = SimpleNamespace(
+    app.config["BROKER_CLIENT"] = SimpleNamespace(
         positionbook=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
         funds=AsyncMock(
@@ -56,10 +56,22 @@ def _app(router: MagicMock, *, backend_lease_factory) -> Flask:
         multi_quotes=AsyncMock(return_value=[]),
         margin=AsyncMock(return_value={"required_margin": "100"}),
     )
+    reader = app.config["BROKER_CLIENT"]
+    adapter = SimpleNamespace(
+        positions=lambda _session: reader.positionbook(),
+        funds=lambda _session: reader.funds(),
+        trade_book=lambda _session: reader.tradebook(),
+        order_book=lambda _session: reader.orderbook(),
+        holdings=lambda _session: reader.holdings(),
+        quotes=lambda _session, _symbols: reader.multi_quotes(_symbols),
+        margin_calculator=lambda _session, _order: reader.margin(_order),
+    )
+    app.config["NATIVE_ADAPTERS"] = {"dhan": adapter}
+    app.config["REGISTRY"] = SimpleNamespace(get_session_for=lambda *_args: object())
     return app
 
 
-def _authority(*actions: str, selector: str = "openalgo:default") -> WebhookExecutionAuthority:
+def _authority(*actions: str, selector: str = "dhan:default") -> WebhookExecutionAuthority:
     return WebhookExecutionAuthority(
         actor_id="external_intent:webhook:test-endpoint",
         selector=selector,
@@ -70,7 +82,7 @@ def _authority(*actions: str, selector: str = "openalgo:default") -> WebhookExec
 def _dispatcher(
     app: Flask,
     *actions: str,
-    selector: str = "openalgo:default",
+    selector: str = "dhan:default",
 ) -> WebhookOrderDispatcher:
     authority = _authority(*actions, selector=selector)
     return WebhookOrderDispatcher(app, authority_provider=lambda _payload: authority)
@@ -121,7 +133,9 @@ def test_place_order_rejects_action_not_granted_by_endpoint_authority(*, backend
 def test_place_order_rejects_invalid_authority_selector(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "place_order", selector="attacker-controlled")
+    dispatcher = _dispatcher(
+        _app(router, backend_lease_factory=backend_lease_factory), "place_order", selector="attacker-controlled"
+    )
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -164,11 +178,11 @@ def test_custom_place_order_runs_through_gate_and_router(*, backend_lease_factor
     assert request_ctx.actor_type == "external_intent"
     assert request_ctx.actor_id == "external_intent:webhook:test-endpoint"
     assert request_ctx.intent_source == "custom"
-    assert request_ctx.selector == "openalgo:default"
+    assert request_ctx.selector == "dhan:default"
     assert request_ctx.external_nonce_hash == expected_hash
-    assert kwargs["hint"].adapter_id == "openalgo"
+    assert kwargs["hint"].adapter_id == "dhan"
     assert kwargs["hint"].account_id == "default"
-    assert kwargs["safety_ctx"].verify(kwargs["order"], request_ctx, "openalgo", "default")
+    assert kwargs["safety_ctx"].verify(kwargs["order"], request_ctx, "dhan", "default")
 
 
 def test_webhook_dispatch_refuses_revoked_backend(backend_lease_factory) -> None:
@@ -177,8 +191,12 @@ def test_webhook_dispatch_refuses_revoked_backend(backend_lease_factory) -> None
     app = _app(router, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
-        source="custom", action="place_order", symbol="NIFTY", exchange="NSE",
-        data={"side": "BUY", "quantity": "1"}, webhook_nonce="synthetic-revoked",
+        source="custom",
+        action="place_order",
+        symbol="NIFTY",
+        exchange="NSE",
+        data={"side": "BUY", "quantity": "1"},
+        webhook_nonce="synthetic-revoked",
         webhook_path="/v1/webhook/custom/test-endpoint",
     )
     backend_lease_factory().revoke()
@@ -192,13 +210,15 @@ def test_parsed_custom_place_order_threads_side_through_gate_and_router(*, backe
     router.place_order = AsyncMock(return_value="ORDER-CUSTOM-1")
     app = _app(router, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(app, "place_order")
-    payload = WebhookReceiver(WebhookConfig(skip_verification=True)).parse_custom({
-        "action": "place_order",
-        "side": "BUY",
-        "symbol": "NIFTY",
-        "exchange": "NSE",
-        "quantity": "1",
-    })
+    payload = WebhookReceiver(WebhookConfig(skip_verification=True)).parse_custom(
+        {
+            "action": "place_order",
+            "side": "BUY",
+            "symbol": "NIFTY",
+            "exchange": "NSE",
+            "quantity": "1",
+        }
+    )
     payload.webhook_nonce = "verified-custom-nonce"
     payload.webhook_path = "/v1/webhook/custom/test-endpoint"
 
@@ -269,8 +289,7 @@ def test_limit_order_rejects_unsafe_price_before_gate_and_router(price: str, *, 
     ],
 )
 def test_gtt_second_leg_rejects_unsafe_values_before_gate_and_router(
-    field: str,
-    value: str, *, backend_lease_factory
+    field: str, value: str, *, backend_lease_factory
 ) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
@@ -305,9 +324,11 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     app = _app(router, backend_lease_factory=backend_lease_factory)
-    app.config["SAFETY"] = SafetySystem(
+    safety = SafetySystem(
         SafetyConfig(qty_limits={"NSE": 1}, check_market_hours=False),
     )
+    safety.check_order = MagicMock(return_value=[SimpleNamespace(passed=True)])
+    app.config["SAFETY"] = safety
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
         source="custom",
@@ -329,7 +350,9 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["status"] == "error"
-    assert "Second-leg quantity 2 exceeds NSE limit of 1" in result["message"]
+    assert result["code"] == "gtt_unsupported"
+    assert result["message"] == "Not placed. GTT orders aren't supported right now."
+    app.config["SAFETY"].check_order.assert_not_called()
     router.place_order.assert_not_called()
 
 
@@ -348,8 +371,8 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
         MagicMock(side_effect=OSError("reservation store unavailable")),
     )
     dispatcher = _dispatcher(app, "place_order")
-    journal = MagicMock()
-    monkeypatch.setattr(dispatcher, "_journal", journal)
+    store = MagicMock()
+    app.config["TRADE_STORAGE"] = store
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -368,7 +391,7 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
     router.place_order.assert_awaited_once()
     audit.log_event.assert_called_once()
     assert audit.log_event.call_args.args[0] == "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED"
-    journal.assert_called_once()
+    store.insert_trade.assert_not_called()
 
 
 def test_place_order_refuses_unvalidated_safety_runtime(*, backend_lease_factory) -> None:
@@ -394,18 +417,22 @@ def test_place_order_refuses_unvalidated_safety_runtime(*, backend_lease_factory
     router.place_order.assert_not_called()
 
 
-def test_place_order_checks_prospective_greeks_before_router(monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory) -> None:
+def test_place_order_checks_prospective_greeks_before_router(
+    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
+) -> None:
     class _BlockingSafety:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
         def check_order(self, _order, **kwargs):
             self.calls.append(kwargs)
-            return [SimpleNamespace(
-                passed=False,
-                layer="L3_PORTFOLIO",
-                reason="prospective delta exceeds limit",
-            )]
+            return [
+                SimpleNamespace(
+                    passed=False,
+                    layer="L3_PORTFOLIO",
+                    reason="prospective delta exceeds limit",
+                )
+            ]
 
     state = SimpleNamespace(
         positions=[],
@@ -476,12 +503,14 @@ def test_custom_place_order_requires_explicit_buy_sell_side(*, backend_lease_fac
 def test_cancel_order_runs_through_gate_and_router_with_signed_extras(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
-    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "cancel_order", selector="dhan:main")
+    dispatcher = _dispatcher(
+        _app(router, backend_lease_factory=backend_lease_factory), "cancel_order", selector="dhan:main"
+    )
     payload = WebhookPayload(
         source="custom",
         action="cancel_order",
         data={
-            "selector": "openalgo:attacker-controlled",
+            "selector": "dhan:attacker-controlled",
             "orderid": "ORDER-7",
             "variety": "bracket",
             "amo": True,
@@ -564,7 +593,42 @@ def test_degraded_webhook_clamp_does_not_place(*, backend_lease_factory) -> None
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["code"] == "laya_clamp"
-    assert result["message"] == "Qty reduced to 1 (Laya limit)"
+    assert result["message"] == "Not placed. Laya allows up to 1."
     assert result["applied_quantity"] == 1
     app.config["SAFETY"].check_order.assert_not_called()
+
+
+def test_webhook_model_deny_never_reaches_safety(*, backend_lease_factory) -> None:
+    from flinttrade_engine.laya import process_laya
+
+    class _Host:
+        def decide(self, state: str, questions: object) -> dict[str, object]:
+            return {
+                "answers": {
+                    "rationale": {"probabilities": {"A": 0.9, "B": 0.1}},
+                    "tilt": {"probabilities": {"A": 0.96, "B": 0.04}},
+                    "side": {"probabilities": {"A": 0.1, "B": 0.9}},
+                }
+            }
+
+    process_laya().set_decision_client(_Host())
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    app = _app(router, backend_lease_factory=backend_lease_factory)
+    dispatcher = _dispatcher(app, "place_order")
+    payload = WebhookPayload(
+        source="custom",
+        action="place_order",
+        symbol="NIFTY",
+        exchange="NSE",
+        data={"side": "BUY", "quantity": "1", "rationale": "Revenge on the last loser."},
+        webhook_nonce="verified-laya-model",
+        webhook_path="/v1/webhook/custom/test-endpoint",
+    )
+
+    result = asyncio.run(dispatcher.place_order(payload))
+
+    assert result["code"] == "laya_denied"
+    app.config["SAFETY"].check_order.assert_not_called()
+    router.place_order.assert_not_called()
     router.place_order.assert_not_called()

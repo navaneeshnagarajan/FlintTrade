@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/historical/tests/test_watchlist.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import pytest
@@ -13,6 +14,7 @@ class TestWatchlistItem:
 
     def test_defaults(self):
         from flinttrade_historical.watchlist import WatchlistItem
+
         item = WatchlistItem(symbol="NIFTY", exchange="NSE_INDEX")
         assert item.interval == "1d"
         assert item.enabled is True
@@ -24,6 +26,7 @@ class TestDownloadWatchlist:
     @pytest.fixture()
     def wl(self, tmp_path):
         from flinttrade_historical.watchlist import DownloadWatchlist
+
         watchlist = DownloadWatchlist(tmp_path / "watchlist.db")
         yield watchlist
         watchlist.close()
@@ -89,6 +92,7 @@ class TestDownloadWatchlist:
 
     def test_persistence_survives_reopen(self, tmp_path):
         from flinttrade_historical.watchlist import DownloadWatchlist
+
         db = tmp_path / "persist.db"
         wl1 = DownloadWatchlist(db)
         wl1.add("BAJFINANCE", "NSE")

@@ -81,9 +81,9 @@ def test_two_adapters_disambiguated(tmp_path) -> None:
     harden_directory(tmp_path)
     store = CredentialStore(tmp_path / "c.db", _MP)
     seed_credentials(store, "acc-d", "dhan", "D", {"k": "dhan"}, adapter_id="dhan")
-    seed_credentials(store, "acc-o", "zerodha", "O", {"k": "oa"}, adapter_id="openalgo")
+    seed_credentials(store, "acc-o", "upstox", "O", {"k": "native"}, adapter_id="upstox")
     assert store.retrieve_for("dhan", "acc-d") == {"k": "dhan"}
-    assert store.retrieve_for("openalgo", "acc-o") == {"k": "oa"}
+    assert store.retrieve_for("upstox", "acc-o") == {"k": "native"}
 
 
 def test_remove_for_is_selector_scoped(tmp_path) -> None:
@@ -164,11 +164,12 @@ def test_frozen_legacy_identity_map_preserves_encrypted_content(tmp_path, broker
 
 
 @pytest.mark.parametrize("broker,adapter", [("zerodha", "openalgo"), ("openalgo", "openalgo")])
-def test_legacy_openalgo_roles_are_retained(tmp_path, broker, adapter):
+def test_retired_bridge_roles_are_quarantined(tmp_path, broker, adapter):
     path = tmp_path / "historical.db"
     legacy_vault(path, _MP, broker=broker, adapter_id=adapter, credentials=_CREDS)
     migrated = CredentialStore(path, _MP)
-    assert migrated.account_for_selector(BrokerSelector("openalgo", "AB1234")).broker == broker
+    assert migrated.account_for_selector(BrokerSelector("openalgo", "AB1234")) is None
+    assert len(migrated.list_quarantine()) == 1
 
 
 @pytest.mark.parametrize("broker,adapter,account", [
@@ -187,7 +188,7 @@ def test_unrecognised_legacy_identity_is_preserved_only_in_quarantine(tmp_path, 
     assert len(metadata) == 1 and metadata[0].ref.row_generation == 1
     with closing(sqlite3.connect(path)) as conn:
         assert conn.execute("SELECT count(*) FROM credential_quarantine").fetchone()[0] == 1
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_primary_projection_captures_every_legacy_primary(tmp_path):

@@ -145,12 +145,12 @@ describe("parseResponse — is_sample_data survives the data-unwrap", () => {
   });
 
   it("leaves unenveloped responses untouched (flag already at top level survives)", async () => {
-    const res = makeJsonResponse({ rates: [], is_sample_data: true });
-    const result = await parseResponse<{ rates: unknown[]; is_sample_data: boolean }>(
+    const res = makeJsonResponse({ matrix: [], is_sample_data: true });
+    const result = await parseResponse<{ matrix: unknown[]; is_sample_data: boolean }>(
       res,
-      "crypto/funding_rates",
+      "analytics/correlation",
     );
-    expect(result).toStrictEqual({ rates: [], is_sample_data: true });
+    expect(result).toStrictEqual({ matrix: [], is_sample_data: true });
   });
 });
 
@@ -327,7 +327,7 @@ describe("buildHeaders — auth attachment", () => {
   it("post attaches X-API-Key and Authorization Bearer when stores are populated", async () => {
     // Re-mock the store getters for this test only.
     (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
-      apiKey: "test-openalgo-key",
+      apiKey: "test-dhan-key",
     }));
     (useAuthStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
       token: "test-jwt-abc",
@@ -340,7 +340,7 @@ describe("buildHeaders — auth attachment", () => {
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
-    expect(headers["X-API-Key"]).toBe("test-openalgo-key");
+    expect(headers["X-API-Key"]).toBe("test-dhan-key");
     expect(headers["Authorization"]).toBe("Bearer test-jwt-abc");
     expect(headers["Content-Type"]).toBe("application/json");
   });

@@ -1,7 +1,7 @@
 """Tests for WheelStrategy (live engine).
 
 All tests are fully in-process — no live broker / network calls.
-The OpenAlgo client is replaced with an AsyncMock throughout.
+The broker client is replaced with an AsyncMock throughout.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def _mock_client(
     option_ltp: float = 80.0,
     expiry_dates: list[str] | None = None,
 ) -> MagicMock:
-    """Build a fully-mocked OpenAlgoClient for wheel strategy tests."""
+    """Build a fully-mocked BrokerClient for wheel strategy tests."""
     client = MagicMock()
 
     # quotes → returns a Quote-like object with .ltp
@@ -51,8 +51,8 @@ def _mock_client(
     # place_order → AsyncMock (no return value needed)
     client.place_order = AsyncMock(return_value={"status": "success"})
 
-    # telegram → AsyncMock
-    client.telegram = AsyncMock(return_value={"status": "success"})
+    # native alert sender → AsyncMock
+    client.send_message = AsyncMock(return_value={"status": "success"})
 
     return client
 
@@ -67,7 +67,7 @@ def _strategy(
 ):
     from flinttrade_engine.strategies.wheel_live import WheelStrategy
     c = client or _mock_client(spot_ltp=spot, option_ltp=option_ltp, expiry_dates=expiry_dates)
-    strat = WheelStrategy(symbol=symbol, exchange="NFO", product="MIS", quantity=quantity, client=c)
+    strat = WheelStrategy(symbol=symbol, exchange="NFO", product="MIS", quantity=quantity, client=c, alert_sender=c.send_message)
     strat.start()
     return strat, c
 
@@ -127,7 +127,7 @@ class TestWheelCSPEntry:
     def test_csp_entry_sends_telegram(self):
         strat, client = _strategy(option_ltp=80.0)
         _run(strat.run_cycle())
-        assert client.telegram.called
+        assert client.send_message.called
 
     def test_csp_entry_emits_two_intents_without_raw_client_write(self):
         """Sell + SL buy are queued for the canonical gated strategy runtime."""
@@ -288,6 +288,18 @@ class TestWheelNoClient:
         strat = WheelStrategy(symbol="NIFTY", client=None)
         strat.start()
         assert isinstance(strat.generate_orders(), list)
+
+    def test_queued_orders_carry_an_admission_note(self):
+        from flinttrade_engine.strategies.wheel_live import WheelStrategy
+        strat = WheelStrategy(symbol="NIFTY", client=None)
+        _run(strat._place_sell("NIFTY24APR22000PE", 50))
+        sell = strat.generate_orders()[0]
+        assert sell.action.value == "SELL"
+        assert sell.admission_note == "Wheel plan: sell NIFTY24APR22000PE"
+        _run(strat._place_sl_buy("NIFTY24APR22000PE", 12.0, 50))
+        buy = strat.generate_orders()[0]
+        assert buy.action.value == "BUY"
+        assert buy.admission_note == "Wheel plan: buy a protective stop on NIFTY24APR22000PE"
 
 
 # ===========================================================================

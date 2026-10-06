@@ -17,7 +17,7 @@
  *   - Confirm dialog for orders of 10+ lots
  */
 
-import { useState, useCallback, useEffect, memo } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import { Zap, CheckCircle2, AlertCircle, Loader2, MousePointerClick } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,9 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
+import { lotCountLabel } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
@@ -138,7 +140,7 @@ function ConfirmOverlay({ symbol, action, lots, quantity, onConfirm, onCancel }:
     >
       <div className="text-sm font-semibold text-text-primary">Confirm Order</div>
       <div className="text-xs text-text-secondary text-center px-4">
-        {action} <span className="font-semibold text-text-primary">{lots} lots</span>{" "}
+        {action} <span className="font-semibold text-text-primary">{lotCountLabel(lots)}</span>{" "}
         (<span className="font-semibold text-text-primary">{quantity} qty</span>) of{" "}
         <span className="font-semibold text-text-primary">{symbol}</span>?
         <br />
@@ -212,6 +214,7 @@ function QuickTradeWidget(props: WidgetProps) {
   const [isPending, setIsPending] = useState(false);
   const [pendingAction, setPendingAction] = useState<"BUY" | "SELL" | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     setAdmission(null);
@@ -257,9 +260,12 @@ function QuickTradeWidget(props: WidgetProps) {
     [exchange, lotSize, lots],
   );
 
+  const lastActionRef = useRef<"BUY" | "SELL" | null>(null);
+
   const executeOrder = useCallback(
-    async (action: "BUY" | "SELL") => {
-      const quantity = resolveQuantity();
+    async (action: "BUY" | "SELL", quantityOverride?: number) => {
+      lastActionRef.current = action;
+      const quantity = quantityOverride ?? resolveQuantity();
       if (quantity == null) {
         setStatus({
           type: "error",
@@ -289,11 +295,12 @@ function QuickTradeWidget(props: WidgetProps) {
           product,
           orderType: orderType,
           strategy: "quicktrade",
+          rationale: admissionRationale(note),
         });
         setAdmission(null);
         setStatus({
           type: "success",
-          message: `${action} order placed · ${lots} lot(s) = ${quantity} qty`,
+          message: `${action} order placed · ${lotCountLabel(lots)} = ${quantity} qty`,
         });
         track("trade", `quicktrade_${action.toLowerCase()}`);
         setTimeout(() => setStatus(null), 4000);
@@ -313,8 +320,18 @@ function QuickTradeWidget(props: WidgetProps) {
         setIsPending(false);
       }
     },
-    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity],
+    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity, note],
   );
+
+  const placeClamped = useCallback((quantity: number) => {
+    const action = lastActionRef.current;
+    if (!action) return;
+    void executeOrder(action, quantity);
+  }, [executeOrder]);
+
+  const cancelClamp = useCallback(() => {
+    setAdmission(null);
+  }, []);
 
   const handleAction = useCallback(
     (action: "BUY" | "SELL") => {
@@ -473,15 +490,21 @@ function QuickTradeWidget(props: WidgetProps) {
         {/* Status */}
         <StatusBanner status={status} />
 
+        <AdmissionNoteField id="quicktrade-admission-note" value={note} onChange={setNote} />
+
         <LayaDegradedLimitsNote status={decisionStatus} />
-        <LayaAdmissionNotice notice={admission} />
+        <LayaAdmissionNotice
+          notice={admission}
+          onPlaceClamped={placeClamped}
+          onCancelClamp={cancelClamp}
+        />
 
         {/* BUY / SELL */}
         <div className="flex gap-2 mt-auto">
           <Button
             onClick={() => handleAction("BUY")}
-            disabled={isPending || admission?.kind === "deny"}
-            aria-label={`Buy ${lots} lots of ${symbol}`}
+            disabled={isPending || admission?.kind === "deny" || admission?.kind === "clamp"}
+            aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
           >
             {isPending && pendingAction === "BUY" ? (
@@ -491,8 +514,8 @@ function QuickTradeWidget(props: WidgetProps) {
           </Button>
           <Button
             onClick={() => handleAction("SELL")}
-            disabled={isPending || admission?.kind === "deny"}
-            aria-label={`Sell ${lots} lots of ${symbol}`}
+            disabled={isPending || admission?.kind === "deny" || admission?.kind === "clamp"}
+            aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
           >
             {isPending && pendingAction === "SELL" ? (

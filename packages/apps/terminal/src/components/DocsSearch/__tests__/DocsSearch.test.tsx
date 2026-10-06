@@ -70,7 +70,7 @@ const MOCK_RESULTS: DocSearchResult[] = [
   {
     path: "guides/order-placement.md",
     title: "Order Placement Guide",
-    snippet: "FlintTrade supports market, limit, and stop orders via OpenAlgo.",
+    snippet: "FlintTrade supports market, limit, and stop orders via native broker.",
     score: 0.95,
   },
   {

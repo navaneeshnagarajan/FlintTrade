@@ -10,7 +10,7 @@ import { safeParse } from "@/lib/safeParse";
 
 /** Application operating mode.
  *  - explore:  Demo/sample data, no broker connection required (was "demo")
- *  - practice: Paper trading against a live broker sandbox (was "sandbox")
+ *  - practice: Paper trading in the FlintTrade sandbox (was "sandbox")
  *  - live:     Real money, requires PIN confirmation on every mode switch
  */
 export type AppMode = "explore" | "practice" | "live";
@@ -33,6 +33,9 @@ const v1ModeSchema = z.object({
   state: z.object({ mode: z.string() }).optional(),
 }).optional();
 
+/** Desk mode when `flinttrade:mode` has no record. Explore is example data, not the signed-in default. */
+export const INITIAL_MODE: AppMode = "practice";
+
 function migrateFromV1(): AppMode {
   const raw = sessionStorage.getItem("flinttrade:mode");
   if (!raw) return "explore";
@@ -52,7 +55,7 @@ const storeImpl: StateCreator<ModeStore, [["zustand/persist", unknown]]> = (
   set,
   get
 ) => ({
-  mode: "explore",
+  mode: INITIAL_MODE,
 
   setMode: (mode) => set({ mode }),
 

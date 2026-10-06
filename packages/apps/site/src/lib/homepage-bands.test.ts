@@ -49,7 +49,7 @@ describe('homepage honest CTA (PR #157) with Graphite A1 motion', () => {
     expect(primaryMatches.length).toBe(1);
     expect(pageSource).toContain('Install the web app');
     expect(pageSource).toContain('href="/download"');
-    expect(pageSource).toContain('Explore demo');
+    expect(pageSource).toContain('Demo (example data)');
     expect(pageSource).toContain('/demo-app/welcome');
   });
 
@@ -66,9 +66,9 @@ describe('homepage honest CTA (PR #157) with Graphite A1 motion', () => {
     expect(pageSource).not.toContain('desktopInstallOptions');
   });
 
-  it('keeps truthful copy and Explore/Practice/Live vocabulary', () => {
+  it('keeps truthful copy and Practice / example-data vocabulary', () => {
     expect(pageSource).toContain('v0.0.1 is not production ready');
-    expect(pageSource).toContain('Explore and Practice modes first');
+    expect(pageSource).toContain('Use Practice and example data first');
     expect(pageSource).toContain('/demo-app/welcome');
   });
 
@@ -262,7 +262,7 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     const pilotSource = [wrapperSource, webglSource, capabilitySource, chapterSource].join('\n');
     expect(pilotSource).not.toMatch(/https?:\/\//);
     expect(pilotSource).not.toMatch(/TextureLoader|CubeTextureLoader|FontLoader|fetch\(|XMLHttpRequest|WebSocket/);
-    expect(pilotSource).not.toMatch(/OpenAlgoClient|place_order|placeOrder|BrokerRouter|gate_order/);
+    expect(pilotSource).not.toMatch(/place_order|placeOrder|BrokerRouter|gate_order/);
     expect(pilotSource).not.toMatch(/packages\/apps\/terminal|demo-app/);
     expect(pilotSource).not.toContain('@react-three');
   });

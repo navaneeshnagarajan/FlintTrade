@@ -5,6 +5,7 @@ in SQLite.  The scheduler calls :meth:`DownloadWatchlist.get_enabled`
 and downloads OHLCV data for each item via the
 :class:`~flinttrade_historical.downloader.HistoricalDownloader`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -122,9 +123,7 @@ class DownloadWatchlist:
         Returns:
             List of :class:`WatchlistItem` in insertion order.
         """
-        rows = self._conn.execute(
-            "SELECT symbol, exchange, interval, enabled FROM watchlist"
-        ).fetchall()
+        rows = self._conn.execute("SELECT symbol, exchange, interval, enabled FROM watchlist").fetchall()
         return [
             WatchlistItem(
                 symbol=row["symbol"],
@@ -157,9 +156,7 @@ class DownloadWatchlist:
         Returns:
             List of :class:`WatchlistItem` with ``enabled=True``.
         """
-        rows = self._conn.execute(
-            "SELECT symbol, exchange, interval FROM watchlist WHERE enabled = 1"
-        ).fetchall()
+        rows = self._conn.execute("SELECT symbol, exchange, interval FROM watchlist WHERE enabled = 1").fetchall()
         return [
             WatchlistItem(
                 symbol=row["symbol"],

@@ -5,6 +5,7 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { Layers } from "lucide-react";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 interface SectorItem {
   name: string;
@@ -31,6 +32,7 @@ export function SectorCard() {
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Sectors
           </p>
+          <ExampleLabel testId="sector-example-label" />
         </div>
 
         <div className="grid grid-cols-2 gap-1.5 flex-1">

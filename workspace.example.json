@@ -1,14 +1,14 @@
 {
   "_comment": [
-    "EXAMPLE workspace.json — copy to your FlintTrade home and edit.",
+    "EXAMPLE workspace.json \u2014 copy to your FlintTrade home and edit.",
     "Locations: Linux ~/.flinttrade/workspace.json | macOS ~/Library/Application Support/flinttrade/workspace.json | Windows %APPDATA%/flinttrade/workspace.json (override with FLINTTRADE_HOME).",
-    "This file is user configuration. Setup/Settings write OpenAlgo bridge settings here; hardened app secrets live as ACL-locked files under your FlintTrade home.",
+    "This file is user configuration. Setup/Settings own native account settings; hardened app secrets live as ACL-locked files under your FlintTrade home.",
     "Secrets are NEVER stored in plaintext: *_ref fields name a keyring/env entry that is resolved at runtime. Leave them empty or point them at a reference; never paste a real token.",
-    "FlintTrade writes this file with sorted keys on save, and creates it from defaults on first run — you usually do not need to hand-write it. The _comment keys are ignored by the config reader and safe to keep or delete.",
+    "FlintTrade writes this file with sorted keys on save, and creates it from defaults on first run \u2014 you usually do not need to hand-write it. The _comment keys are ignored by the config reader and safe to keep or delete.",
     "British spelling in any prose you add. Never commit your real workspace.json (it is gitignored)."
   ],
   "brokers": {
-    "_comment": "Broker wiring. 'openalgo:default' is the built-in OpenAlgo-compatible bridge. Register additional native gateway adapters by id, then route execution and each data feed to one of them. account_acls maps a broker account id to the actor allowed to use it.",
+    "_comment": "Native broker wiring. Connect an available adapter and use its exact broker:account_id selector. Empty selectors leave broker data and execution unconfigured. account_acls maps exact account selectors to authorised actors.",
     "account_acls": {},
     "cost_aware": {
       "enabled": false,
@@ -16,13 +16,13 @@
     },
     "data": {
       "global_indices": "",
-      "historical": "openalgo:default",
-      "option_chains": "openalgo:default",
-      "quote": "openalgo:default",
-      "ticks": "openalgo:default"
+      "historical": "",
+      "option_chains": "",
+      "quote": "",
+      "ticks": ""
     },
     "execution": {
-      "default": "openalgo:default"
+      "default": ""
     },
     "failover": {
       "enabled": false,
@@ -31,9 +31,7 @@
     "rate_limits": {
       "_comment": "Optional per-broker API rate-limit overrides in requests/sec. Keys are broker ids (e.g. 'dhan:main'), each mapping to { \"order\": N, \"data\": M }. Omitted brokers/keys fall back to the adapter's built-in capability defaults; 0 means unlimited. Example: \"dhan:main\": { \"order\": 8, \"data\": 4 }."
     },
-    "registered": [
-      "openalgo:default"
-    ],
+    "registered": [],
     "smart_routing": {
       "_comment": "Liquidity-aware order slicing (POST /api/v1/orders/smart-route + the Smart Order widget). OFF by default; live mode only. Every child order still traverses the full gated execution path. twap_window_seconds/twap_slices tune low-urgency TWAP.",
       "enabled": false,
@@ -42,7 +40,7 @@
     }
   },
   "compliance": {
-    "_comment": "Legacy workspace section for personal-use safety defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records — leave empty.",
+    "_comment": "Legacy workspace section for personal-use safety defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records \u2014 leave empty.",
     "ai_disclosure_banner": true,
     "personal_use_mode": true,
     "static_ip": ""
@@ -50,12 +48,12 @@
   "initialized": true,
   "ai": {
     "autonomous_agent": {
-      "_comment": "The LLM-driven autonomous trading agent (AI route → Agent panel; /api/v1/ai/agent/*). OFF by default — it can place real orders in live mode. Enabling it also requires granting the 'autonomous-trader' actor access in brokers.account_acls; every agent order still traverses the full gated execution path.",
+      "_comment": "The LLM-driven autonomous trading agent (AI route \u2192 Agent panel; /api/v1/ai/agent/*). OFF by default \u2014 it can place real orders in live mode. Enabling it also requires granting the 'autonomous-trader' actor access in brokers.account_acls; every agent order still traverses the full gated execution path.",
       "enabled": false
     }
   },
   "llm": {
-    "_comment": "Optional local or hosted LLM. provider/host/model are non-secret. api_key_ref names a keyring/env entry (e.g. 'env:ANTHROPIC_API_KEY') — never paste a real key here.",
+    "_comment": "Optional local or hosted LLM. provider/host/model are non-secret. api_key_ref names a keyring/env entry (e.g. 'env:ANTHROPIC_API_KEY') \u2014 never paste a real key here.",
     "api_key_ref": "",
     "host": "",
     "model": "",
@@ -73,15 +71,10 @@
     "terminal": true
   },
   "notifications": {
-    "_comment": "Telegram alerts are optional and off by default. telegram_bot_token_ref names a keyring/env entry — never paste the real bot token here. telegram_chat_id is your own chat id.",
+    "_comment": "Telegram alerts are optional and off by default. telegram_bot_token_ref names a keyring/env entry \u2014 never paste the real bot token here. telegram_chat_id is your own chat id.",
     "telegram_bot_token_ref": "",
     "telegram_chat_id": "",
     "telegram_enabled": false
-  },
-  "openalgo": {
-    "_comment": "Optional OpenAlgo-compatible bridge settings written by Setup/Settings. Broker credentials stay in OpenAlgo; FlintTrade stores only the bridge URL, WebSocket port, and OpenAlgo API key when enabled.",
-    "host": "http://127.0.0.1:5000",
-    "ws_port": 8765
   },
   "sebi": {
     "_comment": "Local safety limits (personal use). max_ops_per_second throttles order operations; audit_retention_years keeps the local audit log; kill_switch_enabled arms the engine kill switch.",
@@ -91,9 +84,9 @@
   },
   "storage": {
     "_comment": [
-      "Data directories. The two values below are SENTINELS, not paths — do not 'fix' them for your OS.",
+      "Data directories. The two values below are SENTINELS, not paths \u2014 do not 'fix' them for your OS.",
       "The exact strings '~/.flinttrade/data' and '~/.flinttrade/archive' are compared by string equality and mean 'the data/ and archive/ directories inside MY FlintTrade home', wherever that is: ~/.flinttrade on Linux, ~/Library/Application Support/flinttrade on macOS, %APPDATA%/flinttrade on Windows (or whatever FLINTTRADE_WORKSPACE_DIR / FLINTTRADE_HOME select).",
-      "So on macOS and Windows these values do NOT write to a literal ~/.flinttrade — leave them exactly as written to keep the per-OS default.",
+      "So on macOS and Windows these values do NOT write to a literal ~/.flinttrade \u2014 leave them exactly as written to keep the per-OS default.",
       "Any other value is taken literally: an absolute path, or a leading ~ for your home. Only change them if you genuinely keep data outside the workspace, and remember the uninstaller can only purge what it can resolve."
     ],
     "archive": "~/.flinttrade/archive",

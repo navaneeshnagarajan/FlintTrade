@@ -1,10 +1,10 @@
 """
-OpenAlgo Symbol Converter — Bidirectional converter between broker-specific
-instrument keys and the OpenAlgo canonical symbol format.
+Native Symbol Converter — Bidirectional converter between broker-specific
+instrument keys and the FlintTrade canonical symbol format.
 
 Supports all segments: EQ, FO (futures + options), CDS, MCX, IDX.
 
-OpenAlgo symbol formats:
+Canonical symbol formats:
   - Equity:   RELIANCE
   - Future:   NIFTY28MAR24FUT
   - Option:   NIFTY28MAR2420800CE
@@ -24,7 +24,7 @@ from enum import Enum
 # ---------------------------------------------------------------------------
 
 class Segment(str, Enum):
-    """Exchange segment codes used by OpenAlgo."""
+    """Exchange segment codes used by broker."""
     EQ = "EQ"
     FO = "FO"       # NSE F&O
     CDS = "CDS"     # Currency derivatives
@@ -44,7 +44,7 @@ class InstrumentType(str, Enum):
 
 @dataclass(frozen=True)
 class SymbolParts:
-    """Parsed components of an OpenAlgo symbol string.
+    """Parsed components of an broker symbol string.
 
     Attributes:
         base: Underlying name (e.g. ``NIFTY``, ``RELIANCE``, ``USDINR``).
@@ -63,7 +63,7 @@ class SymbolParts:
 
 
 # ---------------------------------------------------------------------------
-# Well-known base-symbol mappings (broker → OpenAlgo)
+# Well-known base-symbol mappings (broker → broker)
 # ---------------------------------------------------------------------------
 
 SYMBOL_ALIASES: dict[str, str] = {
@@ -110,7 +110,7 @@ _FUTURE_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 def format_expiry_date(dt: date) -> str:
-    """Format a ``date`` object into OpenAlgo's ``DDMMMYY`` string.
+    """Format a ``date`` object into broker's ``DDMMMYY`` string.
 
     Args:
         dt: The expiry date.
@@ -150,13 +150,13 @@ def parse_expiry_date(s: str) -> date:
 
 
 def normalise_base(raw: str) -> str:
-    """Normalise a broker-specific base symbol to the OpenAlgo canonical form.
+    """Normalise a broker-specific base symbol to the FlintTrade canonical form.
 
     Args:
         raw: Raw base symbol from the broker (e.g. ``NIFTY 50``).
 
     Returns:
-        Canonical OpenAlgo base symbol (e.g. ``NIFTY``).
+        Canonical broker base symbol (e.g. ``NIFTY``).
     """
     upper = raw.strip().upper()
     if upper in SYMBOL_ALIASES:
@@ -165,13 +165,13 @@ def normalise_base(raw: str) -> str:
     return upper.replace(" ", "").replace("-", "").replace("_", "")
 
 
-def build_openalgo_symbol(
+def build_canonical_symbol(
     base: str,
     expiry: date | None = None,
     strike: float | None = None,
     option_type: str | None = None,
 ) -> str:
-    """Build an OpenAlgo symbol string from its components.
+    """Build an broker symbol string from its components.
 
     Args:
         base: The underlying name (e.g. ``NIFTY``, ``RELIANCE``).
@@ -180,21 +180,21 @@ def build_openalgo_symbol(
         option_type: ``CE`` or ``PE`` (omit for equities / futures).
 
     Returns:
-        OpenAlgo-formatted symbol string.
+        broker-formatted symbol string.
 
     Raises:
         ValueError: If option_type is given without a strike/expiry, or
                     if option_type is not CE/PE.
 
     Examples:
-        >>> build_openalgo_symbol("NIFTY")
+        >>> build_canonical_symbol("NIFTY")
         'NIFTY'
         >>> from datetime import date
-        >>> build_openalgo_symbol("NIFTY", date(2024, 3, 28))
+        >>> build_canonical_symbol("NIFTY", date(2024, 3, 28))
         'NIFTY28MAR24FUT'
-        >>> build_openalgo_symbol("NIFTY", date(2024, 3, 28), 20800, "CE")
+        >>> build_canonical_symbol("NIFTY", date(2024, 3, 28), 20800, "CE")
         'NIFTY28MAR2420800CE'
-        >>> build_openalgo_symbol("USDINR", date(2024, 3, 28), 85.50, "CE")
+        >>> build_canonical_symbol("USDINR", date(2024, 3, 28), 85.50, "CE")
         'USDINR28MAR2485.5CE'
     """
     canonical = normalise_base(base)
@@ -227,13 +227,13 @@ def build_openalgo_symbol(
     return f"{canonical}{exp_str}{strike_str}{ot}"
 
 
-def parse_openalgo_symbol(symbol: str) -> SymbolParts:
-    """Parse an OpenAlgo symbol string into its constituent parts.
+def parse_canonical_symbol(symbol: str) -> SymbolParts:
+    """Parse an broker symbol string into its constituent parts.
 
     Handles equity, futures, and options (including decimal strikes for CDS).
 
     Args:
-        symbol: An OpenAlgo-format symbol (e.g. ``NIFTY28MAR2420800CE``).
+        symbol: An broker-format symbol (e.g. ``NIFTY28MAR2420800CE``).
 
     Returns:
         A ``SymbolParts`` dataclass with parsed fields.
@@ -242,7 +242,7 @@ def parse_openalgo_symbol(symbol: str) -> SymbolParts:
         ValueError: If the symbol cannot be parsed.
 
     Examples:
-        >>> parts = parse_openalgo_symbol("NIFTY28MAR2420800CE")
+        >>> parts = parse_canonical_symbol("NIFTY28MAR2420800CE")
         >>> parts.base
         'NIFTY'
         >>> parts.strike
@@ -286,14 +286,14 @@ def parse_openalgo_symbol(symbol: str) -> SymbolParts:
             original=symbol,
         )
 
-    raise ValueError(f"Cannot parse OpenAlgo symbol: {symbol!r}")
+    raise ValueError(f"Cannot parse broker symbol: {symbol!r}")
 
 
 def detect_segment(symbol: str, exchange: str = "") -> Segment:
     """Infer the exchange segment from symbol + exchange hint.
 
     Args:
-        symbol: OpenAlgo-format symbol string.
+        symbol: broker-format symbol string.
         exchange: Optional exchange code (e.g. ``NSE``, ``MCX``, ``CDS``).
 
     Returns:
@@ -311,7 +311,7 @@ def detect_segment(symbol: str, exchange: str = "") -> Segment:
 
     # Infer from the symbol itself
     try:
-        parts = parse_openalgo_symbol(symbol)
+        parts = parse_canonical_symbol(symbol)
     except ValueError:
         return Segment.EQ
 

@@ -162,7 +162,7 @@ class BrokerInfo(BaseModel):
             here are *field name hints only* — actual values are encrypted in
             the :class:`CredentialStore`.
         native: A native FlintTrade adapter exists for this broker (it can be
-            captured through the native connect path, not only the OpenAlgo
+            captured through the native connect path, not only the native broker
             bridge).
         connectable: The native adapter has cleared every broker-specific
             activation gate, so the UI may offer a native connect. Evidence can

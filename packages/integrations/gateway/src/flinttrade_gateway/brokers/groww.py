@@ -39,7 +39,9 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import groww_mapping as M
+from ._balance import _balance_number, _balance_record
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+from ._http_transport import _build_httpx_transport
 from ._session_expiry import next_6am_ist_timestamp
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -60,24 +62,6 @@ def _strict_rows(payload: object, key: str) -> list[dict[str, Any]]:
     if any(type(row) is not dict or any(type(name) is not str for name in row) for row in rows):
         raise BrokerReadResponseInvalid
     return rows
-
-
-def _balance_number(value: object) -> float:
-    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
-        raise BrokerBalanceResponseInvalid
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        raise BrokerBalanceResponseInvalid from None
-    if not math.isfinite(number):
-        raise BrokerBalanceResponseInvalid
-    return number
-
-
-def _balance_record(value: object) -> dict[str, object]:
-    if type(value) is not dict or any(type(key) is not str for key in value):
-        raise BrokerBalanceResponseInvalid
-    return value
 
 
 def _lot_record(value: object) -> dict[str, object]:
@@ -221,27 +205,6 @@ GROWW_CAPABILITIES = Capabilities(
     gtt_native=True,
     modify_qty_supported=True,
 )
-
-
-def _build_httpx_transport(timeout: float = 10.0) -> Transport:
-    import httpx  # noqa: PLC0415
-
-    def _request(
-        method: str,
-        url: str,
-        *,
-        headers: dict[str, str],
-        params: dict[str, Any] | None = None,
-        json_body: Any | None = None,
-    ) -> tuple[int, Any]:
-        resp = httpx.request(method, url, headers=headers, params=params, json=json_body, timeout=timeout)
-        try:
-            payload: Any = resp.json()
-        except ValueError:
-            payload = resp.text
-        return resp.status_code, payload
-
-    return _request
 
 
 def _expiry_from_token_payload(payload: Any) -> float:
@@ -841,40 +804,11 @@ class GrowwAdapter(BrokerAdapter):
         yield  # pragma: no cover
 
     async def reconcile(self, session: Session) -> ReconciliationReport:
-        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
-            EMPTY_LOCAL_STATE,
-            build_report,
-            declare_unavailable_order_fields,
-        )
+        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, _reconcile_adapter  # noqa: PLC0415
 
         generated_at = datetime.now(tz=UTC)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
-        try:
-            broker_orders = list(
-                declare_unavailable_order_fields(
-                    await self.order_book(session),
-                    fields=("variety", "validity", "strategy"),
-                )
-            )
-            broker_positions = await self.positions(session)
-            broker_holdings = await self.holdings(session)
-        except (BrokerError, ValueError) as exc:
-            return build_report(
-                adapter_id=self.broker_id,
-                account_id=session.account_id,
-                generated_at=generated_at,
-                local_state=local,
-                error=f"broker fetch failed: {exc}",
-            )
-        return build_report(
-            adapter_id=self.broker_id,
-            account_id=session.account_id,
-            generated_at=generated_at,
-            broker_orders=broker_orders,  # type: ignore[arg-type]
-            broker_positions=broker_positions,  # type: ignore[arg-type]
-            broker_holdings=broker_holdings,
-            local_state=local,
-        )
+        return await _reconcile_adapter(self, session, generated_at=generated_at, local_state=local)
 
 
 def _interval_minutes(interval: str) -> str:

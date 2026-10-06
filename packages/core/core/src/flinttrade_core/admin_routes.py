@@ -129,11 +129,9 @@ _FEATURE_FLAGS: list[dict[str, str]] = [
     {"name": "P&L Tracker", "status": "live", "route": "/trade"},
     {"name": "AI Advisor Chat", "status": "live", "route": "/ai"},
     {"name": "Backtest Lab", "status": "live", "route": "/lab"},
-    {"name": "Flow Builder", "status": "live", "route": "/automate"},
     {"name": "Strategy Builder", "status": "live", "route": "/automate"},
     {"name": "Investor Dashboard", "status": "live", "route": "/invest"},
     {"name": "Learn Center", "status": "live", "route": "/learn"},
-    {"name": "Voice Trading", "status": "locked", "route": "/trade"},
     {"name": "Telegram Kill Switch", "status": "locked", "route": "/automate"},
     {"name": "Multi-account Mirroring", "status": "locked", "route": "/settings"},
     {"name": "AI Swarm Intelligence", "status": "locked", "route": "/ai"},
@@ -146,14 +144,16 @@ def admin_health() -> tuple[Response, int]:
     """Aggregate package health status (delegates to introspect)."""
     data = _introspect_packages()
     total_tests = sum(p["testCount"] for p in data)
-    return jsonify({
-        "status": "success",
-        "data": {
-            "packages": data,
-            "total_packages": len(data),
-            "total_tests": total_tests,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "packages": data,
+                "total_packages": len(data),
+                "total_tests": total_tests,
+            },
+        }
+    ), 200
 
 
 def _introspect_packages() -> list[dict[str, object]]:
@@ -190,13 +190,15 @@ def _introspect_packages() -> list[dict[str, object]]:
             except OSError:
                 pass
 
-        packages.append({
-            "name": name,
-            "type": pkg_type,
-            "status": "active",
-            "testCount": test_count,
-            "testFiles": len(test_files),
-        })
+        packages.append(
+            {
+                "name": name,
+                "type": pkg_type,
+                "status": "active",
+                "testCount": test_count,
+                "testFiles": len(test_files),
+            }
+        )
 
     return packages
 
@@ -217,23 +219,27 @@ def admin_introspect() -> tuple[Response, int]:
             continue
         methods = [m for m in rule.methods if m not in ("HEAD", "OPTIONS")]
         for method in methods:
-            endpoints.append({
-                "method": method,
-                "path": rule.rule,
-                "status": "wired",
-            })
+            endpoints.append(
+                {
+                    "method": method,
+                    "path": rule.rule,
+                    "status": "wired",
+                }
+            )
 
     endpoints.sort(key=lambda e: e["path"])
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "packages": packages,
-            "endpoints": endpoints,
-            "endpoint_count": len(endpoints),
-            "package_count": len(packages),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "packages": packages,
+                "endpoints": endpoints,
+                "endpoint_count": len(endpoints),
+                "package_count": len(packages),
+            },
+        }
+    ), 200
 
 
 @admin_bp.route("/widgets", methods=["GET"])
@@ -244,34 +250,40 @@ def admin_widgets() -> tuple[Response, int]:
         cat = w["category"]
         by_category[cat] = by_category.get(cat, 0) + 1
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "widgets": _WIDGET_REGISTRY,
-            "total": len(_WIDGET_REGISTRY),
-            "by_category": by_category,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "widgets": _WIDGET_REGISTRY,
+                "total": len(_WIDGET_REGISTRY),
+                "by_category": by_category,
+            },
+        }
+    ), 200
 
 
 @admin_bp.route("/repos", methods=["GET"])
 def admin_repos() -> tuple[Response, int]:
     """Read absorption-status.json and return as JSON."""
     if not _STATUS_FILE.exists():
-        return jsonify({
-            "status": "error",
-            "message": "absorption-status.json not found",
-        }), 404
+        return jsonify(
+            {
+                "status": "error",
+                "message": "absorption-status.json not found",
+            }
+        ), 404
 
     try:
         data: dict[str, Any] = json.loads(_STATUS_FILE.read_text(encoding="utf-8"))
         return jsonify({"status": "success", "data": data}), 200
     except json.JSONDecodeError as exc:
         logger.warning("Invalid absorption status JSON: %s", exc)
-        return jsonify({
-            "status": "error",
-            "message": "Invalid JSON",
-        }), 500
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Invalid JSON",
+            }
+        ), 500
 
 
 @admin_bp.route("/system", methods=["GET"])
@@ -285,10 +297,12 @@ def admin_system() -> tuple[Response, int]:
     from .system_metrics import get_system_metrics  # noqa: PLC0415
 
     metrics = get_system_metrics()
-    return jsonify({
-        "status": "success",
-        "data": metrics.to_dict(),
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": metrics.to_dict(),
+        }
+    ), 200
 
 
 @admin_bp.route("/errors", methods=["GET"])
@@ -314,15 +328,17 @@ def admin_errors() -> tuple[Response, int]:
 
     errors = error_log.recent(limit=limit, offset=offset)
     total = error_log.count()
-    return jsonify({
-        "status": "success",
-        "data": {
-            "errors": errors,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "errors": errors,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            },
+        }
+    ), 200
 
 
 @admin_bp.route("/errors/count", methods=["GET"])
@@ -348,14 +364,16 @@ def admin_features() -> tuple[Response, int]:
         s = f["status"]
         by_status[s] = by_status.get(s, 0) + 1
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "features": _FEATURE_FLAGS,
-            "total": len(_FEATURE_FLAGS),
-            "by_status": by_status,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "features": _FEATURE_FLAGS,
+                "total": len(_FEATURE_FLAGS),
+                "by_status": by_status,
+            },
+        }
+    ), 200
 
 
 # ---------------------------------------------------------------------------
@@ -425,10 +443,12 @@ def recent_logins() -> tuple[Response, int]:
 
     la = _get_login_activity()
     logins = la.recent_logins(user_id=user_id, limit=limit)
-    return jsonify({
-        "status": "success",
-        "data": {"logins": logins, "count": len(logins)},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"logins": logins, "count": len(logins)},
+        }
+    ), 200
 
 
 @admin_bp.route("/security/sessions", methods=["GET"])
@@ -444,10 +464,12 @@ def active_sessions() -> tuple[Response, int]:
     user_id: str | None = request.args.get("user_id") or None
     st = _get_session_tracker()
     sessions = st.active_sessions(user_id=user_id)
-    return jsonify({
-        "status": "success",
-        "data": {"sessions": sessions, "count": len(sessions)},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"sessions": sessions, "count": len(sessions)},
+        }
+    ), 200
 
 
 @admin_bp.route("/security/suspicious", methods=["GET"])
@@ -472,13 +494,15 @@ def suspicious_activity() -> tuple[Response, int]:
 
     la = _get_login_activity()
     skt = _get_security_tracker()
-    return jsonify({
-        "status": "success",
-        "data": {
-            "suspicious_logins": la.suspicious_logins(window_hours=window_hours),
-            "suspicious_ips": skt.suspicious_ips(threshold=threshold),
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "suspicious_logins": la.suspicious_logins(window_hours=window_hours),
+                "suspicious_ips": skt.suspicious_ips(threshold=threshold),
+            },
+        }
+    ), 200
 
 
 @admin_bp.route("/security/bans", methods=["GET"])
@@ -498,10 +522,12 @@ def banned_ips() -> tuple[Response, int]:
 
     skt = _get_security_tracker()
     bans = skt.recent_bans(limit=limit)
-    return jsonify({
-        "status": "success",
-        "data": {"bans": bans, "count": len(bans)},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"bans": bans, "count": len(bans)},
+        }
+    ), 200
 
 
 @admin_bp.route("/security/bans", methods=["POST"])
@@ -543,10 +569,12 @@ def ban_ip_route() -> tuple[Response, int]:
     except Exception:
         pass  # Best-effort — persistent ban is already recorded
 
-    return jsonify({
-        "status": "success",
-        "data": {"ban_id": ban_id, "ip": ip, "reason": reason, "duration_hours": duration_hours},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"ban_id": ban_id, "ip": ip, "reason": reason, "duration_hours": duration_hours},
+        }
+    ), 200
 
 
 @admin_bp.route("/security/bans/<path:ip>", methods=["DELETE"])
@@ -574,7 +602,9 @@ def unban_ip_route(ip: str) -> tuple[Response, int]:
     except Exception:
         pass
 
-    return jsonify({
-        "status": "success",
-        "data": {"ip": ip, "lifted": lifted},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"ip": ip, "lifted": lifted},
+        }
+    ), 200

@@ -22,8 +22,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from types import UnionType
 from typing import Annotated, Any, Callable, TypeAliasType, Union, get_args, get_origin, get_type_hints
 
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import Quote
-from flinttrade_core.openalgo_client import OpenAlgoClient
 
 from .strategy import BaseStrategy, StrategyState
 
@@ -40,6 +40,37 @@ class StrategyStopTimeoutError(TimeoutError):
 
 _MIN_TERMINAL_DRAIN_SECONDS = 0.05
 _MAX_TERMINAL_DRAIN_SECONDS = 5.0
+# The worker publishes its completion stamp in a finally that can lose the GIL
+# race with the timeout callback. This grace only lets that stamp be observed.
+# A stamp later than the original deadline still times the hook out.
+# It is polled on the event loop. Waiting via ``asyncio.to_thread`` would queue
+# on the default executor, which ``stop_all`` may already have filled with
+# synchronous hooks that never return.
+_SYNC_HOOK_PUBLISH_GRACE_SECONDS = 0.01
+
+
+async def _await_thread_event(event: threading.Event, timeout: float) -> bool:
+    """Wait for a worker-thread event without using the default executor.
+
+    ``asyncio.to_thread(event.wait, timeout)`` queues on that executor. When
+    ``stop_all`` has already filled it with synchronous hooks that never
+    return, the grace would sit in that queue and shutdown would not time out.
+
+    Args:
+        event: The stamp the worker sets when the hook returns.
+        timeout: How long the event loop may wait to observe that stamp.
+
+    Returns:
+        Whether the event was set before the grace elapsed.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    while not event.is_set():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.001, remaining))
+    return True
 
 
 @dataclass
@@ -63,6 +94,31 @@ class _StrategyExecutionLease:
     runner: Any
     task: asyncio.Task[None] | None
     active: bool = True
+
+
+@dataclass
+class _SyncHookSettlement:
+    """Worker-side completion stamp for one synchronous lifecycle hook.
+
+    ``finished_at`` is published on the worker when the hook returns, before
+    ``asyncio.to_thread`` asks the event loop to resume the task. ``observed``
+    is set on the loop once that result has been collected and before any
+    awaitable returned by the hook is awaited. The lifecycle deadline bounds
+    the hook and that awaitable. It does not include loop lag between the two.
+    """
+
+    observed: asyncio.Event
+    finished: threading.Event = field(default_factory=threading.Event)
+    finished_at: float = 0.0
+
+    def mark(self) -> None:
+        """Record that the synchronous hook has returned on the worker."""
+        self.finished_at = _time.monotonic()
+        self.finished.set()
+
+    def met(self, deadline: float) -> bool:
+        """Return whether the hook returned at or before ``deadline``."""
+        return self.finished.is_set() and self.finished_at <= deadline
 
 
 _CURRENT_STRATEGY_LEASE: ContextVar[_StrategyExecutionLease | None] = ContextVar(
@@ -256,7 +312,7 @@ class TimeScheduler:
             ...
     """
 
-    def __init__(self, client: OpenAlgoClient | None = None) -> None:
+    def __init__(self, client: BrokerClient | None = None) -> None:
         self._client = client
         self._holidays: dict[str, list[str]] = {}  # year -> list of "YYYY-MM-DD"
         self._calendar_days: dict[date, _CalendarDay] = {}
@@ -468,7 +524,7 @@ class TimeScheduler:
         exchange: str = "NSE",
     ) -> list[str]:
         """Cache a normalised holiday payload already fetched by another owner."""
-        from flinttrade_core.openalgo_client import (  # noqa: PLC0415
+        from flinttrade_core.broker_client import (  # noqa: PLC0415
             normalise_holiday_dates,
             normalise_market_calendar,
         )
@@ -535,9 +591,9 @@ class TimeScheduler:
         return values
 
     def load_holidays(self, year: str | None = None) -> list[str]:
-        """Fetch holidays from OpenAlgo and cache them.
+        """Fetch holidays from broker and cache them.
 
-        ``OpenAlgoClient.holidays()`` is an async method. This synchronous
+        ``BrokerClient.holidays()`` is an async method. This synchronous
         helper runs it to completion using asyncio, so it can be called from
         non-async startup code (e.g. app initialisation, tests).
 
@@ -546,7 +602,7 @@ class TimeScheduler:
         y = year or str(self.now_ist().year)
 
         if self._client is None:
-            logger.warning("No OpenAlgo client — cannot fetch holidays")
+            logger.warning("No broker client — cannot fetch holidays")
             return []
 
         try:
@@ -562,7 +618,7 @@ class TimeScheduler:
                 )
                 return []
             # One-owner-loop rule for the shared client's pooled connections.
-            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+            from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
             data = client_call_sync(
                 self._client,
@@ -594,11 +650,11 @@ class TimeScheduler:
 
 
 async def get_latest_quote(
-    client: OpenAlgoClient,
+    client: BrokerClient,
     symbol: str,
     exchange: str,
 ) -> Quote | None:
-    """Fetch the latest quote from OpenAlgo. Returns None on failure."""
+    """Fetch the latest quote from broker. Returns None on failure."""
     try:
         return await client.quotes(symbol, exchange)
     except Exception as exc:
@@ -616,7 +672,7 @@ class StrategyRunner:
 
     Flow per tick:
     1. Check market open + not deploy-frozen
-    2. Fetch live quote via OpenAlgoClient
+    2. Fetch live quote via BrokerClient
     3. Call strategy.on_tick(quote)
     4. Check should_square_off — trigger auto square-off if needed
     """
@@ -624,7 +680,7 @@ class StrategyRunner:
     def __init__(
         self,
         strategy: BaseStrategy,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         scheduler: TimeScheduler | None = None,
         tick_interval_seconds: float = 1.0,
         symbol: str = "",
@@ -647,6 +703,8 @@ class StrategyRunner:
         self._stop_hook_task: asyncio.Task[Any] | None = None
         self._start_hook_worker_active: threading.Event | None = None
         self._stop_hook_worker_active: threading.Event | None = None
+        self._start_hook_settlement: _SyncHookSettlement | None = None
+        self._stop_hook_settlement: _SyncHookSettlement | None = None
         self._stop_request_count = 0
         self._stop_failed = False
         self._cleanup_required = False
@@ -734,16 +792,18 @@ class StrategyRunner:
                     raise RuntimeError("Strategy cannot restart because previous lifecycle cleanup did not complete")
                 self._cleanup_required = True
 
-            start_hook, worker_active = self._create_lifecycle_hook_task(self.strategy.start)
+            start_hook, worker_active, settlement = self._create_lifecycle_hook_task(self.strategy.start)
             with self._ownership_lock:
                 self._start_hook_task = start_hook
                 self._start_hook_worker_active = worker_active
+                self._start_hook_settlement = settlement
             try:
                 await self._wait_for_task(
                     start_hook,
                     label="start hook",
                     cancel_on_timeout=True,
                     worker_active=worker_active,
+                    settlement=settlement,
                 )
             except asyncio.CancelledError as exc:
                 if not worker_active.is_set() and not start_hook.done():
@@ -760,6 +820,7 @@ class StrategyRunner:
                         if self._start_hook_task is start_hook:
                             self._start_hook_task = None
                             self._start_hook_worker_active = None
+                            self._start_hook_settlement = None
 
             self._assert_start_generation(expected_generation)
             with self._ownership_lock:
@@ -828,13 +889,14 @@ class StrategyRunner:
 
                 await self._drain_start_hook_for_stop()
 
-                stop_hook, stop_hook_worker_active = self._get_or_create_stop_hook()
+                stop_hook, stop_hook_worker_active, stop_settlement = self._get_or_create_stop_hook()
                 if not stop_hook.done():
                     await self._wait_for_task(
                         stop_hook,
                         label="stop hook",
                         cancel_on_timeout=True,
                         worker_active=stop_hook_worker_active,
+                        settlement=stop_settlement,
                     )
             except BaseException:
                 with self._ownership_lock:
@@ -846,6 +908,7 @@ class StrategyRunner:
                     if not self_stop_handoff:
                         self._stop_hook_task = None
                         self._stop_hook_worker_active = None
+                        self._stop_hook_settlement = None
                     self._cleanup_required = self_stop_handoff
                     self._quarantined = False
                     self._stop_failed = False
@@ -865,24 +928,34 @@ class StrategyRunner:
     def _create_lifecycle_hook_task(
         self,
         hook: Callable[[], Any],
-    ) -> tuple[asyncio.Task[Any], threading.Event]:
+    ) -> tuple[asyncio.Task[Any], threading.Event, _SyncHookSettlement | None]:
         """Create an owned hook task and offload synchronous invocation."""
         declares_awaitable = self._declares_awaitable_return(hook)
         uses_worker = not inspect.iscoroutinefunction(hook) and not declares_awaitable
         worker_active = threading.Event()
+        settlement = _SyncHookSettlement(observed=asyncio.Event()) if uses_worker else None
+
+        def run_hook() -> Any:
+            try:
+                return hook()
+            finally:
+                if settlement is not None:
+                    settlement.mark()
 
         async def invoke() -> Any:
             if uses_worker:
                 worker_active.set()
                 try:
-                    result = await asyncio.to_thread(hook)
+                    result = await asyncio.to_thread(run_hook)
                 finally:
                     worker_active.clear()
+                    if settlement is not None:
+                        settlement.observed.set()
             else:
                 result = hook()
             return await _await_if_needed(result)
 
-        return asyncio.create_task(invoke()), worker_active
+        return asyncio.create_task(invoke()), worker_active, settlement
 
     def _admit_start(self) -> int | None:
         """Return the scheduler lifecycle generation that admits this start."""
@@ -963,11 +1036,14 @@ class StrategyRunner:
             )
         return isinstance(annotation, type) and issubclass(annotation, awaitable_types)
 
-    def _get_or_create_stop_hook(self) -> tuple[asyncio.Task[Any], threading.Event]:
+    def _get_or_create_stop_hook(
+        self,
+    ) -> tuple[asyncio.Task[Any], threading.Event, _SyncHookSettlement | None]:
         """Reuse a retained stop hook, or create one after a failed attempt."""
         with self._ownership_lock:
             stop_hook = self._stop_hook_task
             worker_active = self._stop_hook_worker_active
+            settlement = self._stop_hook_settlement
         if stop_hook is not None and stop_hook.done():
             try:
                 stop_hook.result()
@@ -976,28 +1052,27 @@ class StrategyRunner:
                 with self._ownership_lock:
                     self._stop_hook_task = None
                     self._stop_hook_worker_active = None
+                    self._stop_hook_settlement = None
         if stop_hook is None:
-            stop_hook, worker_active = self._create_lifecycle_hook_task(self.strategy.stop)
+            stop_hook, worker_active, settlement = self._create_lifecycle_hook_task(self.strategy.stop)
             with self._ownership_lock:
                 self._stop_hook_task = stop_hook
                 self._stop_hook_worker_active = worker_active
+                self._stop_hook_settlement = settlement
         if worker_active is None:
             raise RuntimeError("Strategy stop hook lost worker ownership")
-        return stop_hook, worker_active
+        return stop_hook, worker_active, settlement
 
     async def _drain_start_hook_for_stop(self) -> None:
         """Drain an interrupted start before invoking the stop hook."""
         with self._ownership_lock:
             start_hook = self._start_hook_task
             worker_active = self._start_hook_worker_active
+            settlement = self._start_hook_settlement
         if start_hook is None:
             return
         if not start_hook.done():
-            done, _ = await asyncio.wait(
-                {start_hook},
-                timeout=self.lifecycle_timeout,
-            )
-            if not done:
+            if not await self._finished_within_deadline(start_hook, settlement):
                 if worker_active is None or not worker_active.is_set():
                     start_hook.cancel()
                     await asyncio.sleep(0)
@@ -1011,6 +1086,41 @@ class StrategyRunner:
                 if self._start_hook_task is start_hook:
                     self._start_hook_task = None
                     self._start_hook_worker_active = None
+                    self._start_hook_settlement = None
+
+    async def _finished_within_deadline(
+        self,
+        task: asyncio.Task[Any],
+        settlement: _SyncHookSettlement | None,
+    ) -> bool:
+        """Return whether ``task`` met the lifecycle deadline.
+
+        A synchronous hook that has already returned on its worker meets the
+        deadline even when the event loop has not yet observed the task. A
+        hook that is still running does not.
+        """
+        deadline = _time.monotonic() + self.lifecycle_timeout
+        done, _pending = await asyncio.wait({task}, timeout=self.lifecycle_timeout)
+        if done or task.done():
+            return True
+        if settlement is None:
+            return False
+        if not settlement.finished.is_set():
+            await _await_thread_event(settlement.finished, _SYNC_HOOK_PUBLISH_GRACE_SECONDS)
+        # The sync body already returned, but the loop has not resumed the
+        # worker future. Collect that result, then keep the original deadline
+        # for an awaitable the hook returned. A hook that is still running,
+        # or that returned after the deadline, still times out.
+        if not settlement.met(deadline) or settlement.observed.is_set():
+            return False
+        await settlement.observed.wait()
+        if task.done():
+            return True
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            return False
+        done, _pending = await asyncio.wait({task}, timeout=remaining)
+        return bool(done or task.done())
 
     async def _wait_for_task(
         self,
@@ -1019,10 +1129,10 @@ class StrategyRunner:
         label: str,
         cancel_on_timeout: bool,
         worker_active: threading.Event | None = None,
+        settlement: _SyncHookSettlement | None = None,
     ) -> None:
         """Wait for an owned lifecycle task without exceeding the deadline."""
-        done, _ = await asyncio.wait({task}, timeout=self.lifecycle_timeout)
-        if not done:
+        if not await self._finished_within_deadline(task, settlement):
             if cancel_on_timeout and (worker_active is None or not worker_active.is_set()):
                 task.cancel()
                 await asyncio.sleep(0)
@@ -1064,6 +1174,7 @@ class StrategyRunner:
                 return
             self._stop_hook_task = None
             self._stop_hook_worker_active = None
+            self._stop_hook_settlement = None
         self._cleanup_required = False
 
     async def _run_loop(self) -> None:
@@ -1147,7 +1258,7 @@ class StrategyRunner:
         with self._ownership_lock:
             self._running = False
             self._cleanup_required = True
-        stop_hook, worker_active = self._get_or_create_stop_hook()
+        stop_hook, worker_active, settlement = self._get_or_create_stop_hook()
         try:
             if not stop_hook.done():
                 await self._wait_for_task(
@@ -1155,6 +1266,7 @@ class StrategyRunner:
                     label="stop hook",
                     cancel_on_timeout=True,
                     worker_active=worker_active,
+                    settlement=settlement,
                 )
         except Exception:
             with self._ownership_lock:
@@ -1167,6 +1279,7 @@ class StrategyRunner:
                 if self._stop_hook_task is stop_hook and not self_stop_handoff:
                     self._stop_hook_task = None
                     self._stop_hook_worker_active = None
+                    self._stop_hook_settlement = None
                 self._cleanup_required = self_stop_handoff
                 self._quarantined = False
                 self._stop_failed = False
@@ -1191,7 +1304,7 @@ class StrategyScheduler:
 
     def __init__(
         self,
-        client: OpenAlgoClient | None = None,
+        client: BrokerClient | None = None,
         time_scheduler: TimeScheduler | None = None,
     ) -> None:
         self.client = client
@@ -1209,7 +1322,7 @@ class StrategyScheduler:
     def register(
         self,
         strategy: BaseStrategy,
-        client: OpenAlgoClient | None = None,
+        client: BrokerClient | None = None,
         tick_interval: float = 1.0,
         symbol: str = "",
     ) -> StrategyRunner:

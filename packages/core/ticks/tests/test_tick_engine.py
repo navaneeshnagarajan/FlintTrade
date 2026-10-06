@@ -15,6 +15,7 @@ import pytest
 
 try:
     from tick_engine import Bar, SimulationResult, TickSimulator, Trade  # type: ignore[import]  # noqa: F401
+
     TICK_ENGINE_AVAILABLE = True
 except ImportError:
     TICK_ENGINE_AVAILABLE = False
@@ -28,33 +29,34 @@ pytestmark = pytest.mark.skipif(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_bars(n: int, start_price: float = 100.0, step: float = 1.0) -> list[list[float]]:
     """Generate n rising-price OHLCV bars."""
     bars = []
     for i in range(n):
         close = start_price + i * step
-        bars.append([
-            1_700_000_000 + i * 60,  # timestamp (1 min apart)
-            close - 0.5,             # open
-            close + 1.0,             # high
-            close - 1.0,             # low
-            close,                   # close
-            100_000.0,               # volume
-        ])
+        bars.append(
+            [
+                1_700_000_000 + i * 60,  # timestamp (1 min apart)
+                close - 0.5,  # open
+                close + 1.0,  # high
+                close - 1.0,  # low
+                close,  # close
+                100_000.0,  # volume
+            ]
+        )
     return bars
 
 
 def make_flat_bars(n: int, price: float = 100.0) -> list[list[float]]:
     """Generate n flat-price OHLCV bars."""
-    return [
-        [1_700_000_000 + i * 60, price, price, price, price, 50_000.0]
-        for i in range(n)
-    ]
+    return [[1_700_000_000 + i * 60, price, price, price, price, 50_000.0] for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
 # Basic simulation
 # ---------------------------------------------------------------------------
+
 
 class TestBasicSimulation:
     def test_no_signals_no_trades(self) -> None:
@@ -72,8 +74,8 @@ class TestBasicSimulation:
         """Buy at bar 1, sell at bar 3 — price rises."""
         sim = TickSimulator(initial_capital=100_000.0, slippage_pct=0.0, commission=0.0, lot_size=1.0)
         bars = [
-            [1_700_000_000, 100.0, 101.0, 99.0,  100.0, 10_000.0],
-            [1_700_000_060, 100.0, 102.0, 99.0,  101.0, 10_000.0],  # entry fill here
+            [1_700_000_000, 100.0, 101.0, 99.0, 100.0, 10_000.0],
+            [1_700_000_060, 100.0, 102.0, 99.0, 101.0, 10_000.0],  # entry fill here
             [1_700_000_120, 101.0, 103.0, 100.0, 102.0, 10_000.0],
             [1_700_000_180, 102.0, 104.0, 101.0, 103.0, 10_000.0],  # exit fill here
             [1_700_000_240, 103.0, 105.0, 102.0, 104.0, 10_000.0],
@@ -100,7 +102,7 @@ class TestBasicSimulation:
             [1_000, 110.0, 111.0, 109.0, 110.0, 5_000.0],
             [2_000, 110.0, 111.0, 109.0, 110.0, 5_000.0],  # entry fill
             [3_000, 105.0, 106.0, 104.0, 105.0, 5_000.0],
-            [4_000, 100.0, 101.0,  99.0, 100.0, 5_000.0],  # exit fill
+            [4_000, 100.0, 101.0, 99.0, 100.0, 5_000.0],  # exit fill
         ]
         signals = [1, 0, -1, 0]
         result = sim.run(bars, signals)
@@ -139,6 +141,7 @@ class TestBasicSimulation:
 # ---------------------------------------------------------------------------
 # EMA crossover strategy
 # ---------------------------------------------------------------------------
+
 
 class TestEmaCrossover:
     def test_returns_simulation_result(self) -> None:
@@ -185,6 +188,7 @@ class TestEmaCrossover:
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+
 
 class TestMetrics:
     def test_win_rate_range(self) -> None:
@@ -234,6 +238,7 @@ class TestMetrics:
 # Edge cases / error handling
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     def test_length_mismatch_raises(self) -> None:
         sim = TickSimulator()
@@ -266,6 +271,7 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 # Bar and Trade dataclasses
 # ---------------------------------------------------------------------------
+
 
 class TestDataClasses:
     def test_bar_creation(self) -> None:

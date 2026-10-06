@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 def _make_cache(registry=None, ttl_intraday=3600, ttl_daily=86400):
     """Create an OHLCVCache backed by an in-memory DuckDB."""
     from flinttrade_historical.cache import OHLCVCache
+
     cache = OHLCVCache(
         registry=registry,
         db_path=":memory:",
@@ -45,7 +46,9 @@ def _make_registry_with_bars(bars: list[dict] | None = None, error: str = ""):
         for b in (bars or [])
     ]
     result = ProviderResult(
-        symbol="RELIANCE", exchange="NSE", interval="5m",
+        symbol="RELIANCE",
+        exchange="NSE",
+        interval="5m",
         provider="mock",
         bars=provider_bars,
         error=error,
@@ -88,6 +91,7 @@ class TestOHLCVCacheLifecycle:
 
     def test_context_manager(self):
         from flinttrade_historical.cache import OHLCVCache
+
         with OHLCVCache(db_path=":memory:") as cache:
             cache.initialise()
             assert cache.pipeline is not None
@@ -157,6 +161,7 @@ class TestTTL:
 
     def test_ttl_intraday_interval(self):
         from flinttrade_historical.cache import OHLCVCache
+
         cache = OHLCVCache(db_path=":memory:", ttl_intraday=60, ttl_daily=86400)
         cache.initialise()
         assert cache._ttl_for("5m") == 60
@@ -166,10 +171,13 @@ class TestTTL:
 
     def test_is_fresh_within_ttl(self):
         from flinttrade_historical.cache import CacheEntry, OHLCVCache
+
         cache = OHLCVCache(db_path=":memory:", ttl_intraday=3600)
         cache.initialise()
         entry = CacheEntry(
-            symbol="X", exchange="NSE", interval="5m",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
             last_fetch=datetime.now(tz=timezone.utc) - timedelta(seconds=10),
         )
         assert cache._is_fresh(entry, "5m")
@@ -177,10 +185,13 @@ class TestTTL:
 
     def test_is_stale_past_ttl(self):
         from flinttrade_historical.cache import CacheEntry, OHLCVCache
+
         cache = OHLCVCache(db_path=":memory:", ttl_intraday=60)
         cache.initialise()
         entry = CacheEntry(
-            symbol="X", exchange="NSE", interval="5m",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
             last_fetch=datetime.now(tz=timezone.utc) - timedelta(seconds=120),
         )
         assert not cache._is_fresh(entry, "5m")
@@ -188,6 +199,7 @@ class TestTTL:
 
     def test_is_stale_when_last_fetch_none(self):
         from flinttrade_historical.cache import CacheEntry, OHLCVCache
+
         cache = OHLCVCache(db_path=":memory:")
         cache.initialise()
         entry = CacheEntry(symbol="X", exchange="NSE", interval="5m", last_fetch=None)
@@ -220,9 +232,7 @@ class TestInvalidation:
         cache._upsert_entry("A", "NSE", "5m")
         cache._upsert_entry("B", "NSE", "D")
         cache.invalidate_all()
-        rows = cache.pipeline.connection.execute(
-            "SELECT last_fetch FROM _cache_meta"
-        ).fetchall()
+        rows = cache.pipeline.connection.execute("SELECT last_fetch FROM _cache_meta").fetchall()
         for row in rows:
             assert row[0] is None
         cache.close()
@@ -237,9 +247,18 @@ class TestCacheGet:
     """Test the get() method with mocked provider registry."""
 
     def test_get_fetches_from_provider_on_first_call(self):
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {
+                    "timestamp": "2026-03-16 09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                },
+            ]
+        )
         cache = _make_cache(registry=registry)
 
         result = cache.get("RELIANCE", "NSE", "5m", "2026-03-16", "2026-03-16")
@@ -250,9 +269,18 @@ class TestCacheGet:
         cache.close()
 
     def test_get_returns_cached_on_second_call_within_ttl(self):
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {
+                    "timestamp": "2026-03-16 09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                },
+            ]
+        )
         cache = _make_cache(registry=registry, ttl_intraday=3600)
 
         cache.get("RELIANCE", "NSE", "5m", "2026-03-16", "2026-03-16")
@@ -264,9 +292,18 @@ class TestCacheGet:
         cache.close()
 
     def test_get_refetches_after_ttl_expires(self):
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {
+                    "timestamp": "2026-03-16 09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                },
+            ]
+        )
         # Very short TTL
         cache = _make_cache(registry=registry, ttl_intraday=0)
 
@@ -278,9 +315,18 @@ class TestCacheGet:
         cache.close()
 
     def test_get_force_refresh(self):
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {
+                    "timestamp": "2026-03-16 09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                },
+            ]
+        )
         cache = _make_cache(registry=registry, ttl_intraday=3600)
 
         cache.get("RELIANCE", "NSE", "5m", "2026-03-16", "2026-03-16")
@@ -292,9 +338,14 @@ class TestCacheGet:
     def test_get_no_registry_returns_cached_bars_only(self):
         cache = _make_cache(registry=None)
         # Manually insert a bar
-        cache.pipeline.store_bars("ohlcv_5m", "RELIANCE", "NSE", [
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
-        ])
+        cache.pipeline.store_bars(
+            "ohlcv_5m",
+            "RELIANCE",
+            "NSE",
+            [
+                {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+            ],
+        )
         result = cache.get("RELIANCE", "NSE", "5m", "2026-03-16", "2026-03-16")
         assert result.total_bars == 1
         assert result.new_bars == 0
@@ -305,9 +356,14 @@ class TestCacheGet:
         registry = _make_registry_with_bars([], error="API down")
         cache = _make_cache(registry=registry)
         # Pre-populate cache
-        cache.pipeline.store_bars("ohlcv_5m", "RELIANCE", "NSE", [
-            {"timestamp": "2026-03-15 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
-        ])
+        cache.pipeline.store_bars(
+            "ohlcv_5m",
+            "RELIANCE",
+            "NSE",
+            [
+                {"timestamp": "2026-03-15 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+            ],
+        )
         result = cache.get("RELIANCE", "NSE", "5m", "2026-03-15", "2026-03-16")
         assert result.total_bars == 1
         assert result.new_bars == 0
@@ -322,9 +378,18 @@ class TestCacheGet:
 
     def test_get_merges_no_duplicates(self):
         """Calling get() twice should not double-count bars."""
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {
+                    "timestamp": "2026-03-16 09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                },
+            ]
+        )
         cache = _make_cache(registry=registry, ttl_intraday=0)
 
         cache.get("RELIANCE", "NSE", "5m", "2026-03-16", "2026-03-16")
@@ -335,9 +400,18 @@ class TestCacheGet:
         cache.close()
 
     def test_get_updates_meta_after_fetch(self):
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {
+                    "timestamp": "2026-03-16 09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                },
+            ]
+        )
         cache = _make_cache(registry=registry)
         cache.get("RELIANCE", "NSE", "5m", "2026-03-16", "2026-03-16")
         entry = cache.get_entry("RELIANCE", "NSE", "5m")
@@ -362,10 +436,13 @@ class TestCacheGetBatch:
 
         def side_effect(symbol, exchange, interval, start, end, **kwargs):
             return ProviderResult(
-                symbol=symbol, exchange=exchange, interval="5m",
+                symbol=symbol,
+                exchange=exchange,
+                interval="5m",
                 provider="mock",
-                bars=[ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101,
-                                   low=99, close=100.5, volume=1000)],
+                bars=[
+                    ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100.5, volume=1000)
+                ],
             )
 
         mock_registry.fetch.side_effect = side_effect
@@ -384,18 +461,24 @@ class TestCacheGetBatch:
         cache.close()
 
     def test_batch_respects_force_refresh(self):
-        registry = _make_registry_with_bars([
-            {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
-        ])
+        registry = _make_registry_with_bars(
+            [
+                {"timestamp": "2026-03-16 09:15:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+            ]
+        )
         cache = _make_cache(registry=registry, ttl_intraday=3600)
 
         cache.get_batch(
             [{"symbol": "RELIANCE", "exchange": "NSE"}],
-            interval="5m", start_date="2026-03-16", end_date="2026-03-16",
+            interval="5m",
+            start_date="2026-03-16",
+            end_date="2026-03-16",
         )
         cache.get_batch(
             [{"symbol": "RELIANCE", "exchange": "NSE"}],
-            interval="5m", start_date="2026-03-16", end_date="2026-03-16",
+            interval="5m",
+            start_date="2026-03-16",
+            end_date="2026-03-16",
             force_refresh=True,
         )
         # force_refresh=True on second call should trigger provider again
@@ -419,9 +502,14 @@ class TestBarCounts:
 
     def test_bar_counts_after_insert(self):
         cache = _make_cache()
-        cache.pipeline.store_bars("ohlcv_1d", "X", "NSE", [
-            {"timestamp": "2026-03-16", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
-        ])
+        cache.pipeline.store_bars(
+            "ohlcv_1d",
+            "X",
+            "NSE",
+            [
+                {"timestamp": "2026-03-16", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+            ],
+        )
         counts = cache.bar_counts()
         assert counts["ohlcv_1d"] == 1
         cache.close()
@@ -437,8 +525,11 @@ class TestCacheResult:
 
     def test_success_with_bars(self):
         from flinttrade_historical.cache import CacheResult
+
         result = CacheResult(
-            symbol="X", exchange="NSE", interval="5m",
+            symbol="X",
+            exchange="NSE",
+            interval="5m",
             bars=[{"timestamp": "2026-03-16 09:15:00"}],
         )
         assert result.success
@@ -446,10 +537,12 @@ class TestCacheResult:
 
     def test_failure_with_error(self):
         from flinttrade_historical.cache import CacheResult
+
         result = CacheResult(symbol="X", exchange="NSE", interval="5m", error="boom")
         assert not result.success
 
     def test_failure_no_bars(self):
         from flinttrade_historical.cache import CacheResult
+
         result = CacheResult(symbol="X", exchange="NSE", interval="5m")
         assert not result.success

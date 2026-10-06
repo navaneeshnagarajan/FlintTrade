@@ -29,7 +29,7 @@ def test_redacts_bearer_token() -> None:
 
 
 def test_redacts_access_token_kv() -> None:
-    out = redact_identity('connected access_token=NOTAREALTOKEN-broker-xyz done')
+    out = redact_identity("connected access_token=NOTAREALTOKEN-broker-xyz done")
     assert "NOTAREALTOKEN-broker-xyz" not in out
     assert "<BROKER_ACCESS_TOKEN>" in out
 

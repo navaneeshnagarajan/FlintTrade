@@ -226,8 +226,8 @@ def test_site_vercel_config_uses_workspace_pnpm_lockfile() -> None:
             )
 
 
-def test_make_dev_starts_flinttrade_backend_not_openalgo() -> None:
-    """Local dev should boot FlintTrade's own backend; OpenAlgo is an optional integration."""
+def test_make_dev_starts_flinttrade_backend() -> None:
+    """Local dev boots the native backend."""
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
     start_body = re.search(r"^start:.*?(?=^\S|\Z)", makefile, flags=re.MULTILINE | re.DOTALL)
@@ -240,30 +240,23 @@ def test_make_dev_starts_flinttrade_backend_not_openalgo() -> None:
     assert "FLINTTRADE_PYTHONPATH" in start_body.group(0)
     assert "FLINTTRADE_PYTHONPATH" in dev_body.group(0)
     assert "packages/core/core/src" in makefile
-    assert "openalgo/start-openalgo.sh" not in start_body.group(0)
-    assert "openalgo/start-openalgo.sh" not in dev_body.group(0)
 
 
-def test_runtime_entrypoints_treat_openalgo_as_optional() -> None:
-    """Ops helpers should manage FlintTrade first; OpenAlgo is an optional integration."""
+def test_runtime_entrypoints_manage_native_backend() -> None:
+    """Ops helpers manage the native backend."""
     deploy = (ROOT / "infra" / "scripts" / "deploy.sh").read_text(encoding="utf-8")
     rollback = (ROOT / "infra" / "scripts" / "rollback.sh").read_text(encoding="utf-8")
     health = (ROOT / "infra" / "scripts" / "health-check.sh").read_text(encoding="utf-8")
     status = (ROOT / "infra" / "scripts" / "status.sh").read_text(encoding="utf-8")
-    service = (ROOT / "infra" / "systemd" / "flinttrade.service").read_text(encoding="utf-8")
     cron_readme = (ROOT / "infra" / "cron" / "README.md").read_text(encoding="utf-8")
     docs_readme = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
 
     assert "systemctl restart flinttrade" in deploy
     assert "systemctl restart flinttrade" in rollback
-    assert "systemctl restart openalgo" not in deploy
-    assert "systemctl restart openalgo" not in rollback
-    assert "Requires=openalgo" not in service
     assert "FlintTrade backend responding" in health
-    assert "OpenAlgo integration not responding" in health
-    assert "OpenAlgo integration (optional)" in status
+    assert "FlintTrade backend:" in status
     assert "built\non top of" not in docs_readme
-    assert "recommended OpenAlgo-compatible bridge" in docs_readme
+    assert "local Practice sandbox" in docs_readme
     assert re.search(r"evidence-gated\s+native\s+broker contracts", docs_readme)
     assert "Ping FlintTrade backend health" in cron_readme
 
@@ -315,21 +308,19 @@ def test_native_setup_does_not_create_env_for_normal_source_setup() -> None:
     assert "No .env required for native/source setup" in script
 
 
-def test_server_installer_keeps_openalgo_config_in_ui() -> None:
-    """The advanced server installer may have an EnvironmentFile, but not OpenAlgo-first setup."""
+def test_server_installer_keeps_broker_config_in_ui() -> None:
+    """The server installer delegates broker configuration to the UI."""
     installer = (ROOT / "infra" / "install" / "install-native.sh").read_text(encoding="utf-8")
     docker_installer = (ROOT / "infra" / "install" / "install-docker.sh").read_text(encoding="utf-8")
 
     assert "cp \"$INSTALL_DIR/.env.example\" \"$INSTALL_DIR/.env\"" not in installer
-    assert "Set OPENALGO_API_KEY" not in installer
-    assert "Settings -> Broker Gateway" in installer
+    assert "Settings -> Brokers" in installer
     assert "cp \"$INSTALL_DIR/.env.example\" \"$INSTALL_DIR/.env\"" not in docker_installer
-    assert "Set OPENALGO_API_KEY" not in docker_installer
-    assert "Settings -> Broker Gateway" in docker_installer
+    assert "Settings -> Brokers" in docker_installer
 
 
-def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -> None:
-    """Server installers should not point systemd at retired package paths or require OpenAlgo."""
+def test_server_installers_use_native_backend_entrypoint() -> None:
+    """Server installers use the native backend entrypoint."""
     installer = (ROOT / "infra" / "install" / "install-native.sh").read_text(encoding="utf-8")
     systemd_unit = (ROOT / "infra" / "systemd" / "flinttrade.service").read_text(encoding="utf-8")
     docker_installer = (ROOT / "infra" / "install" / "install-docker.sh").read_text(encoding="utf-8")
@@ -341,9 +332,8 @@ def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -
     assert "Environment=FLINTTRADE_HOME=$INSTALL_DIR" in installer
     assert "Environment=FLINTTRADE_HOME=/opt/flinttrade" in systemd_unit
     assert 'FLINTTRADE_HOME="/home/$FLINTTRADE_USER"' not in installer
-    assert "INSTALL_OPENALGO_SERVICE" in installer
+    assert "After=flinttrade-backend.service" in installer
     assert "Requires=flinttrade-backend.service" in installer
-    assert "Requires=flinttrade-openalgo.service" not in installer
     assert "ps --format '{{.Status}}' flinttrade " in docker_installer
     assert "ps --format '{{.Status}}' flinttrade-backend" not in docker_installer
 
@@ -754,7 +744,7 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
         assert isinstance(document, dict), path
         workflows[path.name] = document
 
-    # The two verification lanes pin ubuntu-24.04, matching flint.toml
+    # The authoritative verification lane pins ubuntu-24.04, matching flint.toml
     # [requirements].os_requires. They package `--dir` and verify the security
     # contract; they publish nothing, so the build host's glibc never reaches a
     # user. desktop-release.yml's Linux build legs stay on ubuntu-22.04/-arm on
@@ -762,7 +752,6 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
     # AppImage, which makes the build host's glibc the installer's real floor.
     required_posix = {
         ("test.yml", "electron-desktop-tests"): (None, "ubuntu-24.04"),
-        ("supply-chain.yml", "electron-package-verification"): (None, "ubuntu-24.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,
@@ -971,7 +960,7 @@ def test_current_beta_release_note_exists() -> None:
 
 
 def test_supply_chain_audits_ticks_and_verifies_electron_package() -> None:
-    """Supply-chain CI retains tick Cargo audit and verifies the Electron directory."""
+    """Cargo auditing and the authoritative Electron package gate retain their union."""
     workflow = (ROOT / ".github" / "workflows" / "supply-chain.yml").read_text(encoding="utf-8")
     cargo_allowlist = (ROOT / "supply-chain" / "cargo-audit-allowlist.yml").read_text(encoding="utf-8")
     cargo_script = (ROOT / "scripts" / "cargo-audit-with-allowlist.py").read_text(encoding="utf-8")
@@ -980,9 +969,15 @@ def test_supply_chain_audits_ticks_and_verifies_electron_package() -> None:
     assert "--manifest-dir packages/core/ticks" in workflow
     assert "packages/core/ticks/cargo-audit-report.json" in workflow
     assert "packages/apps/desktop/src-tauri" not in workflow
-    assert "electron-package-verification:" in workflow
-    assert "electron-builder --dir --linux --x64" in workflow
-    assert "verify:package" in workflow
+    package_workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
+    assert "electron-desktop-tests:" in package_workflow
+    assert "electron-builder --dir --linux --x64" in package_workflow
+    assert "verify:package" in package_workflow
+    assert "verify:bootstrap-manifest" in package_workflow
+    assert "electron-builder --dir --linux --x64" not in workflow
+    package_document = yaml.safe_load(package_workflow)
+    triggers = package_document.get("on", package_document.get(True))
+    assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "allowlist: []" in cargo_allowlist
     assert "Tauri" not in cargo_allowlist
     assert "Vulnerabilities are never suppressed" in cargo_script
@@ -1016,10 +1011,12 @@ def test_desktop_release_does_not_require_numba_stack() -> None:
     assert "numba==" not in requirements
 
 
-def test_workspace_example_documents_ui_owned_openalgo_config() -> None:
-    """workspace.example.json should describe OpenAlgo as UI/workspace config."""
+def test_workspace_example_documents_ui_owned_broker_config() -> None:
+    """Workspace defaults leave native accounts unconfigured."""
     workspace_example = (ROOT / "workspace.example.json").read_text(encoding="utf-8")
 
     assert "Setup/Settings" in workspace_example
     assert "authoritative connection settings are in .env" not in workspace_example
-    assert "OpenAlgo host/ports) lives in .env" not in workspace_example
+    config = json.loads(workspace_example)
+    assert config["brokers"]["execution"]["default"] == ""
+    assert config["brokers"]["registered"] == []

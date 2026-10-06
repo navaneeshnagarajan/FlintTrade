@@ -30,8 +30,13 @@ def test_new_fields_default_to_none() -> None:
 def test_old_payloads_without_new_fields_still_construct() -> None:
     """Serialisation tolerance: a pre-upgrade dump round-trips unchanged."""
     legacy = {
-        "symbol": "RELIANCE", "action": "BUY", "exchange": "NSE",
-        "pricetype": "LIMIT", "product": "CNC", "quantity": "5", "price": "2900",
+        "symbol": "RELIANCE",
+        "action": "BUY",
+        "exchange": "NSE",
+        "pricetype": "LIMIT",
+        "product": "CNC",
+        "quantity": "5",
+        "price": "2900",
     }
     order = Order(**legacy)
     assert order.validity is None and order.price1 is None
@@ -40,9 +45,16 @@ def test_old_payloads_without_new_fields_still_construct() -> None:
 
 def test_new_fields_round_trip_through_model_dump() -> None:
     order = Order(
-        symbol="RELIANCE", action="BUY", variety="gtt", trigger_price="2890",
-        validity="IOC", price1="2800", trigger_price1="2805", quantity1="5",
-        entry_trigger_type="BELOW", stop_loss_trigger_type="IMMEDIATE",
+        symbol="RELIANCE",
+        action="BUY",
+        variety="gtt",
+        trigger_price="2890",
+        validity="IOC",
+        price1="2800",
+        trigger_price1="2805",
+        quantity1="5",
+        entry_trigger_type="BELOW",
+        stop_loss_trigger_type="IMMEDIATE",
         target_trigger_type="IMMEDIATE",
     )
     dumped = order.model_dump()
@@ -61,14 +73,24 @@ def test_new_fields_are_in_instance_dict_for_hashing() -> None:
     fields must live there (set OR unset) or they would escape the HMAC."""
     unset = Order(symbol="RELIANCE", action="BUY")
     set_ = Order(
-        symbol="RELIANCE", action="BUY", validity="DAY",
-        price1="1", trigger_price1="2", quantity1="3",
-        entry_trigger_type="ABOVE", stop_loss_trigger_type="IMMEDIATE",
+        symbol="RELIANCE",
+        action="BUY",
+        validity="DAY",
+        price1="1",
+        trigger_price1="2",
+        quantity1="3",
+        entry_trigger_type="ABOVE",
+        stop_loss_trigger_type="IMMEDIATE",
         target_trigger_type="IMMEDIATE",
     )
     for field in (
-        "validity", "price1", "trigger_price1", "quantity1",
-        "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+        "validity",
+        "price1",
+        "trigger_price1",
+        "quantity1",
+        "entry_trigger_type",
+        "stop_loss_trigger_type",
+        "target_trigger_type",
     ):
         assert field in unset.__dict__
         assert field in set_.__dict__
@@ -80,7 +102,12 @@ def test_exclude_none_dump_omits_unset_new_fields() -> None:
     order = Order(symbol="RELIANCE", action="BUY")
     dumped = order.model_dump(exclude_none=True)
     for field in (
-        "validity", "price1", "trigger_price1", "quantity1",
-        "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+        "validity",
+        "price1",
+        "trigger_price1",
+        "quantity1",
+        "entry_trigger_type",
+        "stop_loss_trigger_type",
+        "target_trigger_type",
     ):
         assert field not in dumped

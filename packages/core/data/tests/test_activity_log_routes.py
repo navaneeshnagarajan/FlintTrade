@@ -25,16 +25,16 @@ import pytest
 _TEST_API_KEY = "test-audit-routes-key"
 
 _ACTIONS = [
-    ("order.place",   {"symbol": "NIFTY", "qty": 50},   "alice", "10.0.0.1"),
-    ("order.place",   {"symbol": "BANKNIFTY", "qty": 25}, "alice", "10.0.0.1"),
-    ("order.cancel",  {"orderid": "ORD001"},              "alice", None),
-    ("order.modify",  {"orderid": "ORD002", "qty": 75},  "bob",   "10.0.0.2"),
-    ("auth.login",    {"method": "password"},             "admin", "192.168.1.1"),
-    ("auth.logout",   {"reason": "idle"},                 "admin", None),
-    ("mode.switch",   {"from": "explore", "to": "live"}, "alice", "10.0.0.1"),
+    ("order.place", {"symbol": "NIFTY", "qty": 50}, "alice", "10.0.0.1"),
+    ("order.place", {"symbol": "BANKNIFTY", "qty": 25}, "alice", "10.0.0.1"),
+    ("order.cancel", {"orderid": "ORD001"}, "alice", None),
+    ("order.modify", {"orderid": "ORD002", "qty": 75}, "bob", "10.0.0.2"),
+    ("auth.login", {"method": "password"}, "admin", "192.168.1.1"),
+    ("auth.logout", {"reason": "idle"}, "admin", None),
+    ("mode.switch", {"from": "explore", "to": "live"}, "alice", "10.0.0.1"),
     ("settings.update", {"key": "theme", "value": "dark"}, "alice", None),
-    ("strategy.start", {"name": "momentum"},              "system", None),
-    ("strategy.stop",  {"name": "momentum"},              "system", None),
+    ("strategy.start", {"name": "momentum"}, "system", None),
+    ("strategy.stop", {"name": "momentum"}, "system", None),
 ]
 
 
@@ -49,7 +49,7 @@ def _restore_env():
 @pytest.fixture(scope="module")
 def route_client(_restore_env):
     """Flask test client with a pre-seeded in-memory ActivityLog."""
-    os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+    os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
     from flinttrade_data.activity_log import ActivityLog
 
@@ -179,7 +179,7 @@ class TestAuditLog:
 
     def test_no_activity_log_returns_503(self, _restore_env):
         """When ACTIVITY_LOG is not configured, return 503."""
-        os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+        os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
         from flinttrade_core.app import create_flask_app
 
         app = create_flask_app()
@@ -253,7 +253,7 @@ class TestAuditExport:
         assert len(rows) == 1
 
     def test_no_activity_log_returns_503(self, _restore_env):
-        os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+        os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
         from flinttrade_core.app import create_flask_app
 
         app = create_flask_app()
@@ -318,7 +318,7 @@ class TestAuditStats:
         assert data["by_action"] == {}
 
     def test_no_activity_log_returns_503(self, _restore_env):
-        os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
+        os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
         from flinttrade_core.app import create_flask_app
 
         app = create_flask_app()

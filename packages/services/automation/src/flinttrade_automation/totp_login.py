@@ -1,15 +1,7 @@
-"""
-TOTP auto-login is intentionally NOT implemented in FlintTrade.
+"""Automatic broker login is unavailable.
 
-OpenAlgo handles broker authentication. FlintTrade connects via API key.
-If the OpenAlgo session expires, the dashboard shows a notification to
-re-authenticate at the OpenAlgo web interface.
-
-Reasons:
-- Every broker has a different login flow (OAuth, TOTP, PIN, SMS OTP)
-- Broker UI changes break scrapers without warning
-- Some brokers actively block automated logins
-- OpenAlgo already handles this — no need to duplicate
+Connect and renew native accounts through FlintTrade's broker connect flow.
+Each adapter owns its supported OAuth, TOTP, PIN or OTP authentication methods.
 """
 
 from __future__ import annotations
@@ -57,7 +49,7 @@ def is_trading_day(d: date | None = None) -> bool:
 class TOTPLogin:
     """Stub — TOTP auto-login is not implemented.
 
-    Broker authentication is handled by OpenAlgo. This class exists
+    Native adapters own broker authentication. This class exists
     for backward compatibility with cron_manager references.
     """
 
@@ -67,6 +59,6 @@ class TOTPLogin:
     def execute(self, **kwargs) -> LoginResult:
         return LoginResult(
             success=False,
-            error="TOTP auto-login removed — authenticate via OpenAlgo web UI",
+            error="TOTP auto-login removed — renew the native account through FlintTrade broker connect",
             timestamp=datetime.now(IST).isoformat(),
         )

@@ -44,7 +44,7 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
     const src = stripComments(read(miniChartPath));
     // Visible badge text must be Sample via ProvenanceBadge or literal Sample
     expect(src).toMatch(/ProvenanceBadge|label=\{?["']Sample["']\}?|>\s*Sample\s*</);
-    expect(src).toMatch(/\(sample data\)/);
+    expect(src).toMatch(/\(Example\)/);
     // Forbidden browser-visible legacy strings
     expect(src).not.toMatch(/>\s*Demo\s*</);
     expect(src).not.toMatch(/\(demo data\)/i);
@@ -106,9 +106,10 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
 
   it("SandboxControls user-visible copy uses Practice terminology (not Paper/sandbox data)", () => {
     const src = stripComments(read(sandboxControlsPath));
-    // Required canonical visible strings
-    expect(src).toMatch(/Place Practice Order/);
-    expect(src).toMatch(/aria-label=["']Place Practice [Oo]rder["']/);
+    // The panel no longer places an order. Remaining copy stays Practice.
+    expect(src).not.toMatch(/Place Practice Order/);
+    expect(src).not.toMatch(/aria-label=["']Place Practice [Oo]rder["']/);
+    expect(src).not.toMatch(/\$\{BASE\}\/order/);
     expect(src).toMatch(/Import Practice data/);
     expect(src).toMatch(/Reset all Practice data\?/);
     expect(src).toMatch(/Practice trades/);
@@ -152,7 +153,7 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
     expect(src).toMatch(/label:\s*["']Practice Trading["']/);
     expect(src).toMatch(/What is Practice Trading\?/);
     expect(src).toMatch(/How to start Practice Trading/);
-    expect(src).toMatch(/to=["']\/settings#api["']/);
+    expect(src).toMatch(/to=["']\/trade["']/);
     expect(src).not.toMatch(/label:\s*["']Paper Trading["']/);
     expect(src).not.toMatch(/What is Paper Trading\?/);
     expect(src).not.toMatch(/How to Paper Trade/);
@@ -168,9 +169,9 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
 
   it("OrderLadder Explore a11y says sample data (not demo data)", () => {
     const src = stripComments(read(orderLadderPath));
-    expect(src).toMatch(/Showing sample data/);
+    expect(src).toMatch(/Showing Example/);
     expect(src).not.toMatch(/Showing demo data/);
-    expect(src).toMatch(/>\s*Sample data\s*</);
+    expect(src).toMatch(/>\s*Example\s*</);
     expect(src).not.toMatch(/>\s*Demo data\s*</);
   });
 

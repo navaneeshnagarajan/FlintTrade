@@ -1,10 +1,10 @@
 """Scheduled task manager using APScheduler.
 
 Built-in jobs:
-1. health_check_job: 9:10 AM IST (verify OpenAlgo session)
+1. health_check_job: 9:10 AM IST (verify broker session)
 2. square_off_warning_job: 3:20 PM IST (warn before square-off)
 3. eod_logout_job: 11:45 PM IST (SEBI session logout)
-4. holiday_check: on startup (load holidays from OpenAlgo)
+4. holiday_check: on startup (load holidays from broker)
 5. post_market_analysis: 3:45 PM IST (daily trade report; lazy trade-store
    resolve, Telegram summary, optional DuckDB persistence)
 
@@ -13,7 +13,7 @@ Additional optional jobs:
 7. mcx_close_check: 11:55 PM IST
 
 Note: Broker login (TOTP) is NOT handled by FlintTrade.
-OpenAlgo manages broker authentication. See packages/services/automation/src/totp_login.py.
+broker manages broker authentication. See packages/services/automation/src/totp_login.py.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class JobDefinition:
 # Default job schedule definitions
 DEFAULT_JOBS: dict[str, dict[str, Any]] = {
     "health_check_job": {
-        "description": "Verify OpenAlgo session at 9:10 AM IST",
+        "description": "Verify broker session at 9:10 AM IST",
         "trigger_type": "cron",
         "trigger_args": {"hour": 9, "minute": 10, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
     },
@@ -84,7 +84,7 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_args": {"hour": 23, "minute": 45, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
     },
     "health_check": {
-        "description": "Check OpenAlgo/WebSocket health every 5 minutes during market hours",
+        "description": "Check broker/WebSocket health every 5 minutes during market hours",
         "trigger_type": "interval",
         "trigger_args": {"minutes": 5},
     },
@@ -147,7 +147,7 @@ def _is_market_holiday(holidays: set[str] | None = None) -> bool:
 
 
 def make_health_check_job(
-    openalgo_client: Any,
+    broker_client: Any,
     audit_logger: Any = None,
     telegram_bot: Any = None,
     holidays: set[str] | None = None,
@@ -162,9 +162,9 @@ def make_health_check_job(
         try:
             # One-owner-loop rule: never drive the shared client on a fresh
             # asyncio.run() loop (poisons its pooled httpx connections).
-            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+            from flinttrade_core.broker_client import client_call_sync  # noqa: PLC0415
 
-            result = client_call_sync(openalgo_client, openalgo_client.ping())
+            result = client_call_sync(broker_client, broker_client.ping())
             success = result.get("status") == "success" if isinstance(result, dict) else False
         except Exception as exc:
             error = str(exc)
@@ -179,7 +179,7 @@ def make_health_check_job(
 
         if not success and telegram_bot:
             telegram_bot.send_message(
-                f"🔴 *Health Check Failed*\nOpenAlgo ping failed at "
+                f"🔴 *Health Check Failed*\nbroker ping failed at "
                 f"{datetime.now(IST).strftime('%H:%M IST')}\nError: {error or 'no response'}"
             )
 
@@ -498,14 +498,14 @@ def make_overnight_optimise_job(optimiser: Callable[[], Any]) -> Callable[[], No
 
 
 async def load_holidays_from_client(
-    openalgo_client: Any,
+    broker_client: Any,
     *,
     payload_sink: Callable[[Any], None] | None = None,
     year: int | None = None,
 ) -> set[str]:
-    """Load market holidays from OpenAlgo API. Must be awaited.
+    """Load market holidays from broker API. Must be awaited.
 
-    OpenAlgo's /holidays endpoint can return an HTTP 200 with an empty body
+    broker's /holidays endpoint can return an HTTP 200 with an empty body
     before a broker has authenticated.  That would trigger a
     ``json.JSONDecodeError`` inside the client's ``resp.json()`` call.  We
     treat that case separately so the log stays quiet and does not look
@@ -515,11 +515,11 @@ async def load_holidays_from_client(
 
     try:
         calendar_year = year if year is not None else datetime.now(IST).year
-        data = await openalgo_client.holidays(
+        data = await broker_client.holidays(
             year=str(calendar_year),
             allow_legacy_fallback=True,
         )
-        from flinttrade_core.openalgo_client import (  # noqa: PLC0415
+        from flinttrade_core.broker_client import (  # noqa: PLC0415
             is_authoritative_market_calendar,
             normalise_holiday_dates,
         )
@@ -533,7 +533,7 @@ async def load_holidays_from_client(
         logger.info("Loaded %d market holidays", len(result))
         return result
     except (_json.JSONDecodeError, ValueError) as exc:
-        # Empty body from OpenAlgo means "no broker yet authenticated".
+        # Empty body from broker means "no broker yet authenticated".
         # Log once at INFO so it's traceable but not alarming.
         msg = str(exc)
         if "Expecting value" in msg or "line 1 column 1" in msg or not msg:
@@ -569,7 +569,7 @@ class CronManager:
     Usage::
 
         cron = CronManager(
-            openalgo_client=client,
+            broker_client=client,
             audit_logger=auditor,
             telegram_bot=bot,
             totp_login=totp,
@@ -580,7 +580,7 @@ class CronManager:
 
     def __init__(
         self,
-        openalgo_client: Any = None,
+        broker_client: Any = None,
         audit_logger: Any = None,
         telegram_bot: Any = None,
         totp_login: Any = None,
@@ -591,7 +591,7 @@ class CronManager:
         self._jobs: dict[str, JobDefinition] = {}
         self._scheduler = None
         self._running = False
-        self.openalgo_client = openalgo_client
+        self.broker_client = broker_client
         self.audit_logger = audit_logger
         self.telegram_bot = telegram_bot
         self.totp_login = totp_login
@@ -678,8 +678,8 @@ class CronManager:
     # ------------------------------------------------------------------
 
     async def load_holidays(self) -> set[str]:
-        """Load holidays from OpenAlgo and cache them. Must be awaited."""
-        if self.openalgo_client:
+        """Load holidays from broker and cache them. Must be awaited."""
+        if self.broker_client:
             calendar_year = datetime.now(IST).year
             missing_payload = object()
             payload: Any = missing_payload
@@ -689,7 +689,7 @@ class CronManager:
                 payload = value
 
             loaded = await load_holidays_from_client(
-                self.openalgo_client,
+                self.broker_client,
                 payload_sink=retain_payload,
                 year=calendar_year,
             )
@@ -704,11 +704,11 @@ class CronManager:
 
     def register_builtin_jobs(self) -> None:
         """Register built-in jobs with their handlers."""
-        if self.openalgo_client:
+        if self.broker_client:
             self.register(
                 "health_check_job",
                 handler=make_health_check_job(
-                    self.openalgo_client, self.audit_logger, self.telegram_bot, self._holidays,
+                    self.broker_client, self.audit_logger, self.telegram_bot, self._holidays,
                 ),
                 **DEFAULT_JOBS["health_check_job"],
             )

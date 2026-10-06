@@ -120,7 +120,7 @@ def test_pnpm_installs_are_frozen() -> None:
                 violations.append(f"{rel}:{n}: pnpm install without --frozen-lockfile → {s}")
             if (
                 _NPM_INSTALL_RE.search(command) or _NPM_INSTALL_ARGV_RE.search(s)
-            ) and "openalgo" not in s.lower():
+            ):
                 violations.append(f"{rel}:{n}: bare npm install/ci (use pnpm) → {s}")
     assert not violations, "Unfrozen node installs found:\n" + "\n".join(violations)
 

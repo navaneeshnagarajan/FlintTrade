@@ -1,3 +1,4 @@
+import { BrokerSummary } from "@/tools/Settings/BrokerSummary";
 /**
  * BrokerConnect — shared native broker connect surface.
  *
@@ -65,13 +66,12 @@ import { cancelAccountAction, runAccountAction } from "@/services/accountMutatio
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { honestBrokerStatus } from "@/lib/operatorIncident";
 import {
-  API_SMOKE_LABEL,
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isMondayReadBroker,
   mondayReadChrome,
   mondayReadConnectable,
-} from "@/lib/mondayReadChrome";
+} from "@/lib/connectedReadChrome";
 
 function brokerSelectable(broker: Pick<NativeBroker, "adapter_id" | "connectable">): boolean {
   return mondayReadConnectable(broker.adapter_id, broker.connectable);
@@ -233,7 +233,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const brokers = brokersQuery.data ?? [];
   const mcpBrokers = mcpQuery.data ?? [];
   const accounts = brokerAccounts.filter((a) => a.source === "native");
-  const gatewayAccounts = brokerAccounts.filter((a) => a.source !== "native");
   const connectableNativeNames = brokers
     .filter((b) => brokerSelectable(b))
     .map((b) => b.display_name);
@@ -448,19 +447,10 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
       prunePendingOAuthAccounts();
       if (pendingOAuthAccountsRef.current.size === 0) return;
 
-      // The canonical cache may be one React effect ahead of Zustand. Preserve
-      // its freshest gateway slice while replacing native rows with this
-      // fresh-source response, then publish that exact combined snapshot.
-      let accounts: BrokerAccount[] = [];
-      qc.setQueryData<BrokerAccount[]>(BROKER_ACCOUNTS_QUERY_KEY, (cached) => {
-        const previous = cached ?? useBrokerStore.getState().accounts;
-        accounts = [
-          ...previous.filter((account) => account.source !== "native"),
-          ...nativeAccounts,
-        ];
-        return accounts;
-      });
-      useBrokerStore.getState().setAccounts(accounts);
+      // The native response replaces the whole retired mixed-source snapshot.
+      // Store and shared query cache publish exactly the same account set.
+      qc.setQueryData<BrokerAccount[]>(BROKER_ACCOUNTS_QUERY_KEY, nativeAccounts);
+      useBrokerStore.getState().setAccounts(nativeAccounts);
 
       for (const [key, pending] of pendingOAuthAccountsRef.current) {
         const connected = nativeAccounts.some((account) => (
@@ -507,7 +497,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   }
 
   function dropRemovedAccountEverywhere(ref: {
-    source: "gateway" | "native";
+    source: "native";
     broker: string;
     account_id: string;
   }) {
@@ -701,60 +691,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
     },
   });
 
-  const gatewayRemoveMutation = useMutation({
-    mutationFn: (sel: { accountId: string; broker: string }) =>
-      runAccountAction(`gateway:${sel.broker}:${sel.accountId}:remove`,
-        (key) => removeBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }, key)),
-    onSuccess: (_r, sel) => {
-      setError("");
-      setNotice(`Gateway account ${sel.accountId} disconnected.`);
-      // Source-qualified key, never the bare id: isBrokerAccountMatch also
-      // matches on account_id alone, so a bare id would cross-evict a native
-      // row sharing this broker-supplied client code (dual-linked account).
-      dropRemovedAccountEverywhere({
-        source: "gateway", broker: sel.broker, account_id: sel.accountId,
-      });
-    },
-    onError: (e: unknown, sel) => {
-      setNotice("");
-      setError(e instanceof Error ? e.message : `Could not disconnect gateway account ${sel.accountId}.`);
-    },
-  });
-
-  const gatewayReconnectMutation = useMutation({
-    mutationFn: (sel: { accountId: string; broker: string }) =>
-      runAccountAction(`gateway:${sel.broker}:${sel.accountId}:reconnect`,
-        (key) => reconnectBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }, key)),
-    onSuccess: (_r, sel) => {
-      setError("");
-      setNotice(`Gateway account ${sel.accountId} reconnected.`);
-      invalidateAccountQueries();
-    },
-    onError: (e: unknown, sel) => {
-      setNotice("");
-      setError(e instanceof Error ? e.message : `Could not reconnect gateway account ${sel.accountId}.`);
-    },
-  });
-
-  const gatewaySetPrimaryMutation = useMutation({
-    mutationFn: (sel: { accountId: string; broker: string }) =>
-      runAccountAction(`gateway:${sel.broker}:${sel.accountId}:primary`,
-        (key) => setPrimaryBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }, key)),
-    onSuccess: (_r, sel) => {
-      setError("");
-      setNotice(`Gateway account ${sel.accountId} set as primary.`);
-      invalidateAccountQueries();
-    },
-    onError: (e: unknown, sel) => {
-      setNotice("");
-      setError(e instanceof Error ? e.message : `Could not set gateway account ${sel.accountId} as primary.`);
-    },
-  });
-
-  const gatewayBusy =
-    gatewayRemoveMutation.isPending
-    || gatewayReconnectMutation.isPending
-    || gatewaySetPrimaryMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -769,18 +705,19 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
       <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-secondary">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <div className="space-y-2">
-          <p>
-            <strong className="text-text-primary">Native Dhan + Kotak Neo is Connected (read).</strong>{" "}
-            Native connection is currently enabled for{" "}
-            {connectableNativeLabel || "the currently selectable native brokers"}. Non-funded live
-            reads stay {CONNECTED_READ_LABEL}. The non-funded read check is {API_SMOKE_LABEL} —
-            never placeable Live orders. Neo
-            has no sandbox: {NEO_OPERATOR_COPY} OpenAlgo is Settings / fallback only, not the
-            primary connect CTA. Native order placement stays fail-closed.{" "}
-            {unavailableNativeLabel
-              ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their activation blockers clear.`
-              : "Unavailable adapters stay disabled until their activation blockers clear."}
+          <BrokerSummary connectedAccounts={accounts.filter((account) => account.status === "connected").length} />
+          <p className="text-xs text-text-muted">
+            Native broker HTTP connectivity is unavailable while native-session support is completed.
+            Local Practice trading remains available.
           </p>
+          <details>
+            <summary className="cursor-pointer text-xs">Broker availability</summary>
+            <p className="mt-2 text-xs text-text-muted">
+              Native connection options: {connectableNativeLabel || "see the available brokers below"}.{" "}
+              {unavailableNativeLabel
+                ? `${unavailableNativeLabel} ${unavailableNativeVerb} listed but unavailable until their requirements are met.`
+                : "Unavailable brokers are disabled until their requirements are met."}
+            </p>
           {unavailableNativeBlockers.length > 0 && (
             <ul className="space-y-1 text-xs text-text-muted" data-testid="native-connect-blockers">
               {unavailableNativeBlockers.map((b) => (
@@ -791,6 +728,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               ))}
             </ul>
           )}
+          </details>
         </div>
       </div>
 
@@ -1071,80 +1009,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           </ul>
         )}
       </div>
-
-      {/* Legacy gateway accounts — only shown when any exist. */}
-      {gatewayAccounts.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-text-secondary">Gateway accounts</h3>
-          <p className="text-xs text-text-muted">
-            Broker accounts connected through the FlintTrade gateway (OpenAlgo bridge / catalogue path).
-          </p>
-          <ul className="space-y-2">
-            {gatewayAccounts.map((a: BrokerAccount) => (
-              <li
-                key={`gateway:${a.broker}:${a.account_id}`}
-                className="flex items-center justify-between rounded-lg border border-border-default bg-surface-card p-3"
-              >
-                <div className="flex items-center gap-3">
-                  {a.is_primary && (
-                    <Star className="size-4 shrink-0 fill-accent text-accent" aria-label="Primary account" />
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-text-primary truncate">
-                      {a.label || a.account_id}
-                    </div>
-                    <div className="text-xs text-text-muted capitalize">
-                      {a.broker}
-                      {a.is_primary ? " · primary" : ""}
-                      {a.read_only ? " · read-only" : ""}
-                    </div>
-                    {a.error_message && (
-                      <div className="text-xxs text-warning mt-0.5 truncate" title={a.error_message}>
-                        {a.error_message}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Badge variant="outline" className="text-xxs capitalize">{a.status}</Badge>
-                  {canPromotePrimaryAccount(a) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Set ${a.label || a.account_id} as primary`}
-                      title="Set as primary"
-                      onClick={() => gatewaySetPrimaryMutation.mutate({ accountId: a.account_id, broker: a.broker })}
-                      disabled={gatewayBusy}
-                    >
-                      <Star className="size-4" aria-hidden="true" />
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Reconnect ${a.label || a.account_id}`}
-                    title="Reconnect"
-                    onClick={() => gatewayReconnectMutation.mutate({ accountId: a.account_id, broker: a.broker })}
-                    disabled={gatewayBusy}
-                  >
-                    <RefreshCw className="size-4" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Disconnect ${a.label || a.account_id}`}
-                    title="Remove account"
-                    onClick={() => gatewayRemoveMutation.mutate({ accountId: a.account_id, broker: a.broker })}
-                    disabled={gatewayBusy}
-                  >
-                    <Trash2 className="size-4 text-loss" aria-hidden="true" />
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {/* Connect a new account */}
       <div className="space-y-4 rounded-lg border border-border-default bg-surface-card/60 p-4">

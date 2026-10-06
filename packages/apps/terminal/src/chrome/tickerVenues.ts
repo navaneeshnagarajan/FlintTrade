@@ -101,6 +101,8 @@ export function venueForTickerSymbol(symbol: TickerFeedSymbol): TickerVenue | nu
 export function deriveTickerVenueStrip(
   symbols: readonly TickerFeedSymbol[],
   isOpen: (exchange: string) => boolean,
+  /** Shared closed-session sentence. Open badges keep their own venue label. */
+  closedLabel?: string,
 ): TickerVenueStrip {
   if (symbols.length === 0) return { kind: "empty" };
 
@@ -120,13 +122,14 @@ export function deriveTickerVenueStrip(
     badges: order.map((venue) => {
       const session = SESSION_COPY[venue];
       const open = isOpen(session.exchange);
+      const closedText = closedLabel ?? `${venue} closed`;
       return {
         venue,
         open,
-        label: open ? `${venue} open` : `${venue} closed`,
+        label: open ? `${venue} open` : (closedLabel ? `${venue}: ${closedLabel}` : `${venue} closed`),
         title: open
           ? `${venue} session is open (${session.hours})`
-          : `${venue} session is closed`,
+          : closedText,
       };
     }),
   };

@@ -33,17 +33,6 @@ a verified end-to-end autonomous trading system.
 
 Resume the pending scope in this order:
 
-1. Account transaction authority, continuous router mutation/cleanup leases,
-   OpenAlgo migration/recovery and the atomic account-lifecycle cutover.
-2. Exact-account roles, data/recording/balances/Practice workflows and UI;
-   managed service, subscription and API-budget integration; catalogue accuracy.
-3. Forecast worker/runtime, durable attempts, rights and licence lineage;
-   full persistent RAG decision workflows.
-4. Isolated overnight research; immutable strategy releases; backtest,
-   walk-forward and prospective Practice qualification; mandates/capital canaries.
-5. Integrated UI/E2E and whole-tree verification, independent audits, followed
-   by separately authorised real broker and market-session checks.
-
 The WIP router lease has a known cleanup regression (19 shutdown failures) and
 three emergency fixture failures in its last expanded run. Its retirement-only
 lease is incomplete. Migration has six RED recovery tests for an absent module.

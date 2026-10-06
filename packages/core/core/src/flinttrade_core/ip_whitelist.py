@@ -323,9 +323,7 @@ def check_ip_whitelist(
 
     client_ip = request.remote_addr or "unknown"
     if not whitelist.is_whitelisted(user_id, client_ip):
-        logger.warning(
-            "Blocked request from %s — not in whitelist for user %s", client_ip, user_id
-        )
+        logger.warning("Blocked request from %s — not in whitelist for user %s", client_ip, user_id)
         return jsonify({"status": "error", "message": "IP not whitelisted"}), 403
     return None
 

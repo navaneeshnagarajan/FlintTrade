@@ -170,9 +170,9 @@ def test_clear_removes_all_entries(cache: Cache) -> None:
 def test_stats_tracks_hits_and_misses(cache: Cache) -> None:
     """stats() returns accurate hit/miss counts."""
     cache.set("s", 1)
-    cache.get("s")    # hit
-    cache.get("s")    # hit
-    cache.get("nope") # miss
+    cache.get("s")  # hit
+    cache.get("s")  # hit
+    cache.get("nope")  # miss
     s = cache.stats()
     assert s["hits"] == 2
     assert s["misses"] == 1
@@ -182,8 +182,8 @@ def test_stats_hit_rate_calculation(cache: Cache) -> None:
     """stats() hit_rate is hits / (hits + misses)."""
     cache.set("v", 99)
     for _ in range(3):
-        cache.get("v")   # 3 hits
-    cache.get("x")       # 1 miss
+        cache.get("v")  # 3 hits
+    cache.get("x")  # 1 miss
     s = cache.stats()
     assert abs(s["hit_rate"] - 0.75) < 0.01
 

@@ -1,8 +1,8 @@
 # Machine Setup Guide
 
 > Works on any Windows, macOS, or Ubuntu machine — including a new contributor's box.
-> FlintTrade `v0.0.1` is not production ready; use Explore and Practice
-> modes before connecting any live broker workflow.
+> FlintTrade `v0.0.1` is not production ready; use Practice, and example data,
+> before connecting any live broker workflow.
 
 ## 1. Install FlintTrade
 
@@ -103,56 +103,16 @@ python scripts/ft.py setup
 python scripts/ft.py dev
 ```
 
-OpenAlgo is no longer bundled as a git submodule. It is an optional external integration that FlintTrade can talk to over HTTP/WebSocket. Install OpenAlgo separately, or run the helper to clone a local-dev copy only when you want that integration path. AlgoMirror is intentionally absent — its mirroring logic is reimplemented natively in `packages/services/ditto/` (our own code), nothing external to install.
-
-The helper is a bash script, so it is POSIX-only; on Windows run it inside
-WSL2, or clone OpenAlgo yourself.
-
-```bash
-bash scripts/setup-test-deps.sh
-```
-
-This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo clone you can run via `make start-openalgo` (also POSIX-only).
 
 ## 3. Configure Broker Access
 
-Use the OpenAlgo-compatible bridge for a working broker session. Configure
-the OpenAlgo server in OpenAlgo itself, then paste the OpenAlgo URL/API key
-in FlintTrade Setup → OpenAlgo Bridge or Settings → Broker Gateway.
-
-Do not use Setup → Brokers or Settings → Brokers for a native session on
-this unreleased line. Native broker HTTP is frozen until Task 9D (account
-mutations return `503` `broker_account_cutover_unavailable`) and Task
-7C.2 / 8B (native HTTP account and market-data reads return `409` with
-zero provider calls until cutover onto the in-process `BrokerReadPort`;
-catalogue and vault-backed account-list GETs stay metadata only). The Brokers screen will
-fail rather than connect. Dhan, Upstox, and Kotak Neo remain evidence-gated as
-connectable in the catalogue; Kotak Neo is Connected (read) / API smoke only
-— Live place fail-closed; Neo has no sandbox. That is not a
-working native HTTP or UX path. Neo's v3 async feed lifecycle has local
-synthetic coverage, while its recorded broker-account evidence remains
-non-funded REST reads; live-account/market-hours feed, funded-order,
-Live-promotion, and
-cross-platform proof are still open. INDmoney is read-verified and its fail-closed
-emergency planner is locally verified, but it stays "coming soon" until
-restart-time regular/smart-parent cancellation can be resolved authoritatively,
-a broker-atomic reduce-only close primitive exists, and a funded/live-market
-order-safety proof lands; Groww stays disabled until its live checks pass. For the
-local-dev OpenAlgo clone, broker credentials stay in
-`.local/external/openalgo/.env` (copy from `.sample.env` if needed):
-- Set broker name (e.g., your broker or its sandbox variant for testing)
-- Set broker credentials (client ID, API key/secret)
+Native broker HTTP remains frozen until Task 9D and Task 7C.2. Start with
+Practice. Credentials belong in the encrypted gateway vault.
 
 ## 4. Start and Verify
 
 Native app users can skip this section. Contributors running from source can
 use:
-
-```bash
-python scripts/ft.py start    # Starts FlintTrade backend on port 5100
-python scripts/ft.py status   # Verifies the backend; OpenAlgo is reported as optional
-python scripts/ft.py test     # full pytest suite passes
-```
 
 The same three lines run unchanged in Windows PowerShell. On POSIX,
 `make start`, `make status` and `make test` are aliases for the same targets.
@@ -193,38 +153,11 @@ $env:FLINTTRADE_BACKEND_HOST = "<tailnet-ip>"
 python scripts/ft.py start
 ```
 
-Non-loopback binds fail closed: the backend refuses to start until the operator
-account exists (complete setup locally first) or `FLINTTRADE_API_KEY` is set,
-and every remote request must carry a session JWT or that API key. Settings
-writes such as OpenAlgo and LLM configuration stay loopback-only — change those
-at the machine that runs the backend. Live market data streams from OpenAlgo's
-WebSocket directly, so point the OpenAlgo host configuration at an address the
-remote browser can also reach.
-
 ## 6. Start Building
 
 Read [`contributing.md`](../../contributing.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues) — the `good first issue` label is a good place to land your first PR. If you use a CLAUDE-aware or AGENTS-aware coding agent (Claude Code, Cursor, Aider, Continue, Codex, etc.), run `bash scripts/setup-agent-context.sh` once to scaffold your machine-local agent context. That helper is a bash script: on Windows run it in WSL2 or Git Bash, or copy the templates from `templates/agent-context/` by hand.
 
 ---
-
-## OpenAlgo Broker Login
-
-1. Open http://127.0.0.1:5000 in browser
-2. Create account on first run
-3. Select broker (use sandbox variant for testing)
-4. Login to broker via OAuth redirect
-5. Go to API Key section, generate key
-6. Paste the OpenAlgo URL and API key into FlintTrade Setup → OpenAlgo Bridge
-   or Settings → Broker Gateway. If the URL omits a port, set REST Port
-   (default `5000`); WebSocket Port defaults to `8765`. FlintTrade stores these
-   settings in the OS workspace.
-
-Broker and OpenAlgo session lifetimes vary by broker. FlintTrade operator
-JWTs expire at 08:00 IST. Re-login when OpenAlgo or FlintTrade reports an
-expired session. When native connect returns, Upstox tokens **expire**
-around ~03:30 IST the next day and have no refresh token —
-`UpstoxAdapter.refresh()` returns the existing session and a fresh login
-is required at expiry.
 
 ## Terminal Env
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 import base64
 import ctypes
 import hashlib
+import http.client
+import io
 import json
+import math
 import os
 import platform
 import re
@@ -24,6 +27,7 @@ import weakref
 import zipfile
 from collections.abc import Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator
@@ -79,11 +83,51 @@ class ManagedOllamaAdmission:
     digest: str
 
 
-_OLLAMA_VERSION = "v0.32.0"
+_OLLAMA_VERSION = "v0.35.0"
 _OLLAMA_SERVER_VERSION = _OLLAMA_VERSION.removeprefix("v")
-_OLLAMA_ROLLBACK_VERSIONS = ("v0.31.2",)
+# v0.32.0 stays so an install of the previous pin can roll back one release.
+# v0.31.2 remains the older rollback.
+_OLLAMA_ROLLBACK_VERSIONS = ("v0.32.0", "v0.31.2")
 _LIFECYCLE_LOCK_NAME = ".ollama-lifecycle.lock"
 _ASSETS_BY_VERSION: dict[str, dict[tuple[str, str], tuple[str, str, int, int]]] = {
+    "v0.35.0": {
+        ("darwin", "arm64"): (
+            "ollama-darwin.tgz",
+            "2608dbb0a0f0136a198db9d48b4f74ece55f452314a39452fca35b7cf20c2589",
+            160_167_937,
+            1024 * 1024 * 1024,
+        ),
+        ("darwin", "x86_64"): (
+            "ollama-darwin.tgz",
+            "2608dbb0a0f0136a198db9d48b4f74ece55f452314a39452fca35b7cf20c2589",
+            160_167_937,
+            1024 * 1024 * 1024,
+        ),
+        ("linux", "x86_64"): (
+            "ollama-linux-amd64.tar.zst",
+            "1c114a6b220c5efca2ef2b1e5f01d1e535e26f6cd6d1678c8489325d2835e525",
+            1_427_765_407,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64"): (
+            "ollama-linux-arm64.tar.zst",
+            "cb627d332b1fe5055bd5485ca10d595da8429e447648209e375390ec3bd09374",
+            1_550_231_393,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("windows", "x86_64"): (
+            "ollama-windows-amd64.zip",
+            "d6f7d3dd4f5d013553a78c1e78b2521fcf41d43dd2863e4596cdc046fe6036db",
+            1_461_196_158,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("windows", "arm64"): (
+            "ollama-windows-arm64.zip",
+            "99d061915a68fb563da0fb9316fd112cfc6fce0c9478601b2765b1f973cb715e",
+            208_072_407,
+            512 * 1024 * 1024,
+        ),
+    },
     "v0.32.0": {
         ("darwin", "arm64"): (
             "ollama-darwin.tgz",
@@ -165,6 +209,26 @@ _ACCELERATOR_ASSETS_BY_VERSION: dict[
     str,
     dict[tuple[str, str, str], tuple[str, str, int, int]],
 ] = {
+    "v0.35.0": {
+        ("linux", "x86_64", "rocm"): (
+            "ollama-linux-amd64-rocm.tar.zst",
+            "77b6ef06adf34b1fa5232d4372d0e988bcb862363e4b81002ed59a1d0b91bb4c",
+            1_051_878_032,
+            5 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64", "jetpack5"): (
+            "ollama-linux-arm64-jetpack5.tar.zst",
+            "f7f1a7e890f2a493014f01cf8de948b5aa4641f34c05d2cb61983649b9c20f5b",
+            297_201_571,
+            2 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64", "jetpack6"): (
+            "ollama-linux-arm64-jetpack6.tar.zst",
+            "609be1fb0f0d28ea3b10df7194508562da431200568157eef36de5745edd2753",
+            269_692_742,
+            2 * 1024 * 1024 * 1024,
+        ),
+    },
     "v0.32.0": {
         ("linux", "x86_64", "rocm"): (
             "ollama-linux-amd64-rocm.tar.zst",
@@ -262,6 +326,31 @@ _LOCKED_MODEL_SUFFIX = ":locked"
 _MANAGED_RUNTIME_OWNER_LOCK = threading.RLock()
 _MANAGED_RUNTIME_OWNER: weakref.ReferenceType[Any] | None = None
 _LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_GATE_REQUEST_DEADLINE: ContextVar[float | None] = ContextVar("ollama_gate_request_deadline", default=None)
+
+
+def _gate_request_remaining() -> float | None:
+    deadline = _GATE_REQUEST_DEADLINE.get()
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or remaining <= 0:
+        raise TimeoutError("managed Ollama gate exceeded its deadline")
+    return remaining
+
+
+@contextmanager
+def _gate_request_budget(deadline: float) -> Iterator[None]:
+    outer = _GATE_REQUEST_DEADLINE.get()
+    token = _GATE_REQUEST_DEADLINE.set(min(deadline, outer) if outer is not None else deadline)
+    try:
+        _gate_request_remaining()
+        yield
+        _gate_request_remaining()
+    finally:
+        _GATE_REQUEST_DEADLINE.reset(token)
+
+
 _OPERATION_ID = re.compile(r"op_[0-9a-f]{32}\Z")
 _ADMISSION_ID = re.compile(r"adm_[0-9a-f]{32}\Z")
 _OPERATION_OWNER_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
@@ -351,6 +440,155 @@ def managed_ollama_session(model: str) -> Iterator[ManagedOllamaAdmission]:
         yield admission
 
 
+def _gate_model_identity(runtime: Any, model: str) -> tuple[str, str] | None:
+    """Resolve an accepted source without relaxing immutable inference aliases."""
+    accepted, sources = runtime._read_model_trust_state()
+    aliases = set(_model_aliases(model))
+    if model in accepted and _is_locked_model_alias(model, accepted[model]):
+        locked = model
+    else:
+        mapped = {sources[name] for name in aliases if name in sources}
+        if len(mapped) != 1:
+            return None
+        locked = mapped.pop()
+    expected = accepted.get(locked)
+    if expected is None or not _is_locked_model_alias(locked, expected):
+        return None
+    identity = runtime._accepted_model_identity(locked)
+    if identity is None or identity != (locked, expected):
+        return None
+    if model != locked:
+        reported = {
+            _normalise_model_digest(row.get("digest"))
+            for row in runtime._raw_models()
+            if any(
+                aliases.intersection(_model_aliases(name))
+                for name in (row.get("name"), row.get("model"))
+                if isinstance(name, str)
+            )
+        }
+        if reported != {expected}:
+            current = next((value for value in reported if value and value != expected), None)
+            if current is not None:
+                with runtime._state_lock:
+                    runtime._model_digest_drift[model] = {"accepted": expected, "current": current}
+                raise OllamaRuntimeError("managed Ollama gate source digest changed")
+            return None
+    return identity
+
+
+def _require_gate_integrity(runtime: Any) -> None:
+    """Known install or durable-state errors cannot authorise a gate call."""
+    _gate_request_remaining()
+    try:
+        installed, install_error = runtime._installation_status(verification_deadline=_GATE_REQUEST_DEADLINE.get())
+        runtime._read_model_trust_state()
+    except Exception as exc:
+        raise OllamaRuntimeError("managed Ollama gate integrity could not be verified") from exc
+    with runtime._state_lock:
+        error = install_error or runtime._runtime_state_error or runtime._operation_truth_error
+    if not installed or error:
+        raise OllamaRuntimeError("managed Ollama gate integrity verification failed")
+    _gate_request_remaining()
+
+
+@contextmanager
+def managed_ollama_gate_session(
+    model: str,
+    digest: str,
+    *,
+    deadline: float | None = None,
+) -> Iterator[ManagedOllamaAdmission]:
+    """Use one decision budget for admission, identity checks and release."""
+    with _gate_request_budget(time.monotonic() + 3.0 if deadline is None else deadline):
+        with _managed_ollama_gate_session(model, digest) as admission:
+            yield admission
+
+
+@contextmanager
+def _managed_ollama_gate_session(model: str, digest: str) -> Iterator[ManagedOllamaAdmission]:
+    """Bind the reviewed source and pin inside the existing immutable admission."""
+    if _normalise_model_digest(digest) != digest:
+        raise OllamaRuntimeError("managed Ollama gate digest is invalid")
+    with _MANAGED_RUNTIME_OWNER_LOCK:
+        runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
+    if runtime is None:
+        raise OllamaRuntimeError("managed Ollama runtime is not ready")
+    locked = _locked_model_alias(digest)
+    _require_gate_integrity(runtime)
+    try:
+        with runtime.inference_session(locked) as admission:
+            _require_gate_integrity(runtime)
+            if _gate_model_identity(runtime, model) != (locked, digest):
+                raise OllamaRuntimeError("managed Ollama gate source is not accepted")
+            yield admission
+            _require_gate_integrity(runtime)
+            if _gate_model_identity(runtime, model) != (locked, digest):
+                raise OllamaRuntimeError("managed Ollama gate source changed during inference")
+    except Exception:
+        # Shared admission cleanup can replace an inner error with its own
+        # identity failure. Preserve an observed integrity refusal after cleanup.
+        _require_gate_integrity(runtime)
+        raise
+
+
+def managed_ollama_gate_snapshot(model: str = "") -> dict[str, Any] | None:
+    """Bound a liveness snapshot's network identity checks to half a second."""
+    try:
+        with _gate_request_budget(time.monotonic() + 0.5):
+            return _managed_ollama_gate_snapshot(model)
+    except TimeoutError:
+        return None
+
+
+def _managed_ollama_gate_snapshot(model: str) -> dict[str, Any] | None:
+    """Return owned readiness or configured startup/failure display state.
+
+    A configured runtime without a published owner can explain progress, but
+    cannot establish readiness or an inference admission. Probe before asking
+    the existing status machinery to publish readiness; inference separately
+    rechecks the immutable model and source identity in its held admission.
+    """
+    with _MANAGED_RUNTIME_OWNER_LOCK:
+        runtime = _MANAGED_RUNTIME_OWNER() if _MANAGED_RUNTIME_OWNER is not None else None
+    owned = runtime is not None
+    if runtime is None:
+        from flask import current_app, has_app_context  # noqa: PLC0415
+
+        runtime = current_app.config.get("OLLAMA_RUNTIME") if has_app_context() else None
+    if runtime is None:
+        return None
+    try:
+        snapshot = dict(
+            runtime._status_snapshot(
+                probe_server=True,
+                verification_deadline=_GATE_REQUEST_DEADLINE.get(),
+            )
+        )
+        if not owned or not snapshot.get("installed") or snapshot.get("integrity_error"):
+            snapshot["ready"] = False
+        port = getattr(runtime, "_port", 0) or 0
+        snapshot["port"] = port if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535 else 0
+        snapshot["pinned_server_version"] = str(runtime.server_version)
+        snapshot["model_present"] = False
+        snapshot["reported_digest"] = None
+        if model and snapshot.get("ready"):
+            try:
+                identity = _gate_model_identity(runtime, model)
+            except Exception:
+                identity = None
+            if identity is not None:
+                snapshot["model_present"] = True
+                snapshot["reported_digest"] = identity[1]
+            with runtime._state_lock:
+                snapshot["model_digest_drift"] = {
+                    name: dict(value) for name, value in runtime._model_digest_drift.items()
+                }
+    except Exception:
+        return None
+    return snapshot
+
+
 def _normalise_machine(machine: str) -> str:
     value = machine.strip().lower()
     if value in {"amd64", "x64"}:
@@ -426,19 +664,13 @@ def _assets_for_platform(
     machine_name = _normalise_machine(machine or platform.machine())
     base = _asset_for_platform(system=system_name, machine=machine_name, version=version)
     selected_accelerator = (
-        _detect_linux_accelerator(system_name, machine_name)
-        if accelerator is None
-        else accelerator.strip().lower()
+        _detect_linux_accelerator(system_name, machine_name) if accelerator is None else accelerator.strip().lower()
     )
     if not selected_accelerator:
         return (base,)
-    selected = _ACCELERATOR_ASSETS_BY_VERSION.get(version, {}).get(
-        (system_name, machine_name, selected_accelerator)
-    )
+    selected = _ACCELERATOR_ASSETS_BY_VERSION.get(version, {}).get((system_name, machine_name, selected_accelerator))
     if selected is None:
-        raise OllamaRuntimeError(
-            f"unsupported Ollama accelerator: {system_name}/{machine_name}/{selected_accelerator}"
-        )
+        raise OllamaRuntimeError(f"unsupported Ollama accelerator: {system_name}/{machine_name}/{selected_accelerator}")
     name, sha256, size_bytes, max_extracted_bytes = selected
     overlay = OllamaAsset(
         name=name,
@@ -722,6 +954,7 @@ def _open_windows_private_regular_descriptor(
     invalid_message: str,
 ) -> int:
     """Open a Windows file as a reparse point and verify its native identity."""
+
     class ByHandleFileInformation(ctypes.Structure):
         _fields_ = [
             ("file_attributes", ctypes.c_uint32),
@@ -838,10 +1071,7 @@ def _open_windows_private_regular_descriptor(
             raise OllamaRuntimeError(invalid_message)
         root_handle = open_handle(managed_root, directory=True)
         root_info = handle_info(root_handle)
-        if (
-            not root_info.file_attributes & directory_attribute
-            or root_info.file_attributes & reparse_attribute
-        ):
+        if not root_info.file_attributes & directory_attribute or root_info.file_attributes & reparse_attribute:
             raise OllamaRuntimeError(invalid_message)
         root_final = final_path(root_handle)
         if root_final != _normalise_windows_expected_path(managed_root):
@@ -1851,6 +2081,9 @@ def _read_loopback_http_json(
     probe_deadline = time.monotonic() + _PROBE_DEADLINE_SECONDS
     if deadline is not None:
         probe_deadline = min(probe_deadline, deadline)
+    gate_deadline = _GATE_REQUEST_DEADLINE.get()
+    if gate_deadline is not None:
+        probe_deadline = min(probe_deadline, gate_deadline)
     remaining = probe_deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("managed Ollama probe exceeded its deadline")
@@ -1948,7 +2181,71 @@ def _loopback_request_url(base_url: str, path: str) -> str:
     return f"http://127.0.0.1:{parsed.port}{path}"
 
 
+class _GateDeadlineReader(io.RawIOBase):
+    """Apply the gate's total budget to every header or body socket read."""
+
+    def __init__(self, stream: Any, sock: Any) -> None:
+        self._stream = stream
+        self._sock = sock
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        self._sock.settimeout(_gate_request_remaining())
+        data = self._stream.read1(len(buffer))
+        _gate_request_remaining()
+        buffer[: len(data)] = data
+        return len(data)
+
+    def close(self) -> None:
+        try:
+            self._stream.close()
+        finally:
+            super().close()
+
+
+class _GateDeadlineHTTPResponse(http.client.HTTPResponse):
+    def __init__(self, sock: Any, *args: Any, **kwargs: Any) -> None:
+        super().__init__(sock, *args, **kwargs)
+        self.fp = io.BufferedReader(_GateDeadlineReader(self.fp, sock))
+
+
+class _GateDeadlineHTTPConnection(http.client.HTTPConnection):
+    response_class = _GateDeadlineHTTPResponse
+
+    def connect(self) -> None:
+        self.timeout = _gate_request_remaining()
+        super().connect()
+        _gate_request_remaining()
+
+    def send(self, data: Any) -> None:
+        if self.sock is None:
+            self.connect()
+        self.sock.settimeout(_gate_request_remaining())
+        super().send(data)
+        _gate_request_remaining()
+
+
+class _GateDeadlineHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, request: Any) -> Any:
+        return self.do_open(_GateDeadlineHTTPConnection, request)
+
+
+class _GateNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        fp.close()
+        raise OllamaRuntimeError("managed Ollama gate identity request was redirected")
+
+
 def _open_loopback_request(request: urllib.request.Request, *, timeout: float) -> Any:
+    if _GATE_REQUEST_DEADLINE.get() is not None:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _GateNoRedirect(),
+            _GateDeadlineHTTPHandler(),
+        )
+        return opener.open(request, timeout=min(timeout, _gate_request_remaining()))  # noqa: S310
     return _LOOPBACK_OPENER.open(request, timeout=timeout)  # noqa: S310
 
 
@@ -1968,16 +2265,20 @@ def _request_ollama_json(
         method=method,
         headers={"Content-Type": "application/json", "User-Agent": "FlintTrade/OllamaRuntime"},
     )
-    with _open_loopback_request(request, timeout=10) as response:
+    remaining = _gate_request_remaining()
+    with _open_loopback_request(request, timeout=min(10.0, remaining) if remaining is not None else 10) as response:
         with _interrupt_response_on_cancel(response, cancel_event):
             raw_response = response.read(_MAX_OLLAMA_API_RESPONSE_BYTES + 1)
             _raise_if_event_cancelled(cancel_event)
+            _gate_request_remaining()
     if len(raw_response) > _MAX_OLLAMA_API_RESPONSE_BYTES:
         raise OllamaRuntimeError("managed Ollama API response exceeded the size limit")
     if not raw_response.strip():
         return None
     try:
-        return json.loads(raw_response)
+        result = json.loads(raw_response)
+        _gate_request_remaining()
+        return result
     except (TypeError, ValueError) as exc:
         raise OllamaRuntimeError("managed Ollama API returned invalid JSON") from exc
 
@@ -2022,7 +2323,11 @@ _HSA_OVERRIDE_NAME = re.compile(r"HSA_OVERRIDE_GFX_VERSION(?:_[0-9]{1,3})?\Z")
 
 
 def _valid_environment_value(value: str, *, max_length: int = 4096) -> bool:
-    return bool(value) and len(value) <= max_length and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    return (
+        bool(value)
+        and len(value) <= max_length
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    )
 
 
 def _valid_https_proxy(value: str) -> bool:
@@ -2034,10 +2339,7 @@ def _valid_https_proxy(value: str) -> bool:
     except ValueError:
         return False
     return bool(
-        parsed.scheme.lower() in {"http", "https"}
-        and parsed.hostname
-        and port is not None
-        and not parsed.fragment
+        parsed.scheme.lower() in {"http", "https"} and parsed.hostname and port is not None and not parsed.fragment
     )
 
 
@@ -2115,10 +2417,7 @@ class OllamaRuntime:
         if releases is not None and asset is not None:
             raise ValueError("asset and releases cannot be supplied together")
         if releases is not None:
-            self._release_assets = {
-                version: tuple(selected_assets)
-                for version, selected_assets in releases.items()
-            }
+            self._release_assets = {version: tuple(selected_assets) for version, selected_assets in releases.items()}
         elif asset is None:
             self._release_assets = {
                 version: _assets_for_platform(version=version)
@@ -2456,9 +2755,7 @@ class OllamaRuntime:
         token: str,
         releases: list[dict[str, str]],
     ) -> dict[str, Any]:
-        payload = self._validate_uninstall_state(
-            {"schema": 1, "phase": phase, "token": token, "releases": releases}
-        )
+        payload = self._validate_uninstall_state({"schema": 1, "phase": phase, "token": token, "releases": releases})
         root = self._ensure_managed_directory(self.runtime_root, create=True)
         path = self._uninstall_state_path()
         try:
@@ -2557,9 +2854,10 @@ class OllamaRuntime:
         self._finish_committed_uninstall(state)
 
     def _infer_runtime_state(self) -> tuple[str, str | None]:
-        ordered = (self.target_version, *(
-            version for version in self._release_assets if version != self.target_version
-        ))
+        ordered = (
+            self.target_version,
+            *(version for version in self._release_assets if version != self.target_version),
+        )
         present = [
             version
             for version in ordered
@@ -2614,7 +2912,8 @@ class OllamaRuntime:
     def _write_runtime_state(self, active: str, previous: str | None) -> None:
         if (
             active not in self._release_assets
-            or previous is not None and previous not in self._release_assets
+            or previous is not None
+            and previous not in self._release_assets
             or previous == active
         ):
             raise OllamaRuntimeError("managed Ollama runtime version state is invalid")
@@ -2838,10 +3137,7 @@ class OllamaRuntime:
             or isinstance(started_at, bool)
             or not isinstance(started_at, (int, float))
             or started_at <= 0
-            or (
-                state == "running"
-                and (finished_at is not None or error is not None)
-            )
+            or (state == "running" and (finished_at is not None or error is not None))
             or (
                 state != "running"
                 and (
@@ -2913,11 +3209,7 @@ class OllamaRuntime:
         def migrate_unknown(operation: dict[str, Any]) -> None:
             started_at = operation.get("started_at")
             finished_at = operation.get("finished_at")
-            if (
-                finished_at is None
-                and not isinstance(started_at, bool)
-                and isinstance(started_at, (int, float))
-            ):
+            if finished_at is None and not isinstance(started_at, bool) and isinstance(started_at, (int, float)):
                 finished_at = max(time.time(), float(started_at))
             operation.update(
                 {
@@ -2943,10 +3235,10 @@ class OllamaRuntime:
             raw_operations = [legacy_operation]
         elif schema == 2 and isinstance(payload.get("operations"), list):
             raw_operations = payload["operations"]
-        elif schema in {3, _OPERATION_STATE_SCHEMA} and isinstance(
-            payload.get("operations"), list
-        ):
-            raw_operations = [dict(operation) if isinstance(operation, dict) else operation for operation in payload["operations"]]
+        elif schema in {3, _OPERATION_STATE_SCHEMA} and isinstance(payload.get("operations"), list):
+            raw_operations = [
+                dict(operation) if isinstance(operation, dict) else operation for operation in payload["operations"]
+            ]
             if schema == 3:
                 for operation in raw_operations:
                     if (
@@ -3397,7 +3689,8 @@ class OllamaRuntime:
                 and re.fullmatch(r"\.repair-[0-9a-f]{32}", path.name) is not None
                 and (
                     self._read_residue_marker(path, kind="repair") is not None
-                    or repair_state is not None and repair_state["quarantine"] == path.name
+                    or repair_state is not None
+                    and repair_state["quarantine"] == path.name
                 )
             )
             if not owned_repair_link:
@@ -3452,9 +3745,7 @@ class OllamaRuntime:
         except FileNotFoundError:
             return 0
         base_name = re.escape(self.log_path.name)
-        owned_name = re.compile(
-            rf"(?:{base_name}(?:\.[0-9]+)?|\.{base_name}(?:\.[0-9]+)?\.[0-9]+\.[0-9]+\.tmp)\Z"
-        )
+        owned_name = re.compile(rf"(?:{base_name}(?:\.[0-9]+)?|\.{base_name}(?:\.[0-9]+)?\.[0-9]+\.[0-9]+\.tmp)\Z")
         total = 0
         try:
             with os.scandir(log_root) as children:
@@ -3476,11 +3767,7 @@ class OllamaRuntime:
             raise OllamaRuntimeError("could not verify free disk space during extraction") from exc
         if free_bytes < next_bytes + _INSTALL_DISK_RESERVE_BYTES:
             raise OllamaRuntimeError("insufficient free disk space during extraction")
-        current_bytes = (
-            self._managed_storage_bytes(enforce_limit=False)
-            if managed_bytes is None
-            else managed_bytes
-        )
+        current_bytes = self._managed_storage_bytes(enforce_limit=False) if managed_bytes is None else managed_bytes
         if current_bytes + next_bytes > _MAX_MANAGED_STORAGE_BYTES:
             raise OllamaRuntimeError("managed Ollama extraction exceeds the managed storage size limit")
         return current_bytes + next_bytes
@@ -3503,16 +3790,14 @@ class OllamaRuntime:
     ) -> Path:
         path_stat = path.lstat()
         install_path_is_safe = not stat.S_ISLNK(path_stat.st_mode) and stat.S_ISDIR(path_stat.st_mode)
-        repair_path_is_safe = stat.S_ISDIR(path_stat.st_mode) or stat.S_ISREG(path_stat.st_mode) or stat.S_ISLNK(
-            path_stat.st_mode
+        repair_path_is_safe = (
+            stat.S_ISDIR(path_stat.st_mode) or stat.S_ISREG(path_stat.st_mode) or stat.S_ISLNK(path_stat.st_mode)
         )
         if (kind == "install" and not install_path_is_safe) or (kind == "repair" and not repair_path_is_safe):
             raise OllamaRuntimeError("managed Ollama residue path is unsafe")
         pid = os.getpid() if owner_pid is None else owner_pid
         process_created = (
-            self._process_create_time(pid, strict=True)
-            if owner_create_time is None
-            else owner_create_time
+            self._process_create_time(pid, strict=True) if owner_create_time is None else owner_create_time
         )
         marker = self._residue_marker_path(path, kind=kind)
         _write_private_file(
@@ -3598,9 +3883,7 @@ class OllamaRuntime:
             if kind == "install" and (stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISDIR(path_stat.st_mode)):
                 continue
             if kind == "repair" and not (
-                stat.S_ISDIR(path_stat.st_mode)
-                or stat.S_ISREG(path_stat.st_mode)
-                or stat.S_ISLNK(path_stat.st_mode)
+                stat.S_ISDIR(path_stat.st_mode) or stat.S_ISREG(path_stat.st_mode) or stat.S_ISLNK(path_stat.st_mode)
             ):
                 continue
             marker = self._read_residue_marker(path, kind=kind)
@@ -3647,9 +3930,10 @@ class OllamaRuntime:
             owner_pid = int(marker["owner_pid"])
             owner_created = float(marker["owner_create_time"])
             if self._process_identity_is_alive(owner_pid, owner_created):
-                current_owner = owner_pid == os.getpid() and abs(
-                    self._process_create_time(os.getpid(), strict=True) - owner_created
-                ) < 0.01
+                current_owner = (
+                    owner_pid == os.getpid()
+                    and abs(self._process_create_time(os.getpid(), strict=True) - owner_created) < 0.01
+                )
                 if not current_owner:
                     raise OllamaRuntimeError("another process still owns managed Ollama residue")
             owned.append((path, kind))
@@ -3730,9 +4014,7 @@ class OllamaRuntime:
     def _normalise_existing_logs(self) -> None:
         log_root = self._ensure_managed_directory(self.log_path.parent, create=True)
         numbered_log = re.compile(rf"{re.escape(self.log_path.name)}\.([0-9]+)\Z")
-        temporary_log = re.compile(
-            rf"\.{re.escape(self.log_path.name)}(?:\.[0-9]+)?\.[0-9]+\.[0-9]+\.tmp\Z"
-        )
+        temporary_log = re.compile(rf"\.{re.escape(self.log_path.name)}(?:\.[0-9]+)?\.[0-9]+\.[0-9]+\.tmp\Z")
         with self._log_lock:
             try:
                 with os.scandir(log_root) as children:
@@ -3740,8 +4022,7 @@ class OllamaRuntime:
                     for child in children:
                         numbered_match = numbered_log.fullmatch(child.name)
                         if temporary_log.fullmatch(child.name) or (
-                            numbered_match is not None
-                            and not 1 <= int(numbered_match.group(1)) <= _LOG_BACKUP_COUNT
+                            numbered_match is not None and not 1 <= int(numbered_match.group(1)) <= _LOG_BACKUP_COUNT
                         ):
                             residue.append(Path(child.path))
             except OSError as exc:
@@ -3942,7 +4223,10 @@ class OllamaRuntime:
         }
         if not isinstance(record, dict) or record.get("schema") != 1:
             raise OllamaRuntimeError("managed Ollama process ownership state is invalid")
-        if any(isinstance(record.get(key), bool) or not isinstance(record.get(key), kind) for key, kind in required_types.items()):
+        if any(
+            isinstance(record.get(key), bool) or not isinstance(record.get(key), kind)
+            for key, kind in required_types.items()
+        ):
             raise OllamaRuntimeError("managed Ollama process ownership state is invalid")
         if (
             record["backend_pid"] <= 0
@@ -4026,10 +4310,9 @@ class OllamaRuntime:
         )
         current_backend = False
         if allow_current_backend and int(record["backend_pid"]) == os.getpid():
-            current_backend = abs(
-                self._process_create_time(os.getpid(), strict=True)
-                - float(record["backend_create_time"])
-            ) < 0.01
+            current_backend = (
+                abs(self._process_create_time(os.getpid(), strict=True) - float(record["backend_create_time"])) < 0.01
+            )
         if backend_is_alive and not current_backend:
             raise OllamaRuntimeError("another FlintTrade backend still owns the managed Ollama runtime")
         if int(record["child_pid"]) == 0:
@@ -4055,9 +4338,7 @@ class OllamaRuntime:
                 raise OllamaRuntimeError("stale managed Ollama child identity could not be verified")
             self._remove_process_owner_record_after_teardown()
             return True
-        raise OllamaRuntimeError(
-            "managed Ollama survived its owning backend; terminate it manually before continuing"
-        )
+        raise OllamaRuntimeError("managed Ollama survived its owning backend; terminate it manually before continuing")
 
     def _metadata_file(self, name: str, *, version: str | None = None) -> Path:
         install_dir = self.runtime_root / (version or self._active_version)
@@ -4152,10 +4433,7 @@ class OllamaRuntime:
             install_dir=install_dir,
             deadline=deadline,
         )
-        expected_assets = [
-            {"name": asset.name, "sha256": asset.sha256}
-            for asset in selected_assets
-        ]
+        expected_assets = [{"name": asset.name, "sha256": asset.sha256} for asset in selected_assets]
         if (
             marker.get("schema") != 3
             or marker.get("version") != selected_version
@@ -4235,9 +4513,7 @@ class OllamaRuntime:
                 actual_size = path.stat().st_size
             except OSError as exc:
                 raise OllamaRuntimeError("managed Ollama runtime integrity verification failed") from exc
-            if actual_size != expected_size or (
-                rehash and _sha256_file(path, deadline=deadline) != expected_digest
-            ):
+            if actual_size != expected_size or (rehash and _sha256_file(path, deadline=deadline) != expected_digest):
                 raise OllamaRuntimeError("managed Ollama runtime integrity verification failed")
 
         executable = install_dir.joinpath(*PurePosixPath(candidate).parts)
@@ -4274,6 +4550,18 @@ class OllamaRuntime:
             return False, None
         return True, None
 
+    def install_present(self) -> bool:
+        """Return whether a FlintTrade-managed Ollama install is on disk.
+
+        A missing install is unmanaged. The desk then says how to start Ollama
+        and does not offer Start. This does not launch the server.
+        """
+        try:
+            installed, _error = self._installation_status()
+        except Exception:  # noqa: BLE001 - a broken install is not a managed Start
+            return False
+        return bool(installed)
+
     @staticmethod
     def _public_operation(operation: dict[str, Any] | None) -> dict[str, Any] | None:
         if operation is None:
@@ -4299,9 +4587,7 @@ class OllamaRuntime:
         probe_server: bool = False,
         verification_deadline: float | None = None,
     ) -> dict[str, Any]:
-        installed, installation_integrity_error = self._installation_status(
-            verification_deadline=verification_deadline
-        )
+        installed, installation_integrity_error = self._installation_status(verification_deadline=verification_deadline)
         with self._deadline_lock(
             self._process_lock,
             deadline=verification_deadline,
@@ -4319,11 +4605,7 @@ class OllamaRuntime:
                 operation="status snapshot",
             ):
                 operation_truth_error = self._operation_truth_error
-                integrity_error = (
-                    operation_truth_error
-                    or self._runtime_state_error
-                    or installation_integrity_error
-                )
+                integrity_error = operation_truth_error or self._runtime_state_error or installation_integrity_error
                 phase = self._phase
                 operation = self._public_operation(self._operation)
                 unresolved_operation = self._public_operation(
@@ -4331,8 +4613,7 @@ class OllamaRuntime:
                         (
                             candidate
                             for candidate in self._operations
-                            if candidate.get("state") == "indeterminate"
-                            and candidate.get("reconciled_at") is None
+                            if candidate.get("state") == "indeterminate" and candidate.get("reconciled_at") is None
                         ),
                         None,
                     )
@@ -4341,9 +4622,7 @@ class OllamaRuntime:
                 error = self._error or None
                 downloaded_bytes = self._downloaded_bytes
                 download_total_bytes = self._download_total_bytes
-                model_digest_drift = {
-                    model: dict(digests) for model, digests in self._model_digest_drift.items()
-                }
+                model_digest_drift = {model: dict(digests) for model, digests in self._model_digest_drift.items()}
                 teardown = dict(self._teardown)
                 inference_processor = self._inference_processor
                 log_error = self._log_error or None
@@ -4470,11 +4749,7 @@ class OllamaRuntime:
         deadline: float | None,
         operation: str,
     ) -> Iterator[None]:
-        acquired = (
-            lock.acquire()
-            if deadline is None
-            else lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
-        )
+        acquired = lock.acquire() if deadline is None else lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
         if not acquired:
             raise OllamaRuntimeError(f"managed Ollama {operation} timed out")
         try:
@@ -4585,9 +4860,7 @@ class OllamaRuntime:
                     daemon=True,
                 )
                 cleanup.start()
-                raise _OllamaLifecycleCleanupTimedOut(
-                    "managed Ollama lifecycle transition timed out"
-                ) from exc
+                raise _OllamaLifecycleCleanupTimedOut("managed Ollama lifecycle transition timed out") from exc
 
     def _clear_lifecycle_transition_when_available(self) -> None:
         """Release a timed-out transition only after condition ownership is recovered."""
@@ -4749,8 +5022,7 @@ class OllamaRuntime:
                 except OllamaRuntimeError as exc:
                     with self._state_lock:
                         unresolved = any(
-                            operation.get("state") == "indeterminate"
-                            and operation.get("reconciled_at") is None
+                            operation.get("state") == "indeterminate" and operation.get("reconciled_at") is None
                             for operation in self._operations
                         )
                     if unresolved and "operation truth is unavailable" not in str(exc):
@@ -4844,22 +5116,14 @@ class OllamaRuntime:
 
     def _prepare_operation_lock_path(self, lock_path: Path, purpose: str) -> None:
         lease_name = "lifecycle" if purpose == "lifecycle" else f"operation {purpose}"
-        flags = (
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_BINARY", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-        )
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
         created = False
         try:
             descriptor = os.open(lock_path, flags, 0o600)
         except FileExistsError:
             pass
         except OSError as exc:
-            raise OllamaRuntimeError(
-                f"managed Ollama {lease_name} lease path could not be prepared"
-            ) from exc
+            raise OllamaRuntimeError(f"managed Ollama {lease_name} lease path could not be prepared") from exc
         else:
             created = True
             try:
@@ -4870,9 +5134,7 @@ class OllamaRuntime:
                     durable_unlink(lock_path)
                 except OSError:
                     pass
-                raise OllamaRuntimeError(
-                    f"managed Ollama {lease_name} lease path could not be prepared"
-                ) from exc
+                raise OllamaRuntimeError(f"managed Ollama {lease_name} lease path could not be prepared") from exc
         try:
             self._validate_operation_lock_path(lock_path, purpose)
         except Exception:
@@ -4963,11 +5225,7 @@ class OllamaRuntime:
                 self._operations = operations
                 self._operation = dict(operations[-1]) if operations else None
             existing = next(
-                (
-                    operation
-                    for operation in operations
-                    if operation.get("admission_id") == selected_admission_id
-                ),
+                (operation for operation in operations if operation.get("admission_id") == selected_admission_id),
                 None,
             )
             if existing is not None:
@@ -4980,8 +5238,7 @@ class OllamaRuntime:
                 (
                     operation
                     for operation in operations
-                    if operation.get("state") == "indeterminate"
-                    and operation.get("reconciled_at") is None
+                    if operation.get("state") == "indeterminate" and operation.get("reconciled_at") is None
                 ),
                 None,
             )
@@ -5054,8 +5311,7 @@ class OllamaRuntime:
                     (
                         index
                         for index, operation in enumerate(operations)
-                        if operation.get("id") == operation_id
-                        and operation.get("admission_id") == admission_id
+                        if operation.get("id") == operation_id and operation.get("admission_id") == admission_id
                     ),
                     None,
                 )
@@ -5094,11 +5350,7 @@ class OllamaRuntime:
                 if legacy:
                     self._write_operation_state(operations)
                 operation_index = next(
-                    (
-                        index
-                        for index, operation in enumerate(operations)
-                        if operation.get("id") == operation_id
-                    ),
+                    (index for index, operation in enumerate(operations) if operation.get("id") == operation_id),
                     None,
                 )
                 if operation_index is None:
@@ -5112,9 +5364,7 @@ class OllamaRuntime:
                     operation.get("subject"),
                 )
                 invalid_result = (
-                    state == "succeeded"
-                    and operation["kind"] in _OPERATION_RESULT_KINDS
-                    and normalised_result is None
+                    state == "succeeded" and operation["kind"] in _OPERATION_RESULT_KINDS and normalised_result is None
                 )
                 terminal = dict(operation)
                 terminal.update(
@@ -5563,8 +5813,10 @@ class OllamaRuntime:
         except Exception as exc:
             cancelled = isinstance(exc, _OllamaOperationCancelled)
             self._phase = "stopped" if cancelled else "failed"
-            self._error = "" if cancelled else (
-                str(exc) if isinstance(exc, OllamaRuntimeError) else "managed Ollama installation failed"
+            self._error = (
+                ""
+                if cancelled
+                else (str(exc) if isinstance(exc, OllamaRuntimeError) else "managed Ollama installation failed")
             )
             if isinstance(exc, OllamaRuntimeError):
                 raise
@@ -5591,6 +5843,7 @@ class OllamaRuntime:
             if self._runtime_state_error:
                 raise OllamaRuntimeError(self._runtime_state_error)
             if self._active_version == self.target_version:
+                self._prune_superseded_rollback_if_idle()
                 raise OllamaRuntimeError("managed Ollama runtime is already on the preferred release")
             self._require_stopped_runtime_mutation("runtime update")
             self._ensure_runtime_state_committed()
@@ -5602,9 +5855,58 @@ class OllamaRuntime:
                 self._raise_if_cancelled()
                 self._mark_operation_mutation_started()
                 self._write_runtime_state(self.target_version, previous)
+            self._prune_unreferenced_releases()
             self._phase = "installed"
             self._error = ""
             return self._status_snapshot()
+
+    def _prune_superseded_rollback_if_idle(self) -> None:
+        """Finish a prune that failed after a previous update already switched.
+
+        ``update`` raises once the preferred release is active. That retry is
+        the only way to remove a rollback generation the failed prune left
+        behind, and only when the runtime is stopped.
+        """
+        if self._runtime_state_error or not self._unreferenced_release_dirs():
+            return
+        self._require_stopped_runtime_mutation("runtime update")
+        self._prune_unreferenced_releases()
+
+    def _unreferenced_release_dirs(self) -> list[Path]:
+        """Return installed version directories that are neither active nor previous."""
+        retain = {version for version in (self._active_version, self._previous_version) if version}
+        try:
+            root = self._ensure_managed_directory(self.runtime_root, create=False)
+        except FileNotFoundError:
+            return []
+        unreferenced: list[Path] = []
+        for path in self._bounded_children(root):
+            if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", path.name) is None or path.name in retain:
+                continue
+            unreferenced.append(path)
+        return unreferenced
+
+    def _prune_unreferenced_releases(self) -> None:
+        """Delete the rollback generation this update no longer names.
+
+        One previous release is enough to roll back. Keeping the generation
+        before that permanently retains several gigabytes, and uninstall later
+        fails once a build no longer recognises that version.
+        """
+        for path in self._unreferenced_release_dirs():
+            try:
+                path_stat = path.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise OllamaRuntimeError("managed Ollama superseded rollback could not be inspected") from exc
+            if (
+                stat.S_ISLNK(path_stat.st_mode)
+                or self._path_is_reparse(path_stat)
+                or not stat.S_ISDIR(path_stat.st_mode)
+            ):
+                raise OllamaRuntimeError("managed Ollama superseded rollback path is unsafe")
+            _remove_path_without_following_root(path)
 
     def rollback(self) -> dict[str, Any]:
         """Switch to the one retained, fully rehashed release."""
@@ -5640,9 +5942,7 @@ class OllamaRuntime:
                 if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", path.name) is None:
                     continue
                 if path.name not in self._release_assets:
-                    raise OllamaRuntimeError(
-                        f"managed Ollama release {path.name} is not recognised by this build"
-                    )
+                    raise OllamaRuntimeError(f"managed Ollama release {path.name} is not recognised by this build")
                 path_stat = path.lstat()
                 is_directory = (
                     stat.S_ISDIR(path_stat.st_mode)
@@ -5727,9 +6027,7 @@ class OllamaRuntime:
     def repair(self) -> dict[str, Any]:
         """Quarantine and transactionally replace one corrupt managed install."""
         if self._operation_truth_error:
-            raise OllamaRuntimeError(
-                "durable operation receipt truth is unavailable; runtime-file repair is blocked"
-            )
+            raise OllamaRuntimeError("durable operation receipt truth is unavailable; runtime-file repair is blocked")
         operation_context = getattr(self._operation_context, "current", None)
         if not isinstance(operation_context, dict):
             result, _status_code = self.run_synchronous_operation(
@@ -5761,8 +6059,7 @@ class OllamaRuntime:
                     (
                         operation
                         for operation in operations
-                        if operation.get("state") == "indeterminate"
-                        and operation.get("reconciled_at") is None
+                        if operation.get("state") == "indeterminate" and operation.get("reconciled_at") is None
                     ),
                     None,
                 )
@@ -5770,18 +6067,14 @@ class OllamaRuntime:
                     self._operations = operations
                     self._operation = dict(operations[-1]) if operations else None
                 if unresolved is not None:
-                    raise OllamaRuntimeError(
-                        "an indeterminate managed Ollama operation requires acknowledgement"
-                    )
+                    raise OllamaRuntimeError("an indeterminate managed Ollama operation requires acknowledgement")
                 if admitted is None:
                     raise OllamaRuntimeError("managed Ollama repair operation ownership was lost")
             return self._repair_locked()
 
     def _repair_locked(self) -> dict[str, Any]:
         if self._operation_truth_error:
-            raise OllamaRuntimeError(
-                "durable operation receipt truth is unavailable; runtime-file repair is blocked"
-            )
+            raise OllamaRuntimeError("durable operation receipt truth is unavailable; runtime-file repair is blocked")
         self._prepare_direct_operation()
         runtime_root = self.install_dir.parent
         try:
@@ -5867,6 +6160,39 @@ class OllamaRuntime:
         self._phase = "installed"
         self._error = ""
         return result
+
+    def version_snapshot(self) -> dict[str, str | None]:
+        """Observe the configured tag and loopback server version without mutation.
+
+        This About-only snapshot does not reconcile operation journals, verify
+        installation receipts, inspect process ownership or call an injected
+        probe. A reply is a version observation, not managed-runtime readiness.
+        The existing raw HTTP probe never redirects and shares one absolute
+        deadline across connection, headers and response body.
+        """
+        from flinttrade_core.version_inventory import sanitise_version
+
+        deadline = time.monotonic() + 0.75
+        configured = sanitise_version(getattr(self, "target_version", None))
+        port = getattr(self, "_port", 0)
+        reported = None
+        status = "unavailable"
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
+            try:
+                payload = _read_loopback_http_json(f"http://127.0.0.1:{port}", "/api/version", deadline=deadline)
+            except OSError:
+                status = "not_responding"
+            except (ValueError, OllamaRuntimeError):
+                pass  # A malformed response cannot supply an observed version.
+            else:
+                reported = sanitise_version(payload.get("version")) if isinstance(payload, dict) else None
+                if reported is not None:
+                    status = "reported"
+        return {
+            "configured": configured,
+            "reported": reported,
+            "status": status,
+        }
 
     def status(self) -> dict[str, Any]:
         deadline = time.monotonic() + _SYNC_LIFECYCLE_WAIT_SECONDS
@@ -6076,9 +6402,7 @@ class OllamaRuntime:
                 operation = self._operation
                 current_operation_id = str(operation.get("id")) if operation is not None else None
                 running_operation_id = (
-                    current_operation_id
-                    if operation is not None and operation.get("state") == "running"
-                    else None
+                    current_operation_id if operation is not None and operation.get("state") == "running" else None
                 )
                 if running_operation_id is not None and expected_operation_id is None:
                     raise OllamaRuntimeError("operation ID is required to cancel an active Ollama operation")
@@ -6396,10 +6720,7 @@ class OllamaRuntime:
                             raise OllamaRuntimeError("managed Ollama model store contains too many entries")
                         child_stat = child.stat(follow_symlinks=False)
                         reparse_mask = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-                        is_reparse = bool(
-                            reparse_mask
-                            and getattr(child_stat, "st_file_attributes", 0) & reparse_mask
-                        )
+                        is_reparse = bool(reparse_mask and getattr(child_stat, "st_file_attributes", 0) & reparse_mask)
                         if child.is_symlink() or stat.S_ISLNK(child_stat.st_mode) or is_reparse:
                             raise OllamaRuntimeError("managed Ollama model store is unsafe")
                         if stat.S_ISDIR(child_stat.st_mode):
@@ -6494,11 +6815,7 @@ class OllamaRuntime:
             for value in (raw_model.get("name"), raw_model.get("model")):
                 if isinstance(value, str):
                     live_digests[value] = digest
-        reconciled_accepted = {
-            alias: digest
-            for alias, digest in accepted.items()
-            if live_digests.get(alias) == digest
-        }
+        reconciled_accepted = {alias: digest for alias, digest in accepted.items() if live_digests.get(alias) == digest}
         reconciled_sources = {
             source: alias
             for source, alias in sources.items()
@@ -6509,9 +6826,7 @@ class OllamaRuntime:
         with self._state_lock:
             retained = set(reconciled_accepted) | set(reconciled_sources)
             self._model_digest_drift = {
-                model: digests
-                for model, digests in self._model_digest_drift.items()
-                if model in retained
+                model: digests for model, digests in self._model_digest_drift.items() if model in retained
             }
 
     def _best_effort_reconcile_model_trust(self) -> None:
@@ -6643,11 +6958,7 @@ class OllamaRuntime:
         requested_aliases = set(_model_aliases(model))
         for raw_model in self._raw_models():
             names = [raw_model.get("name"), raw_model.get("model")]
-            if not any(
-                requested_aliases.intersection(_model_aliases(name))
-                for name in names
-                if isinstance(name, str)
-            ):
+            if not any(requested_aliases.intersection(_model_aliases(name)) for name in names if isinstance(name, str)):
                 continue
             current_digest = _normalise_model_digest(raw_model.get("digest"))
             if current_digest == expected_digest:
@@ -6673,11 +6984,7 @@ class OllamaRuntime:
             if not isinstance(raw_model, dict):
                 continue
             names = [raw_model.get("name"), raw_model.get("model")]
-            if not any(
-                requested_aliases.intersection(_model_aliases(name))
-                for name in names
-                if isinstance(name, str)
-            ):
+            if not any(requested_aliases.intersection(_model_aliases(name)) for name in names if isinstance(name, str)):
                 continue
             matches = _normalise_model_digest(raw_model.get("digest")) == expected_digest
             if matches:
@@ -6730,8 +7037,7 @@ class OllamaRuntime:
                     (
                         candidate
                         for candidate in candidate_names
-                        if isinstance(candidate, str)
-                        and requested_aliases.intersection(_model_aliases(candidate))
+                        if isinstance(candidate, str) and requested_aliases.intersection(_model_aliases(candidate))
                     ),
                     "",
                 )
@@ -6788,10 +7094,7 @@ class OllamaRuntime:
                 if self._model_pull is not None:
                     pull_model = str(self._model_pull.get("model") or "")
                     pull_digest = _normalise_model_digest(self._model_pull.get("digest"))
-                    if (
-                        pull_digest == expected_digest
-                        and requested_aliases.intersection(_model_aliases(pull_model))
-                    ):
+                    if pull_digest == expected_digest and requested_aliases.intersection(_model_aliases(pull_model)):
                         self._model_pull.update(
                             {
                                 "status": "accepted",
@@ -6874,11 +7177,7 @@ class OllamaRuntime:
         accepted, sources = self._read_model_trust_state()
         requested_aliases = set(_model_aliases(model))
         previous_source = next(
-            (
-                source
-                for source in sources
-                if requested_aliases.intersection(_model_aliases(source))
-            ),
+            (source for source in sources if requested_aliases.intersection(_model_aliases(source))),
             "",
         )
         previous_alias = sources.get(previous_source, "")
@@ -6949,10 +7248,13 @@ class OllamaRuntime:
                 projected_store_bytes = initial_store_bytes + aggregate_total
                 if projected_store_bytes > _MAX_MODEL_STORE_BYTES:
                     raise OllamaRuntimeError("Ollama model pull exceeds the model store size limit")
-                projected_managed_bytes = max(
-                    initial_managed_bytes,
-                    initial_non_log_bytes + _MAX_LOG_STORAGE_BYTES,
-                ) + aggregate_total
+                projected_managed_bytes = (
+                    max(
+                        initial_managed_bytes,
+                        initial_non_log_bytes + _MAX_LOG_STORAGE_BYTES,
+                    )
+                    + aggregate_total
+                )
                 if projected_managed_bytes > _MAX_MANAGED_STORAGE_BYTES:
                     raise OllamaRuntimeError("Ollama model pull exceeds the managed storage size limit")
                 try:
@@ -7045,9 +7347,7 @@ class OllamaRuntime:
             with self._bounded_state_lock(deadline=deadline, operation="shutdown transition"):
                 operation = self._operation
                 expected_operation_id = (
-                    str(operation.get("id"))
-                    if operation is not None and operation.get("state") == "running"
-                    else None
+                    str(operation.get("id")) if operation is not None and operation.get("state") == "running" else None
                 )
             remaining = _remaining_teardown_time(deadline)
             self.stop(

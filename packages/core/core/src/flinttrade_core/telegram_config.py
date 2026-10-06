@@ -186,9 +186,7 @@ def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None
             raise TelegramConfigError("incomplete_enable")
         notifications["telegram_enabled"] = next_enabled
         notifications["telegram_chat_id"] = next_chat_id
-        notifications["telegram_bot_token_ref"] = (
-            TELEGRAM_BOT_TOKEN_REF if would_have_token else ""
-        )
+        notifications["telegram_bot_token_ref"] = TELEGRAM_BOT_TOKEN_REF if would_have_token else ""
 
     workspace.update(_apply)
 

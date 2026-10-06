@@ -9,6 +9,7 @@ import path from "path";
 
 import { reticle } from "@reticlehq/vite-plugin";
 import { shouldInjectReticleConnect } from "./vite.reticleConnectGate.ts";
+import { readVersionInventory } from "./vite.versionInventory.ts";
 
 function readFlintTradeVersion(): string {
   const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -31,6 +32,7 @@ export default defineConfig({
   envDir: publicDemoBuild ? false : undefined,
   define: {
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
+    __FLINTTRADE_VERSION_INVENTORY__: JSON.stringify(readVersionInventory(import.meta.dirname)),
   },
   plugins: [
     // Official plugin. inject is off unless a Reticle daemon is already on
@@ -64,6 +66,14 @@ export default defineConfig({
       "@flinttrade/design-system/cinematic.css": path.resolve(import.meta.dirname, "../../core/design-system/src/cinematic.css"),
       "@flinttrade/design-system/brand": path.resolve(import.meta.dirname, "../../core/design-system/src/brand/index.ts"),
       "@flinttrade/design-system": path.resolve(import.meta.dirname, "../../core/design-system/src/index.ts"),
+      "@flinttrade/indian-charges": path.resolve(
+        import.meta.dirname,
+        "../../core/core/src/flinttrade_core/data/indian_charges.json",
+      ),
+      "@flinttrade/instrument-lots": path.resolve(
+        import.meta.dirname,
+        "../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json",
+      ),
       // Plotly widgets render through plotly.js-dist-min directly. Redirect
       // legacy Plotly specifiers so old imports do not leak the full bundle.
       "plotly.js/dist/plotly": "plotly.js-dist-min",
@@ -93,21 +103,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // FlintTrade backend (port 5100) — must be listed before /api
-      // Port 5100 avoids conflict with OpenAlgo multi-instance (5000-5009)
       "/ft-api": {
         target: process.env.VITE_FLINTTRADE_HOST || "http://127.0.0.1:5100",
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/ft-api/, ""),
-      },
-      // OpenAlgo REST API (port 5000)
-      "/api": {
-        target: process.env.VITE_OPENALGO_HOST || "http://127.0.0.1:5000",
-        changeOrigin: true,
-      },
-      "/ws": {
-        target: process.env.VITE_OPENALGO_WS || "ws://127.0.0.1:8765",
-        ws: true,
-        rewrite: (p: string) => p.replace(/^\/ws/, ""),
       },
     },
   },

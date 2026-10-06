@@ -4,7 +4,7 @@
  * Features:
  *   - Continuously scrolling bar of instrument prices
  *   - Per-chip: symbol, LTP, change, change% — green/red coloring
- *   - Powered by Jotai tickAtomFamily for live WebSocket prices
+ *   - Reads Jotai price atoms populated by native polling or the Example feed
  *   - CSS keyframe animation — pauses on hover
  *   - Default instruments: indices + top equities
  */
@@ -73,7 +73,7 @@ function PriceChip({ instrument }: PriceChipProps) {
 
   const ltp = tick?.ltp ?? null;
   // Prefer prevClose (from usePrevClose REST fetch) for accurate change%.
-  // LTP-mode WebSocket does not send close/pct — compute from prevClose + live LTP.
+  // Partial native quotes may omit close/pct; compute from the session reference.
   const prevClose = tick?.prevClose ?? tick?.close ?? null;
   const pct =
     prevClose !== null && prevClose > 0 && ltp !== null

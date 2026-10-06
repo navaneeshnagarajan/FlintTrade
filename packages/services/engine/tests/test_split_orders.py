@@ -1,6 +1,6 @@
 """Tests for packages/services/engine/src/split_orders.py.
 
-No live OpenAlgo connection required — all routing is mocked.
+No live broker connection required — all routing is mocked.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _run(result):
 
 
 _PRINCIPAL = BracketPrincipal(
-    actor_id="tester", jti="jti-1", adapter_id="openalgo", account_id="default"
+    actor_id="tester", jti="jti-1", adapter_id="broker", account_id="default"
 )
 
 

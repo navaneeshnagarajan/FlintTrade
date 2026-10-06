@@ -1,6 +1,6 @@
 """Extended tests for CronManager — job lifecycle, history, built-in jobs, holiday logic.
 
-All external dependencies (APScheduler, OpenAlgo client) are mocked.
+All external dependencies (APScheduler, broker client) are mocked.
 """
 
 from __future__ import annotations
@@ -497,7 +497,7 @@ class TestBuiltinJobFactories:
         return datetime.now(IST).date().weekday() < 5
 
     def test_health_check_job_on_weekday(self):
-        """health_check_job pings OpenAlgo on a weekday, logs audit and Telegram."""
+        """health_check_job pings broker on a weekday, logs audit and Telegram."""
         from flinttrade_automation.cron_manager import make_health_check_job
         mock_client = MagicMock()
         mock_client.ping = MagicMock(return_value={"status": "success"})
@@ -592,7 +592,7 @@ class TestLoadHolidays:
             {"data": {"NSE": [{"date": "2026-04-14"}]}},
         ],
     )
-    def test_loads_supported_openalgo_envelopes(self, payload):
+    def test_loads_supported_broker_envelopes(self, payload):
         import asyncio
         from flinttrade_automation.cron_manager import load_holidays_from_client
 
@@ -645,7 +645,7 @@ class TestLoadHolidays:
     def test_returns_empty_when_no_client(self):
         import asyncio
         from flinttrade_automation.cron_manager import CronManager
-        cron = CronManager(openalgo_client=None)
+        cron = CronManager(broker_client=None)
         result = asyncio.run(cron.load_holidays())
         assert result == set()
 
@@ -675,7 +675,7 @@ class TestLoadHolidays:
         async def holidays(**_kwargs):
             return payload
 
-        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        cron = CronManager(broker_client=MagicMock(holidays=holidays))
 
         asyncio.run(cron.load_holidays())
 
@@ -694,7 +694,7 @@ class TestLoadHolidays:
         async def holidays(**_kwargs):
             return payloads.pop(0)
 
-        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        cron = CronManager(broker_client=MagicMock(holidays=holidays))
         retained_reference = cron.holidays
 
         asyncio.run(cron.load_holidays())
@@ -716,7 +716,7 @@ class TestLoadHolidays:
                 return {"holidays": ["2026-01-26"]}
             raise RuntimeError("calendar unavailable")
 
-        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        cron = CronManager(broker_client=MagicMock(holidays=holidays))
         asyncio.run(cron.load_holidays())
         first_payload = cron.holiday_payload
 
@@ -750,7 +750,7 @@ class TestLoadHolidays:
                 }
             return rejected_payload
 
-        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        cron = CronManager(broker_client=MagicMock(holidays=holidays))
         with patch("flinttrade_automation.cron_manager.datetime") as clock:
             clock.now.return_value = datetime(2026, 7, 11, tzinfo=IST)
             asyncio.run(cron.load_holidays())
@@ -772,7 +772,7 @@ class TestLoadHolidays:
                 "data": [{"date": "2027-01-26", "holiday_type": "TRADING_HOLIDAY"}],
             }
 
-        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        cron = CronManager(broker_client=MagicMock(holidays=holidays))
         with patch("flinttrade_automation.cron_manager.datetime") as clock:
             clock.now.return_value = datetime(2027, 1, 1, tzinfo=IST)
             asyncio.run(cron.load_holidays())
@@ -1059,7 +1059,7 @@ class TestEodSyncJob:
     def test_swallows_starter_failure(self):
         from flinttrade_automation.cron_manager import make_eod_sync_job
 
-        starter = MagicMock(side_effect=RuntimeError("openalgo down"))
+        starter = MagicMock(side_effect=RuntimeError("broker down"))
         with patch(
             "flinttrade_automation.cron_manager._is_market_holiday", return_value=False
         ):

@@ -152,7 +152,7 @@ class SmartRouteResult:
 def _available_qty_top_n(depth: dict, action: Literal["BUY", "SELL"], n: int = 5) -> int:
     """Sum the available quantity across the top *n* price levels in *depth*.
 
-    Depth dict format (matches OpenAlgo depth response)::
+    Depth dict format (matches broker depth response)::
 
         {
             "asks": [{"price": 100.0, "quantity": 200}, ...],
@@ -208,7 +208,7 @@ class SmartOrderRouter:
         base_router: The underlying gated dispatcher (any object exposing an
             async ``route_order``); production wires the ``GatedChildExecutor``.
         depth_provider: Async callable ``(symbol, exchange) → dict`` returning
-            market depth in OpenAlgo format.
+            market depth in broker format.
         volume_provider: Async callable ``(symbol, exchange) → int`` returning
             recent traded volume.
         twap_window_seconds: Total TWAP window for ``low`` urgency orders (default 300 s).

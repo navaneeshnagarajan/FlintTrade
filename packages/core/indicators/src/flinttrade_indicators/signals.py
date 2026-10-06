@@ -40,9 +40,7 @@ def crossover(
     validate_series(s1, min_length=1)
     validate_series(s2, min_length=1)
     if len(s1) != len(s2):
-        raise ValueError(
-            f"Array length mismatch: s1={len(s1)}, s2={len(s2)}"
-        )
+        raise ValueError(f"Array length mismatch: s1={len(s1)}, s2={len(s2)}")
 
     n = len(s1)
     result = np.zeros(n, dtype=np.bool_)
@@ -79,9 +77,7 @@ def crossunder(
     validate_series(s1, min_length=1)
     validate_series(s2, min_length=1)
     if len(s1) != len(s2):
-        raise ValueError(
-            f"Array length mismatch: s1={len(s1)}, s2={len(s2)}"
-        )
+        raise ValueError(f"Array length mismatch: s1={len(s1)}, s2={len(s2)}")
 
     n = len(s1)
     result = np.zeros(n, dtype=np.bool_)
@@ -174,9 +170,7 @@ def exrem(
     validate_series(primary, min_length=1)
     validate_series(secondary, min_length=1)
     if len(primary) != len(secondary):
-        raise ValueError(
-            f"Array length mismatch: primary={len(primary)}, secondary={len(secondary)}"
-        )
+        raise ValueError(f"Array length mismatch: primary={len(primary)}, secondary={len(secondary)}")
 
     n = len(primary)
     result = np.zeros(n, dtype=np.bool_)
@@ -222,9 +216,7 @@ def flip(
     validate_series(set_signal, min_length=1)
     validate_series(reset_signal, min_length=1)
     if len(set_signal) != len(reset_signal):
-        raise ValueError(
-            f"Array length mismatch: set_signal={len(set_signal)}, reset_signal={len(reset_signal)}"
-        )
+        raise ValueError(f"Array length mismatch: set_signal={len(set_signal)}, reset_signal={len(reset_signal)}")
 
     n = len(set_signal)
     result = np.zeros(n, dtype=np.bool_)
@@ -276,9 +268,7 @@ def valuewhen(
     validate_series(condition, min_length=1)
     validate_series(source, min_length=1)
     if len(condition) != len(source):
-        raise ValueError(
-            f"Array length mismatch: condition={len(condition)}, source={len(source)}"
-        )
+        raise ValueError(f"Array length mismatch: condition={len(condition)}, source={len(source)}")
     if occurrence < 1:
         raise ValueError(f"occurrence must be >= 1, got {occurrence}")
 

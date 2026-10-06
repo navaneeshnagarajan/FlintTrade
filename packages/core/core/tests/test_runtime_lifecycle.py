@@ -38,7 +38,7 @@ def _runtime_app(backend_lease_proof=None) -> object:
     app.contract_manager = MagicMock()
     app.rag = None
     app.telegram = None
-    app.settings = MagicMock(openalgo_host="http://127.0.0.1", openalgo_api_key="")
+    app.settings = MagicMock(dhan_host="http://127.0.0.1", dhan_api_key="")
     app.version = "test"
     app._tick_recorder = None
     app._tick_recorder_task = None
@@ -95,7 +95,7 @@ def _set_calendar_load(
 
 
 def test_owned_schedulers_start_under_a_fail_closed_calendar() -> None:
-    """Calendar-independent jobs and Practice scheduling must survive OpenAlgo outage."""
+    """Calendar-independent jobs and Practice scheduling must survive native broker outage."""
     app = _runtime_app()
     app._calendar_loaded = False
 
@@ -126,9 +126,7 @@ async def test_stop_during_holiday_load_prevents_startup_from_resuming(
         return set()
 
     app.cron.load_holidays = load_holidays
-    app.cron.register_builtin_jobs = MagicMock(
-        side_effect=AssertionError("startup resumed after shutdown")
-    )
+    app.cron.register_builtin_jobs = MagicMock(side_effect=AssertionError("startup resumed after shutdown"))
     flask_app = Flask("startup-stop-race")
     flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] = True
 
@@ -158,7 +156,7 @@ def test_runtime_admission_closes_before_authentication(
     """No route may touch closing dependencies once process teardown starts."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "configured-key")
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     password = tmp_path / "master_password"
     password.write_text("runtime-lifecycle-test-password", encoding="utf-8")
     password.chmod(0o600)
@@ -218,22 +216,37 @@ def test_runtime_admission_closure_does_not_wait_for_generation_lease() -> None:
 
 
 @pytest.mark.asyncio
-async def test_shutdown_drains_admitted_request_before_closing_dependencies() -> None:
+async def test_shutdown_drains_admitted_request_before_closing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     """An admitted handler retains dependency ownership until it returns."""
     from flinttrade_core.app import _install_runtime_request_tracking
 
     runtime = _runtime_app()
     flask_app = Flask("request-drain")
-    _install_runtime_request_tracking(flask_app)
+    tracker = _install_runtime_request_tracking(flask_app)
     runtime._flask_app = flask_app
     request_started = threading.Event()
     release_request = threading.Event()
+    handler_finished = threading.Event()
+    drain_waiting = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    condition_wait = tracker._condition.wait
+    close_after_handler: list[bool] = []
     response_status: list[int] = []
+
+    def wait_for_request_release(timeout: float | None = None) -> bool:
+        # Observe the real blocking drain, not merely entry to shutdown. A
+        # bypassed drain must never let this test release the active handler.
+        loop.call_soon_threadsafe(drain_waiting.set)
+        return condition_wait(timeout)
+
+    monkeypatch.setattr(tracker._condition, "wait", wait_for_request_release)
+    runtime.client.close.side_effect = lambda: close_after_handler.append(handler_finished.is_set())
 
     @flask_app.get("/blocking")
     def blocking_request() -> tuple[str, int]:
         request_started.set()
         release_request.wait(timeout=2.0)
+        handler_finished.set()
         return "done", 200
 
     def make_request() -> None:
@@ -241,20 +254,28 @@ async def test_shutdown_drains_admitted_request_before_closing_dependencies() ->
         response_status.append(response.status_code)
 
     request_thread = threading.Thread(target=make_request, daemon=True)
+    stop_task = None
     request_thread.start()
-    assert await asyncio.to_thread(request_started.wait, 1.0)
+    try:
+        assert await asyncio.to_thread(request_started.wait, 1.0)
+        stop_task = asyncio.create_task(runtime.stop())
+        await asyncio.wait_for(drain_waiting.wait(), timeout=1.0)
+        runtime.scheduler.stop_all.assert_awaited_once_with()
+        runtime.client.close.assert_not_awaited()
+        assert not stop_task.done()
+        rejected = flask_app.test_client().get("/blocking")
+        assert rejected.status_code == 503
+    finally:
+        release_request.set()
+        try:
+            if stop_task is not None:
+                await asyncio.wait_for(stop_task, timeout=1.0)
+        finally:
+            request_thread.join(timeout=1.0)
 
-    stop_task = asyncio.create_task(runtime.stop())
-    await asyncio.sleep(0.05)
-    runtime.scheduler.stop_all.assert_awaited_once_with()
-    rejected = flask_app.test_client().get("/blocking")
-    assert rejected.status_code == 503
-
-    release_request.set()
-    await asyncio.wait_for(stop_task, timeout=1.0)
-    request_thread.join(timeout=1.0)
-
+    assert not request_thread.is_alive()
     assert response_status == [200]
+    assert close_after_handler == [True]
     assert runtime.scheduler.stop_all.await_count == 2
     runtime.client.close.assert_awaited_once_with()
 
@@ -536,9 +557,7 @@ async def test_shutdown_retires_router_before_dependencies_close() -> None:
     runtime = _runtime_app()
     flask_app = Flask("shutdown-router-retirement")
     router = MagicMock()
-    router.revoke_and_drain.side_effect = (
-        lambda **_kwargs: flask_app.config.get("BROKER_ROUTER") is None
-    )
+    router.revoke_and_drain.side_effect = lambda **_kwargs: flask_app.config.get("BROKER_ROUTER") is None
     flask_app.config["BROKER_ROUTER"] = router
     runtime._flask_app = flask_app
 
@@ -819,7 +838,7 @@ async def test_a_rejected_duplicate_start_never_rolls_back_the_running_runtime(
 
     The rejected caller used to install its own empty owner ledger before the
     claim was tested, then run the startup-rollback path on the way out — which
-    released the winning start's owners, closed the live OpenAlgo client and
+    released the winning start's owners, closed the live native broker client and
     audit logger, and latched ``_stop_completed`` so the operator's later stop
     became a no-op. A duplicate start request must be inert.
     """
@@ -1045,9 +1064,7 @@ async def test_calendar_refresh_loop_retries_a_failed_initial_load(
     )
     monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2027)
 
-    refresh_task = asyncio.create_task(
-        app._market_calendar_refresh_loop(loaded=False)
-    )
+    refresh_task = asyncio.create_task(app._market_calendar_refresh_loop(loaded=False))
     await asyncio.wait_for(applied.wait(), timeout=1.0)
     app._stop_event.set()
     await asyncio.wait_for(refresh_task, timeout=1.0)
@@ -1711,9 +1728,7 @@ async def test_expired_startup_rollback_invokes_local_ai_without_claiming_releas
 
     monkeypatch.setattr(local_ai_routes, "shutdown_local_ai_runtime", stop_local_ai)
 
-    complete = await runtime._recover_startup_rollback(
-        _LifecycleDeadline(time.monotonic() - 1.0)
-    )
+    complete = await runtime._recover_startup_rollback(_LifecycleDeadline(time.monotonic() - 1.0))
 
     assert complete is False
     assert await asyncio.to_thread(invoked.wait, 1.0)
@@ -1770,33 +1785,7 @@ async def test_full_app_startup_stops_local_ai_before_reverse_rolling_back_other
     runtime.telegram.start_background.side_effect = lambda: events.append("telegram-start")
     runtime.telegram.stop.side_effect = lambda: events.append("telegram-stop")
     runtime._refresh_market_calendar = AsyncMock(return_value=True)
-    runtime._wait_for_shutdown_result = AsyncMock(
-        side_effect=RuntimeError("injected after reconciliation acquisition")
-    )
-
-    class Storage:
-        def initialise(self) -> None:
-            events.append("tick-storage-start")
-
-        def close(self) -> None:
-            events.append("tick-storage-close")
-
-    class Recorder:
-        pending_tick_count = 0
-
-        async def run(self) -> None:
-            await asyncio.Future()
-
-        def stop(self) -> None:
-            events.append("tick-stop")
-
-    class CheckpointOwner:
-        def persist(self, *, force: bool) -> None:
-            assert force is True
-            events.append("tick-checkpoint")
-
-        def persist_locked(self) -> None:
-            return None
+    runtime._wait_for_shutdown_result = AsyncMock(side_effect=RuntimeError("injected after reconciliation acquisition"))
 
     class ReconciliationRunner:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -1808,28 +1797,21 @@ async def test_full_app_startup_stops_local_ai_before_reverse_rolling_back_other
         def stop(self) -> None:
             events.append("reconciliation-stop")
 
-    recorder = Recorder()
-    checkpoint_owner = CheckpointOwner()
+    poison_tick_factory = MagicMock(side_effect=AssertionError("unavailable capture must not be constructed"))
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     runtime._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_bind_runtime_emergency_dispatcher", lambda *_args: None)
-    monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: True)
-    monkeypatch.setattr(app_module, "_tick_capture_watchlist", lambda: [])
-    monkeypatch.setattr(app_module, "_tick_capture_mode", lambda: "quote")
-    monkeypatch.setattr(app_module, "_prepare_tick_orderflow_state", lambda *_args, **_kwargs: {
-        "pruned_ticks": 0,
-        "restored_ticks": 0,
-        "restore_failures": 0,
-    })
-    monkeypatch.setattr(app_module, "_build_tick_recorder", lambda **_kwargs: recorder)
-    monkeypatch.setattr(app_module, "_OrderFlowCheckpointOwner", lambda *_args, **_kwargs: checkpoint_owner)
+    monkeypatch.setenv("FLINTTRADE_TICK_CAPTURE", "1")
+    monkeypatch.setattr(app_module, "_prepare_tick_orderflow_state", poison_tick_factory)
+    monkeypatch.setattr(app_module, "_build_tick_recorder", poison_tick_factory)
+    monkeypatch.setattr(app_module, "_OrderFlowCheckpointOwner", poison_tick_factory)
     monkeypatch.setattr(app_module, "_auto_sync_enabled", lambda: False)
     monkeypatch.setattr(app_module, "_wire_ml_signal_runtime", lambda *_args: None)
     monkeypatch.setattr(app_module.Settings, "from_env", staticmethod(lambda: runtime.settings))
-    monkeypatch.setattr(storage_module, "StorageManager", lambda _path: Storage())
-    monkeypatch.setattr(orderflow_module, "create_live_market_orderflow_aggregator", lambda: object())
+    monkeypatch.setattr(storage_module, "StorageManager", poison_tick_factory)
+    monkeypatch.setattr(orderflow_module, "create_live_market_orderflow_aggregator", poison_tick_factory)
     monkeypatch.setattr(reconciliation_module, "ReconciliationRunner", ReconciliationRunner)
     monkeypatch.setattr(
         smart_order_routes,
@@ -1850,8 +1832,7 @@ async def test_full_app_startup_stops_local_ai_before_reverse_rolling_back_other
         local_ai_routes,
         "shutdown_local_ai_runtime",
         lambda runtime_app, **_kwargs: (
-            runtime_app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
-            and not events.append("local-ai-stop")
+            runtime_app.config["RUNTIME_ACCEPTING_REQUESTS"] is False and not events.append("local-ai-stop")
         ),
     )
 
@@ -1868,13 +1849,15 @@ async def test_full_app_startup_stops_local_ai_before_reverse_rolling_back_other
         assert events.index("local-ai-stop") < events.index("reconciliation-stop")
         rollback_order = [
             events.index("reconciliation-stop"),
-            events.index("tick-stop"),
             events.index("telegram-stop"),
             events.index("smart-stop"),
             events.index("client-close"),
             events.index("audit-close"),
         ]
         assert rollback_order == sorted(rollback_order)
+        poison_tick_factory.assert_not_called()
+        assert flask_app.config["TICK_CAPTURE_ENABLED"] is False
+        assert "TICK_RECORDER" not in flask_app.config
         assert events.count("local-ai-stop") == 1
         assert runtime._startup_recovery_pending is False
     finally:
@@ -2442,7 +2425,7 @@ async def test_startup_external_failure_logs_class_without_raw_exception_text(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     runtime = _runtime_app()
-    secret = "raw-openalgo-exception-secret"
+    secret = "raw-dhan-exception-secret"
     runtime.cron.holiday_generation = 0
     runtime.cron.holiday_year = None
     runtime.cron.load_holidays = AsyncMock(side_effect=RuntimeError(secret))

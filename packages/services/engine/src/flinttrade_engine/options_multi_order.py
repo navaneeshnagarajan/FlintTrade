@@ -21,7 +21,7 @@ Symbol format — the helpers construct symbols of the form::
     {UNDERLYING}{EXPIRY}{STRIKE}CE   e.g. NIFTY25MAY2526000CE
     {UNDERLYING}{EXPIRY}{STRIKE}PE   e.g. NIFTY25MAY2526000PE
 
-The ``expiry`` parameter must match exactly whatever OpenAlgo/broker uses
+The ``expiry`` parameter must match exactly whatever broker/broker uses
 (e.g. ``"25MAY25"``).  ``strike`` values are passed as floats and formatted
 as integers (no decimals) unless the strike itself is fractional (rare on NSE).
 
@@ -69,7 +69,7 @@ def _option_symbol(
     strike: float,
     option_type: str,
 ) -> str:
-    """Construct an option symbol in OpenAlgo format.
+    """Construct an option symbol in broker format.
 
     Args:
         underlying: Base symbol (e.g. ``"NIFTY"``).

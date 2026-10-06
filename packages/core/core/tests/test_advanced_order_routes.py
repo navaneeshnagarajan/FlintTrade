@@ -56,6 +56,7 @@ def _make_app(basket_executor=None, split_executor=None) -> Flask:
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
     flask_app.config["MODE"] = "live"
+    flask_app.config["BROKER_ROUTER"] = MagicMock(default_selector="dhan:default")
     if basket_executor:
         flask_app.config["BASKET_EXECUTOR"] = basket_executor
     if split_executor:
@@ -88,7 +89,7 @@ def test_basket_missing_legs():
 
 
 def test_basket_ok(monkeypatch):
-    """201 on successful basket execution."""
+    """A valid basket is checked, then refused before the executor."""
     result = _basket_result(success=True)
     ex = MagicMock()
     ex.execute = MagicMock(return_value=result)  # executor is synchronous
@@ -107,10 +108,9 @@ def test_basket_ok(monkeypatch):
     with _make_app(basket_executor=ex).test_client() as c:
         resp = c.post("/api/v1/orders/basket", json={"legs": legs})
 
-    assert resp.status_code == 201
-    assert resp.get_json()["status"] == "success"
-    # The route builds the request principal and passes it to the gated executor.
-    assert ex.execute.call_count == 1
+    assert resp.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
+    ex.execute.assert_not_called()
     assert [(leg.symbol, leg.quantity) for leg in admitted] == [("NIFTY25MAYFUT", "50")]
 
 
@@ -150,8 +150,7 @@ def test_split_no_executor():
     with _make_app().test_client() as c:
         resp = c.post(
             "/api/v1/orders/split",
-            json={"symbol": "NIFTY25MAYFUT", "exchange": "NFO",
-                  "action": "BUY", "total_qty": 300, "chunk_size": 75},
+            json={"symbol": "NIFTY25MAYFUT", "exchange": "NFO", "action": "BUY", "total_qty": 300, "chunk_size": 75},
         )
     assert resp.status_code == 503
 
@@ -165,7 +164,7 @@ def test_split_missing_required():
 
 
 def test_split_ok(monkeypatch):
-    """201 on successful split execution."""
+    """A valid split is checked, then refused before the executor."""
     result = _split_result(success=True)
     ex = MagicMock()
     ex.execute_split = MagicMock(return_value=result)  # executor is synchronous
@@ -189,8 +188,9 @@ def test_split_ok(monkeypatch):
             },
         )
 
-    assert resp.status_code == 201
-    assert ex.execute_split.call_count == 1
+    assert resp.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
+    ex.execute_split.assert_not_called()
     assert [leg.quantity for leg in admitted] == ["75", "75", "75", "75"]
 
 

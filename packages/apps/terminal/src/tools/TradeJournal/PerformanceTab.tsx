@@ -47,9 +47,11 @@ import { istParts, istToday } from "@/lib/ist";
 import {
   computeAllStreaks,
   computeAnalytics,
+  computeStrategyStats,
   getLongestLossStreak,
   getLongestWinStreak,
 } from "@/lib/journalAnalytics";
+import { isRestoredFromBackup, restoredExclusionLine } from "@/lib/restoredFills";
 import { getTradeJournal, TRADE_JOURNAL_MAX_LIMIT, type JournalTrade } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { StatCard } from "./StatCard";
@@ -250,7 +252,9 @@ export interface PerformanceTabProps {
 }
 
 export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: PerformanceTabProps) {
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const mode = useModeStore((s) => s.mode);
+  const isExplore = mode === "explore";
+  const isPractice = mode === "practice";
   const [scope, setScope] = useState<PerformanceScope>("range");
 
   const { start, end } = useMemo(() => ytdIstRange(), []);
@@ -277,6 +281,10 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
   const sliceNote = journalSliceNote(rows.length, windowTotal);
 
   const analytics = useMemo(() => computeAnalytics(rows), [rows]);
+  const strategyStats = useMemo(() => computeStrategyStats(rows), [rows]);
+  const restoredLine = restoredExclusionLine(
+    rows.filter((row) => isRestoredFromBackup(row.strategy)).length,
+  );
   const closed = useMemo(() => closedChronological(rows), [rows]);
   const equity = useMemo(() => computeEquitySeries(closed), [closed]);
   const monthlyReturns = useMemo(() => computeMonthlyReturns(closed), [closed]);
@@ -311,6 +319,10 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
   }));
 
   const hasData = closed.length > 0;
+  const grossPnl = analytics.netPnl;
+  const chargeTotal = closed.reduce((sum, trade) => sum + (Number.isFinite(trade.fees) ? trade.fees : 0), 0);
+  const netHeadline = grossPnl - chargeTotal;
+  const chargeNote = isPractice ? " (estimated)" : "";
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Performance metrics">
@@ -385,8 +397,9 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
             <div className="grid grid-cols-5 gap-2">
               <StatCard
                 label="Net P&L"
-                value={formatCurrencyCompact(analytics.netPnl)}
-                positive={analytics.netPnl >= 0}
+                value={formatCurrencyCompact(netHeadline)}
+                positive={netHeadline >= 0}
+                title={`Gross ${formatCurrencyCompact(grossPnl)} · Charges ${formatCurrencyCompact(chargeTotal)}${chargeNote}`}
               />
               <StatCard
                 label="Trades"
@@ -420,6 +433,31 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
               <StatCard label="Best Trade" value={formatCurrencyCompact(analytics.bestTrade)} positive={true} />
               <StatCard label="Worst Trade" value={formatCurrencyCompact(analytics.worstTrade)} positive={false} />
             </div>
+
+            {(strategyStats.length > 0 || restoredLine) && (
+            <section aria-label="Laya and strategy stats">
+              {strategyStats.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xxs font-medium text-text-muted uppercase tracking-wide">
+                    Strategy
+                  </p>
+                  {strategyStats.map(({ strategy, trades: tradeCount, pnl }) => (
+                    <div key={strategy} className="flex justify-between gap-2 text-xs">
+                      <span className="truncate text-text-secondary">{strategy}</span>
+                      <span className="shrink-0 font-mono tabular-nums text-text-muted">
+                        {formatCurrencyCompact(pnl)} · {tradeCount}t
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {restoredLine && (
+                <p className="text-xxs text-text-muted" role="note">
+                  {restoredLine}
+                </p>
+              )}
+            </section>
+            )}
 
             {/* Streak tracker */}
             <section aria-labelledby="perf-streak-label">

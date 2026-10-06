@@ -24,14 +24,13 @@ from flinttrade_gateway.routing_config import (
 
 def _valid_brokers() -> dict:
     return {
-        "registered": ["openalgo:default", "dhan:personal", "upstox:personal"],
+        "registered": ["upstox:default", "dhan:personal", "upstox:personal"],
         "account_acls": {
             "dhan": {"personal": ["nava@flinttrade.local"]},
-            "upstox": {"personal": ["nava@flinttrade.local"]},
-            "openalgo": {"default": ["nava@flinttrade.local"]},
+            "upstox": {"personal": ["nava@flinttrade.local"], "default": ["nava@flinttrade.local"]},
         },
         "execution": {
-            "default": "openalgo:default",
+            "default": "upstox:default",
             "F&O": "dhan:personal",
             "iceberg": "dhan:personal",
         },
@@ -44,7 +43,7 @@ def _valid_brokers() -> dict:
         },
         "failover": {
             "enabled": True,
-            "order": ["dhan:personal", "upstox:personal", "openalgo:default"],
+            "order": ["dhan:personal", "upstox:personal", "upstox:default"],
         },
         "cost_aware": {"enabled": False, "tasks": []},
     }
@@ -55,13 +54,13 @@ def _valid_brokers() -> dict:
 
 def test_from_workspace_parses_canonical_shape() -> None:
     cfg = RoutingConfig.from_workspace(_valid_brokers())
-    assert cfg.execution.default == "openalgo:default"
+    assert cfg.execution.default == "upstox:default"
     assert cfg.execution.by_segment["F&O"] == "dhan:personal"
     assert cfg.data.ticks == "dhan:personal"
     assert cfg.data.quote == "dhan:personal"
     assert cfg.data.global_indices == "upstox:personal"
     assert cfg.failover.enabled is True
-    assert cfg.failover.order == ("dhan:personal", "upstox:personal", "openalgo:default")
+    assert cfg.failover.order == ("dhan:personal", "upstox:personal", "upstox:default")
     assert cfg.account_acls["dhan"]["personal"] == ["nava@flinttrade.local"]
 
 
@@ -77,7 +76,7 @@ def test_quote_falls_back_to_option_chains_when_absent() -> None:
 
 def test_resolve_execution_default() -> None:
     cfg = RoutingConfig.from_workspace(_valid_brokers())
-    assert cfg.resolve("execution", None) == "openalgo:default"
+    assert cfg.resolve("execution", None) == "upstox:default"
 
 
 def test_resolve_execution_segment_override_for_fno() -> None:
@@ -89,7 +88,7 @@ def test_resolve_execution_segment_override_for_fno() -> None:
 def test_resolve_execution_no_override_for_equity() -> None:
     cfg = RoutingConfig.from_workspace(_valid_brokers())
     order = SimpleNamespace(exchange="NSE")
-    assert cfg.resolve("execution", order) == "openalgo:default"
+    assert cfg.resolve("execution", order) == "upstox:default"
 
 
 def test_resolve_data_tasks() -> None:
@@ -103,7 +102,7 @@ def test_resolve_global_indices_falls_back_to_execution_default() -> None:
     brokers = _valid_brokers()
     brokers["data"]["global_indices"] = ""
     cfg = RoutingConfig.from_workspace(brokers)
-    assert cfg.resolve("data.global_indices") == "openalgo:default"
+    assert cfg.resolve("data.global_indices") == "upstox:default"
 
 
 def test_resolve_unknown_task_returns_none() -> None:
@@ -155,7 +154,7 @@ def test_unauthorised_account_warns_not_raises() -> None:
     brokers = _valid_brokers()
     brokers["account_acls"] = {}  # nothing authorised yet
     cfg = RoutingConfig.from_workspace(brokers)  # must NOT raise
-    assert cfg.execution.default == "openalgo:default"
+    assert cfg.execution.default == "upstox:default"
 
 
 def test_non_dict_account_acls_raises_routing_config_error() -> None:
@@ -183,8 +182,8 @@ def test_non_dict_per_adapter_account_acls_entry_raises() -> None:
 def test_default_workspace_config_round_trips() -> None:
     brokers = default_workspace_config()["brokers"]
     cfg = RoutingConfig.from_workspace(brokers)
-    assert cfg.execution.default == "openalgo:default"
-    assert cfg.resolve("data.ticks") == "openalgo:default"
+    assert cfg.execution.default == ""
+    assert cfg.resolve("data.ticks") == ""
 
 
 def test_routing_hint_defaults() -> None:

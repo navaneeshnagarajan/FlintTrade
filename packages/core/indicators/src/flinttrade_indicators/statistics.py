@@ -94,9 +94,7 @@ def correl(
     validate_series(series_a, min_length=period)
     validate_series(series_b, min_length=period)
     if len(series_a) != len(series_b):
-        raise ValueError(
-            f"Array length mismatch: series_a={len(series_a)}, series_b={len(series_b)}"
-        )
+        raise ValueError(f"Array length mismatch: series_a={len(series_a)}, series_b={len(series_b)}")
     if period < 2:
         raise ValueError(f"correl period must be >= 2, got {period}")
 
@@ -146,9 +144,7 @@ def beta(
     validate_series(asset, min_length=period + 1)
     validate_series(benchmark, min_length=period + 1)
     if len(asset) != len(benchmark):
-        raise ValueError(
-            f"Array length mismatch: asset={len(asset)}, benchmark={len(benchmark)}"
-        )
+        raise ValueError(f"Array length mismatch: asset={len(asset)}, benchmark={len(benchmark)}")
     if np.any(asset <= 0.0) or np.any(benchmark <= 0.0):
         raise ValueError("beta requires all prices to be strictly positive.")
 

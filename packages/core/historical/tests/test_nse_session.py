@@ -20,6 +20,7 @@ class TestParseChartResponse:
 
     def _parser(self):
         from flinttrade_historical.nse_session import NSESession
+
         return NSESession._parse_chart_response
 
     def test_bare_list_of_arrays(self):
@@ -37,9 +38,11 @@ class TestParseChartResponse:
 
     def test_wrapped_data_key(self):
         parse = self._parser()
-        payload = {"data": [
-            ["1704067800000", 100.0, 105.0, 98.0, 102.0, 500],
-        ]}
+        payload = {
+            "data": [
+                ["1704067800000", 100.0, 105.0, 98.0, 102.0, 500],
+            ]
+        }
         bars = parse(payload)
         assert len(bars) == 1
         assert bars[0].low == 98.0
@@ -81,14 +84,17 @@ class TestParseSearchResponse:
 
     def _parser(self):
         from flinttrade_historical.nse_session import NSESession
+
         return NSESession._parse_search_response
 
     def test_wrapped_symbols_key(self):
         parse = self._parser()
-        payload = {"symbols": [
-            {"symbol": "NIFTY 50", "symbolName": "Nifty 50", "identifier": "INDEX"},
-            {"symbol": "NIFTY BANK", "symbolName": "Bank Nifty", "identifier": "INDEX"},
-        ]}
+        payload = {
+            "symbols": [
+                {"symbol": "NIFTY 50", "symbolName": "Nifty 50", "identifier": "INDEX"},
+                {"symbol": "NIFTY BANK", "symbolName": "Bank Nifty", "identifier": "INDEX"},
+            ]
+        }
         matches = parse(payload)
         assert len(matches) == 2
         assert matches[0]["symbol"] == "NIFTY 50"
@@ -117,12 +123,11 @@ class TestIntervalValidation:
 
     def test_unsupported_interval_returns_error(self):
         from flinttrade_historical.nse_session import NSESession
+
         sess = NSESession(pre_warm=False)
 
         async def run():
-            result = await sess.get_nse_data(
-                "NIFTY 50", "2h", date(2025, 1, 1), date(2025, 1, 31)
-            )
+            result = await sess.get_nse_data("NIFTY 50", "2h", date(2025, 1, 1), date(2025, 1, 31))
             await sess.close()
             return result
 
@@ -133,6 +138,7 @@ class TestIntervalValidation:
 
     def test_empty_search_query_returns_error(self):
         from flinttrade_historical.nse_session import NSESession
+
         sess = NSESession(pre_warm=False)
 
         async def run():
@@ -187,10 +193,12 @@ class TestNSESessionHTTP:
         ]
         mock_client = MagicMock()
         # First call: homepage pre-warm, second call: chart data
-        mock_client.get = AsyncMock(side_effect=[
-            self._make_mock_response({}),          # pre-warm
-            self._make_mock_response(chart_payload),  # chart data
-        ])
+        mock_client.get = AsyncMock(
+            side_effect=[
+                self._make_mock_response({}),  # pre-warm
+                self._make_mock_response(chart_payload),  # chart data
+            ]
+        )
         mock_client.cookies = {}
         mock_client.aclose = AsyncMock()
 
@@ -198,8 +206,10 @@ class TestNSESessionHTTP:
             sess = NSESession(pre_warm=True)
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await sess.get_nse_data(
-                    "NIFTY 50", "1d",
-                    date(2025, 1, 1), date(2025, 1, 31),
+                    "NIFTY 50",
+                    "1d",
+                    date(2025, 1, 1),
+                    date(2025, 1, 31),
                 )
                 await sess.close()
             return result

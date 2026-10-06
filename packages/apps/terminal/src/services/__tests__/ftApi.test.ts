@@ -25,6 +25,8 @@ vi.mock("@/stores/modeStore", () => ({
     { getState: () => modeState },
   ),
 }));
+import { useBrokerStore } from "@/stores/brokerStore";
+import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 import {
   getStrategies,
   getRunningStrategies,
@@ -65,8 +67,10 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
   beforeEach(() => {
+    useBrokerStore.setState({ accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected", label: "Upstox", connected_at: null, error_message: null, is_primary: true }], activeAccountId: "native:upstox:U1" });
     authState.token = "";
     modeState.mode = "practice";
+    setConnectedReadPosture(false);
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -164,8 +168,9 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     const health = await getHealth();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(health.broker.note).toBe("Explore");
-    expect(health.duckdb.note).toBe("Explore");
+    expect(health.broker.note).toBe("Example");
+    expect(health.duckdb.note).toBe("Example");
+    expect(JSON.stringify(health)).not.toContain("Explore");
     expect(health.disk.scope).not.toBe("host");
     expect(health.memory.scope).not.toBe("host");
     expect(health.disk.free_gb).toBeUndefined();
@@ -229,6 +234,44 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(health.disk.total_gb).toBeUndefined();
     expect(health.memory.total_mb).toBeUndefined();
     expect(health.cpu?.used_pct).toBeUndefined();
+    expect(health.broker.note).toBe("Example");
+    expect(health.duckdb.note).toBe("Example");
+    expect(JSON.stringify(health)).not.toContain("Explore");
+  });
+
+  it("names the sample health fallback Example in every Mode", async () => {
+    authState.token = "demo-user";
+
+    modeState.mode = "explore";
+    fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(getHealth()).resolves.toMatchObject({
+      broker: { note: "Example", scope: "unavailable" },
+      duckdb: { note: "Example", scope: "unavailable" },
+      disk: { scope: "unavailable", note: "Unavailable" },
+      memory: { scope: "unavailable", note: "Unavailable" },
+    });
+
+    modeState.mode = "practice";
+    setConnectedReadPosture(true);
+    fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
+    const connected = await getHealth();
+    expect(connected.broker.note).toBe("Example");
+    expect(connected.duckdb.note).toBe("Example");
+    expect(connected.disk.scope).toBe("unavailable");
+    expect(connected.disk.total_gb).toBeUndefined();
+    expect(connected.memory.total_mb).toBeUndefined();
+    expect(JSON.stringify(connected)).not.toContain("128");
+    expect(JSON.stringify(connected)).not.toContain("256");
+    expect(JSON.stringify(connected)).not.toContain("2048");
+    expect(JSON.stringify(connected)).not.toContain("8192");
+
+    modeState.mode = "live";
+    fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
+    const live = await getHealth();
+    expect(live.broker.note).toBe("Example");
+    expect(live.duckdb.note).toBe("Example");
+    expect(live.disk.free_gb).toBeUndefined();
+    expect(live.memory.total_mb).toBeUndefined();
   });
 
   it("normalises a non-empty registered-strategy payload for Automate consumers", async () => {
@@ -530,12 +573,12 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       l4_pnl: {
         pause_pct: 3,
         kill_pct: 6,
-        selector: "openalgo:default",
+        selector: "upstox:U1",
         opening_risk_capital: 100000,
         is_paused: false,
         is_killed: false,
         accounts: [{
-          selector: "openalgo:default",
+          selector: "upstox:U1",
           session_key: "2026-07-13",
           opening_risk_capital: 100000,
           is_paused: false,
@@ -567,10 +610,10 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       max_net_vega: 400,
       daily_loss_pause_pct: 3,
       daily_loss_kill_pct: 6,
-      daily_loss_selector: "openalgo:default",
+      daily_loss_selector: "upstox:U1",
       opening_risk_capital: 100000,
       daily_loss_accounts: [{
-        selector: "openalgo:default",
+        selector: "upstox:U1",
         session_key: "2026-07-13",
         opening_risk_capital: 100000,
         is_paused: false,
@@ -584,7 +627,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       emergency_result: emergencyResult,
     });
     expect(fetchSpy.mock.calls[0]![0]).toContain(
-      "/api/v1/safety/config?broker=openalgo&account_id=default",
+      "/api/v1/safety/config?broker=upstox&account_id=U1",
     );
   });
 
@@ -623,7 +666,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result.kill_switch_reason).toBe("");
     expect(result.flatten_complete).toBe(true);
     expect(result.emergency_result).toBeNull();
-    expect(fetchSpy.mock.calls[0]![0]).not.toContain("broker=openalgo");
+    expect(fetchSpy.mock.calls[0]![0]).not.toContain("broker=dhan");
   });
 
   it("updateSafetyConfig() binds explicit opening capital to the selected account", async () => {
@@ -636,8 +679,8 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(url).toContain("/api/v1/safety/config");
     expect(JSON.parse(String(init.body))).toEqual({
       opening_risk_capital: 100000,
-      broker: "openalgo",
-      account_id: "default",
+      broker: "upstox",
+      account_id: "U1",
     });
   });
 
@@ -656,7 +699,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({
       status: "success",
       data: {
-        selector: "openalgo:default",
+        selector: "upstox:U1",
         session_key: "2026-07-13",
         opening_risk_capital: 100000,
         is_paused: false,
@@ -667,7 +710,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     await resetDailyPnLState();
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/safety/l4?broker=openalgo&account_id=default");
+    expect(url).toContain("/api/v1/safety/l4?broker=upstox&account_id=U1");
     expect(init.method).toBe("DELETE");
   });
 

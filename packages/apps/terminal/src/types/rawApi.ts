@@ -1,7 +1,7 @@
 /**
- * Raw API response types matching OpenAlgo's snake_case wire format.
+ * Raw API response types matching broker's snake_case wire format.
  *
- * OpenAlgo REST endpoints return snake_case field names, while the typed
+ * broker REST endpoints return snake_case field names, while the typed
  * api.ts interfaces use camelCase after normalisation. These raw interfaces
  * reflect the actual wire format so widgets can safely process API data
  * before normalisation.

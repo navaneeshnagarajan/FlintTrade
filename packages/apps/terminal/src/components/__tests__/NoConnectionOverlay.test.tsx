@@ -28,6 +28,8 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   useBrokerStore: (
     selector: (s: {
       accounts: Array<{ status: string; source: "gateway" | "native" }>;
@@ -103,7 +105,7 @@ describe("NoConnectionOverlay", () => {
     expect(screen.queryByText(/continue without live data/i)).not.toBeInTheDocument();
   });
 
-  it("does not block a native-only Live workspace while OpenAlgo is disconnected", () => {
+  it("does not block a native-only Live workspace while native broker is disconnected", () => {
     brokerAccounts = [{ status: "connected", source: "native" }];
     render(<NoConnectionOverlay />);
 
@@ -128,7 +130,7 @@ describe("NoConnectionOverlay", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
-  it("still accepts the legacy OpenAlgo-connected path when no account snapshot exists", () => {
+  it("shows the Live disconnection gate when only stale connection state exists", () => {
     connectionStatus = "connected";
     render(<NoConnectionOverlay />);
 
@@ -136,7 +138,7 @@ describe("NoConnectionOverlay", () => {
       vi.advanceTimersByTime(5100);
     });
 
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 
   it("does not stack on the Live-risk primary banner", () => {

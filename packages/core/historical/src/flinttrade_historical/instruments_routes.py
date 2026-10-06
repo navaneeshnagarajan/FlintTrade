@@ -4,7 +4,7 @@ Endpoint
 --------
 GET /api/v1/instruments  — download all instruments for an exchange
 
-Proxies through :class:`flinttrade_core.openalgo_client.OpenAlgoClient`
+Proxies through :class:`flinttrade_core.broker_client.BrokerClient`
 ``instruments()`` endpoint.  Streams the response as newline-delimited JSON
 when the result set exceeds 10,000 rows so the frontend can process large
 master-contract files without buffering the entire payload in memory.
@@ -28,13 +28,13 @@ logger = logging.getLogger("flinttrade.historical.instruments_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import (
+    from flinttrade_core.broker_client import (
         client_call_sync,
         client_close_sync,
-        resolve_openalgo_client,
+        resolve_broker_client,
     )
 except Exception:  # pragma: no cover
-    resolve_openalgo_client = None  # type: ignore[assignment,misc]
+    resolve_broker_client = None  # type: ignore[assignment,misc]
     client_call_sync = None  # type: ignore[assignment,misc]
     client_close_sync = None  # type: ignore[assignment,misc]
 
@@ -87,15 +87,15 @@ def get_instruments() -> tuple[Any, int] | Response:
         For > 10,000 rows: streaming NDJSON (``Content-Type:
         application/x-ndjson``), one instrument per line.
 
-    Raises HTTP 503 when OpenAlgo is unreachable.
+    Raises HTTP 503 when native broker is unreachable.
     """
     exchange: str = request.args.get("exchange", "NSE").upper()
 
     try:
-        if resolve_openalgo_client is None:
-            raise ImportError("OpenAlgo client resolver not available")
+        if resolve_broker_client is None:
+            raise ImportError("native broker client resolver not available")
 
-        client, close_client = resolve_openalgo_client()
+        client, close_client = resolve_broker_client()
         try:
             raw = client_call_sync(client, client.instruments(exchange=exchange))
         finally:
@@ -139,7 +139,7 @@ def get_instruments() -> tuple[Any, int] | Response:
             jsonify(
                 {
                     "status": "error",
-                    "message": "Could not fetch instruments from OpenAlgo",
+                    "message": "Could not fetch instruments from native broker",
                     "detail": "instrument fetch failed",
                 }
             ),

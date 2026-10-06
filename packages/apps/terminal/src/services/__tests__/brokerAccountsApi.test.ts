@@ -57,7 +57,7 @@ describe("brokerAccountsApi", () => {
     mocks.listNative.mockResolvedValue([]);
   });
 
-  it("lists gateway and native accounts through one merged contract", async () => {
+  it("lists only native accounts and discards retired gateway rows", async () => {
     mocks.listGateway.mockResolvedValue([gatewayAccount]);
     mocks.listNative.mockResolvedValue([
       {
@@ -77,7 +77,6 @@ describe("brokerAccountsApi", () => {
     ]);
 
     await expect(listBrokerAccounts()).resolves.toEqual([
-      gatewayAccount,
       {
         account_id: "UPX1",
         broker: "upstox",
@@ -111,11 +110,11 @@ describe("brokerAccountsApi", () => {
     ]);
   });
 
-  it("forwards one AbortSignal through both account sources and native discovery", async () => {
+  it("forwards the AbortSignal through native account discovery", async () => {
     const controller = new AbortController();
 
     await listBrokerAccounts([], controller.signal);
-    expect(mocks.listGateway).toHaveBeenCalledWith(controller.signal);
+    expect(mocks.listGateway).not.toHaveBeenCalled();
     expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
 
     mocks.listNative.mockClear();
@@ -127,10 +126,9 @@ describe("brokerAccountsApi", () => {
     expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
   });
 
-  it("keeps a failed source's previous rows until that source recovers", async () => {
-    mocks.listGateway.mockRejectedValue(new Error("Gateway unavailable"));
-
-    await expect(listBrokerAccounts([gatewayAccount])).resolves.toEqual([gatewayAccount]);
+  it("does not resurrect retired rows after native discovery fails", async () => {
+    mocks.listNative.mockRejectedValue(new Error("Native discovery unavailable"));
+    await expect(listBrokerAccounts([gatewayAccount])).rejects.toThrow("Native discovery unavailable");
   });
 
   it("dispatches account actions by account source", async () => {
@@ -145,17 +143,18 @@ describe("brokerAccountsApi", () => {
     expect(mocks.reloginNative).toHaveBeenCalledWith("upstox", "UPX1", undefined, actionKey);
     expect(mocks.setNativePrimary).toHaveBeenCalledWith("upstox", "UPX1", actionKey);
 
-    await removeBrokerAccount(gatewayRef, actionKey);
-    await reconnectBrokerAccount(gatewayRef, actionKey);
-    await setPrimaryBrokerAccount(gatewayRef, actionKey);
-    expect(mocks.removeGateway).toHaveBeenCalledWith("GW1", actionKey);
-    expect(mocks.reconnectGateway).toHaveBeenCalledWith("GW1", actionKey);
-    expect(mocks.setGatewayPrimary).toHaveBeenCalledWith("GW1", actionKey);
+    await expect(removeBrokerAccount(gatewayRef, actionKey)).rejects.toThrow("Only native broker accounts");
+    await expect(reconnectBrokerAccount(gatewayRef, actionKey)).rejects.toThrow("Only native broker accounts");
+    await expect(setPrimaryBrokerAccount(gatewayRef, actionKey)).rejects.toThrow("Only native broker accounts");
+    expect(mocks.removeGateway).not.toHaveBeenCalled();
+    expect(mocks.reconnectGateway).not.toHaveBeenCalled();
+    expect(mocks.setGatewayPrimary).not.toHaveBeenCalled();
   });
 
   it("lists only live native read accounts in the shared account client", async () => {
     mocks.listNative.mockResolvedValue([
       { adapter_id: "dhan", account_id: "DH1", has_session: false, is_primary: true },
+      { adapter_id: "dhan", account_id: "DH2", is_primary: false },
       { adapter_id: "upstox", account_id: "UPX1", has_session: true, is_primary: false },
       { adapter_id: "kotakneo", account_id: "K1", has_session: true, is_primary: true },
     ]);
@@ -164,6 +163,75 @@ describe("brokerAccountsApi", () => {
       { adapter_id: "upstox", account_id: "UPX1", is_primary: false },
       { adapter_id: "kotakneo", account_id: "K1", is_primary: true },
     ]);
+  });
+
+  it.each([null, "native:upstox:SHARED"])(
+    "does not substitute another live session when the chosen identity %s has none",
+    (activeAccountId) => {
+      const brokerAccounts: BrokerAccount[] = [
+        { ...gatewayAccount, source: "native", broker: "dhan", account_id: "SHARED", is_primary: false },
+        { ...gatewayAccount, source: "native", broker: "upstox", account_id: "SHARED", is_primary: true },
+      ];
+      const readAccounts = [{ adapter_id: "dhan", account_id: "SHARED", is_primary: true }];
+
+      expect(selectNativeReadAccount(readAccounts, brokerAccounts, activeAccountId)).toBeUndefined();
+    },
+  );
+
+  it("keeps the store-selected primary identity when live discovery has a different primary", () => {
+    const brokerAccounts: BrokerAccount[] = [
+      { ...gatewayAccount, source: "native", broker: "dhan", account_id: "D1", status: "disconnected" },
+      { ...gatewayAccount, source: "native", broker: "upstox", account_id: "U1", is_primary: false },
+    ];
+    const readAccounts = [
+      { adapter_id: "upstox", account_id: "U1", is_primary: true },
+      { adapter_id: "dhan", account_id: "D1", is_primary: false },
+    ];
+
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, null)).toEqual({
+      adapter_id: "dhan", account_id: "D1", is_primary: false,
+    });
+  });
+
+  it("does not resolve ambiguous store identities from the live-session subset", () => {
+    const brokerAccounts: BrokerAccount[] = [
+      { ...gatewayAccount, source: "native", broker: "dhan", account_id: "D1", is_primary: false },
+      { ...gatewayAccount, source: "native", broker: "upstox", account_id: "U1", is_primary: false },
+    ];
+    const readAccounts = [{ adapter_id: "upstox", account_id: "U1", is_primary: true }];
+
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, null)).toBeUndefined();
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "native:upstox:MISSING")).toBeUndefined();
+  });
+
+  it("preserves encoded composite selectors without conflating same-id broker accounts", () => {
+    const brokerAccounts: BrokerAccount[] = [
+      { ...gatewayAccount, source: "native", broker: "dhan", account_id: "A:B/1" },
+      { ...gatewayAccount, source: "native", broker: "upstox", account_id: "A:B/1", is_primary: false },
+    ];
+    const readAccounts = [
+      { adapter_id: "dhan", account_id: "A:B/1", is_primary: true },
+      { adapter_id: "upstox", account_id: "A:B/1", is_primary: false },
+    ];
+
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "native:upstox:A%3AB%2F1")).toEqual({
+      adapter_id: "upstox", account_id: "A:B/1", is_primary: false,
+    });
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "A:B/1")).toBeUndefined();
+  });
+
+  it("preserves an unambiguous legacy selector for the exact live native identity", () => {
+    const brokerAccounts: BrokerAccount[] = [
+      { ...gatewayAccount, source: "native", broker: "dhan", account_id: "D1", is_primary: false },
+    ];
+    const readAccounts = [
+      { adapter_id: "upstox", account_id: "D1", is_primary: true },
+      { adapter_id: "dhan", account_id: "D1", is_primary: false },
+    ];
+
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "D1")).toEqual({
+      adapter_id: "dhan", account_id: "D1", is_primary: false,
+    });
   });
 
   it("selects the active native read account before the primary fallback", () => {

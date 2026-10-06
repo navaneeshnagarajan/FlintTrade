@@ -23,10 +23,6 @@ The quotes below are the strings this tip replaced.
    primary) is a separate UX call (**FT-SETUP-FLOW-001**). This finding
    is copy honesty only.
 
-Existing product sentences stay. Kotak Neo copy remains
-`Live read only until funded unlock.` Live place stays fail-closed.
-OpenAlgo stays Settings / fallback, not the primary connect CTA.
-
 ## Verified operator surfaces
 
 Quotes below are the operator strings this tip replaced.
@@ -38,39 +34,34 @@ Quotes below are the operator strings this tip replaced.
 
 `No broker needed · primary Monday Practice path`
 
-The Explore and Live notes on the same screen already use product
+The Example and Live notes on the same screen already use product
 language (`No broker needed`, `Broker required · PIN and authenticator
 required`).
 
 ### Setup connection step
 
+- `You do not need a broker for Monday Practice.`
+
+- `Settings fallback only — not the Monday primary connect path.`
+
+- `Monday primary broker connect: native Dhan + Kotak Neo.`
+
 `packages/apps/terminal/src/routes/setup/ConnectionStep.tsx` renders
 these operator sentences:
-
-- `You do not need a broker for Monday Practice.`
-- `OpenAlgo and native brokers stay in Settings as a fallback — not the primary Monday path.`
-- `Settings fallback only — not the Monday primary connect path.`
-- `Monday primary broker connect: native Dhan + Kotak Neo.`
 
 The same step already uses honest product language beside those leaks:
 `Connected (read) / API smoke only — never placeable Live orders` and
 `Live read only until funded unlock.`
 
-`packages/apps/terminal/src/routes/setup/ConnectionStep.test.tsx` pins
-the leak. The test title and assertion both require the weekday pack
-phrase (`Monday primary broker connect`). The follow-up must retarget
-that assertion at the product-language sentence. Do not delete the
-check that OpenAlgo is not the primary connect CTA.
-
 ### Broker Connect (Setup and Settings)
+
+- Strong copy: `Monday path is native Dhan + Kotak Neo Connected (read).`
+
 
 `packages/apps/terminal/src/components/account/BrokerConnect.tsx` is the
 shared Brokers surface (setup direct connect, and Settings → Brokers via
 `packages/apps/terminal/src/tools/Settings/BrokersSection.tsx`). The
 warning banner says:
-
-- Strong copy: `Monday path is native Dhan + Kotak Neo Connected (read).`
-- Following sentence: `OpenAlgo is Settings / fallback only, not the Monday primary connect CTA.`
 
 The rest of that paragraph already uses **Connected (read)**, **API
 smoke**, and fail-closed Live place.
@@ -82,7 +73,7 @@ IDs that contain the weekday pack name:
 
 - `(FT-MONDAY-002)` beside native Dhan + Kotak Neo Connected (read) /
   API smoke (broker setup and the native-read section).
-- `(FT-MONDAY-001)` beside Practice SandboxEngine fills and the Learn →
+- `(FT-MONDAY-001)` beside Practice fills and the Learn →
   Practice Trading fallback.
 - `(FT-MONDAY-003)` beside AI Suggest labelling, Chat live-read context,
   and the Settings AI note.
@@ -123,7 +114,8 @@ operator; the function names may stay.
 These are not operator chrome. Do not rename them as part of this
 finding:
 
-- Identifiers such as `isMondayReadBroker`, `mondayReadChrome`,
+- Identifiers such as `isMondayReadBroker` and `mondayReadChrome` in
+  `packages/apps/terminal/src/lib/connectedReadChrome.ts`,
   `nativeMonday`, `MONDAY_READ_BROKERS`, and `run_monday_read_smoke`.
 - Developer comments, including the file headers on `ConnectionStep.tsx`
   and `SetupAccountRoute.tsx`, the comment in
@@ -150,24 +142,6 @@ finding:
 ## Acceptance
 
 The product fix is done when all of the following hold:
-
-1. Mode Select, the Mode bar, and account status use Practice, Connected
-   (read), and Live. API smoke is not a Mode label. Broker-connect helper
-   copy may still name the non-funded read check API smoke. Those surfaces
-   do not name a weekday pack as a path.
-2. `docs/USER_GUIDE.md` operator copy, plus the operator-facing setup
-   prose in `docs/setup/QUICKSTART.md`, `docs/setup/static-ip-setup.md`,
-   and `docs/COMPATIBILITY.md`, no longer advertise the internal
-   tracking IDs listed above. Developer acceptance docs and the
-   contributor docs named above may keep them.
-3. Kotak Neo stream errors do not revive the obsolete “market feed is not
-   wired” wording and do not imply that local synthetic lifecycle
-   tests are live broker proof.
-4. `ConnectionStep.test.tsx` asserts the replacement product sentence
-   and still proves OpenAlgo is not the primary connect CTA.
-5. British English. No personal details, hostnames, account names, or
-   fund amounts in the change.
-6. Wizard layout and broker behaviour are unchanged.
 
 ## Status
 

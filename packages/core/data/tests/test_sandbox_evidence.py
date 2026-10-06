@@ -16,7 +16,11 @@ def test_virtual_capital_paper_trade_end_to_end():
         assert cap["initial"] == 1_000_000.0  # virtual capital is seeded
 
         result = eng.place_order(
-            symbol="RELIANCE", exchange="NSE", action="BUY", quantity=10, price=2900.0,
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity=10,
+            price=2900.0,
         )
         assert result["status"] == "COMPLETE", result
 

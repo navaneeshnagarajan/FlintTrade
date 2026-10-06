@@ -2,7 +2,7 @@
  * ConnectionStep — optional broker step in the setup wizard.
  *
  * Monday primary path (FT-MONDAY-001): continue without a broker. Practice
- * fills use FlintTrade's native SandboxEngine. OpenAlgo and native brokers
+ * fills use FlintTrade's native SandboxEngine. Native brokers
  * stay Settings/fallback only — never the primary connect CTA.
  *
  * Exports: ConnectionStep (schema/helpers live in connectionForm.ts for Fast Refresh)
@@ -12,7 +12,6 @@ import { useState } from "react";
 import { ArrowRight, CheckCheck, Info } from "lucide-react";
 
 import { BrokerConnect } from "@/components/account/BrokerConnect";
-import { OpenAlgoConnectionForm } from "@/components/account/OpenAlgoConnectionForm";
 import { Button } from "@/components/ui/button";
 import { useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
@@ -21,9 +20,9 @@ import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isMondayReadBroker,
-} from "@/lib/mondayReadChrome";
+} from "@/lib/connectedReadChrome";
 
-type ConnectionMode = "openalgo" | "direct";
+type ConnectionMode = "direct";
 
 interface TabButtonProps {
   active: boolean;
@@ -39,7 +38,7 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
       className={[
         "flex-1 py-1.5 text-xs font-medium rounded-md transition-colors",
         active
-          ? "bg-accent text-white"
+          ? "bg-accent text-accent-foreground"
           : "text-text-secondary hover:text-text-primary",
       ].join(" ")}
       aria-pressed={active}
@@ -49,20 +48,8 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
   );
 }
 
-/**
- * Synthetic ConnectionFormValues used when proceeding from Direct Connect.
- * Host/key are left as placeholder values — the gateway adapter handles auth
- * independently and the actual broker sessions live in brokerStore.
- */
-const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
-  host: "http://127.0.0.1:5100",
-  port: "5100",
-  apiKey: "direct-connect",
-  wsPort: "8765",
-};
-
 function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
-  return account.status === "connected" && account.read_only !== true;
+  return account.source === "native" && account.status === "connected" && account.read_only !== true;
 }
 
 function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
@@ -75,7 +62,7 @@ function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
 }
 
 function isReadOnlyConnectedBrokerAccount(account: BrokerAccount): boolean {
-  return account.status === "connected" && account.read_only === true;
+  return account.source === "native" && account.status === "connected" && account.read_only === true;
 }
 
 interface DirectConnectPanelProps {
@@ -129,7 +116,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         type="button"
         className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
         disabled={!canContinue}
-        onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
+        onClick={() => onComplete({ brokerConnected: true })}
       >
         <CheckCheck className="size-4 mr-2" />
         {canContinue ? "Continue" : "Connect Dhan or Neo for Connected (read)"}
@@ -141,29 +128,46 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
 
 interface ConnectionStepProps {
   onComplete: (values: ConnectionFormValues) => void;
+  /**
+   * Brokerless continuation on the Practice desk tray. When set, the primary
+   * control records a skip instead of a successful connection. The first-run
+   * wizard omits it and still advances through `onComplete`.
+   */
+  onContinueWithoutBroker?: () => void;
   defaultValues?: Partial<ConnectionFormValues>;
 }
 
-export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
+export function ConnectionStep({
+  onComplete,
+  onContinueWithoutBroker,
+}: ConnectionStepProps) {
   const [mode, setMode] = useState<ConnectionMode | null>(null);
+
+  function continueWithoutBroker() {
+    if (onContinueWithoutBroker) {
+      onContinueWithoutBroker();
+      return;
+    }
+    onComplete({ brokerConnected: false });
+  }
 
   return (
     <div className="space-y-5">
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
-          Practice uses FlintTrade&apos;s SandboxEngine for paper fills. You do not
+          Practice — simulated fills, no real money. You do not
           need a broker for Practice.
         </p>
         <Button
           type="button"
           className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-          onClick={() => onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" })}
+          onClick={continueWithoutBroker}
         >
           Continue without a broker
           <ArrowRight className="size-4 ml-2" />
         </Button>
         <p className="text-xs text-text-muted text-center">
-          OpenAlgo and native brokers stay in Settings as a fallback — not the
+          Native brokers stay in Settings as a fallback — not the
           primary Practice path.
         </p>
       </div>
@@ -180,17 +184,8 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
           <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
             FlintTrade Native
           </TabButton>
-          <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
-            OpenAlgo Bridge
-          </TabButton>
         </div>
 
-        {mode === "openalgo" && (
-          <p className="text-xs text-text-muted">
-            Settings fallback only — not the primary connect path. Practice
-            fills still use the native SandboxEngine.
-          </p>
-        )}
         {mode === "direct" && (
           <p className="text-xs text-text-muted">
             Native Dhan + Kotak Neo stays {CONNECTED_READ_LABEL}. Successful
@@ -199,11 +194,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
           </p>
         )}
 
-        {mode === "openalgo" ? (
-          <OpenAlgoConnectionForm defaultValues={defaultValues} onSaved={onComplete} />
-        ) : mode === "direct" ? (
-          <DirectConnectPanel onComplete={onComplete} />
-        ) : null}
+        {mode === "direct" && <DirectConnectPanel onComplete={onComplete} />}
       </div>
     </div>
   );

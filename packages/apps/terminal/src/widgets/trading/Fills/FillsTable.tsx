@@ -50,6 +50,8 @@ import { istToday } from "@/lib/ist";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/formatters";
 import { Badge } from "@/components/ui/badge";
+import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
+import { isRestoredFromBackup } from "@/lib/restoredFills";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -91,6 +93,7 @@ import {
   type FillRow,
   type RawFillSource,
 } from "./fillsModel";
+import { exchangeTransactionLabel } from "@/lib/indianCharges";
 import { importLegacyScreenshots, ScreenshotCell } from "./screenshots";
 
 // ---------------------------------------------------------------------------
@@ -102,6 +105,49 @@ const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 function fmtPnl(pnl: number): string {
   const sign = pnl >= 0 ? "+" : "−";
   return `${sign}₹${Math.abs(pnl).toLocaleString("en-IN")}`;
+}
+
+function fmtCharge(amount: number): string {
+  return `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** One charges line under a Practice fill. The exchange name follows the fill. */
+function PracticeChargesLine({
+  charges,
+  exchange,
+}: {
+  charges: NonNullable<FillRow["estimatedCharges"]>;
+  exchange: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const transactionLine = exchange && exchange.trim().length > 0
+    ? exchangeTransactionLabel(exchange)
+    : charges.exchangeLabel;
+  return (
+    <div className="mt-0.5 max-w-48">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-auto px-0 py-0 text-[10px] font-normal text-text-muted hover:text-text-secondary"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        Charges {fmtCharge(charges.total)} (estimated)
+      </Button>
+      {open && (
+        <ul className="mt-0.5 space-y-0.5 text-[10px] text-text-secondary font-mono tabular-nums">
+          <li>STT {fmtCharge(charges.stt)}</li>
+          <li>
+            {transactionLine} {fmtCharge(charges.exchangeCharges)}
+          </li>
+          <li>SEBI fee {fmtCharge(charges.sebiFee)}</li>
+          <li>Stamp duty {fmtCharge(charges.stampDuty)}</li>
+          <li>GST {fmtCharge(charges.gst)}</li>
+        </ul>
+      )}
+    </div>
+  );
 }
 
 const RIGHT_COLS = new Set(["qty", "price", "value", "entryPrice", "exitPrice", "pnl", "fees"]);
@@ -378,9 +424,17 @@ export function FillsTable({
         accessorKey: "symbol",
         header: "Symbol",
         cell: ({ row }) => (
-          <span className="font-mono font-medium truncate max-w-32 inline-block align-bottom" title={row.original.symbol}>
-            {row.original.symbol}
-          </span>
+          <div className="min-w-0">
+            <span className="font-mono font-medium truncate max-w-32 inline-block align-bottom" title={row.original.symbol}>
+              {row.original.symbol}
+            </span>
+            {row.original.estimatedCharges && (
+              <PracticeChargesLine
+                charges={row.original.estimatedCharges}
+                exchange={row.original.exchange}
+              />
+            )}
+          </div>
         ),
       },
       {
@@ -477,9 +531,13 @@ export function FillsTable({
         accessorKey: "strategy",
         header: "Strategy",
         cell: ({ row }) => (
-          <span className="text-text-muted truncate max-w-20 inline-block align-bottom" title={row.original.strategy ?? undefined}>
-            {row.original.strategy ?? "—"}
-          </span>
+          isRestoredFromBackup(row.original.strategy) ? (
+            <RestoredFillTag />
+          ) : (
+            <span className="text-text-muted truncate max-w-20 inline-block align-bottom" title={row.original.strategy ?? undefined}>
+              {row.original.strategy ?? "—"}
+            </span>
+          )
         ),
       },
       {
@@ -501,7 +559,7 @@ export function FillsTable({
               attachDisabled={isExplore || r.tradeKey === null}
               disabledReason={
                 isExplore
-                  ? "Sample data — attaching is disabled in Explore mode"
+                  ? "Example — attaching is disabled"
                   : "Screenshots attach to journalled fills — this fill has no journal record yet"
               }
               onAttach={(dataUrl) => {

@@ -396,7 +396,7 @@ def test_scheduled_pipeline_preserves_validated_latest_bar_timestamp() -> None:
     assert result["timestamp"] == bars[-1]["timestamp"]
 
 
-def test_scheduled_pipeline_accepts_openalgo_daily_interval() -> None:
+def test_scheduled_pipeline_accepts_broker_daily_interval() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 
     now = datetime(2026, 7, 13, 5, 0, tzinfo=timezone.utc)
@@ -721,19 +721,19 @@ def test_configure_signal_sources_wires_one_hub_and_ml_sink() -> None:
     from flinttrade_ai.signal_routes import configure_signal_sources
 
     app = Flask(__name__)
-    openalgo_client = MagicMock()
+    broker_client = MagicMock()
     ml_pipeline = MagicMock()
 
     with patch("flinttrade_ai.signal_routes.SignalPipeline", return_value=ml_pipeline) as constructor:
-        first_hub, first_ml = configure_signal_sources(app, openalgo_client)
-        second_hub, second_ml = configure_signal_sources(app, openalgo_client)
+        first_hub, first_ml = configure_signal_sources(app, broker_client)
+        second_hub, second_ml = configure_signal_sources(app, broker_client)
 
     assert first_hub is second_hub
     assert first_ml is second_ml is ml_pipeline
     assert app.config["SIGNAL_HUB"] is first_hub
     assert app.config["ML_SIGNAL_PIPELINE"] is ml_pipeline
     constructor.assert_called_once_with(
-        openalgo_client=openalgo_client,
+        broker_client=broker_client,
         signal_sink=first_hub.ingest_ml_cycle,
     )
     assert ml_pipeline.update_instruments.call_count == 2
@@ -792,16 +792,16 @@ def test_flask_factory_installs_signal_hub_and_ml_source(monkeypatch, tmp_path) 
     master_password = tmp_path / "master_password"
     master_password.write_text("signal-test-master-password\n", encoding="utf-8")
     master_password.chmod(0o600)
-    openalgo_client = MagicMock()
+    broker_client = MagicMock()
     backend_lease = acquire_backend_instance_lease()
     try:
-        app = create_flask_app(client=openalgo_client, backend_lease_proof=backend_lease.proof)
+        app = create_flask_app(client=broker_client, backend_lease_proof=backend_lease.proof)
 
         hub = app.config["SIGNAL_HUB"]
         ml_pipeline = app.config["ML_SIGNAL_PIPELINE"]
         assert isinstance(hub, LiveSignalPipeline)
         assert isinstance(ml_pipeline, SignalPipeline)
-        assert ml_pipeline._openalgo_client is openalgo_client
+        assert ml_pipeline._broker_client is broker_client
         assert ml_pipeline._signal_sink.__self__ is hub
         assert ml_pipeline._signal_sink.__func__ is hub.ingest_ml_cycle.__func__
         rules = {rule.rule for rule in app.url_map.iter_rules()}

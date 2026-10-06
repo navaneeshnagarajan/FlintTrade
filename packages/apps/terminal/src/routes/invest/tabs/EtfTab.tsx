@@ -42,7 +42,9 @@ import {
 } from "@/components/ui/table";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
+import { useModeStore } from "@/stores/modeStore";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import { cn } from "@/lib/utils";
 import { ETF_UNIVERSE, type EtfInfo } from "@/lib/etfs";
 import { formatINR, formatPercent } from "../formatters";
@@ -77,9 +79,10 @@ interface EtfRow extends EtfInfo {
 const ETF_SYMBOLS = ETF_UNIVERSE.map((e) => ({ symbol: e.symbol, exchange: e.exchange }));
 
 function useEtfQuotes() {
+  const scope = useMarketDataScope();
   return useQuery<Quote[]>({
-    queryKey: ["etf-quotes"],
-    queryFn: () => getMultiQuotes(ETF_SYMBOLS).then(normaliseMultiQuotes),
+    queryKey: ["etf-quotes", scope],
+    queryFn: ({ signal }) => getMultiQuotes(ETF_SYMBOLS, signal, scope).then(normaliseMultiQuotes),
     refetchInterval: 30_000,
     retry: 1,
   });
@@ -251,6 +254,7 @@ function buildColumns(): ColumnDef<SortedTableFeatures, EtfRow>[] {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function EtfTab() {
+  const isExplore = useModeStore((s) => s.mode === "explore");
   const { data: quotes, isLoading, isError, refetch } = useEtfQuotes();
 
   const [sorting, setSorting] = useState<SortingState>([
@@ -259,11 +263,13 @@ export function EtfTab() {
 
   const columns = useMemo(() => buildColumns(), []);
 
-  // Fall back to demo prices when API fails or returns empty
-  const isDemo = isError || (!isLoading && (!quotes || quotes.length === 0));
+  // Explore serves mock quotes, so an empty list is not the example signal.
+  // A failed or empty book outside Explore still falls back to sample prices.
+  const quotesMissing = isError || !quotes || quotes.length === 0;
+  const isDemo = isExplore || quotesMissing;
 
   const rows = useMemo<EtfRow[]>(() => {
-    if (quotes && quotes.length > 0) return mergeWithQuotes(quotes);
+    if (!isError && quotes && quotes.length > 0) return mergeWithQuotes(quotes);
     // Use demo prices when no live data
     return ETF_UNIVERSE.map((e): EtfRow => {
       const demo = DEMO_ETF_PRICES[e.symbol];
@@ -275,7 +281,7 @@ export function EtfTab() {
         volume: demo?.volume ?? 0,
       };
     });
-  }, [quotes]);
+  }, [quotes, isError]);
 
   const table = useTable({
     features: sortedTableFeatures,
@@ -294,7 +300,7 @@ export function EtfTab() {
         <div>
           <h3 className="font-heading font-semibold text-sm text-text-primary">ETF Universe</h3>
           <p className="text-xs text-text-muted mt-0.5">
-            {ETF_UNIVERSE.length} Indian ETFs — fetching live quotes...
+            {ETF_UNIVERSE.length} Indian ETFs — {isExplore ? "fetching Example quotes…" : "fetching native quotes…"}
           </p>
         </div>
 
@@ -321,14 +327,16 @@ export function EtfTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleChip always />}
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-heading font-semibold text-sm text-text-primary">ETF Universe</h3>
           <p className="text-xs text-text-muted mt-0.5">
-            {ETF_UNIVERSE.length} ETFs — {isDemo ? "sample prices" : "live quotes via OpenAlgo. Refreshes every 30s"}.
+            {ETF_UNIVERSE.length} ETFs — {isExplore
+              ? "Example prices. Connect a broker for live quotes."
+              : `${quotesMissing ? "sample prices" : "live quotes via your native broker. Refreshes every 30s"}.`}
           </p>
         </div>
         <Button
@@ -400,8 +408,10 @@ export function EtfTab() {
       </GlassCard>
 
       <p className="text-xs text-text-muted">
-        Expense ratios (TER%) are approximate annual values. Price data sourced from
-        OpenAlgo via NSE EQ segment. LTP and change% reflect the current session.
+        Expense ratios (TER%) are approximate annual values.{" "}
+        {isDemo || quotesMissing
+          ? "Example prices illustrate this ETF universe. Current broker prices are unavailable."
+          : "Your native broker via NSE EQ segment. LTP and change% reflect the current session."}
       </p>
     </div>
   );

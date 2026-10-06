@@ -18,6 +18,7 @@ import pytest
 
 try:
     from tick_engine import Bar, SimulationResult, TickSimulator, Trade  # type: ignore[import]  # noqa: F401
+
     TICK_ENGINE_AVAILABLE = True
 except ImportError:
     TICK_ENGINE_AVAILABLE = False
@@ -37,13 +38,34 @@ pytestmark = pytest.mark.skipif(
 # simulator types. If maturin adds a class/function, add it here and in
 # __init__.py.
 _EXPECTED_SURFACE = {
-    "TickSimulator", "Bar", "Trade", "SimulationResult", "Tick", "Signal",
-    "BacktestResult", "simulate", "simulate_correlated", "confidence_intervals",
-    "SessionConfig", "SessionState", "SessionTracker", "OptionType",
-    "OptionStrategyType", "OptionsConfig", "OptionsStrategy", "Greeks",
-    "black_scholes_greeks", "LegConfig", "SpreadConfig", "SpreadBacktest",
-    "run_spreads_batch", "straddle_config", "strangle_config",
-    "iron_condor_config", "PairsStrategy", "run_batch",
+    "TickSimulator",
+    "Bar",
+    "Trade",
+    "SimulationResult",
+    "Tick",
+    "Signal",
+    "BacktestResult",
+    "simulate",
+    "simulate_correlated",
+    "confidence_intervals",
+    "SessionConfig",
+    "SessionState",
+    "SessionTracker",
+    "OptionType",
+    "OptionStrategyType",
+    "OptionsConfig",
+    "OptionsStrategy",
+    "Greeks",
+    "black_scholes_greeks",
+    "LegConfig",
+    "SpreadConfig",
+    "SpreadBacktest",
+    "run_spreads_batch",
+    "straddle_config",
+    "strangle_config",
+    "iron_condor_config",
+    "PairsStrategy",
+    "run_batch",
 }
 
 
@@ -329,10 +351,10 @@ class TestTradeObjects:
     def _run_long_trade(self, entry_price: float = 100.0, exit_price: float = 110.0):
         sim = TickSimulator(initial_capital=100_000.0, slippage_pct=0.0, commission=0.0, lot_size=1.0)
         bars = [
-            [0,   entry_price, entry_price + 2, entry_price - 1, entry_price, 1000.0],
-            [60,  entry_price, entry_price + 2, entry_price - 1, entry_price, 1000.0],
-            [120, exit_price,  exit_price + 2,  exit_price - 1,  exit_price,  1000.0],
-            [180, exit_price,  exit_price + 2,  exit_price - 1,  exit_price,  1000.0],
+            [0, entry_price, entry_price + 2, entry_price - 1, entry_price, 1000.0],
+            [60, entry_price, entry_price + 2, entry_price - 1, entry_price, 1000.0],
+            [120, exit_price, exit_price + 2, exit_price - 1, exit_price, 1000.0],
+            [180, exit_price, exit_price + 2, exit_price - 1, exit_price, 1000.0],
         ]
         signals = [1, 0, -1, 0]
         return sim.run(bars, signals)

@@ -9,7 +9,7 @@ catches the exact kind of bug the 2026-05-19 Codex stop-gate review surfaced:
   etc.) — but the safety-proxy was still wide open for accidental drift.
 - `f754cff` added ``/options`` + ``/options-multi`` to close a mode-gate
   bypass that was discovered when `optionsOrder` had been temporarily
-  routed through OpenAlgo direct.
+  routed through native broker direct.
 - `9fe4dd3` retro-fitted regression coverage for the new routes.
 
 Each of those incidents stemmed from the same root cause: the frontend's
@@ -50,13 +50,10 @@ _EXPECTED_FRONTEND_ORDER_LEAVES = {
     "basket",
     "cancel",
     "cancel-all",
-    "close-position",
     "modify",
-    "open-position",
     "options",
     "options-multi",
     "place",
-    "place-smart",
     "split",
 }
 _LOWER_KEBAB_RE = re.compile(r"[a-z][a-z0-9-]*\Z")
@@ -718,7 +715,7 @@ _BACKEND_ONLY_LEAVES: set[str] = {
     "super",
     "triggers",
     "multi",
-    # Legacy OpenAlgo-style GTT leaves. The terminal compatibility exports
+    # Legacy native broker-style GTT leaves. The terminal compatibility exports
     # (`placeGtt` / `modifyGtt` / `cancelGtt` / `getGttOrderbook`) now call the
     # canonical gated `/orders/forever` client instead of `postOrder("gtt-*")`.
     # Keep these backend leaves documented as legacy/fail-closed compatibility

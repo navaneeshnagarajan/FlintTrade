@@ -474,9 +474,7 @@ class TestWorkspaceResolution:
 
         assert (workspace / "totp_auth.duckdb.wal").exists()
 
-    def test_store_with_nothing_enrolled_migrates_without_verification(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
+    def test_store_with_nothing_enrolled_migrates_without_verification(self, monkeypatch, tmp_path: Path) -> None:
         """An un-enrolled store has no pairing to prove, so it must not be deleted.
 
         Verification exists to catch a mispaired key, not to judge the store's
@@ -649,9 +647,7 @@ class TestWorkspaceResolution:
         assert legacy_db.exists()
         assert legacy_key.exists()
 
-    def test_in_memory_store_borrows_the_workspace_key_without_probing(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
+    def test_in_memory_store_borrows_the_workspace_key_without_probing(self, monkeypatch, tmp_path: Path) -> None:
         """``:memory:`` has no directory of its own, and still must not probe."""
         workspace = self._default_workspace(monkeypatch, tmp_path)
         legacy_db, legacy_key = self._legacy_pair(monkeypatch, tmp_path)

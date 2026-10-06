@@ -36,7 +36,7 @@ from flinttrade_screener.sample_data_routes import sample_data_bp
 def _reset_lot_size_resolver():
     """Clear the module-level shared LotSizeResolver between tests.
 
-    The route caches one resolver per OpenAlgo client instance; a leaked
+    The route caches one resolver per broker client instance; a leaked
     resolver (with its 24-hour cache) from one test must never serve another.
     """
     sample_data_routes._resolver = None
@@ -46,12 +46,12 @@ def _reset_lot_size_resolver():
     sample_data_routes._resolver_client_id = None
 
 
-def _make_app(openalgo_client=None) -> Flask:
+def _make_app(broker_client=None) -> Flask:
     """Build a Flask app with the sample-data blueprint registered."""
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
-    if openalgo_client is not None:
-        flask_app.config["OPENALGO_CLIENT"] = openalgo_client
+    if broker_client is not None:
+        flask_app.config["BROKER_CLIENT"] = broker_client
     flask_app.register_blueprint(sample_data_bp)
     return flask_app
 
@@ -64,14 +64,14 @@ def client():
 
 
 def _client_with_instruments(instruments):
-    """Return a test client whose app carries a mock OpenAlgo client."""
-    openalgo = MagicMock()
+    """Return a test client whose app carries a mock broker client."""
+    broker = MagicMock()
     if isinstance(instruments, Exception):
-        openalgo.instruments.side_effect = instruments
+        broker.instruments.side_effect = instruments
     else:
         rows = [{"exchange": "NFO", **instrument} for instrument in instruments]
-        openalgo.instruments.return_value = {"status": "success", "data": rows}
-    return _make_app(openalgo).test_client()
+        broker.instruments.return_value = {"status": "success", "data": rows}
+    return _make_app(broker).test_client()
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,9 @@ def test_lot_size_known_symbol_returns_real_value(client):
     data = resp.get_json()
     assert data["symbol"] == "NIFTY"
     assert data["exchange"] == "NFO"
-    assert data["lot_size"] == 75  # Current NIFTY lot size (post-2024 reset)
+    from flinttrade_core.instrument_lots import lot_size_from_master
+
+    assert data["lot_size"] == lot_size_from_master("NIFTY")
 
 
 def test_lot_size_is_flagged_as_sample_data_without_a_live_source(client):
@@ -324,7 +326,7 @@ def test_lot_size_table_delegates_to_resolver_fallback(client):
 
 
 # ---------------------------------------------------------------------------
-# /api/v1/screener/lot-size — resolver-backed (app has an OpenAlgo client)
+# /api/v1/screener/lot-size — resolver-backed (app has an broker client)
 # ---------------------------------------------------------------------------
 
 
@@ -367,12 +369,14 @@ def test_lot_size_contract_falls_back_to_live_base_symbol():
 
 
 def test_lot_size_fetch_failure_falls_back_flagged():
-    """A dead OpenAlgo must not 500 — serve the fallback, honestly flagged."""
-    c = _client_with_instruments(ConnectionError("OpenAlgo down"))
+    """A dead broker must not 500 — serve the fallback, honestly flagged."""
+    c = _client_with_instruments(ConnectionError("broker down"))
     resp = c.get("/api/v1/screener/lot-size?symbol=NIFTY&exchange=NFO")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["lot_size"] == 75
+    from flinttrade_core.instrument_lots import lot_size_from_master
+
+    assert data["lot_size"] == lot_size_from_master("NIFTY")
     assert data["is_sample_data"] is True
 
 

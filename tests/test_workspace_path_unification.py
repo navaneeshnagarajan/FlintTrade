@@ -231,13 +231,11 @@ _STRING_LITERAL_DEBT: frozenset[str] = frozenset(
 #   cache.py                 "suitable for ``~/.flinttrade/`` data directories".
 #   desktop.py               module header + `_ensure_workspace` both present the
 #                            dotdir as where workspace.json is created.
-#   excel_routes.py          documents the EXCEL_OUTPUT_DIR default.
 #   expiry_tracker.py        one trailing sentence, unlike its per-OS-qualified
 #                            migration docstring above it.
 #   test_contracts.py        \
 #   test_credentials.py       > test-isolation prose ("no files are written to …").
 #   engine/tests/conftest.py /
-#   test_flow_routes.py      one test docstring.
 #   test_totp_auth.py        one test docstring.
 # ---------------------------------------------------------------------------
 _DOC_MENTION_DEBT: frozenset[str] = frozenset(
@@ -248,8 +246,6 @@ _DOC_MENTION_DEBT: frozenset[str] = frozenset(
         "packages/core/historical/src/flinttrade_historical/expiry_tracker.py",
         "packages/integrations/gateway/tests/test_contracts.py",
         "packages/integrations/gateway/tests/test_credentials.py",
-        "packages/integrations/webhooks/src/flinttrade_webhooks/excel_routes.py",
-        "packages/integrations/webhooks/tests/test_flow_routes.py",
         "packages/services/engine/tests/conftest.py",
     }
 )
@@ -281,7 +277,7 @@ _EXCUSED: frozenset[str] = frozenset(_ALLOWED) | _KNOWN_DEBT
 # of a copy-once migration, so a pre-workspace copy is left behind on every
 # upgraded macOS/Windows install:
 #
-#   flows         FlowBuilder flow definitions
+#   flows         Legacy workspace content retained during migration
 #   models        trained signal models (signal_model.joblib and its .sha256)
 #   strategies    user strategy files and per-strategy state.json
 #

@@ -55,10 +55,14 @@ def gator_oscillator(
 
     validate_ohlcv(high, low, high, min_length=1)
     jaw, teeth, lips = _alligator(
-        high, low,
-        jaw_period=jaw_period, jaw_offset=jaw_offset,
-        teeth_period=teeth_period, teeth_offset=teeth_offset,
-        lips_period=lips_period, lips_offset=lips_offset,
+        high,
+        low,
+        jaw_period=jaw_period,
+        jaw_offset=jaw_offset,
+        teeth_period=teeth_period,
+        teeth_offset=teeth_offset,
+        lips_period=lips_period,
+        lips_offset=lips_offset,
     )
 
     n = len(high)
@@ -352,8 +356,14 @@ def chop(
 
 def kst(
     close: NDArray[np.float64],
-    r1: int = 10, r2: int = 13, r3: int = 15, r4: int = 20,
-    n1: int = 10, n2: int = 13, n3: int = 15, n4: int = 20,
+    r1: int = 10,
+    r2: int = 13,
+    r3: int = 15,
+    r4: int = 20,
+    n1: int = 10,
+    n2: int = 13,
+    n3: int = 15,
+    n4: int = 20,
     signal: int = 9,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Know Sure Thing (KST).

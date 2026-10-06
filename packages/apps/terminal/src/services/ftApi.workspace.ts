@@ -1,4 +1,5 @@
 import { get, post, put, del } from "./ftApi.helpers";
+import { isPublicDemoBuild } from "@/lib/demoSession";
 
 export interface PresetWidgetEntry {
   id: string;
@@ -41,17 +42,27 @@ export interface UpdatePresetPayload {
   widgets?: string[];
 }
 
-export const listPresets = () =>
-  get<{ presets: WorkspacePresetRecord[] }>("presets/");
+export const listPresets = async () => {
+  if (isPublicDemoBuild()) return (await import("./publicDemoPresets")).listPublicDemoPresets();
+  return get<{ presets: WorkspacePresetRecord[] }>("presets/");
+};
 
-export const createPreset = (payload: CreatePresetPayload) =>
-  post<WorkspacePresetRecord>("presets/", payload);
+export const createPreset = async (payload: CreatePresetPayload) => {
+  if (isPublicDemoBuild()) return (await import("./publicDemoPresets")).createPublicDemoPreset(payload);
+  return post<WorkspacePresetRecord>("presets/", payload);
+};
 
-export const updatePreset = (id: string, payload: UpdatePresetPayload) =>
-  put<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}`, payload);
+export const updatePreset = async (id: string, payload: UpdatePresetPayload) => {
+  if (isPublicDemoBuild()) return (await import("./publicDemoPresets")).updatePublicDemoPreset(id, payload);
+  return put<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}`, payload);
+};
 
-export const deletePreset = (id: string) =>
-  del<{ success: boolean }>(`presets/${encodeURIComponent(id)}`);
+export const deletePreset = async (id: string) => {
+  if (isPublicDemoBuild()) return (await import("./publicDemoPresets")).deletePublicDemoPreset(id);
+  return del<{ success: boolean }>(`presets/${encodeURIComponent(id)}`);
+};
 
-export const forkPreset = (id: string, name: string) =>
-  post<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}/fork`, { name });
+export const forkPreset = async (id: string, name: string) => {
+  if (isPublicDemoBuild()) return (await import("./publicDemoPresets")).forkPublicDemoPreset(id, name);
+  return post<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}/fork`, { name });
+};

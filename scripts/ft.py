@@ -9,7 +9,7 @@ standard library is imported.
 
 Usage::
 
-    python scripts/ft.py <start|stop|restart|status|dev|setup|test|test-fast|lint|clean|version|help|
+    python scripts/ft.py <start|stop|restart|status|dev|setup|test|test-fast|check|lint|clean|version|help|
                           desktop-test|desktop-build|desktop-package|desktop-dev>
 
 After a FlintTrade install the shim exposes exactly the same interface as::
@@ -22,9 +22,12 @@ Run ``python scripts/ft.py help`` for the full command table.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import platform
 import re
+import select
+import shlex
 import shutil
 import signal
 import socket
@@ -35,7 +38,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 
 def _load_module_from_path(module_name: str, module_path: str | Path) -> ModuleType:
@@ -89,7 +92,6 @@ IS_WINDOWS = os.name == "nt"
 
 BACKEND_HOST = os.environ.get("FLINTTRADE_BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.environ.get("FLINTTRADE_BACKEND_PORT", "5100"))
-OPENALGO_PORT = int(os.environ.get("OPENALGO_PORT", "5000"))
 BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 
 CORE_SRC = REPO_ROOT / "packages" / "core" / "core" / "src"
@@ -108,6 +110,12 @@ not the exact number - it is that an unbounded local run turns a flaky
 process-spawning test into an indefinite hang with no output at all.
 """
 
+PYTEST_NATIVE_THREAD_ENV = dict.fromkeys((
+    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS",
+), "1")
+"""Test-only native thread bounds; xdist already supplies process parallelism."""
+
 # Directories that `clean` and the workspace walk never descend into: the repo
 # virtualenv, the git object store, and the gitignored .local/ scratch tree
 # (external test-dep clones and archives live there and are not ours to delete).
@@ -125,8 +133,9 @@ COMMANDS: dict[str, str] = {
     "status": "Show backend, port-ownership, workspace and version status",
     "dev": "Run the terminal dev server alongside the FlintTrade backend",
     "setup": "First-time setup - install Python and Node dependencies",
-    "test": "Run the full pytest suite (plus the Rust ticks crate when cargo is present)",
-    "test-fast": "Run pytest and stop on the first failure",
+    "test": "Run pytest (paths/flags accepted); default also tests Rust when cargo is present",
+    "test-fast": "Run pytest (paths/flags accepted) and stop on the first failure",
+    "check": "Run affected checks; --full runs the exhaustive local gate; --dry-run prints commands",
     "lint": "Run ruff over packages/ and tests/, then the terminal's react-hooks gate",
     "clean": "Delete __pycache__, .pytest_cache and node_modules trees",
     "version": "Print the FlintTrade version",
@@ -335,6 +344,16 @@ def python_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def pytest_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Bound native test libraries without changing application Python commands.
+
+    Each xdist worker otherwise starts its own CPU-sized BLAS/OpenMP pool.
+    Force the measured test bounds even when the shell inherits larger values;
+    pytest worker options still control process-level concurrency independently.
+    """
+    return python_env(extra) | PYTEST_NATIVE_THREAD_ENV
+
+
 # ---------------------------------------------------------------------------
 # Process helpers
 # ---------------------------------------------------------------------------
@@ -518,11 +537,15 @@ def terminate_pid(pid: int) -> bool:
     if IS_WINDOWS:
         taskkill = shutil.which("taskkill")
         if taskkill:
-            proc = subprocess.run(
-                [taskkill, "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                check=False,
-            )
+            try:
+                proc = subprocess.run(
+                    [taskkill, "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=3,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
             return proc.returncode == 0
     try:
         os.kill(pid, signal.SIGTERM)
@@ -835,11 +858,9 @@ def cmd_status(_args: list[str]) -> int:
     else:
         info(f"  API: not responding on port {BACKEND_PORT}")
 
-    info("\nOpenAlgo integration (optional):")
-    info(f"  API: {'responding' if port_is_live(OPENALGO_PORT) else 'not responding'} on port {OPENALGO_PORT}")
 
     info("\nPorts:")
-    for port in (BACKEND_PORT, OPENALGO_PORT, 5173, 3000):
+    for port in (BACKEND_PORT, 5173, 3000):
         info(f"  :{port} - {describe_port(port)}")
 
     info("\nWorkspace:")
@@ -851,6 +872,83 @@ def cmd_status(_args: list[str]) -> int:
 
     info(f"\nVersion: {read_version()}")
     return 0
+
+
+def _wait_dev_backend_exit(
+    proc: subprocess.Popen[bytes], *, stop_requested: Callable[[], bool] | None = None,
+) -> None:
+    """Observe POSIX exit without reaping the group leader and releasing its PID.
+
+    Python 3.12 on macOS lacks ``waitid``; kqueue provides the same non-reaping
+    notification. Polling lets recorded signals request cleanup without raising
+    asynchronously inside Popen, before we have recorded ownership of a child.
+    Windows retains Popen's wait and taskkill tree handling.
+    """
+    if IS_WINDOWS:
+        proc.wait()
+    elif hasattr(os, "waitid"):
+        flags = os.WEXITED | os.WNOWAIT | (os.WNOHANG if stop_requested is not None else 0)
+        while stop_requested is None or not stop_requested():
+            if os.waitid(os.P_PID, proc.pid, flags) is not None:
+                return
+            time.sleep(0.05)
+    else:
+        with select.kqueue() as queue:
+            event = select.kevent(proc.pid, filter=select.KQ_FILTER_PROC,
+                                  flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT, fflags=select.KQ_NOTE_EXIT)
+            try:
+                changes = [event]
+                while stop_requested is None or not stop_requested():
+                    if queue.control(changes, 1, 0.05 if stop_requested is not None else None):
+                        return
+                    changes = []
+            except ProcessLookupError:
+                pass  # The still-unreaped child exited before registration.
+
+
+def _stop_dev_processes(processes: Sequence[subprocess.Popen[bytes]], *, timeout: float = 3.0) -> None:
+    """Stop only dev children created here, including their inherited process groups.
+
+    POSIX callers must spawn with ``start_new_session=True``: the recorded PID
+    then names our private group, never a group discovered from a port or an
+    arbitrary process. Retain exited leaders until every group signal is sent:
+    the unreaped child pins its PID/PGID against reuse. A reaped leader no longer
+    grants group authority. All groups share one graceful deadline.
+    """
+    if IS_WINDOWS:
+        for proc in processes:
+            if proc.poll() is None:
+                terminate_pid(proc.pid)
+    else:
+        pending = {proc.pid for proc in processes if proc.returncode is None}
+        for pid in tuple(pending):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pending.remove(pid)
+        deadline = time.monotonic() + timeout
+        while pending and time.monotonic() < deadline:
+            for pid in tuple(pending):
+                try:
+                    os.killpg(pid, 0)
+                except ProcessLookupError:
+                    pending.remove(pid)
+            if pending:
+                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        for pid in pending:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    for proc in processes:
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                warn(f"Dev child PID {proc.pid} did not exit after forced termination.")
 
 
 def cmd_dev(_args: list[str]) -> int:
@@ -868,7 +966,6 @@ def cmd_dev(_args: list[str]) -> int:
     header("FlintTrade Dev Mode")
     info("  Terminal:  http://127.0.0.1:5173")
     info(f"  Backend:   {BACKEND_URL}")
-    info("  OpenAlgo:  optional integration, configure in Settings when needed")
     info("")
 
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -877,20 +974,37 @@ def cmd_dev(_args: list[str]) -> int:
     backend_log = (DEV_LOG_DIR / "backend.log").open("wb")
     terminal_log = (DEV_LOG_DIR / "terminal.log").open("wb")
     processes: list[subprocess.Popen[bytes]] = []
+    received_signal: int | None = None
+    previous_handlers = {}
+
+    def request_stop(signum: int, _frame: object) -> None:
+        nonlocal received_signal
+        # Do not interrupt Popen before its child is recorded, or interrupt the
+        # bounded TERM/KILL cleanup on a repeated signal. The first reason wins.
+        if received_signal is None:
+            received_signal = signum
+
     try:
+        if not IS_WINDOWS:
+            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                # Respect the launcher's contract, notably nohup's ignored HUP.
+                if signal.getsignal(signum) == signal.SIG_IGN:
+                    continue
+                previous_handlers[signum] = signal.signal(signum, request_stop)
         backend = subprocess.Popen(
             [python, "-m", "flinttrade_core.app"],
             cwd=str(REPO_ROOT),
             env=env,
             stdout=backend_log,
             stderr=subprocess.STDOUT,
+            start_new_session=not IS_WINDOWS,
         )
         processes.append(backend)
 
         pnpm = pnpm_argv()
         if pnpm is None:
             warn("No Node toolchain found; the terminal dev server was not started.")
-        else:
+        elif received_signal is None:
             # Vite's dev server is interactive, so CI is deliberately not forced here.
             terminal_env = os.environ.copy()
             terminal_env.setdefault("VITE_FLINTTRADE_HOST", BACKEND_URL)
@@ -900,6 +1014,7 @@ def cmd_dev(_args: list[str]) -> int:
                 env=terminal_env,
                 stdout=terminal_log,
                 stderr=subprocess.STDOUT,
+                start_new_session=not IS_WINDOWS,
             )
             processes.append(terminal)
 
@@ -907,16 +1022,27 @@ def cmd_dev(_args: list[str]) -> int:
         info("Logs: .local/dev-logs/backend.log and .local/dev-logs/terminal.log")
         info("Press Ctrl+C to stop.")
         try:
-            return backend.wait()
+            _wait_dev_backend_exit(backend, stop_requested=lambda: received_signal is not None)
         except KeyboardInterrupt:
+            received_signal = signal.SIGINT
+        if received_signal is not None:
             info("\nStopping dev processes...")
-            return 0
     finally:
-        for proc in processes:
-            if proc.poll() is None:
-                terminate_pid(proc.pid)
-        for handle in (backend_log, terminal_log):
-            handle.close()
+        try:
+            _stop_dev_processes(processes)
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+            for handle in (backend_log, terminal_log):
+                handle.close()
+    if received_signal == signal.SIGINT:
+        return 0
+    if received_signal is not None:
+        # Restore the original signal disposition only after our owned groups
+        # are gone; default handlers retain the CLI's signal exit status.
+        signal.raise_signal(received_signal)
+        return 128 + received_signal
+    return backend.returncode if backend.returncode is not None else 1
 
 
 _IMPORT_FAILURE_MARKER = "FT-IMPORT-FAILURE "
@@ -1121,26 +1247,243 @@ def pytest_paths() -> list[str]:
     return paths
 
 
-def _run_pytest(extra_flags: Sequence[str]) -> int:
-    """Run pytest over every discovered test directory.
+def _pytest_runner_options(args: Sequence[str]) -> tuple[list[str], int | None]:
+    """Consume the runner's optional worker count while preserving pytest arguments."""
+    remaining: list[str] = []
+    workers: int | None = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            remaining.extend(args[index:])
+            break
+        if arg == "--workers" or arg.startswith("--workers="):
+            if arg == "--workers":
+                index += 1
+                if index == len(args):
+                    raise ValueError("--workers requires a non-negative integer")
+                value = args[index]
+            else:
+                value = arg.partition("=")[2]
+            try:
+                workers = int(value)
+            except ValueError as exc:
+                raise ValueError("--workers requires a non-negative integer") from exc
+            if workers < 0:
+                raise ValueError("--workers requires a non-negative integer")
+        else:
+            remaining.append(arg)
+        index += 1
+    return remaining, workers
+
+
+_PYTEST_VALUE_OPTIONS = frozenset({
+        "-k", "-m", "-c", "--config-file", "-o", "-n", "--numprocesses", "--override-ini", "--maxfail",
+        "-W", "--pythonwarnings", "--max-warnings", "--pdbcls", "--lfnf", "--last-failed-no-failures",
+        "-r", "--report-chars", "--verbosity", "--pastebin", "--cache-show", "--debug",
+        "--deselect", "--ignore", "--ignore-glob", "--confcutdir", "--rootdir", "--basetemp",
+        "--doctest-report", "--doctest-glob",
+        "--junitxml", "--junit-xml", "--junitprefix", "--junit-prefix", "--capture", "--tb", "--show-capture", "--color",
+        "--code-highlight", "--durations", "--durations-min", "--timeout", "--timeout-method", "--timeout_method",
+        "--session-timeout", "--randomly-seed", "--dist", "--max-worker-restart", "--maxprocesses",
+        "--tx", "--px", "--testrunuid", "--cov", "--cov-report", "--cov-config", "--cov-fail-under", "--cov-context",
+        "--log-level", "--log-format", "--log-date-format", "--log-file", "--log-file-level", "--log-file-format",
+        "--log-file-date-format", "--log-file-mode", "--log-disable",
+        "--log-cli-level", "--log-cli-format", "--log-cli-date-format", "--log-auto-indent",
+        "-p", "--assert", "--import-mode", "--anyio-mode", "--asyncio-mode", "--asyncio-default-fixture-loop-scope",
+        "--asyncio-default-test-loop-scope", "--maxschedchunk", "--rsyncdir", "--rsyncignore",
+        "--ft-shard-index", "--ft-shard-count",
+})
+
+
+def _pytest_has_targets(args: Sequence[str]) -> bool:
+    """Recognise explicit paths/node ids without mistaking selection values for paths."""
+    skip_value = False
+    positional_only = False
+    for arg in args:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg == "--":
+            positional_only = True
+            continue
+        if not positional_only and arg in _PYTEST_VALUE_OPTIONS:
+            skip_value = True
+            continue
+        if not positional_only and arg.startswith("-"):
+            continue
+        target_path = arg.partition("::")[0]
+        if positional_only or "--pyargs" in args or "/" in target_path or "\\" in target_path:
+            return True
+        if target_path.endswith(".py") or (REPO_ROOT / target_path).exists():
+            return True
+    return False
+
+
+def _pytest_selection_requested(args: Sequence[str]) -> bool:
+    """Distinguish partial/display-only runs from full tests with output preferences."""
+    if _pytest_has_targets(args):
+        return True
+    selectors = {
+        "-k", "-m", "--deselect", "--ignore", "--ignore-glob", "--collect-only", "--collectonly", "--co",
+        "--lf", "--last-failed", "--lfnf", "--last-failed-no-failures", "--stepwise", "--sw",
+        "--stepwise-skip", "--sw-skip", "--stepwise-reset", "--sw-reset", "--fixtures", "--funcargs", "--fixtures-per-test",
+        "--setup-only", "--setuponly", "--setup-plan", "--setupplan", "--markers", "--cache-show",
+        "--ft-shard-index", "--ft-shard-count", "-h", "--help", "-V", "--version", "-f", "--looponfail",
+    }
+    skip_value = False
+    for arg in args:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg == "--":
+            break
+        if arg.partition("=")[0] in selectors or arg.startswith(("-k", "-m")):
+            return True
+        if arg in _PYTEST_VALUE_OPTIONS:
+            skip_value = True
+    return False
+
+
+def _pytest_requested_plugins(args: Sequence[str]) -> set[str]:
+    """Read explicit plugin names without executing pytest's plugin configuration."""
+    plugins = set()
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        if arg == "-p":
+            if index + 1 < len(args):
+                plugins.add(args[index + 1])
+            index += 1
+        elif arg.startswith("-p"):
+            plugins.add(arg[2:].removeprefix("="))
+        elif arg in _PYTEST_VALUE_OPTIONS:
+            index += 1
+        index += 1
+    return plugins
+
+
+_PYTEST_PLUGIN_PROBE = """\
+import json
+import sys
+from _pytest.config import get_config
+from _pytest.config.exceptions import UsageError
+
+args = sys.argv[1:]
+config = get_config(args)
+try:
+    # Parse configuration/plugins, but never import project conftests or collect
+    # tests. Unknown conftest-defined options are left to the real invocation.
+    try:
+        config.parse(['--noconftest', *args])
+    except UsageError:
+        pass
+    manager = config.pluginmanager
+    modules = {getattr(plugin, '__name__', '') for plugin in manager.get_plugins()}
+    print('FT-PYTEST-PLUGINS ' + json.dumps({
+        'xdist': 'xdist.plugin' in modules,
+        'timeout': 'pytest_timeout' in modules,
+        'timeout_blocked': any(manager.is_blocked(name) for name in ('timeout', 'pytest_timeout')),
+    }))
+finally:
+    config._ensure_unconfigure()
+"""
+
+
+def _pytest_plugin_state(python: str, args: Sequence[str], env: dict[str, str]) -> dict[str, bool] | None:
+    """Ask the selected pytest to resolve config, overrides and plugin load order.
+
+    The bootstrap runner remains stdlib-only. Keep this configuration probe
+    separate from optional module availability checks; importing xdist alone
+    says nothing about whether the selected configuration enables its hooks.
+    Invalid/unavailable interpreters or configurations still receive pytest's
+    own diagnostics when the real command runs.
+    """
+    try:
+        result = subprocess.run(
+            [python, "-c", _PYTEST_PLUGIN_PROBE, *args], cwd=REPO_ROOT, env=env,
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    marker = "FT-PYTEST-PLUGINS "
+    for line in reversed(result.stdout.splitlines()):
+        if result.returncode == 0 and line.startswith(marker):
+            return json.loads(line[len(marker):])
+    return None
+
+
+def pytest_argv(extra_flags: Sequence[str], *, env: dict[str, str] | None = None) -> list[str]:
+    """Build a bounded pytest invocation, defaulting to every repository test root.
 
     Args:
         extra_flags: Flags appended after the target paths.
+        env: Exact child environment; defaults to the interactive pytest environment.
 
     Returns:
-        pytest's exit code.
+        The complete command, with optional xdist parallelism capped at four workers
+        unless ``--workers`` or ``FLINTTRADE_TEST_WORKERS`` overrides it.
     """
     python = resolve_python()
-    paths = pytest_paths()
-    if not paths:
-        fail("No test directories found.")
-        return 1
-    argv = [
-        python,
-        "-m",
-        "pytest",
-        *paths,
-        *extra_flags,
+    env = pytest_env() if env is None else env
+    args, workers = _pytest_runner_options(extra_flags)
+    paths = [] if _pytest_has_targets(args) else pytest_paths()
+    if not paths and not _pytest_has_targets(args):
+        raise ValueError("No test directories found.")
+    parallel_args: list[str] = []
+    option_args = args[:args.index("--")] if "--" in args else args
+    explicit_xdist = any(arg == "-n" or arg.startswith(("-n", "--numprocesses")) for arg in option_args)
+    explicit_config = any(
+        arg.startswith(("-c", "--config-file=")) or arg == "--config-file"
+        for arg in option_args
+    )
+    configuration_args = [] if explicit_config else ["-c", str(REPO_ROOT / "pyproject.toml")]
+    state = _pytest_plugin_state(python, [*configuration_args, *paths, *args], env)
+    plugin_args = [*shlex.split(env.get("PYTEST_ADDOPTS", "")), *option_args]
+    plugins = _pytest_requested_plugins(plugin_args)
+    autoload_disabled = bool(env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD")) or (
+        "--disable-plugin-autoload" in plugin_args
+    )
+    # CLI -p accepts entry-point aliases; PYTEST_PLUGINS imports module names
+    # directly. The top-level xdist module has no plugin hooks of its own.
+    environment_plugins = {name.strip() for name in env.get("PYTEST_PLUGINS", "").split(",")}
+    xdist_loaded = bool({"xdist", "xdist.plugin"} & plugins) or "xdist.plugin" in environment_plugins
+    timeout_loaded = bool({"timeout", "pytest_timeout"} & plugins) or "pytest_timeout" in environment_plugins
+    xdist_disabled = "no:xdist" in plugins or "no:xdist.plugin" in plugins or (autoload_disabled and not xdist_loaded)
+    timeout_blocked = bool({"no:timeout", "no:pytest_timeout"} & plugins)
+    if state is not None:
+        xdist_disabled = not state["xdist"]
+        timeout_loaded = state["timeout"]
+        timeout_blocked = not timeout_loaded and state["timeout_blocked"]
+        autoload_disabled = not timeout_loaded
+    if timeout_blocked:
+        raise ValueError("The test runner requires pytest-timeout; do not disable the timeout watchdog plugin.")
+    # A disabled plugin cannot register -n. Only automatic worker insertion is
+    # suppressed: an explicit, incompatible -n remains pytest's own decision.
+    if not explicit_xdist and not xdist_disabled:
+        if workers is None:
+            value = env.get("FLINTTRADE_TEST_WORKERS")
+            try:
+                workers = int(value) if value is not None else min(4, max(1, os.cpu_count() or 1))
+            except ValueError as exc:
+                raise ValueError("FLINTTRADE_TEST_WORKERS must be a non-negative integer") from exc
+            if workers < 0:
+                raise ValueError("FLINTTRADE_TEST_WORKERS must be a non-negative integer")
+        available = state["xdist"] if state is not None else (
+            capture([python, "-c", "import xdist"], env=env) is not None
+        )
+        if available:
+            # Zero must override -n inherited through pytest's config/addopts too.
+            parallel_args = ["-n", str(workers)]
+        elif workers > 0:
+            info("pytest-xdist unavailable - running pytest sequentially")
+    timeout_plugin = ["-p", "pytest_timeout"] if autoload_disabled and not timeout_loaded else []
+    bounds = [
+        *configuration_args,
+        *timeout_plugin,
+        *parallel_args,
         "--tb=short",
         "--import-mode=importlib",
         # Match the CI invocation in .github/workflows/test.yml. Without these,
@@ -1157,21 +1500,72 @@ def _run_pytest(extra_flags: Sequence[str]) -> int:
         f"--timeout={PYTEST_TIMEOUT_SECONDS}",
         "--timeout-method=thread",
     ]
-    return run(argv, env=python_env(), check=False)
+    if "--" in args:
+        separator = args.index("--")
+        args = [*args[:separator], *bounds, *args[separator:]]
+    else:
+        args.extend(bounds)
+    return [python, "-m", "pytest", *paths, *args]
 
 
-def cmd_test(_args: list[str]) -> int:
-    """Run the full pytest suite, then the Rust ticks crate when cargo is present.
+def _run_pytest(extra_flags: Sequence[str]) -> int:
+    """Run selected pytest tests, preserving failures and the watchdog timeout."""
+    try:
+        argv = pytest_argv(extra_flags)
+    except ValueError as exc:
+        fail(str(exc))
+        return 2
+    return run(argv, env=pytest_env(), check=False)
+
+
+def rust_test_env(python: str) -> dict[str, str]:
+    """Pin PyO3 and expose the selected interpreter's Unix shared library directory.
+
+    uv's standalone Python keeps libpython outside the system loader search
+    path. Rust's test executable links that library, so it needs LIBDIR at
+    runtime as well as PYO3_PYTHON during compilation. Preserve any existing
+    loader paths and leave Windows/static-Python environments unchanged.
+    """
+    env = python_env({"PYO3_PYTHON": python})
+    system = platform.system()
+    if system not in {"Linux", "Darwin"}:
+        return env
+    libdir = capture(
+        [python, "-I", "-c", "import sysconfig; print(sysconfig.get_config_var('LIBDIR') or '')"],
+        env=env,
+    )
+    if not libdir:
+        return env
+    directory = Path(libdir)
+    pattern = "libpython*.so*" if system == "Linux" else "libpython*.dylib"
+    try:
+        shared_library = directory.is_absolute() and any(path.is_file() for path in directory.glob(pattern))
+    except (OSError, ValueError):
+        shared_library = False
+    if shared_library:
+        variable = "LD_LIBRARY_PATH" if system == "Linux" else "DYLD_LIBRARY_PATH"
+        existing = env.get(variable, "")
+        # Both Unix loaders use ':', irrespective of the host running a platform test.
+        if libdir not in existing.split(":"):
+            env[variable] = libdir + (":" + existing if existing else "")
+    return env
+
+
+def cmd_test(args: list[str]) -> int:
+    """Run selected Python tests, or the full Python/Rust suites without selection.
 
     Args:
-        _args: Unused positional arguments.
+        args: Pytest paths/options, plus an optional runner ``--workers`` override.
 
     Returns:
         The first non-zero exit code, or 0.
     """
-    code = _run_pytest(["-v"])
+    code = _run_pytest(["-v", *args])
     if code != 0:
         return code
+    selected_args, _workers = _pytest_runner_options(args)
+    if _pytest_selection_requested(selected_args):
+        return 0
 
     cargo = shutil.which("cargo")
     if cargo is None:
@@ -1185,21 +1579,29 @@ def cmd_test(_args: list[str]) -> int:
     python = resolve_python()
     return run(
         [cargo, "test", "--manifest-path", "packages/core/ticks/Cargo.toml"],
-        env=python_env({"PYO3_PYTHON": python}),
+        env=rust_test_env(python),
         check=False,
     )
 
 
-def cmd_test_fast(_args: list[str]) -> int:
+def cmd_test_fast(args: list[str]) -> int:
     """Run pytest and stop on the first failure.
 
     Args:
-        _args: Unused positional arguments.
+        args: Pytest paths/options, plus an optional runner ``--workers`` override.
 
     Returns:
         pytest's exit code.
     """
-    return _run_pytest(["-x"])
+    args = list(args)
+    args.insert(args.index("--") if "--" in args else len(args), "-x")
+    return _run_pytest(args)
+
+
+def cmd_check(args: list[str]) -> int:
+    """Run the local check planner from its exact sibling path."""
+    checks = _load_module_from_path("_flinttrade_local_checks", Path(__file__).with_name("check_local.py"))
+    return checks.run_checks(args, runner=SimpleNamespace(**globals()))
 
 
 def cmd_lint(_args: list[str]) -> int:
@@ -1433,16 +1835,20 @@ def desktop_pack_script() -> str:
     raise SystemExit(1)
 
 
-def cmd_desktop_package(args: list[str]) -> int:
+def cmd_desktop_package(_args: list[str]) -> int:
     """Package and verify the Electron installer for this OS/arch.
 
+    The standalone pack scripts own preparation, typechecking, tests, bundling
+    and package verification. Running ``build`` first repeats that preparation
+    and replaces the native helpers after their tests have already passed.
+
     Args:
-        args: Forwarded to :func:`cmd_desktop_build`.
+        _args: Unused positional arguments.
 
     Returns:
         The first non-zero exit code, or 0.
     """
-    code = cmd_desktop_build(args)
+    code = _pnpm_workspace_install()
     if code != 0:
         return code
     code = _pnpm_desktop(desktop_pack_script())
@@ -1479,6 +1885,7 @@ HANDLERS: dict[str, Callable[[list[str]], int]] = {
     "setup": cmd_setup,
     "test": cmd_test,
     "test-fast": cmd_test_fast,
+    "check": cmd_check,
     "lint": cmd_lint,
     "clean": cmd_clean,
     "version": cmd_version,

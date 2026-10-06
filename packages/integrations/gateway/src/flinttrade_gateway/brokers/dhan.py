@@ -41,6 +41,7 @@ from flinttrade_core.broker_read_port import (
     BalanceSnapshot,
     BrokerBalanceResponseInvalid,
     BrokerReadResponseInvalid,
+    QuoteRequest,
 )
 from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
@@ -54,6 +55,7 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import dhan_mapping as M
+from ._balance import _balance_number, _balance_record
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -84,24 +86,6 @@ _SAFETY_TERMINAL_ORDER_STATUSES = frozenset(
 _SAFETY_FOREVER_PRE_TRIGGER_STATUSES = frozenset(
     {"CONFIRM", "PENDING", "SCHEDULED", "TRIGGER PENDING", "TRIGGER_PENDING"}
 )
-
-
-def _balance_number(value: object) -> float:
-    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
-        raise BrokerBalanceResponseInvalid
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        raise BrokerBalanceResponseInvalid from None
-    if not math.isfinite(number):
-        raise BrokerBalanceResponseInvalid
-    return number
-
-
-def _balance_record(value: object) -> dict[str, object]:
-    if type(value) is not dict or any(type(key) is not str for key in value):
-        raise BrokerBalanceResponseInvalid
-    return value
 
 
 def _balance_snapshot_from_dhan(response: object) -> BalanceSnapshot:
@@ -318,6 +302,7 @@ class DhanAdapter(BrokerAdapter):
     """
 
     safety_snapshot_requires_serial_reads = True
+    _BROKER_READ_DEPTH_EXCHANGES = frozenset({"NSE", "BSE"})
 
     def __init__(
         self,
@@ -522,6 +507,20 @@ class DhanAdapter(BrokerAdapter):
         # are part of the SafetyContext-hashed order), so a bracket/cover/iceberg
         # order is gated identically to a regular one — no parallel order path.
         variety = str(getattr(order, "variety", "regular")).lower()
+        # GTT is not a Dhan variety. Forever orders are ``/forever/orders`` and
+        # broker-held target/stop legs are ``/super/orders``. Neither endpoint
+        # is reachable from a submit. Modify, cancel, and list stay on their
+        # own methods.
+        if variety == "gtt":
+            raise UnsupportedCapabilityError(
+                "Not placed. GTT orders aren't supported right now.",
+                broker_id="dhan",
+            )
+        if variety in ("bracket", "cover"):
+            raise UnsupportedCapabilityError(
+                "Not placed. Broker-held target and stop orders aren't supported right now.",
+                broker_id="dhan",
+            )
         client = self._client(session)
         if variety in ("regular", ""):
             resp = await self._call(client.place_order, **M.to_place_order_kwargs(order, security_id, tag=tag))
@@ -534,12 +533,8 @@ class DhanAdapter(BrokerAdapter):
             resp = await self._call(
                 self._http(session).post, M.ORDERS_ENDPOINT, M.to_amo_order_payload(order, security_id, tag=tag)
             )
-        elif variety in ("bracket", "cover"):
-            resp = await self._call(client.place_super_order, **M.to_super_order_kwargs(order, security_id, tag=tag))
         elif variety == "iceberg":
             resp = await self._call(client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag))
-        elif variety == "gtt":
-            resp = await self._call(client.place_forever, **M.to_forever_kwargs(order, security_id, tag=tag))
         else:
             raise BrokerError(f"Dhan does not support order variety {variety!r}")
         return M.extract_order_id(resp)
@@ -1795,6 +1790,38 @@ class DhanAdapter(BrokerAdapter):
                 out.append(Quote(**M.from_dhan_quote(name, exchange, rec, strict=True)))
         return out
 
+    async def depth(self, session: Session, request: QuoteRequest) -> dict[str, Any]:
+        """Read exact cash-equity depth through the existing quote SDK transport.
+
+        The read owner supplies session authority and the shared quote budget.
+        This in-process capability does not change frozen native HTTP routes,
+        streaming readiness, account lifecycle or derivative lot evidence.
+        """
+        instrument = request.instrument
+        if instrument.exchange not in self._BROKER_READ_DEPTH_EXCHANGES:
+            raise UnsupportedCapabilityError("Dhan read-port depth supports cash equities only", broker_id="dhan")
+        if self._security_resolver is None:
+            raise BrokerReadResponseInvalid from None
+        try:
+            security_id = self._security_resolver(instrument.symbol, instrument.exchange)
+            if (type(security_id) is not str or not security_id.isascii()
+                    or not security_id.isdecimal() or str(int(security_id)) != security_id
+                    or int(security_id) <= 0
+                    or (instrument.instrument_id is not None and instrument.instrument_id != security_id)):
+                raise BrokerReadResponseInvalid from None
+            identity = M.reverse_security_id(self._security_resolver, security_id, instrument.exchange)
+            if (identity.get("symbol") != instrument.symbol
+                    or identity.get("exchange") != instrument.exchange
+                    or identity.get("security_id") != security_id
+                    or identity.get("instrument") != "EQUITY"):
+                raise BrokerReadResponseInvalid from None
+        except (M.DhanMappingError, ValueError, TypeError):
+            raise BrokerReadResponseInvalid from None
+        segment = M.to_dhan_segment(instrument.exchange)
+        response = await self._call(self._client(session).quote_data, {segment: [int(security_id)]})
+        return {"symbol": instrument.symbol, "exchange": instrument.exchange,
+                **M.depth_from_feed(segment, security_id, response)}
+
     async def ltp(self, session: Session, symbols: list[str]) -> dict[str, float]:
         """Last traded prices from the existing quote snapshot, keyed by ``EXCHANGE:SYMBOL``."""
         quotes = await self.quotes(session, symbols)
@@ -2399,40 +2426,11 @@ class DhanAdapter(BrokerAdapter):
         broker fetch failure is captured on the report's
         ``error`` field instead of raised, so the runner retries next cycle.
         """
-        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
-            EMPTY_LOCAL_STATE,
-            build_report,
-            declare_unavailable_order_fields,
-        )
+        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, _reconcile_adapter  # noqa: PLC0415
 
         generated_at = datetime.now(tz=UTC)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
-        try:
-            broker_orders = declare_unavailable_order_fields(
-                await self.order_book(session),
-                fields=("variety", "validity", "strategy"),
-            )
-            broker_positions = await self.positions(session)
-            broker_holdings = await self.holdings(session)
-        except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes
-            return build_report(
-                adapter_id=self.broker_id,
-                account_id=session.account_id,
-                generated_at=generated_at,
-                local_state=local,
-                error=f"broker fetch failed: {exc}",
-            )
-        # The read methods return the normalised row dicts at runtime (see the
-        # mapping layer); build_report consumes them as plain mappings.
-        return build_report(
-            adapter_id=self.broker_id,
-            account_id=session.account_id,
-            generated_at=generated_at,
-            broker_orders=broker_orders,  # type: ignore[arg-type]
-            broker_positions=broker_positions,  # type: ignore[arg-type]
-            broker_holdings=broker_holdings,
-            local_state=local,
-        )
+        return await _reconcile_adapter(self, session, generated_at=generated_at, local_state=local)
 
 
 from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # noqa: E402  shared per-process token (§8.0c)

@@ -25,10 +25,14 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_core.indian_charges import estimate_practice_fill
+from flinttrade_core.instrument_lots import contract_quantity_message
+from flinttrade_core.restored_fills import RESTORED_FROM_BACKUP
 from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
 
 from .sandbox_migration import LegacySandboxConflict, migrate_workspace
@@ -36,15 +40,30 @@ from .state_store import IST, ensure_schema, init_capital
 
 logger = logging.getLogger("flinttrade.data.sandbox_engine")
 
+# Fills restored from a backup are stored as records. They are not new orders.
+# The marker string lives in flinttrade_core.restored_fills so every scoring
+# reader filters on the same value. Re-exported here for existing imports.
+_IMPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "config",
+        "capital",
+        "positions",
+        "orders",
+        "trades",
+        "pnl_history",
+        "exported_at",
+        "reset_at",
+    }
+)
+
 _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
 
 # ---------------------------------------------------------------------------
 # Table name allowlist — prevents SQL injection via dynamic table names
 # ---------------------------------------------------------------------------
 
-_VALID_TABLES = frozenset(
-    {"capital", "sandbox_config", "orders", "trades", "positions", "pnl", "mtm"}
-)
+_VALID_TABLES = frozenset({"capital", "sandbox_config", "orders", "trades", "positions", "pnl", "mtm"})
 
 
 def _validate_table(table: str) -> str:
@@ -52,6 +71,48 @@ def _validate_table(table: str) -> str:
     if table not in _VALID_TABLES:
         raise ValueError(f"Invalid table name: {table}")
     return table
+
+
+def _charges_for_fill(
+    *,
+    symbol: str,
+    exchange: str,
+    product: str,
+    action: str,
+    quantity: int,
+    price: float,
+    traded_at: float | None = None,
+) -> tuple[float, str]:
+    """Return ``(total, json)`` for one Practice fill from the shared table.
+
+    ``traded_at`` is Unix seconds. The statutory schedule is the one in force
+    on that IST date, not today's, so a restored fill keeps the rate that
+    applied when it traded.
+    """
+    on = None
+    if traded_at is not None:
+        on = datetime.fromtimestamp(float(traded_at), tz=IST).date()
+    breakdown = estimate_practice_fill(
+        symbol=symbol,
+        exchange=exchange,
+        product=product,
+        action=action,
+        quantity=quantity,
+        price=Decimal(str(price)),
+        on=on,
+    )
+    payload = breakdown.as_floats()
+    return float(breakdown.total), json.dumps(payload)
+
+
+def _parse_charges_json(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 @dataclass(slots=True)
@@ -148,6 +209,41 @@ def _coerce_timestamp(value: Any, default: float) -> float:
     return parsed
 
 
+def _is_option_symbol(symbol: str) -> bool:
+    """True for a compact or hyphenated CE/PE symbol."""
+    if parse_option_symbol(symbol) is not None:
+        return True
+    compact = "".join(symbol.strip().upper().split())
+    # A digit keeps "RELIANCE" (ends in CE) from reading as a call.
+    return any(char.isdigit() for char in compact) and compact.endswith(("CE", "PE"))
+
+
+def _is_future_position(symbol: str, exchange: str) -> bool:
+    """True when the row is a future rather than an option or an equity.
+
+    Practice stores no settlement price. A future is recognised from the
+    symbol (``FUT``) or from a derivatives exchange that is not an option.
+    """
+    if _is_option_symbol(symbol):
+        return False
+    if parse_future_symbol(symbol) is not None:
+        return True
+    compact = "".join(symbol.strip().upper().split())
+    if compact.endswith("FUT"):
+        return True
+    return exchange.strip().upper() in {
+        "NFO",
+        "BFO",
+        "MCX",
+        "CDS",
+        "NSE_FNO",
+        "BSE_FNO",
+        "MCX_COMM",
+        "NSE_CURRENCY",
+        "BSE_CURRENCY",
+    }
+
+
 # ---------------------------------------------------------------------------
 # SandboxEngine
 # ---------------------------------------------------------------------------
@@ -174,9 +270,7 @@ class SandboxEngine:
         config: SandboxConfig | None = None,
     ) -> None:
         use_workspace_default = (
-            db_path is None
-            and not os.getenv("SANDBOX_STATE_PATH")
-            and not os.getenv("SANDBOX_DB_PATH")
+            db_path is None and not os.getenv("SANDBOX_STATE_PATH") and not os.getenv("SANDBOX_DB_PATH")
         )
         self._db_path = db_path or _default_db_path()
 
@@ -189,9 +283,7 @@ class SandboxEngine:
 
         self._conn = open_sqlite(self._db_path, durability="normal")
         self._lock = threading.RLock()
-        self._requested_config = _normalise_config(
-            config or SandboxConfig(starting_capital=initial_capital)
-        )
+        self._requested_config = _normalise_config(config or SandboxConfig(starting_capital=initial_capital))
         self._initial_capital = self._requested_config.starting_capital
         self.config = self._requested_config
         self._init_db()
@@ -211,9 +303,7 @@ class SandboxEngine:
                 exc,
             )
         except Exception:
-            logger.exception(
-                "Retired Practice ledger migration failed; source was left untouched"
-            )
+            logger.exception("Retired Practice ledger migration failed; source was left untouched")
 
     # ------------------------------------------------------------------
     # Initialisation
@@ -228,9 +318,7 @@ class SandboxEngine:
     def _init_db(self) -> None:
         """Create tables, indexes, and seed the capital row if missing."""
         ensure_schema(self._conn)
-        capital_row = self._conn.execute(
-            "SELECT initial FROM capital WHERE id = 'default'"
-        ).fetchone()
+        capital_row = self._conn.execute("SELECT initial FROM capital WHERE id = 'default'").fetchone()
         seed_config = self._requested_config
         if capital_row is not None and seed_config == SandboxConfig():
             seed_config = SandboxConfig(starting_capital=float(capital_row[0]))
@@ -255,6 +343,7 @@ class SandboxEngine:
         self.config = self._load_config()
         self._initial_capital = self.config.starting_capital
         init_capital(self._conn, self._initial_capital)
+        self._backfill_fill_charges()
 
     def _load_config(self) -> SandboxConfig:
         row = self._conn.execute(
@@ -282,8 +371,7 @@ class SandboxEngine:
             proposed_margin = self._calculate_used_margin(config=updated)
             if proposed_margin > proposed_current:
                 raise ValueError(
-                    "Practice policy would reduce capital below committed margin "
-                    f"of {proposed_margin:.2f}"
+                    f"Practice policy would reduce capital below committed margin of {proposed_margin:.2f}"
                 )
 
             now = time.time()
@@ -340,9 +428,7 @@ class SandboxEngine:
             - ``available`` — capital available for new orders
             - ``used_margin`` — capital currently tied up in open positions
         """
-        row = self._conn.execute(
-            "SELECT initial, current, used_margin FROM capital WHERE id = 'default'"
-        ).fetchone()
+        row = self._conn.execute("SELECT initial, current, used_margin FROM capital WHERE id = 'default'").fetchone()
 
         if not row:  # Should never happen after _init_db, but guard anyway
             return {
@@ -360,10 +446,24 @@ class SandboxEngine:
             "current": current,
             "available": max(available, 0.0),
             "used_margin": used_margin,
+            "estimated_charges": self.total_estimated_charges(),
         }
 
-    def get_funds(self) -> dict[str, float]:
-        """Return the retired engine's funds shape from canonical state."""
+    def get_funds(self) -> dict[str, float | bool]:
+        """Return the retired engine's funds shape from canonical state.
+
+        ``available_balance`` is capital left after blocked margin.
+        ``current_balance`` is the ledger (``current``): initial capital plus
+        realised P&L, with blocked margin still inside it. Practice never
+        settles daily futures MTM into that ledger, and a position has no
+        settlement or previous-close price, so ``futures_mtm_in_ledger`` is
+        false and futures mark from ``avg_price``.
+
+        Option premium and equity notional are not booked into ``current``
+        until the leg is realised. ``ledger_balance`` is the net-worth cash:
+        ``current`` with those open cash trades applied, and with blocked
+        margin still included. Futures notional is not applied.
+        """
         capital = self.get_capital()
         pnl = self.get_pnl()
         return {
@@ -371,8 +471,27 @@ class SandboxEngine:
             "used_margin": capital["used_margin"],
             "realized_pnl": pnl["realised"],
             "available_balance": capital["available"],
+            "current_balance": capital["current"],
+            "ledger_balance": self._net_worth_ledger(capital),
+            "futures_mtm_in_ledger": False,
+            "estimated_charges": capital["estimated_charges"],
             "total_equity": capital["current"] + pnl["unrealised"],
         }
+
+    def _net_worth_ledger(self, capital: dict[str, float]) -> float:
+        """Cash for net worth, including blocked margin.
+
+        ``current`` is not reduced by ``used_margin``. Open option and equity
+        positions subtract signed entry value (quantity × average), because
+        that cash movement is only realised later. Futures are left out:
+        there is no daily settlement into capital and no settlement price.
+        """
+        ledger = float(capital["current"])
+        for position in self.get_positions():
+            if _is_future_position(str(position["symbol"]), str(position["exchange"])):
+                continue
+            ledger -= int(position["net_qty"]) * float(position["avg_price"])
+        return ledger
 
     def adjust_capital(self, amount: float) -> dict[str, float]:
         """Add or remove virtual capital.
@@ -399,14 +518,9 @@ class SandboxEngine:
             new_current = cap["current"] + amount
 
             if new_current < 0:
-                raise ValueError(
-                    f"Cannot remove {abs(amount):.2f} — current capital is only {cap['current']:.2f}"
-                )
+                raise ValueError(f"Cannot remove {abs(amount):.2f} — current capital is only {cap['current']:.2f}")
             if new_current < cap["used_margin"]:
-                raise ValueError(
-                    "Cannot reduce Practice capital below committed margin "
-                    f"of {cap['used_margin']:.2f}"
-                )
+                raise ValueError(f"Cannot reduce Practice capital below committed margin of {cap['used_margin']:.2f}")
 
             now = time.time()
             self._conn.execute(
@@ -434,6 +548,9 @@ class SandboxEngine:
         order_type: str = "MARKET",
         trigger_price: float = 0.0,
         strategy: str = "",
+        instrument_token: str = "",
+        price_source: str | None = None,
+        price_age_s: int | None = None,
     ) -> dict[str, Any]:
         """Validate a paper order and either fill it or leave it pending.
 
@@ -452,6 +569,8 @@ class SandboxEngine:
             order_type: ``MARKET``, ``LIMIT``, ``SL`` or ``SL-M``.
             trigger_price: Required positive trigger for stop orders.
             strategy: Optional strategy label retained on the order and trade.
+            instrument_token: Security id of the listed contract. When set, the
+                quantity must be a positive multiple of that contract's lot size.
 
         Returns:
             Dict with keys:
@@ -473,6 +592,11 @@ class SandboxEngine:
             return {"order_id": "", "status": "REJECTED", "message": "Exchange is required"}
         if quantity <= 0:
             return {"order_id": "", "status": "REJECTED", "message": "Quantity must be > 0"}
+        token = str(instrument_token or "").strip()
+        if token:
+            refusal = contract_quantity_message(token, quantity, contract=symbol)
+            if refusal:
+                return {"order_id": "", "status": "REJECTED", "message": refusal}
         if action not in ("BUY", "SELL"):
             return {"order_id": "", "status": "REJECTED", "message": f"Invalid action: {action}"}
         if order_type not in {"MARKET", "LIMIT", "SL", "SL-M"}:
@@ -522,8 +646,7 @@ class SandboxEngine:
                         "order_id": "",
                         "status": "REJECTED",
                         "message": (
-                            f"Insufficient capital: need {required_margin:.2f}, "
-                            f"available {cap['available']:.2f}"
+                            f"Insufficient capital: need {required_margin:.2f}, available {cap['available']:.2f}"
                         ),
                     }
 
@@ -536,9 +659,7 @@ class SandboxEngine:
                     return {
                         "order_id": "",
                         "status": "REJECTED",
-                        "message": (
-                            f"Insufficient position: need {quantity}, holding {held}{detail}"
-                        ),
+                        "message": (f"Insufficient position: need {quantity}, holding {held}{detail}"),
                     }
 
             order_id = str(uuid.uuid4())
@@ -546,6 +667,10 @@ class SandboxEngine:
             status = "COMPLETE" if order_type == "MARKET" else "PENDING"
             fill_price = price if status == "COMPLETE" else None
             fill_time = now if status == "COMPLETE" else None
+            stored_source, stored_age = _fill_provenance(
+                price_source if status == "COMPLETE" else None,
+                price_age_s if status == "COMPLETE" else None,
+            )
 
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -553,8 +678,9 @@ class SandboxEngine:
                     """INSERT INTO orders
                        (order_id, symbol, exchange, action, quantity, price,
                         trigger_price, pricetype, product, strategy, status,
-                        filled_qty, avg_fill_px, fill_time, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        filled_qty, avg_fill_px, fill_time, price_source,
+                        price_age_s, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         order_id,
                         symbol,
@@ -570,6 +696,8 @@ class SandboxEngine:
                         quantity if status == "COMPLETE" else 0,
                         fill_price,
                         fill_time,
+                        stored_source,
+                        stored_age,
                         now,
                         now,
                     ),
@@ -585,6 +713,8 @@ class SandboxEngine:
                         product=product,
                         strategy=strategy,
                         traded_at=now,
+                        price_source=stored_source,
+                        price_age_s=stored_age,
                     )
                 self._update_used_margin(now)
                 self._conn.execute("COMMIT")
@@ -606,7 +736,17 @@ class SandboxEngine:
             if status == "COMPLETE"
             else f"Paper {order_type} order is pending a matching live tick"
         )
-        return {"order_id": order_id, "status": status, "message": message}
+        if status == "COMPLETE" and stored_source == "last_close" and stored_age is not None:
+            from flinttrade_data.practice_price import last_close_fill_label
+
+            message = last_close_fill_label(price, stored_age)
+        result: dict[str, Any] = {"order_id": order_id, "status": status, "message": message}
+        if stored_source:
+            result["price_source"] = stored_source
+            result["price"] = price
+        if stored_age is not None:
+            result["price_age_s"] = stored_age
+        return result
 
     def check_pending_fills(self, latest_ticks: dict[str, float]) -> list[str]:
         """Fill pending LIMIT/SL/SL-M orders whose tick condition is met."""
@@ -614,8 +754,10 @@ class SandboxEngine:
             pending = self._conn.execute(
                 """SELECT order_id, symbol, exchange, action, quantity, price,
                           trigger_price, stop_triggered, pricetype, product, strategy
-                   FROM orders WHERE status = 'PENDING'
-                   ORDER BY created_at, order_id"""
+                   FROM orders
+                   WHERE status = 'PENDING' AND strategy != ?
+                   ORDER BY created_at, order_id""",
+                (RESTORED_FROM_BACKUP,),
             ).fetchall()
             filled: list[str] = []
             for row in pending:
@@ -647,9 +789,7 @@ class SandboxEngine:
                     elif action == "SELL" and ltp >= limit_price:
                         fill_price = float(limit_price)
                 elif order_type == "SL":
-                    triggered_now = (
-                        action == "BUY" and ltp >= trigger_price
-                    ) or (
+                    triggered_now = (action == "BUY" and ltp >= trigger_price) or (
                         action == "SELL" and ltp <= trigger_price
                     )
                     if triggered_now and not stop_triggered:
@@ -677,9 +817,7 @@ class SandboxEngine:
                 try:
                     rejection_message = ""
                     if action == "BUY":
-                        committed_margin = self._calculate_used_margin(
-                            exclude_order_id=str(order_id)
-                        )
+                        committed_margin = self._calculate_used_margin(exclude_order_id=str(order_id))
                         proposed_margin = self._estimate_margin(
                             quantity=int(quantity),
                             price=fill_price,
@@ -731,6 +869,7 @@ class SandboxEngine:
                         product=str(product),
                         strategy=str(strategy),
                         traded_at=now,
+                        price_source="ltp",
                     )
                     self._update_used_margin(now)
                     self._conn.execute("COMMIT")
@@ -781,7 +920,7 @@ class SandboxEngine:
         self,
         order_id: str,
         *,
-        quantity: int | None = None,
+        quantity: int | float | str | None = None,
         price: float | None = None,
         trigger_price: float | None = None,
         order_type: str | None = None,
@@ -801,13 +940,19 @@ class SandboxEngine:
                     "message": "Only a pending Practice order can be modified",
                 }
             symbol, exchange, action, old_qty, old_price, old_trigger, old_type, product = row
-            new_qty = int(old_qty if quantity is None else quantity)
+            raw_qty = old_qty if quantity is None else quantity
+            try:
+                new_qty = int(raw_qty)
+                if isinstance(raw_qty, bool) or new_qty <= 0 or (not isinstance(raw_qty, str) and new_qty != raw_qty):
+                    raise ValueError("Quantity must be a positive whole number")
+            except (TypeError, ValueError, OverflowError):
+                return {"order_id": "", "status": "REJECTED", "message": "Quantity must be a positive whole number"}
             new_price = float(old_price if price is None else price)
             new_trigger = float(old_trigger if trigger_price is None else trigger_price)
             new_type = str(old_type if order_type is None else order_type).strip().upper()
             if new_type == "SLM":
                 new_type = "SL-M"
-            if new_qty <= 0 or new_type not in {"LIMIT", "SL", "SL-M"}:
+            if new_type not in {"LIMIT", "SL", "SL-M"}:
                 return {"order_id": "", "status": "REJECTED", "message": "Invalid modification"}
             if not all(math.isfinite(value) for value in (new_price, new_trigger)):
                 return {"order_id": "", "status": "REJECTED", "message": "Prices must be finite"}
@@ -866,6 +1011,23 @@ class SandboxEngine:
     # Positions
     # ------------------------------------------------------------------
 
+    def _restored_contracts(self) -> set[tuple[str, str, str]]:
+        """Contracts whose fills are all restored from backup.
+
+        A contract is restored only when it has at least one restored fill
+        and no fill with any other strategy. A later live fill clears it.
+        """
+        rows = self._conn.execute("SELECT symbol, exchange, product, strategy FROM trades").fetchall()
+        restored: set[tuple[str, str, str]] = set()
+        live: set[tuple[str, str, str]] = set()
+        for symbol, exchange, product, strategy in rows:
+            key = (symbol, exchange, product)
+            if strategy == RESTORED_FROM_BACKUP:
+                restored.add(key)
+            else:
+                live.add(key)
+        return restored - live
+
     def get_positions(self) -> list[dict[str, Any]]:
         """Return all open sandbox positions (net_qty != 0).
 
@@ -876,14 +1038,17 @@ class SandboxEngine:
         rows = self._conn.execute(
             """SELECT symbol, exchange, product, net_qty, avg_price,
                       buy_qty, buy_value, sell_qty, sell_value,
-                      realised_pnl, unrealised_pnl, updated_at
+                      realised_pnl, unrealised_pnl, updated_at,
+                      price_source, price_age_s
                FROM positions
                WHERE net_qty != 0
                ORDER BY updated_at DESC"""
         ).fetchall()
 
-        return [
-            {
+        restored_contracts = self._restored_contracts()
+        positions: list[dict[str, Any]] = []
+        for r in rows:
+            row = {
                 "symbol": r[0],
                 "exchange": r[1],
                 "product": r[2],
@@ -899,9 +1064,14 @@ class SandboxEngine:
                 "realized_pnl": r[9],
                 "unrealized_pnl": r[10],
                 "updated_at": _format_ts(r[11]),
+                "restored": (r[0], r[1], r[2]) in restored_contracts,
             }
-            for r in rows
-        ]
+            if r[12]:
+                row["price_source"] = r[12]
+            if r[13] is not None:
+                row["price_age_s"] = r[13]
+            positions.append(row)
+        return positions
 
     # ------------------------------------------------------------------
     # Orders
@@ -952,24 +1122,29 @@ class SandboxEngine:
         """Return executed Practice fills ordered newest first."""
         rows = self._conn.execute(
             """SELECT trade_id, order_id, symbol, exchange, action, quantity,
-                      price, product, strategy, traded_at
+                      price, product, strategy, traded_at, charges, charges_json
                FROM trades ORDER BY traded_at DESC, trade_id DESC"""
         ).fetchall()
-        return [
-            {
-                "trade_id": row[0],
-                "order_id": row[1],
-                "symbol": row[2],
-                "exchange": row[3],
-                "action": row[4],
-                "quantity": row[5],
-                "price": row[6],
-                "product": row[7],
-                "strategy": row[8],
-                "traded_at": _format_ts(row[9]),
-            }
-            for row in rows
-        ]
+        trades: list[dict[str, Any]] = []
+        for row in rows:
+            breakdown = _parse_charges_json(row[11])
+            trades.append(
+                {
+                    "trade_id": row[0],
+                    "order_id": row[1],
+                    "symbol": row[2],
+                    "exchange": row[3],
+                    "action": row[4],
+                    "quantity": row[5],
+                    "price": row[6],
+                    "product": row[7],
+                    "strategy": row[8],
+                    "traded_at": _format_ts(row[9]),
+                    "charges": float(row[10] or 0.0),
+                    "charges_breakdown": breakdown,
+                }
+            )
+        return trades
 
     # ------------------------------------------------------------------
     # P&L
@@ -986,17 +1161,22 @@ class SandboxEngine:
             - ``total`` — realised + unrealised
         """
         row = self._conn.execute(
-               """SELECT
+            """SELECT
                    COALESCE(SUM(realised_pnl), 0.0),
                    COALESCE(SUM(unrealised_pnl), 0.0)
                FROM positions"""
         ).fetchone()
 
         realised, unrealised = row or (0.0, 0.0)
+        gross = float(realised) + float(unrealised)
+        charges = self.total_estimated_charges()
         return {
             "realised": realised,
             "unrealised": unrealised,
-            "total": realised + unrealised,
+            "gross": gross,
+            "charges": charges,
+            "net": gross - charges,
+            "total": gross,
         }
 
     def get_pnl_history(self) -> list[dict[str, Any]]:
@@ -1081,9 +1261,7 @@ class SandboxEngine:
                 else:
                     marks[(str(exchange), str(symbol))] = mark
             if missing:
-                raise ValueError(
-                    "Current LTP required before Practice square-off: " + ", ".join(missing)
-                )
+                raise ValueError("Current LTP required before Practice square-off: " + ", ".join(missing))
 
             now = time.time()
             self._conn.execute("BEGIN IMMEDIATE")
@@ -1225,6 +1403,9 @@ class SandboxEngine:
 
         if not isinstance(data, dict):
             raise ValueError("Import data must be a JSON object")
+        unknown = set(data) - _IMPORT_KEYS
+        if unknown:
+            raise ValueError("Import data contains unsupported fields")
 
         schema_version = data.get("schema_version", 1)
         if isinstance(schema_version, bool) or schema_version not in {1, 2}:
@@ -1258,9 +1439,7 @@ class SandboxEngine:
         current = float(capital_data.get("current", initial))
         if not all(math.isfinite(value) for value in (initial, current)) or initial <= 0 or current < 0:
             raise ValueError("Imported capital values are invalid")
-        imported_config = _normalise_config(
-            SandboxConfig(**(config_data or {"starting_capital": initial}))
-        )
+        imported_config = _normalise_config(SandboxConfig(**(config_data or {"starting_capital": initial})))
 
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -1322,9 +1501,7 @@ class SandboxEngine:
                     quantity = int(order.get("quantity", 0))
                     price = float(order.get("price", 0.0))
                     order_id = str(order.get("order_id") or uuid.uuid4())
-                    order_type = str(
-                        order.get("order_type", order.get("pricetype", "MARKET"))
-                    ).strip().upper()
+                    order_type = str(order.get("order_type", order.get("pricetype", "MARKET"))).strip().upper()
                     created_at = _coerce_timestamp(order.get("created_at"), now)
                     fill_time = (
                         _coerce_timestamp(order.get("fill_time"), created_at)
@@ -1342,14 +1519,13 @@ class SandboxEngine:
                         "stop_triggered": bool(order.get("stop_triggered", False)),
                         "order_type": order_type,
                         "product": str(order.get("product", "MIS")).strip().upper(),
-                        "strategy": str(order.get("strategy", "")),
+                        # Every resting kind (LIMIT, SL, SL-M) is marked so a
+                        # later tick cannot fill it. A completed order keeps
+                        # the strategy it was placed with.
+                        "strategy": (RESTORED_FROM_BACKUP if status == "PENDING" else str(order.get("strategy", ""))),
                         "status": status,
-                        "filled_qty": int(
-                            order.get("filled_qty", quantity if status == "COMPLETE" else 0)
-                        ),
-                        "avg_fill_px": order.get(
-                            "avg_fill_px", price if status == "COMPLETE" else None
-                        ),
+                        "filled_qty": int(order.get("filled_qty", quantity if status == "COMPLETE" else 0)),
+                        "avg_fill_px": order.get("avg_fill_px", price if status == "COMPLETE" else None),
                         "fill_time": fill_time,
                         "created_at": created_at,
                     }
@@ -1393,29 +1569,52 @@ class SandboxEngine:
                             "quantity": row["filled_qty"],
                             "price": row["avg_fill_px"],
                             "product": row["product"],
-                            "strategy": row["strategy"],
+                            "strategy": RESTORED_FROM_BACKUP,
                             "traded_at": row["fill_time"] or row["created_at"],
                         }
                         for row in imported_orders
                         if row["status"] == "COMPLETE" and row["filled_qty"] > 0
                     ]
                 for trade in effective_trades:
+                    symbol = str(trade.get("symbol", "")).strip().upper()
+                    exchange = str(trade.get("exchange", "")).strip().upper()
+                    action = str(trade.get("action", "BUY")).strip().upper()
+                    quantity = int(trade.get("quantity", 0))
+                    price = float(trade.get("price", 0.0))
+                    product = str(trade.get("product", "MIS")).strip().upper()
+                    traded_at = _coerce_timestamp(trade.get("traded_at"), now)
+                    stored = trade.get("charges_breakdown")
+                    if isinstance(stored, dict) and "total" in stored:
+                        charges = float(trade.get("charges", stored.get("total", 0.0)))
+                        charges_json = json.dumps(stored)
+                    else:
+                        charges, charges_json = _charges_for_fill(
+                            symbol=symbol,
+                            exchange=exchange,
+                            product=product,
+                            action=action,
+                            quantity=quantity,
+                            price=price,
+                            traded_at=traded_at,
+                        )
                     self._conn.execute(
                         """INSERT INTO trades
                            (trade_id, order_id, symbol, exchange, action, quantity,
-                            price, product, strategy, traded_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            price, product, strategy, traded_at, charges, charges_json)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             str(trade.get("trade_id") or uuid.uuid4()),
                             str(trade.get("order_id", "")),
-                            str(trade.get("symbol", "")).strip().upper(),
-                            str(trade.get("exchange", "")).strip().upper(),
-                            str(trade.get("action", "BUY")).strip().upper(),
-                            int(trade.get("quantity", 0)),
-                            float(trade.get("price", 0.0)),
-                            str(trade.get("product", "MIS")).strip().upper(),
-                            str(trade.get("strategy", "")),
-                            _coerce_timestamp(trade.get("traded_at"), now),
+                            symbol,
+                            exchange,
+                            action,
+                            quantity,
+                            price,
+                            product,
+                            RESTORED_FROM_BACKUP,
+                            traded_at,
+                            charges,
+                            charges_json,
                         ),
                     )
 
@@ -1549,6 +1748,35 @@ class SandboxEngine:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def total_estimated_charges(self) -> float:
+        """Sum of estimated statutory charges across every Practice fill."""
+        row = self._conn.execute("SELECT COALESCE(SUM(charges), 0.0) FROM trades").fetchone()
+        return float(row[0] or 0.0)
+
+    def _backfill_fill_charges(self) -> None:
+        """Estimate charges for fills recorded before the shared table existed."""
+        rows = self._conn.execute(
+            """SELECT trade_id, symbol, exchange, action, quantity, price, product, traded_at
+               FROM trades
+               WHERE charges_json IS NULL OR charges_json = ''"""
+        ).fetchall()
+        if not rows:
+            return
+        for trade_id, symbol, exchange, action, quantity, price, product, traded_at in rows:
+            charges, charges_json = _charges_for_fill(
+                symbol=str(symbol),
+                exchange=str(exchange),
+                product=str(product),
+                action=str(action),
+                quantity=int(quantity),
+                price=float(price),
+                traded_at=float(traded_at) if traded_at is not None else None,
+            )
+            self._conn.execute(
+                "UPDATE trades SET charges = ?, charges_json = ? WHERE trade_id = ?",
+                (charges, charges_json, trade_id),
+            )
+
     def _pending_sell_quantity(
         self,
         symbol: str,
@@ -1580,12 +1808,25 @@ class SandboxEngine:
         product: str,
         strategy: str,
         traded_at: float,
+        price_source: str | None = None,
+        price_age_s: int | None = None,
     ) -> None:
+        charges, charges_json = _charges_for_fill(
+            symbol=symbol,
+            exchange=exchange,
+            product=product,
+            action=action,
+            quantity=quantity,
+            price=price,
+            traded_at=traded_at,
+        )
+        source, age = _fill_provenance(price_source, price_age_s)
         self._conn.execute(
             """INSERT INTO trades
                (trade_id, order_id, symbol, exchange, action, quantity, price,
-                product, strategy, traded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                product, strategy, price_source, price_age_s, traded_at,
+                charges, charges_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(uuid.uuid4()),
                 order_id,
@@ -1596,7 +1837,11 @@ class SandboxEngine:
                 price,
                 product,
                 strategy,
+                source,
+                age,
                 traded_at,
+                charges,
+                charges_json,
             ),
         )
         self._update_position(
@@ -1607,6 +1852,8 @@ class SandboxEngine:
             quantity=quantity,
             price=price,
             now=traded_at,
+            price_source=source,
+            price_age_s=age,
         )
         self._record_daily_pnl(traded_at)
 
@@ -1626,7 +1873,8 @@ class SandboxEngine:
             for position_id, net_qty, avg_price in rows:
                 unrealised = (ltp - float(avg_price)) * int(net_qty)
                 self._conn.execute(
-                    """UPDATE positions SET unrealised_pnl = ?, updated_at = ?
+                    """UPDATE positions SET unrealised_pnl = ?, updated_at = ?,
+                           price_source = NULL, price_age_s = NULL
                        WHERE position_id = ?""",
                     (unrealised, now, position_id),
                 )
@@ -1657,24 +1905,33 @@ class SandboxEngine:
             ).fetchone()[0]
         )
         gross = float(realised) + float(unrealised)
+        charges = float(
+            self._conn.execute(
+                """SELECT COALESCE(SUM(charges), 0.0) FROM trades
+                   WHERE date(traded_at, 'unixepoch', '+5 hours', '+30 minutes') = ?""",
+                (session_date,),
+            ).fetchone()[0]
+        )
+        net = gross - charges
         existing = self._conn.execute(
             "SELECT high_water_mark, max_drawdown FROM pnl WHERE session_date = ?",
             (session_date,),
         ).fetchone()
-        previous_high = float(existing[0]) if existing else gross
+        previous_high = float(existing[0]) if existing else net
         previous_drawdown = float(existing[1]) if existing else 0.0
-        high_water = max(previous_high, gross)
-        max_drawdown = max(previous_drawdown, high_water - gross)
+        high_water = max(previous_high, net)
+        max_drawdown = max(previous_drawdown, high_water - net)
         self._conn.execute(
             """INSERT INTO pnl
                (session_date, realised_total, unrealised_total, gross_pnl,
                 charges, net_pnl, total_trades, high_water_mark, max_drawdown,
                 updated_at)
-               VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(session_date) DO UPDATE SET
                    realised_total = excluded.realised_total,
                    unrealised_total = excluded.unrealised_total,
                    gross_pnl = excluded.gross_pnl,
+                   charges = excluded.charges,
                    net_pnl = excluded.net_pnl,
                    total_trades = excluded.total_trades,
                    high_water_mark = excluded.high_water_mark,
@@ -1685,7 +1942,8 @@ class SandboxEngine:
                 realised,
                 unrealised,
                 gross,
-                gross,
+                charges,
+                net,
                 total_trades,
                 high_water,
                 max_drawdown,
@@ -1693,13 +1951,12 @@ class SandboxEngine:
             ),
         )
 
-    def _get_position(
-        self, symbol: str, exchange: str, product: str
-    ) -> dict[str, Any] | None:
+    def _get_position(self, symbol: str, exchange: str, product: str) -> dict[str, Any] | None:
         """Fetch a single position row or None if not found."""
         row = self._conn.execute(
             """SELECT position_id, net_qty, avg_price, buy_qty, buy_value,
-                      sell_qty, sell_value, realised_pnl, unrealised_pnl
+                      sell_qty, sell_value, realised_pnl, unrealised_pnl,
+                      price_source, price_age_s
                FROM positions
                WHERE symbol = ? AND exchange = ? AND product = ?""",
             (symbol, exchange, product),
@@ -1718,6 +1975,8 @@ class SandboxEngine:
             "sell_value": row[6],
             "realised_pnl": row[7],
             "unrealised_pnl": row[8],
+            "price_source": row[9],
+            "price_age_s": row[10],
         }
 
     def _update_position(
@@ -1730,6 +1989,8 @@ class SandboxEngine:
         quantity: int,
         price: float,
         now: float,
+        price_source: str | None = None,
+        price_age_s: int | None = None,
     ) -> None:
         """Upsert a position row after a fill."""
         notional = quantity * price
@@ -1744,16 +2005,28 @@ class SandboxEngine:
             sell_qty = quantity if action == "SELL" else 0
             sell_value = notional if action == "SELL" else 0.0
 
+            source, age = _fill_provenance(price_source, price_age_s)
             self._conn.execute(
                 """INSERT INTO positions
                    (position_id, symbol, exchange, product,
                     net_qty, avg_price, buy_qty, buy_value,
-                    sell_qty, sell_value, realised_pnl, unrealised_pnl, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?)""",
+                    sell_qty, sell_value, realised_pnl, unrealised_pnl,
+                    price_source, price_age_s, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?, ?, ?)""",
                 (
-                    pos_id, symbol, exchange, product,
-                    net_qty, avg_price, buy_qty, buy_value,
-                    sell_qty, sell_value, now,
+                    pos_id,
+                    symbol,
+                    exchange,
+                    product,
+                    net_qty,
+                    avg_price,
+                    buy_qty,
+                    buy_value,
+                    sell_qty,
+                    sell_value,
+                    source,
+                    age,
+                    now,
                 ),
             )
         else:
@@ -1770,17 +2043,18 @@ class SandboxEngine:
                 new_buy_qty = buy_qty + quantity
                 new_buy_value = buy_value + notional
                 new_net_qty = net_qty + quantity
-                new_avg_price = (
-                    ((net_qty * avg_price) + notional) / new_net_qty
-                    if new_net_qty > 0
-                    else price
-                )
                 new_sell_qty = sell_qty
                 new_sell_value = sell_value
-                new_realised = realised_pnl
-                new_unrealised = (
-                    (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
-                )
+                # Covering a short realises (entry − cover) on the closed quantity.
+                # A buy that flips through flat starts the new long at the cover price.
+                if net_qty < 0:
+                    close_qty = min(quantity, -net_qty)
+                    new_realised = realised_pnl + close_qty * (avg_price - price)
+                    new_avg_price = price if new_net_qty > 0 else avg_price
+                else:
+                    new_avg_price = ((net_qty * avg_price) + notional) / new_net_qty if new_net_qty > 0 else price
+                    new_realised = realised_pnl
+                new_unrealised = (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
             else:  # SELL
                 new_sell_qty = sell_qty + quantity
                 new_sell_value = sell_value + notional
@@ -1794,22 +2068,32 @@ class SandboxEngine:
                     new_realised = realised_pnl + close_qty * (price - avg_price)
                 else:
                     new_realised = realised_pnl
-                new_unrealised = (
-                    (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
-                )
+                new_unrealised = (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
 
             self._conn.execute(
                 """UPDATE positions
                    SET net_qty = ?, avg_price = ?,
                        buy_qty = ?, buy_value = ?,
                        sell_qty = ?, sell_value = ?,
-                       realised_pnl = ?, unrealised_pnl = ?, updated_at = ?
+                       realised_pnl = ?, unrealised_pnl = ?,
+                       price_source = ?, price_age_s = ?, updated_at = ?
                    WHERE position_id = ?""",
                 (
-                    new_net_qty, new_avg_price,
-                    new_buy_qty, new_buy_value,
-                    new_sell_qty, new_sell_value,
-                    new_realised, new_unrealised, now,
+                    new_net_qty,
+                    new_avg_price,
+                    new_buy_qty,
+                    new_buy_value,
+                    new_sell_qty,
+                    new_sell_value,
+                    new_realised,
+                    new_unrealised,
+                    *_kept_position_provenance(
+                        price_source,
+                        price_age_s,
+                        new_net_qty,
+                        existing,
+                    ),
+                    now,
                     pos_id,
                 ),
             )
@@ -1895,16 +2179,14 @@ class SandboxEngine:
         normalised_exchange = exchange.strip().upper()
         normalised_product = product.strip().upper()
         is_option = parse_option_symbol(normalised_symbol) is not None
-        is_derivative = (
-            parse_future_symbol(normalised_symbol) is not None
-            or normalised_exchange in {"NFO", "BFO", "MCX", "CDS"}
-        )
+        is_derivative = parse_future_symbol(normalised_symbol) is not None or normalised_exchange in {
+            "NFO",
+            "BFO",
+            "MCX",
+            "CDS",
+        }
         if is_option:
-            leverage = (
-                policy.option_buy_leverage
-                if action.strip().upper() == "BUY"
-                else policy.option_sell_leverage
-            )
+            leverage = policy.option_buy_leverage if action.strip().upper() == "BUY" else policy.option_sell_leverage
         elif is_derivative or normalised_product == "NRML":
             leverage = policy.futures_leverage
         else:
@@ -1917,3 +2199,42 @@ class SandboxEngine:
             self._conn.close()
         except Exception:  # pragma: no cover
             pass
+
+
+def _fill_provenance(
+    price_source: str | None,
+    price_age_s: int | None,
+) -> tuple[str | None, int | None]:
+    """Normalise a fill's price tag. Unknown sources are dropped."""
+    source = str(price_source or "").strip().lower()
+    if source == "ltp":
+        return "ltp", None
+    if source != "last_close" or price_age_s is None:
+        return None, None
+    try:
+        age = int(price_age_s)
+    except (TypeError, ValueError):
+        return None, None
+    if age < 0:
+        return None, None
+    return "last_close", age
+
+
+def _kept_position_provenance(
+    source: str | None,
+    age: int | None,
+    net_qty: int,
+    existing: dict[str, Any] | None,
+) -> tuple[str | None, int | None]:
+    """Keep the last-close marker only while the open position has no live price."""
+    if net_qty == 0 or source == "ltp":
+        return None, None
+    if source == "last_close" and age is not None:
+        return source, age
+    if existing is None:
+        return None, None
+    previous = existing.get("price_source")
+    previous_age = existing.get("price_age_s")
+    if previous == "last_close" and previous_age is not None:
+        return "last_close", int(previous_age)
+    return None, None

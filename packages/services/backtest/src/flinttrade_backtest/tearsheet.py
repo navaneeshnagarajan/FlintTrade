@@ -28,6 +28,7 @@ import io
 import logging
 import textwrap
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -222,14 +223,18 @@ def generate_tearsheet(
         )
 
     try:
-        buf = io.StringIO()
-        qs.reports.html(
-            returns,
-            benchmark=benchmark_returns,
-            title=title,
-            output=buf,
-        )
-        raw_html = buf.getvalue()
+        # QuantStats opens output as a path; file-like buffers are unsupported.
+        # A private directory also lets Windows reopen the report and guarantees
+        # cleanup if rendering or reading fails.
+        with TemporaryDirectory(prefix="flinttrade-tearsheet-") as directory:
+            output = Path(directory) / "report.html"
+            qs.reports.html(
+                returns,
+                benchmark=benchmark_returns,
+                title=title,
+                output=str(output),
+            )
+            raw_html = output.read_text(encoding="utf-8")
         return _brand_html(raw_html, title=title)
     except Exception as exc:
         logger.error("generate_tearsheet failed for '%s': %s", title, exc)

@@ -15,10 +15,12 @@ import React from "react";
 // ---------------------------------------------------------------------------
 
 const mockGetOptionChain = vi.fn();
+const authority = vi.hoisted(() => ({ scope: "live:native:dhan:A1" }));
+
+vi.mock("@/hooks/useDataScope", () => ({ useMarketDataScope: () => authority.scope }));
 
 vi.mock("@/services/api", () => ({
-  getOptionChain: (symbol: string, exchange: string, expiry?: string) =>
-    mockGetOptionChain(symbol, exchange, expiry),
+  getOptionChain: (...args: unknown[]) => mockGetOptionChain(...args),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -54,6 +56,7 @@ describe("useOptionChain", () => {
     // a standalone fn's call history — so the prior test's call leaked into
     // `expect(mockGetOptionChain).not.toHaveBeenCalled()`, failing order-dependently.
     vi.clearAllMocks();
+    authority.scope = "live:native:dhan:A1";
   });
 
   it("returns data when expiry is selected", async () => {
@@ -72,7 +75,7 @@ describe("useOptionChain", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(chainData);
-    expect(mockGetOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "2026-04-10");
+    expect(mockGetOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "2026-04-10", expect.any(AbortSignal), authority.scope);
   });
 
   it("returns empty/idle when no symbol is provided", () => {

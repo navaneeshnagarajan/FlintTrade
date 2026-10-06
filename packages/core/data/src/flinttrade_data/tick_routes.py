@@ -1,22 +1,20 @@
 """Tick capture Flask endpoints — status, recorded-tick queries, watchlist.
 
 Registered as a Blueprint in ``create_flask_app()`` (flinttrade_core app.py).
-The recorder itself is opt-in (``FLINTTRADE_TICK_CAPTURE``) and created at
-boot; these routes surface it so the terminal can show capture status, browse
-what has been recorded, and manage the capture watchlist at runtime.
+Native network capture is unavailable. These routes report that capability,
+retain queries over a supplied local tick store, and manage the allowlist of
+an explicitly owned local recorder.
 
 Endpoints
 ---------
 GET  /api/v1/data/ticks/status     — capture status (enabled, running, count, watchlist).
 GET  /api/v1/data/ticks            — query recorded ticks by symbol/exchange/date.
-POST /api/v1/data/ticks/watchlist  — add/remove capture symbols (applies on
-                                     the recorder's next WebSocket reconnect).
+POST /api/v1/data/ticks/watchlist  — add/remove local ingestion symbols.
 
 The recorder, its StorageManager and the shared storage lock are placed on the
 Flask app config (``TICK_RECORDER``, ``TICK_STORAGE``, ``TICK_STORAGE_LOCK``)
-by the application factory when capture is enabled; with capture disabled the
-status endpoint reports ``enabled: false`` and the others return 409 — an
-honest "not recording" rather than empty-success.
+by their local owner. The status endpoint reports native capture unavailable;
+query/watchlist requests without their corresponding local owner return 409.
 """
 
 from __future__ import annotations
@@ -27,7 +25,13 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .tick_recorder import MAX_WATCHLIST_INSTRUMENTS, WatchlistCapacityError, _canonical_instrument
+from .storage import read_stored_timestamp
+from .tick_recorder import (
+    MAX_WATCHLIST_INSTRUMENTS,
+    NATIVE_TICK_CAPTURE_UNAVAILABLE,
+    WatchlistCapacityError,
+    _canonical_instrument,
+)
 
 logger = logging.getLogger("flinttrade.data.tick_routes")
 
@@ -55,7 +59,7 @@ def _storage_unavailable_response() -> tuple[Any, int]:
     return jsonify(
         {
             "status": "error",
-            "message": "Tick capture is not enabled — no tick store to query.",
+            "message": "No local tick store is available to query.",
         }
     ), 409
 
@@ -65,15 +69,13 @@ def tick_status() -> Any:
     """Report tick-capture status.
 
     Returns:
-        JSON with ``enabled`` (recorder wired at boot), ``running`` (WS loop
-        active), ``tick_count`` (recorded this session), and the capture
-        ``watchlist`` by mode.
+        Native capture flags remain false regardless of old preferences.
+        Supplied local recorder counters, errors and watchlist remain visible.
     """
     recorder = _recorder()
     if recorder is None:
-        enabled = bool(current_app.config.get("TICK_CAPTURE_ENABLED", False))
         data: dict[str, Any] = {
-            "enabled": enabled,
+            "enabled": False,
             "running": False,
             "connected": False,
             "tick_count": 0,
@@ -84,15 +86,11 @@ def tick_status() -> Any:
             "future_source_timestamp_rejections": 0,
             "invalid_source_timestamp_rejections": 0,
             "watchlist": {},
+            "hint": NATIVE_TICK_CAPTURE_UNAVAILABLE,
         }
         last_error = str(current_app.config.get("TICK_CAPTURE_ERROR", "") or "").strip()
         if last_error:
             data["last_error"] = last_error
-        elif not enabled:
-            data["hint"] = (
-                "Set FLINTTRADE_TICK_CAPTURE=1 (or workspace.json data.tick_capture.enabled) "
-                "and restart to record ticks."
-            )
         return jsonify(
             {
                 "status": "success",
@@ -105,23 +103,18 @@ def tick_status() -> Any:
     integration_error = str(current_app.config.get("TICK_CAPTURE_ERROR", "") or "").strip()
     last_error = "; ".join(dict.fromkeys(error for error in (integration_error, recorder_error) if error))
     data: dict[str, Any] = {
-        "enabled": True,
-        "running": bool(snapshot.get("running", False)),
-        "connected": bool(snapshot.get("connected", False)),
+        "enabled": False,
+        "running": False,
+        "connected": False,
         "tick_count": int(snapshot.get("tick_count", 0)),
         "persisted_tick_count": int(snapshot.get("persisted_tick_count", 0)),
         "pending_tick_count": int(snapshot.get("pending_tick_count", 0)),
         "dropped_tick_count": int(snapshot.get("dropped_tick_count", 0)),
-        "stale_source_timestamp_rejections": int(
-            snapshot.get("stale_source_timestamp_rejections", 0)
-        ),
-        "future_source_timestamp_rejections": int(
-            snapshot.get("future_source_timestamp_rejections", 0)
-        ),
-        "invalid_source_timestamp_rejections": int(
-            snapshot.get("invalid_source_timestamp_rejections", 0)
-        ),
+        "stale_source_timestamp_rejections": int(snapshot.get("stale_source_timestamp_rejections", 0)),
+        "future_source_timestamp_rejections": int(snapshot.get("future_source_timestamp_rejections", 0)),
+        "invalid_source_timestamp_rejections": int(snapshot.get("invalid_source_timestamp_rejections", 0)),
         "watchlist": recorder.get_watchlist(),
+        "hint": NATIVE_TICK_CAPTURE_UNAVAILABLE,
     }
     for error_name in (
         "transport_error",
@@ -198,10 +191,16 @@ def query_ticks() -> Any:
     if truncated:
         rows = rows[-limit:]  # keep the most recent rows in the window
 
-    # DuckDB timestamps serialise via str() — make each row JSON-safe.
+    # Stored timestamps are naive UTC. Publish an explicit offset so a
+    # reader does not treat the wall clock as IST.
     for row in rows:
         ts = row.get("ts")
-        if ts is not None and not isinstance(ts, (str, int, float)):
+        if isinstance(ts, bool) or isinstance(ts, (int, float)):
+            continue
+        aware = read_stored_timestamp(ts)
+        if aware is not None:
+            row["ts"] = aware.isoformat()
+        elif ts is not None and not isinstance(ts, str):
             row["ts"] = str(ts)
 
     return jsonify(
@@ -229,9 +228,9 @@ def update_watchlist() -> Any:
         instruments (list): ``[{"exchange": "NSE", "symbol": "RELIANCE"}, ...]``.
         mode (str, optional): ``ltp``/``quote``/``depth`` (default ``quote``).
 
-    A successful update mutates the recorder under its shared subscription
-    lock, atomically synchronises the signal allowlist, then requests an
-    immediate reconnect so the subscription change can take effect.
+    A successful update mutates the local recorder under its shared
+    subscription lock and atomically synchronises the signal allowlist.
+    It does not enable network capture or dispatch a broker subscription.
     """
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -281,7 +280,7 @@ def update_watchlist() -> Any:
             return jsonify(
                 {
                     "status": "error",
-                    "message": "Tick capture is not enabled.",
+                    "message": "No local tick recorder is available.",
                 }
             ), 409
 
@@ -359,13 +358,12 @@ def update_watchlist() -> Any:
                     }
                 ), 500
 
-            reconnect_requested = False
-            request_reconnect = getattr(recorder, "request_reconnect", None)
-            if callable(request_reconnect):
+            retire_removed_identities = getattr(recorder, "retire_removed_identities", None)
+            if callable(retire_removed_identities):
                 try:
-                    reconnect_requested = bool(request_reconnect())
-                except Exception as exc:  # noqa: BLE001 - mutation succeeded; report deferred application
-                    logger.warning("Recorder reconnect request failed (%s)", type(exc).__name__)
+                    retire_removed_identities()
+                except Exception as exc:  # noqa: BLE001 - retain the successful local allowlist update
+                    logger.warning("Local recorder identity retirement failed (%s)", type(exc).__name__)
 
         return jsonify(
             {
@@ -373,8 +371,8 @@ def update_watchlist() -> Any:
                 "data": {
                     "watchlist": updated_watchlist,
                     "changed": True,
-                    "reconnect_requested": reconnect_requested,
-                    "applies_on": "reconnect requested" if reconnect_requested else "next WebSocket reconnect",
+                    "reconnect_requested": False,
+                    "applies_on": "local ingestion only",
                 },
             }
         )

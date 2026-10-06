@@ -1,8 +1,8 @@
 /**
  * Shared provenance chrome for the Market Overview widget.
  *
- * Live sections still show a Live chip. Sample chips are retired: the Mode
- * honesty bar owns that disclaimer, so a sample section stays quiet.
+ * Each section discloses its own data source. Sample fallbacks remain
+ * labelled in Practice and Live, independently of the application mode.
  */
 
 import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";

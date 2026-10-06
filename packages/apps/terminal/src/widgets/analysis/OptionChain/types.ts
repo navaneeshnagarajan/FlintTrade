@@ -27,7 +27,7 @@ export interface InstrumentRecord {
 
 export type ViewType = "LTP" | "OI" | "GREEKS";
 
-/** Raw option row from OpenAlgo optionchain API */
+/** Raw option row from broker optionchain API */
 export interface RawOptionRow {
   strike_price?: number;
   strike?: number;
@@ -48,14 +48,14 @@ export interface RawOptionRow {
   implied_volatility?: number | null;
 }
 
-/** OpenAlgo v2 chain entry: { strike, ce: {...}, pe: {...} } */
+/** broker chain entry: { strike, ce: {...}, pe: {...} } */
 export interface ChainEntry {
   strike: number;
   ce: RawOptionRow | null;
   pe: RawOptionRow | null;
 }
 
-/** OpenAlgo optionchain raw API shape (v2 format) */
+/** broker optionchain raw API shape (v2 format) */
 export interface RawOptionChain {
   chain?: ChainEntry[];
   atm_strike?: number;

@@ -61,10 +61,7 @@ def _read_table(connection: Any, table: str, present: set[str]) -> list[dict[str
     if table not in present:
         return []
     columns = [row[0] for row in connection.execute(f"DESCRIBE {table}").fetchall()]
-    return [
-        dict(zip(columns, row))
-        for row in connection.execute(f"SELECT * FROM {table}").fetchall()
-    ]
+    return [dict(zip(columns, row)) for row in connection.execute(f"SELECT * FROM {table}").fetchall()]
 
 
 def _archive_legacy(source: Path, archive_dir: Path) -> Path:
@@ -72,9 +69,7 @@ def _archive_legacy(source: Path, archive_dir: Path) -> Path:
     destination = archive_dir / f"engine-sandbox-{source.stem}.migrated.duckdb"
     counter = 1
     while destination.exists():
-        destination = archive_dir / (
-            f"engine-sandbox-{source.stem}.migrated.{counter}.duckdb"
-        )
+        destination = archive_dir / (f"engine-sandbox-{source.stem}.migrated.{counter}.duckdb")
         counter += 1
     source.replace(destination)
     for suffix in (".wal", "-wal", "-shm"):
@@ -105,16 +100,11 @@ def _normalise_status(value: Any) -> str:
 
 def _validate_default_account(rows_by_table: dict[str, list[dict[str, Any]]]) -> None:
     account_ids = {
-        str(row["account_id"])
-        for rows in rows_by_table.values()
-        for row in rows
-        if row.get("account_id") is not None
+        str(row["account_id"]) for rows in rows_by_table.values() for row in rows if row.get("account_id") is not None
     }
     unsupported = account_ids - {"default"}
     if unsupported:
-        raise LegacySandboxConflict(
-            "legacy sandbox contains non-default accounts; per-account migration is deferred"
-        )
+        raise LegacySandboxConflict("legacy sandbox contains non-default accounts; per-account migration is deferred")
 
 
 def _target_has_session_state(connection: Any) -> bool:
@@ -160,10 +150,7 @@ def migrate_legacy_sandbox(
 
         with duckdb.connect(str(legacy), read_only=True) as source:
             present = {row[0] for row in source.execute("SHOW TABLES").fetchall()}
-            rows_by_table = {
-                table: _read_table(source, table, present)
-                for table in _LEGACY_TABLES
-            }
+            rows_by_table = {table: _read_table(source, table, present) for table in _LEGACY_TABLES}
 
         _validate_default_account(rows_by_table)
         counts = {table: len(rows) for table, rows in rows_by_table.items()}
@@ -174,14 +161,9 @@ def migrate_legacy_sandbox(
             or float(row.get("realized_pnl") or 0.0) != 0.0
             for row in funds
         )
-        has_legacy_state = (
-            any(rows_by_table[table] for table in _SESSION_TABLES)
-            or meaningful_funds
-        )
+        has_legacy_state = any(rows_by_table[table] for table in _SESSION_TABLES) or meaningful_funds
         if has_legacy_state and _target_has_session_state(sqlite):
-            raise LegacySandboxConflict(
-                "legacy DuckDB and canonical SQLite both contain session state"
-            )
+            raise LegacySandboxConflict("legacy DuckDB and canonical SQLite both contain session state")
 
         orders = list(rows_by_table["sandbox_orders"])
         trades = rows_by_table["sandbox_trades"]
@@ -198,23 +180,25 @@ def migrate_legacy_sandbox(
             if order_id in known_order_ids:
                 continue
             traded_at = trade.get("traded_at")
-            orders.append({
-                "order_id": order_id,
-                "symbol": trade.get("symbol", ""),
-                "exchange": trade.get("exchange", "NSE"),
-                "action": trade.get("action", "BUY"),
-                "quantity": trade.get("quantity", 0),
-                "price": trade.get("price", 0.0),
-                "trigger_price": 0.0,
-                "pricetype": "MARKET",
-                "product": trade.get("product", "MIS"),
-                "strategy": trade.get("strategy", ""),
-                "status": "COMPLETE",
-                "fill_price": trade.get("price", 0.0),
-                "fill_time": traded_at,
-                "created_at": traded_at,
-                "updated_at": traded_at,
-            })
+            orders.append(
+                {
+                    "order_id": order_id,
+                    "symbol": trade.get("symbol", ""),
+                    "exchange": trade.get("exchange", "NSE"),
+                    "action": trade.get("action", "BUY"),
+                    "quantity": trade.get("quantity", 0),
+                    "price": trade.get("price", 0.0),
+                    "trigger_price": 0.0,
+                    "pricetype": "MARKET",
+                    "product": trade.get("product", "MIS"),
+                    "strategy": trade.get("strategy", ""),
+                    "status": "COMPLETE",
+                    "fill_price": trade.get("price", 0.0),
+                    "fill_time": traded_at,
+                    "created_at": traded_at,
+                    "updated_at": traded_at,
+                }
+            )
             known_order_ids.add(order_id)
 
         now = time.time()
@@ -269,9 +253,7 @@ def migrate_legacy_sandbox(
                         status,
                         quantity if status == "COMPLETE" else 0,
                         float(fill_price) if fill_price is not None else None,
-                        _epoch(row.get("fill_time"), default=updated_at)
-                        if row.get("fill_time") is not None
-                        else None,
+                        _epoch(row.get("fill_time"), default=updated_at) if row.get("fill_time") is not None else None,
                         created_at,
                         updated_at,
                     ),
@@ -344,8 +326,7 @@ def migrate_legacy_sandbox(
                 )
 
             sqlite.execute(
-                "INSERT INTO sandbox_migrations (source_key, row_counts, migrated_at) "
-                "VALUES (?, ?, ?)",
+                "INSERT INTO sandbox_migrations (source_key, row_counts, migrated_at) VALUES (?, ?, ?)",
                 (source_key, json.dumps(counts, sort_keys=True), now),
             )
             sqlite.execute("COMMIT")
@@ -369,11 +350,13 @@ def _legacy_candidates(workspace: Path, explicit: Path | None) -> list[Path]:
     env_path = os.getenv("SANDBOX_ENGINE_DB_PATH")
     if env_path and env_path != ":memory:":
         candidates.append(Path(env_path).expanduser())
-    candidates.extend((
-        workspace / "data" / "engine-sandbox" / "default.duckdb",
-        workspace / "sandbox" / "default.duckdb",
-        workspace / "data" / "sandbox.duckdb",
-    ))
+    candidates.extend(
+        (
+            workspace / "data" / "engine-sandbox" / "default.duckdb",
+            workspace / "sandbox" / "default.duckdb",
+            workspace / "data" / "sandbox.duckdb",
+        )
+    )
     unique: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
@@ -392,9 +375,7 @@ def migrate_workspace(
 ) -> list[dict[str, Any]]:
     """Discover and migrate the retired default-account database in a workspace."""
     workspace = Path(workspace_dir).expanduser().resolve()
-    target = Path(state_path).expanduser().resolve() if state_path else (
-        workspace / "sandbox" / "state.sqlite"
-    )
+    target = Path(state_path).expanduser().resolve() if state_path else (workspace / "sandbox" / "state.sqlite")
     archive = workspace / "archive" / "migrations"
     explicit = Path(legacy_path).expanduser() if legacy_path else None
     sources = [path for path in _legacy_candidates(workspace, explicit) if path.exists()]

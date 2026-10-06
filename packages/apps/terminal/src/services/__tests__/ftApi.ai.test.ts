@@ -20,9 +20,9 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 
 vi.mock("@/stores/connectionStore", () => ({
-  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  //  models a normally-loaded app; the hydration
   // fail-closed window is covered by brokerTargets/api tests.
-  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey, openAlgoHydrated: true }) },
+  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey }) },
 }));
 
 vi.mock("@/stores/authStore", () => ({
@@ -30,6 +30,8 @@ vi.mock("@/stores/authStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { source?: string; broker: string; account_id: string }) =>
+    [account.source ?? "unconfigured", account.broker, account.account_id].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native" }>,
     selector: string | null,
@@ -45,6 +47,9 @@ import {
   AI_SESSION_IMPORT_MAX_CONTENT_BYTES,
   AI_SESSION_IMPORT_MAX_MESSAGES,
   getSignalIdentity,
+  getPracticeAgentRuns,
+  getPracticeAgentEvents,
+  resolvePracticeAgentRun,
   getRecentSignals,
   importAiSession,
   importAiSessionChunked,
@@ -688,8 +693,8 @@ describe("startAgent", () => {
     expect(requestBody(fetchMock)).toMatchObject({ broker: "dhan", account_id: "D1" });
   });
 
-  it("keeps OpenAlgo primary when a bridge API key is configured", async () => {
-    storeState.apiKey = "openalgo-key";
+  it("keeps the exact native target despite stale transport credentials", async () => {
+    storeState.apiKey = "stale-backend-key";
     storeState.brokerState = {
       accounts: [
         { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
@@ -699,8 +704,7 @@ describe("startAgent", () => {
 
     await startAgent(BASE_PARAMS);
 
-    expect(requestBody(fetchMock)).not.toHaveProperty("broker");
-    expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
+    expect(requestBody(fetchMock)).toMatchObject({ broker: "upstox", account_id: "U1" });
   });
 
   it("does not add a native target outside live mode", async () => {
@@ -740,7 +744,7 @@ describe("runTeamAnalysisStream", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    storeState.apiKey = "openalgo-key";
+    storeState.apiKey = "stale-backend-key";
     storeState.token = "jwt-token";
   });
 
@@ -838,5 +842,41 @@ describe("runTeamAnalysisStream", () => {
     };
 
     await expect(consume()).rejects.toThrow(/ended before the final result/i);
+  });
+});
+
+
+describe("Practice agent run API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("unwraps durable Practice runs from the canonical history endpoint", async () => {
+    const runs = [{ run_id: "run-1", mode: "practice", status: "stopped", config: {}, snapshot: {}, error: null, created_at: "now", updated_at: "now" }];
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: runs }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await getPracticeAgentRuns()).toEqual(runs);
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/ai\/agent\/practice\/runs$/);
+    expect(fetchMock.mock.calls[0][1].method ?? "GET").toBe("GET");
+  });
+
+  it("requests a bounded ordered event page and encodes the run identity", async () => {
+    const events = [{ seq: 41, run_id: "run/1", kind: "risk_denied", data: { reason: "daily limit" }, created_at: "now" }];
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: events }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await getPracticeAgentEvents("run/1", 40, 100)).toEqual(events);
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/practice\/runs\/run%2F1\/events\?after=40&limit=100$/);
+  });
+
+  it("resolves an interrupted run without replay parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: AGENT_SNAPSHOT }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await resolvePracticeAgentRun("run/1")).toEqual(AGENT_SNAPSHOT);
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/practice\/runs\/run%2F1\/resolve$/);
+    expect(requestBody(fetchMock)).toEqual({});
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+  });
+
+  it("surfaces reconciliation refusal without claiming a resolved snapshot", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", message: "Account not flat" }, 409)));
+    await expect(resolvePracticeAgentRun("run-1")).rejects.toThrow("Account not flat");
   });
 });

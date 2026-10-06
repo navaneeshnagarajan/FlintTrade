@@ -350,14 +350,20 @@ def test_indeterminate_reconciliation_requires_exact_confirmed_receipt_identity(
     client = app.test_client()
     operation_id = f"op_{'a' * 32}"
 
-    assert client.post(
-        "/v1/ai/local-runtime/operations/reconcile",
-        json={"operation_id": operation_id, "admission_id": _ADMISSION_ID},
-    ).status_code == 400
-    assert client.post(
-        "/v1/ai/local-runtime/operations/reconcile",
-        json={"confirmed": True, "admission_id": _ADMISSION_ID},
-    ).status_code == 400
+    assert (
+        client.post(
+            "/v1/ai/local-runtime/operations/reconcile",
+            json={"operation_id": operation_id, "admission_id": _ADMISSION_ID},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/v1/ai/local-runtime/operations/reconcile",
+            json={"confirmed": True, "admission_id": _ADMISSION_ID},
+        ).status_code
+        == 400
+    )
     accepted = client.post(
         "/v1/ai/local-runtime/operations/reconcile",
         json={
@@ -551,7 +557,7 @@ def test_runtime_control_requires_auth_even_when_no_global_key_is_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     app = Flask(__name__)
     app.config["TESTING"] = True
     runtime = _FakeRuntime()
@@ -564,11 +570,11 @@ def test_runtime_control_requires_auth_even_when_no_global_key_is_configured(
     assert runtime.calls == []
 
 
-def test_openalgo_bridge_key_cannot_administer_the_managed_runtime(
+def test_unknown_client_key_cannot_administer_the_managed_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
-    monkeypatch.setenv("OPENALGO_API_KEY", "bridge-only-key")
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "bridge-only-key")
     app = Flask(__name__)
     app.config["TESTING"] = True
     runtime = _FakeRuntime()
@@ -577,7 +583,7 @@ def test_openalgo_bridge_key_cannot_administer_the_managed_runtime(
 
     response = app.test_client().post(
         "/v1/ai/local-runtime/start",
-        headers={"X-API-Key": "bridge-only-key"},
+        headers={"X-API-Key": "unrecognised-client-key"},
     )
 
     assert response.status_code == 401
@@ -889,9 +895,7 @@ def test_provider_config_write_failure_publishes_a_durable_indeterminate_receipt
             read_config=lambda: {"provider": "ollama", "host": "", "model": "qwen3:8b"},
             read_effective_config=lambda: {"provider": "openai", "host": "", "model": "gpt-4o"},
             resolve_secret=lambda: "",
-            persist_config=lambda _candidate: (_ for _ in ()).throw(
-                RuntimeError("simulated ambiguous config write")
-            ),
+            persist_config=lambda _candidate: (_ for _ in ()).throw(RuntimeError("simulated ambiguous config write")),
         )
 
     status = runtime.status()
@@ -922,9 +926,7 @@ def test_provider_override_activation_write_failure_is_durably_indeterminate(
             read_config=lambda: {"provider": "openai", "host": "", "model": "gpt-4o"},
             read_effective_config=lambda: {"provider": "openai", "host": "", "model": "gpt-4o"},
             resolve_secret=lambda: "",
-            persist_config=lambda _candidate: (_ for _ in ()).throw(
-                RuntimeError("simulated ambiguous config write")
-            ),
+            persist_config=lambda _candidate: (_ for _ in ()).throw(RuntimeError("simulated ambiguous config write")),
         )
 
     status = runtime.status()
@@ -1133,10 +1135,12 @@ def test_provider_transition_rejects_uninstalled_or_external_ollama_without_pers
                 {"provider": "ollama"},
                 read_config=lambda: {"provider": "openai", "host": "", "model": "gpt-4o"},
                 resolve_secret=lambda: "",
-                persist_config=lambda payload: events.append(  # noqa: B023 - consumed in this iteration
-                    f"persist:{payload['provider']}"
-                )
-                or dict(payload),
+                persist_config=lambda payload: (
+                    events.append(  # noqa: B023 - consumed in this iteration
+                        f"persist:{payload['provider']}"
+                    )
+                    or dict(payload)
+                ),
             )
 
         assert events == []

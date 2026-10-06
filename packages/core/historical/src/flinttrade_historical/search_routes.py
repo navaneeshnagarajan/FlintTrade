@@ -4,7 +4,7 @@ Endpoint
 --------
 GET /api/v1/search  — search for trading symbols with optional exchange filter
 
-Proxies through :class:`flinttrade_core.openalgo_client.OpenAlgoClient`
+Proxies through :class:`flinttrade_core.broker_client.BrokerClient`
 ``search()`` endpoint and applies optional exchange + limit filtering
 on the results.
 
@@ -26,13 +26,13 @@ logger = logging.getLogger("flinttrade.historical.search_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import (
+    from flinttrade_core.broker_client import (
         client_call_sync,
         client_close_sync,
-        resolve_openalgo_client,
+        resolve_broker_client,
     )
 except Exception:  # pragma: no cover
-    resolve_openalgo_client = None  # type: ignore[assignment,misc]
+    resolve_broker_client = None  # type: ignore[assignment,misc]
     client_call_sync = None  # type: ignore[assignment,misc]
     client_close_sync = None  # type: ignore[assignment,misc]
 
@@ -77,7 +77,7 @@ def search_symbols() -> tuple[Any, int]:
 
     Raises:
         HTTP 400 when ``?q`` is missing or empty.
-        HTTP 503 when OpenAlgo is unreachable.
+        HTTP 503 when native broker is unreachable.
     """
     query: str = request.args.get("q", "").strip()
     if not query:
@@ -98,10 +98,10 @@ def search_symbols() -> tuple[Any, int]:
         )
 
     try:
-        if resolve_openalgo_client is None:
-            raise ImportError("OpenAlgo client resolver not available")
+        if resolve_broker_client is None:
+            raise ImportError("native broker client resolver not available")
 
-        client, close_client = resolve_openalgo_client()
+        client, close_client = resolve_broker_client()
         try:
             raw = client_call_sync(client, client.search(query=query))
         finally:
@@ -136,7 +136,7 @@ def search_symbols() -> tuple[Any, int]:
             jsonify(
                 {
                     "status": "error",
-                    "message": "Could not fetch search results from OpenAlgo",
+                    "message": "Could not fetch search results from native broker",
                     "detail": "search request failed",
                 }
             ),

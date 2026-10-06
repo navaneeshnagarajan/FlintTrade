@@ -67,7 +67,7 @@ Republic Day (26 Jan), Holi, Good Friday, Ambedkar Jayanti, Maharashtra Day, Ind
 
 Exact holiday list changes annually. Fetch programmatically:
 ```
-POST /api/v1/holidays  → returns list of NSE/BSE holiday dates
+Read the NSE/BSE exchange holiday calendar
 ```
 
 ## Time Zone Handling

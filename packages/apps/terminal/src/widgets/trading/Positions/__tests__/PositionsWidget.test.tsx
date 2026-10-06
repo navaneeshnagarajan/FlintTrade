@@ -4,7 +4,7 @@
  * Tests for the merged Positions widget — the position book's THREE views.
  * Covers the gated write path (per-row Convert, per-row square-off, the typed
  * exit-all flow, exact displayed-account authority and the fail-closed product
- * check), the Excel export, and the two absorbed views: netting/grouping/totals
+ * check), and the two absorbed views: netting/grouping/totals
  * (from the retired Net Position widget) and the treemap/grouping/chart-open
  * contract (from the retired Position Heat Map widget).
  *
@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -40,9 +40,8 @@ const mockUsePositions = vi.fn();
 const mockUseBrokerConnected = vi.fn();
 const mockConnectionState = vi.hoisted(() => ({
   apiKey: "",
-  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  //  models a normally-loaded app; the hydration
   // fail-closed window is covered by brokerTargets/api tests.
-  openAlgoHydrated: true,
 }));
 const mockModeState = vi.hoisted(() => ({
   mode: "live",
@@ -70,6 +69,15 @@ const mockReadState = vi.hoisted(() => ({
 
 vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+const mockUseOrders = vi.fn();
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: (...args: unknown[]) => mockUseOrders(...args),
+}));
+
+vi.mock("@/hooks/useFunds", () => ({
+  useFunds: () => ({ data: undefined }),
 }));
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
@@ -108,8 +116,8 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
             }
           : {
               mode,
-              scopeKey: "live:openalgo:test",
-              brokerType: "openalgo",
+              scopeKey: "live:native:upstox:U1",
+              brokerType: "dhan",
               accountId: "default",
             });
     return {
@@ -155,17 +163,26 @@ vi.mock("@/stores/modeStore", () => ({
     typeof selector === "function" ? selector(mockModeState) : mockModeState,
 }));
 
-const mockDownloadExcel = vi.fn();
-vi.mock("@/services/ftApi.data", () => ({
-  downloadExcel: (...args: unknown[]) => mockDownloadExcel(...args),
-}));
 
 // Square-off goes through the existing gated placeOrder path (services/api →
 // /ft-api/api/v1/orders/place → SafetySystem → gate_order → BrokerRouter).
 const mockPlaceOrder = vi.fn();
-vi.mock("@/services/api", () => ({
-  placeOrder: (...args: unknown[]) => mockPlaceOrder(...args),
-}));
+vi.mock("@/services/api", () => {
+  class OrderApiError extends Error {
+    readonly status: number;
+    readonly body: unknown;
+    constructor(message: string, status: number, body: unknown) {
+      super(message);
+      this.name = "OrderApiError";
+      this.status = status;
+      this.body = body;
+    }
+  }
+  return {
+    placeOrder: (...args: unknown[]) => mockPlaceOrder(...args),
+    OrderApiError,
+  };
+});
 
 const mockEmitNotification = vi.fn();
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
@@ -198,13 +215,17 @@ vi.mock("@/stores/brokerStore", () => ({
 // ---------------------------------------------------------------------------
 
 import PositionsWidget from "../PositionsWidget";
+import { OrderApiError } from "@/services/api";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import {
   netPositions,
   normalisePositions,
+  offsetLegTooltip,
   positionExposure,
   underlyingOf,
 } from "../positionBook";
 import { SAMPLE_POSITION_BOOK } from "../sampleBook";
+import { totalPositionMtm } from "@/lib/pnl";
 
 function mockBrokerAccountMatch(
   account: { account_id: string; broker: string; source?: string },
@@ -238,18 +259,44 @@ function queryResult(overrides = {}) {
     isError: false,
     error: null,
     isFetching: false,
+    isSuccess: true,
+    fetchStatus: "idle",
     refetch: vi.fn(),
     dataUpdatedAt: 0,
     ...overrides,
   };
 }
 
-/** JSDOM reports 0×0 for every rect, which culls every treemap cell. */
-function withMeasuredContainer(run: () => void) {
+/** Heat tiles are the only buttons whose accessible name carries a rupee P&L. */
+function heatTiles() {
+  return screen.getAllByRole("button", { name: /: [+\-]₹/ });
+}
+
+/**
+ * JSDOM reports 0×0 for every rect, which culls every treemap cell.
+ *
+ * `heatOnly` sizes the heat canvas and leaves the widget root wide, so a
+ * "+N more" click still lands on the table rather than the narrow cards.
+ */
+function withMeasuredContainer(
+  run: () => void,
+  size: { width: number; height: number } = { width: 800, height: 400 },
+  options: { heatOnly?: boolean } = {},
+) {
   const original = Element.prototype.getBoundingClientRect;
-  Element.prototype.getBoundingClientRect = function () {
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const measured = !options.heatOnly || this.getAttribute("data-testid") === "heat-map";
+    const width = measured ? size.width : 900;
+    const height = measured ? size.height : 700;
     return {
-      width: 800, height: 400, top: 0, left: 0, right: 800, bottom: 400, x: 0, y: 0,
+      width,
+      height,
+      top: 0,
+      left: 0,
+      right: width,
+      bottom: height,
+      x: 0,
+      y: 0,
       toJSON() {},
     } as DOMRect;
   };
@@ -277,6 +324,7 @@ describe("PositionsWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPlaceOrder.mockReset();
+    mockEmitNotification.mockReset();
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
     mockUseBrokerConnected.mockReturnValue(true);
@@ -284,6 +332,8 @@ describe("PositionsWidget", () => {
     mockBrokerState.activeAccountId = null;
     mockReadState.identity = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    mockUseOrders.mockReturnValue(queryResult({ data: [] }));
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
   });
 
   it("renders without crashing", () => {
@@ -298,11 +348,12 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("No open positions")).toBeInTheDocument();
   });
 
-  it("shows the empty state when data is undefined", () => {
-    mockUsePositions.mockReturnValue(queryResult({ data: undefined }));
+  it("does not treat an unverified position book as empty", () => {
+    mockUsePositions.mockReturnValue(queryResult({ data: undefined, isSuccess: false }));
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(screen.getByText("No open positions")).toBeInTheDocument();
+    expect(screen.getByText("Positions unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
   });
 
   it("shows pending status before first authoritative success (and no empty or error)", () => {
@@ -378,8 +429,9 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("-₹810")).toBeInTheDocument();
   });
 
-  it("shows connected practice positions read-only without broker write controls", () => {
+  it("squares off a Practice position through place with the opposite side and quantity", async () => {
     mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ1" });
     mockUsePositions.mockReturnValue(
       queryResult({
         data: [
@@ -390,13 +442,65 @@ describe("PositionsWidget", () => {
     render(<PositionsWidget {...defaultProps} />);
 
     expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
-    expect(screen.getByText("Read-only")).toBeInTheDocument();
-    // Provenance is labelled separately from capability: sandbox book, no writes.
+    expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
     expect(screen.getByText("Practice")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith({
+      symbol: "NIFTY24APR24000CE",
+      exchange: "NFO",
+      action: "SELL",
+      product: "NRML",
+      orderType: "MARKET",
+      quantity: 75,
+      price: 150,
+      triggerPrice: 0,
+      strategy: "FlintPositions",
+      rationale: "",
+    }, {
+      mode: "practice",
+      scopeKey: "practice:sandbox:default",
+      brokerType: "sandbox",
+      accountId: "default",
+    }, { exit: true });
+  });
+
+  it("squares off a Practice position while Laya is Down without an extra confirmation", async () => {
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-DOWN" });
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const squareOff = screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" });
+    expect(squareOff).toBeEnabled();
+    fireEvent.click(squareOff);
+    expect(screen.queryByRole("button", { name: /laya/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 75 }),
+      expect.objectContaining({ mode: "practice" }),
+      { exit: true },
+    );
+    await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Exit requested. Exits are allowed while Laya is Down.",
+      }),
+    ));
   });
 
   it("shows the header with position count", () => {
@@ -685,57 +789,6 @@ describe("PositionsWidget", () => {
     expect(screen.queryByText("Live only")).toBeNull();
   });
 
-  // ── Excel export ─────────────────────────────────────────────────────────
-
-  it("does not show the export button when there are no positions", () => {
-    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
-    render(<PositionsWidget {...defaultProps} />);
-    expect(screen.queryByRole("button", { name: /export positions to excel/i })).toBeNull();
-  });
-
-  it("exports the positions and emits a success notification", async () => {
-    mockDownloadExcel.mockResolvedValue(2);
-    mockUsePositions.mockReturnValue(
-      queryResult({
-        data: [
-          { symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 },
-          { symbol: "BANKNIFTY", pnl: -200, quantity: 25, ltp: 200, average_price: 190 },
-        ],
-      }),
-    );
-    render(<PositionsWidget {...defaultProps} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /export positions to excel/i }));
-
-    await vi.waitFor(() => expect(mockDownloadExcel).toHaveBeenCalledTimes(1));
-    // Exports the mapped rows under the "Positions" sheet.
-    expect(mockDownloadExcel.mock.calls[0][1]).toBe("Positions");
-    expect(mockDownloadExcel.mock.calls[0][0]).toHaveLength(2);
-    await vi.waitFor(() =>
-      expect(mockEmitNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ category: "system", title: "Positions exported" }),
-      ),
-    );
-  });
-
-  it("emits an alert notification when the export fails", async () => {
-    mockDownloadExcel.mockRejectedValue(new Error("backend down"));
-    mockUsePositions.mockReturnValue(
-      queryResult({
-        data: [{ symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 }],
-      }),
-    );
-    render(<PositionsWidget {...defaultProps} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /export positions to excel/i }));
-
-    await vi.waitFor(() =>
-      expect(mockEmitNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ category: "alert", title: "Export failed", body: "backend down" }),
-      ),
-    );
-  });
-
   // ── Convert + exit-all safety actions ───────────────────────────────────
 
   describe("position actions", () => {
@@ -785,6 +838,122 @@ describe("PositionsWidget", () => {
         product: "MIS",
       },
     ];
+
+    it.each([
+      { mode: "live", decisionStatus: "ready" },
+      { mode: "practice", decisionStatus: "ready" },
+      { mode: "practice", decisionStatus: "down" },
+    ] as const)("does not describe acknowledgement as a filled exit in $mode while Laya is $decisionStatus", async ({ mode, decisionStatus }) => {
+      mockModeState.mode = mode;
+      useOperatorSignalStore.setState({ decisionStatus });
+      mockPlaceOrder.mockResolvedValue({ orderId: "ACK-ONLY" });
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed."))
+        .toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+      if (mode === "live") stubFetch();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+      await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "Exit-all requested. Check positions and orders for the outcome.",
+      })));
+      for (const [notification] of mockEmitNotification.mock.calls) {
+        expect(`${notification.title} ${notification.body}`).not.toMatch(/\bCLOSED\b|\bfilled\b|Every open.*squared off/i);
+      }
+    });
+
+    it("shows the exact execution-first warning in square-off confirmation", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed."))
+        .toBeInTheDocument();
+    });
+
+    it.each([
+      { isLoading: true, isSuccess: false, data: undefined },
+      { isError: true, error: new Error("Broker orders unsupported"), isSuccess: false, data: undefined },
+      { isError: true, error: new Error("Broker unavailable"), isSuccess: false, data: [] },
+      { fetchStatus: "paused", data: [] },
+    ])("keeps unavailable orders distinct from empty orders: %j", (ordersState) => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      mockUseOrders.mockReturnValue(queryResult(ordersState));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+      expect(screen.getByTestId("exit-orders-unavailable")).toHaveTextContent(
+        "Broker orders are unavailable. Reconcile them before another exit.",
+      );
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 1 }} />);
+      expect(screen.getByTestId("exit-orders-unavailable")).toBeInTheDocument();
+      const squareOff = screen.queryByRole("button", { name: "Square off RELIANCE" });
+      expect(squareOff === null || (squareOff as HTMLButtonElement).disabled).toBe(true);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+      mockUseOrders.mockReturnValue(queryResult({ data: [] }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 2 }} />);
+      expect(screen.queryByTestId("exit-orders-unavailable")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeEnabled();
+    });
+
+    it("keeps cancel-pending rows visible", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      mockUseOrders.mockReturnValue(queryResult({ data: [{
+        symbol: "RELIANCE", exchange: "NSE", product: "MIS", action: "BUY", status: "CANCEL_PENDING",
+      }] }));
+      render(<PositionsWidget {...defaultProps} />);
+      expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+      expect(screen.getByText("Exit pending")).toBeInTheDocument();
+      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeDisabled();
+    });
+
+    it("keeps cancel-pending warnings visible in narrow cards", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      mockUseOrders.mockReturnValue(queryResult({ data: [{
+        symbol: "RELIANCE", exchange: "NSE", product: "MIS", action: "BUY", status: "CANCEL_PENDING",
+      }] }));
+      withMeasuredContainer(() => render(<PositionsWidget {...defaultProps} />), { width: 390, height: 700 });
+      expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+      expect(screen.getByText(/Cancel pending\. This order may still fill\./)).toBeInTheDocument();
+    });
+
+    it("retains uncertain exit status and transport details", async () => {
+      mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
+      expect(await screen.findByText("Exit status unknown. An order may still execute. Failed to fetch"))
+        .toBeInTheDocument();
+    });
+
+    it.each(["acknowledged", "lost response"])(
+      "does not carry another account's warning or response into the active account: %s", async (outcome) => {
+        let resolve!: (value: unknown) => void;
+        let reject!: (reason: unknown) => void;
+        const response = new Promise((done, failed) => { resolve = done; reject = failed; });
+        mockPlaceOrder.mockReturnValue(response);
+        const held = { symbol: "INFY", exchange: "NSE", product: "MIS", quantity: 10, ltp: 100 };
+        mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+        const { rerender } = render(<PositionsWidget {...defaultProps} />);
+        mockUsePositions.mockReturnValue(queryResult({ data: [{ ...held, quantity: -3 }] }));
+        rerender(<PositionsWidget {...defaultProps} params={{ nonce: 3 }} />);
+        expect(screen.getByTestId("position-flip-toast")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Close INFY" }));
+        expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+        mockBrokerState.accounts = [{ broker: "dhan", account_id: "B", label: "B", source: "native", status: "connected" }];
+        mockBrokerState.activeAccountId = "native:dhan:B";
+        mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+        rerender(<PositionsWidget {...defaultProps} params={{ nonce: 4 }} />);
+        expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+        expect(screen.queryByText("Unexpected")).not.toBeInTheDocument();
+        await act(async () => {
+          if (outcome === "acknowledged") resolve({ orderId: "A-ACK" });
+          else reject(new TypeError("A connection lost"));
+          await response.catch(() => {});
+        });
+        expect(mockEmitNotification).not.toHaveBeenCalled();
+      },
+    );
 
     it("converts a position through the gated convert route", async () => {
       const fetchMock = stubFetch();
@@ -841,7 +1010,7 @@ describe("PositionsWidget", () => {
       );
 
       expect(
-        await screen.findByText("Live orders are allowed in live mode only — switch mode first"),
+        await screen.findByText(/Live orders are allowed in live mode only — switch mode first/),
       ).toBeInTheDocument();
       // The dialog stays open so the operator can read what blocked it.
       expect(screen.getByText("Convert position")).toBeInTheDocument();
@@ -888,7 +1057,11 @@ describe("PositionsWidget", () => {
 
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ category: "system", title: "Exit-all submitted" }),
+        expect.objectContaining({
+          category: "system",
+          title: "Exit-all submitted",
+          body: "Exit-all requested. Check positions and orders for the outcome.",
+        }),
       );
     });
 
@@ -955,18 +1128,167 @@ describe("PositionsWidget", () => {
         price: 0,
         triggerPrice: 0,
         strategy: "FlintPositions",
+        rationale: "",
       }, {
         mode: "live",
         scopeKey: "live:native:dhan:POSITIONS-A",
         brokerType: "dhan",
         accountId: "POSITIONS-A",
-      });
+      }, { exit: true });
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "order", title: "Square-off submitted" }),
       );
     });
 
+    it("sends the square-off admission note with placeOrder", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "SQ-NOTE" });
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+        target: { value: "Flatten the open risk" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "RELIANCE",
+          action: "BUY",
+          rationale: "Flatten the open risk",
+        }),
+        expect.anything(),
+        { exit: true },
+      );
+    });
+
+    it("tags a pending exit and refuses a second square-off", () => {
+      mockModeState.mode = "practice";
+      mockUseOrders.mockReturnValue({
+        ...queryResult(),
+        data: [{
+          orderId: "E1",
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "SELL",
+          quantity: 4,
+          price: 100,
+          orderType: "LIMIT",
+          status: "OPEN",
+          product: "MIS",
+          strategy: "",
+          timestamp: "",
+        }],
+      });
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{
+          symbol: "INFY",
+          exchange: "NSE",
+          product: "MIS",
+          quantity: 10,
+          average_price: 100,
+          ltp: 101,
+          pnl: 10,
+        }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      expect(screen.getByText("INFY")).toBeInTheDocument();
+      expect(screen.getByText("Exit pending")).toBeInTheDocument();
+      const squareOff = screen.getByRole("button", { name: "Square off INFY" });
+      expect(squareOff).toBeDisabled();
+      fireEvent.click(squareOff);
+      expect(screen.queryByText("Square off position?")).not.toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {
+        target: { value: "EXIT" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+      expect(screen.getByText(
+        "Not placed. An exit for INFY is already pending. Wait for it to fill, or cancel it and try again.",
+      )).toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
+
+    it("tags a position restored from backup", () => {
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{
+          symbol: "INFY",
+          exchange: "NSE",
+          product: "MIS",
+          quantity: 10,
+          average_price: 100,
+          ltp: 101,
+          pnl: 10,
+          restored: true,
+        }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+      const tag = screen.getByText("Restored");
+      expect(tag).toHaveAttribute(
+        "title",
+        "Restored from backup. Not sent to a broker or checked by Laya.",
+      );
+    });
+
+    it("shows a flipped position on its own row until the toast is dismissed", async () => {
+      const held = {
+        symbol: "INFY",
+        exchange: "NSE",
+        product: "MIS",
+        quantity: 10,
+        average_price: 100,
+        ltp: 110,
+        pnl: 100,
+      };
+      mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+      expect(screen.queryByText("Unexpected")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{ ...held, quantity: -3, pnl: -30 }],
+      }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 1 }} />);
+
+      expect(screen.getByText("INFY")).toBeInTheDocument();
+      expect(screen.getByText("Unexpected")).toBeInTheDocument();
+      expect(screen.getByTestId("position-flip-toast")).toHaveTextContent(
+        "Position changed after your broker's orders loaded. You're now short 3 INFY. Close it if that wasn't intended.",
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      expect(screen.getByTestId("position-flip-toast")).toBeInTheDocument();
+
+      useOperatorSignalStore.setState({ decisionStatus: "down" });
+      mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE1" });
+      fireEvent.click(screen.getByRole("button", { name: "Close INFY" }));
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "BUY",
+          product: "MIS",
+          quantity: 3,
+        }),
+        expect.objectContaining({
+          mode: "live",
+          brokerType: "dhan",
+          accountId: "POSITIONS-A",
+        }),
+        { exit: true },
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+      expect(screen.getByText("Unexpected")).toBeInTheDocument();
+    });
     it("squares off a short position with a BUY market order for the absolute quantity", async () => {
       mockPlaceOrder.mockResolvedValue({ orderId: "SQ2" });
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
@@ -990,7 +1312,84 @@ describe("PositionsWidget", () => {
           brokerType: "dhan",
           accountId: "POSITIONS-A",
         }),
+        { exit: true },
       );
+    });
+
+    it("keeps the square-off control and shows Laya's refusal when a close is denied", async () => {
+      mockModeState.mode = "practice";
+      mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya denied this order.", 403, {
+        code: "laya_denied",
+        reason: "Quantity is above the practice limit.",
+        message: "Laya denied this order.",
+        limits: { max_quantity: 4 },
+      }));
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+      const denied = await screen.findByTestId("laya-denied");
+      expect(denied).toHaveTextContent("Laya denied");
+      expect(denied).toHaveTextContent("Quantity is above the practice limit.");
+      expect(screen.getByText("Max quantity 4.")).toBeInTheDocument();
+      expect(screen.getByText("Square off position?")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE", hidden: true })).toBeInTheDocument();
+    });
+
+    it("squares off each Practice position through place and reports a partial failure", async () => {
+      mockModeState.mode = "practice";
+      mockPlaceOrder
+        .mockResolvedValueOnce({ orderId: "PQ-OK" })
+        .mockRejectedValueOnce(new OrderApiError("Laya denied this order.", 403, {
+          code: "laya_denied",
+          reason: "Practice book is closed.",
+          message: "Laya denied this order.",
+        }));
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "INFY", pnl: 100, quantity: 10, ltp: 100, average_price: 90, exchange: "NSE", product: "CNC" },
+          { symbol: "TCS", pnl: -50, quantity: -4, ltp: 200, average_price: 210, exchange: "NSE", product: "MIS" },
+        ],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {
+        target: { value: "EXIT" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        symbol: "INFY",
+        action: "SELL",
+        quantity: 10,
+        orderType: "MARKET",
+        product: "CNC",
+        price: 100,
+      }), expect.objectContaining({ mode: "practice" }), { exit: true });
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        symbol: "TCS",
+        action: "BUY",
+        quantity: 4,
+        orderType: "MARKET",
+        product: "MIS",
+        price: 200,
+      }), expect.objectContaining({ mode: "practice" }), { exit: true });
+      expect(await screen.findByText("Exit requested: INFY.")).toBeInTheDocument();
+      expect(screen.getAllByText("TCS").length).toBeGreaterThan(0);
+      expect(screen.getByTestId("laya-denied")).toHaveTextContent("Laya denied");
+      expect(screen.getByTestId("laya-denied")).toHaveTextContent("Practice book is closed.");
+      expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm exit all positions" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Exit all positions", hidden: true })).toBeInTheDocument();
     });
 
     it("surfaces the backend rejection honestly inside the square-off dialog", async () => {
@@ -1004,7 +1403,7 @@ describe("PositionsWidget", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
 
       expect(
-        await screen.findByText("Live orders are allowed in live mode only — switch mode first"),
+        await screen.findByText(/Live orders are allowed in live mode only — switch mode first/),
       ).toBeInTheDocument();
       // The dialog stays open so the operator can read what blocked it.
       expect(screen.getByText("Square off position?")).toBeInTheDocument();
@@ -1074,13 +1473,13 @@ describe("PositionsWidget", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("keeps native-only convert and exit-all off an OpenAlgo position book", () => {
-      mockConnectionState.apiKey = "openalgo-key";
+    it("refuses all writes when the displayed book differs from the selected native account", () => {
+      mockConnectionState.apiKey = "dhan-key";
       mockReadState.identity = {
         mode: "live",
-        scopeKey: "live:openalgo:book-scope",
-        brokerType: "openalgo",
-        accountId: "default",
+        scopeKey: "live:native:dhan:DIFFERENT",
+        brokerType: "dhan",
+        accountId: "DIFFERENT",
       };
       mockBrokerState.accounts = [{
         broker: "dhan",
@@ -1094,7 +1493,7 @@ describe("PositionsWidget", () => {
 
       render(<PositionsWidget {...defaultProps} />);
 
-      expect(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
       expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
@@ -1199,6 +1598,7 @@ describe("PositionsWidget", () => {
           brokerType: "upstox",
           accountId: "ACCOUNT-A",
         },
+        { exit: true },
       );
     });
 
@@ -1333,7 +1733,7 @@ describe("PositionsWidget", () => {
       expect(screen.queryByLabelText("TATAMOTORS: net qty 3")).not.toBeInTheDocument();
     });
 
-    it("drops symbols that net flat and says so in the total", () => {
+    it("keeps offset legs that net to zero, each with its own row", () => {
       mockUsePositions.mockReturnValue(
         queryResult({
           data: [
@@ -1345,10 +1745,73 @@ describe("PositionsWidget", () => {
       );
       render(<PositionsWidget {...viewProps("net")} />);
 
-      expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
-      // The whole book's P&L still counts the flat legs — the label says so
-      // rather than letting the footer disagree with the header.
-      expect(screen.getByText(/incl. 2 flat legs/i)).toBeInTheDocument();
+      const cnc = screen.getByLabelText("RELIANCE CNC: net qty 80");
+      const mis = screen.getByLabelText("RELIANCE MIS: net qty -80");
+      const tooltip = "CNC and MIS legs don't cancel at your broker. At intraday square-off the MIS leg closes and the CNC leg stays open.";
+      expect(within(cnc).getByText("Offset")).toHaveAttribute("title", tooltip);
+      expect(within(mis).getByText("Offset")).toHaveAttribute("title", tooltip);
+      expect(screen.getByText("incl. 1 offset symbol (legs still open)")).toBeInTheDocument();
+      expect(screen.queryByText(/flat symbol/)).not.toBeInTheDocument();
+      expect(screen.getByLabelText("SBIN: net qty 2")).toBeInTheDocument();
+    });
+
+    it("counts a symbol as flat only when every leg is at quantity 0", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 0, averagePrice: 3900, ltp: 3820, pnl: 0 },
+            { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
+          ],
+        }),
+      );
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("incl. 1 flat symbol")).toBeInTheDocument();
+      expect(screen.queryByText(/offset symbol/)).not.toBeInTheDocument();
+      expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("SBIN: net qty 2")).toBeInTheDocument();
+    });
+
+    it("shows the flat and offset notes alongside each other", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 0, averagePrice: 3900, ltp: 3820, pnl: 0 },
+            { symbol: "RELIANCE", exchange: "NSE", product: "CNC", quantity: 80, averagePrice: 2950, ltp: 2870, pnl: -6400 },
+            { symbol: "RELIANCE", exchange: "NSE", product: "MIS", quantity: -80, averagePrice: 2960, ltp: 2870, pnl: 7200 },
+          ],
+        }),
+      );
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("incl. 1 offset symbol (legs still open)")).toBeInTheDocument();
+      expect(screen.getByText("incl. 1 flat symbol")).toBeInTheDocument();
+    });
+
+    it("counts RELIANCE and NIFTY as two offset symbols on the sample book", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("incl. 2 offset symbols (legs still open)")).toBeInTheDocument();
+      expect(screen.queryByText(/flat symbol/)).not.toBeInTheDocument();
+      expect(screen.getByText("P&L: +₹16,575")).toBeInTheDocument();
+      expect(screen.getByText("+₹1,625")).toBeInTheDocument();
+      expect(screen.getAllByText("NIFTY24APR22500CE")).toHaveLength(2);
+      expect(screen.getByLabelText("RELIANCE CNC: net qty 80")).toBeInTheDocument();
+      expect(screen.getByLabelText("RELIANCE MIS: net qty -80")).toBeInTheDocument();
+      expect(screen.getByLabelText("BANKNIFTY24APR49000PE: net qty -30")).toBeInTheDocument();
+      const niftyMis = screen.getByLabelText("NIFTY24APR22500CE MIS: net qty 65");
+      const niftyNrml = screen.getByLabelText("NIFTY24APR22500CE NRML: net qty -65");
+      const niftyTip = "MIS and NRML legs don't cancel at your broker. At intraday square-off the MIS leg closes and the NRML leg stays open.";
+      expect(within(niftyMis).getByText("Offset")).toHaveAttribute("title", niftyTip);
+      expect(within(niftyNrml).getByText("Offset")).toHaveAttribute("title", niftyTip);
+      const relianceCnc = screen.getByLabelText("RELIANCE CNC: net qty 80");
+      expect(within(relianceCnc).getByText("Offset")).toHaveAttribute(
+        "title",
+        "CNC and MIS legs don't cancel at your broker. At intraday square-off the MIS leg closes and the CNC leg stays open.",
+      );
     });
 
     it("renders live positions, never the Explore sample, when a broker is connected", () => {
@@ -1426,6 +1889,18 @@ describe("PositionsWidget", () => {
       expect(screen.getByText("P&L: -₹1,000")).toBeInTheDocument();
     });
 
+    it("prices the sample NIFTY short at one lot of 65", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "flat" })} />);
+        expect(screen.getByRole("button", { name: "NIFTY24APR22500CE: -₹1,950 (-14.60%)" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "NIFTY24APR22500CE: +₹3,575 (+30.60%)" })).toBeInTheDocument();
+      });
+      expect(screen.getByText("P&L: +₹16,575")).toBeInTheDocument();
+    });
+
     it("shows the Explore sample and its watermark without a broker", () => {
       mockModeState.mode = "explore";
       mockUseBrokerConnected.mockReturnValue(false);
@@ -1445,7 +1920,7 @@ describe("PositionsWidget", () => {
         queryResult({
           data: [
             { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
-            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 75, averagePrice: 180, ltp: 235, pnl: 4125, pnlPercent: 30.6 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 65, averagePrice: 180, ltp: 235, pnl: 3575, pnlPercent: 30.6 },
           ],
         }),
       );
@@ -1457,7 +1932,65 @@ describe("PositionsWidget", () => {
         expect(screen.getByTestId("heat-group-chip-NFO")).toHaveTextContent("NFO");
         expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /^NIFTY24APR22500CE:/ })).toBeInTheDocument();
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
       });
+    });
+
+    it("keeps a small exchange group on its own band when the canvas is short", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 65, averagePrice: 180, ltp: 235, pnl: 3575, pnlPercent: 30.6 },
+          ],
+        }),
+      );
+      // The stack is taller than the canvas; NFO still gets a band and a tile.
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "NFO group" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^NIFTY24APR22500CE:/ })).toBeInTheDocument();
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+        expect(screen.queryByTestId("heat-more-overflow")).not.toBeInTheDocument();
+      }, { width: 800, height: 60 });
+    });
+
+    it("names tiles that do not fit inside their own band and opens them in the list", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 50, averagePrice: 3900, ltp: 3820, pnl: -4000, pnlPercent: -2.1 },
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "WIPRO", exchange: "NSE", product: "CNC", quantity: 10, averagePrice: 400, ltp: 410, pnl: 100, pnlPercent: 2.5 },
+          ],
+        }),
+      );
+      const scrollIntoView = vi.fn();
+      const originalScroll = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = scrollIntoView;
+      try {
+        withMeasuredContainer(() => {
+          render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+          expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+          expect(screen.queryByTestId("heat-more-overflow")).not.toBeInTheDocument();
+          const more = screen.getByRole("button", { name: "+3 more: TCS, INFY, WIPRO" });
+          expect(more).toHaveAttribute("title", "TCS, INFY, WIPRO");
+          expect(screen.getByRole("list", { name: "Positions without a heat map tile" })).toBeInTheDocument();
+          expect(screen.getByText("TCS: -₹4,000 (-2.10%)")).toBeInTheDocument();
+          fireEvent.click(more);
+        }, { width: 16, height: 40 }, { heatOnly: true });
+        expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByRole("button", { name: "Heat" })).toHaveAttribute("aria-pressed", "false");
+        for (const symbol of ["TCS", "INFY", "WIPRO"]) {
+          const row = document.querySelector(`[data-position-key="${symbol}:CNC:NSE"]`);
+          expect(row).toHaveAttribute("data-highlighted", "true");
+        }
+        expect(scrollIntoView).toHaveBeenCalled();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScroll;
+      }
     });
 
     it("still labels a single exchange group so the mode control looks used", () => {
@@ -1501,7 +2034,7 @@ describe("PositionsWidget", () => {
         queryResult({
           data: [
             { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
-            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 75, averagePrice: 180, ltp: 235, pnl: 4125, pnlPercent: 30.6 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 65, averagePrice: 180, ltp: 235, pnl: 3575, pnlPercent: 30.6 },
           ],
         }),
       );
@@ -1544,7 +2077,52 @@ describe("PositionsWidget", () => {
         expect(screen.getByTestId("heat-group-chip-NSE")).toHaveTextContent("NSE");
         expect(screen.getByTestId("heat-group-chip-NFO")).toHaveTextContent("NFO");
         expect(screen.queryByText("No exchange groups in these positions")).not.toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^NIFTY24APR22500CE:/ })).toHaveLength(2);
+        expect(screen.getByRole("button", { name: /^BANKNIFTY24APR49000PE:/ })).toBeInTheDocument();
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
       });
+    });
+
+    it("keeps every Example sample tile when grouped by sector", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "sector" })} />);
+        expect(screen.getByRole("group", { name: "Other group" })).toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^NIFTY24APR22500CE:/ })).toHaveLength(2);
+        expect(screen.getByRole("button", { name: /^BANKNIFTY24APR49000PE:/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^SUNPHARMA:/ })).toBeInTheDocument();
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+      });
+    });
+
+    it("keeps the Example sample's small exchange group on a short canvas", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+      }, { width: 320, height: 160 });
+    });
+
+    it("keeps every Example sample sector band on a short canvas", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "sector" })} />);
+        expect(screen.getByRole("group", { name: "Other group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "Pharma group" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^SUNPHARMA:/ })).toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^NIFTY24APR22500CE:/ })).toHaveLength(2);
+        expect(heatTiles()).toHaveLength(SAMPLE_POSITION_BOOK.length);
+        expect(screen.queryByText(/^\+\d+ more$/)).not.toBeInTheDocument();
+      }, { width: 320, height: 160 });
     });
   });
 });
@@ -1603,14 +2181,42 @@ describe("positionBook", () => {
     expect(rows[0].legs).toBe(2);
   });
 
-  it("excludes flat positions (net qty = 0)", () => {
+  it("keeps open legs that net to zero as separate offset rows", () => {
     const rows = netPositions(
       normalisePositions([
-        { symbol: "NIFTY FUT", quantity: 1, average_price: 22400, ltp: 22400 },
-        { symbol: "NIFTY FUT", quantity: -1, average_price: 22400, ltp: 22400 },
+        { symbol: "NIFTY FUT", exchange: "NFO", product: "MIS", quantity: 1, average_price: 22400, ltp: 22400 },
+        { symbol: "NIFTY FUT", exchange: "NFO", product: "NRML", quantity: -1, average_price: 22400, ltp: 22400 },
       ]),
     );
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.netQty)).toEqual([1, -1]);
+    expect(rows.every((row) => row.offset)).toBe(true);
+    expect(rows[0]?.exposure).toBe(22400);
+    expect(rows[1]?.exposure).toBe(22400);
+    expect(rows[0]?.offsetProducts).toEqual(["MIS", "NRML"]);
+  });
+
+  it("drops a symbol only when every leg is at quantity 0", () => {
+    const rows = netPositions(
+      normalisePositions([
+        { symbol: "WIPRO", exchange: "NSE", product: "CNC", quantity: 0, average_price: 455, ltp: 448 },
+        { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, average_price: 800, ltp: 810 },
+      ]),
+    );
+    expect(rows.map((row) => row.symbol)).toEqual(["SBIN"]);
+    expect(rows[0]?.offset).toBeUndefined();
+  });
+
+  it("names offset products and drops the square-off sentence when neither leg is MIS", () => {
+    expect(offsetLegTooltip(["MIS", "NRML"])).toBe(
+      "MIS and NRML legs don't cancel at your broker. At intraday square-off the MIS leg closes and the NRML leg stays open.",
+    );
+    expect(offsetLegTooltip(["CNC", "MIS"])).toBe(
+      "CNC and MIS legs don't cancel at your broker. At intraday square-off the MIS leg closes and the CNC leg stays open.",
+    );
+    expect(offsetLegTooltip(["CNC", "NRML"])).toBe(
+      "CNC and NRML legs don't cancel at your broker.",
+    );
   });
 
   it("nets P&L as the sum of the rows' mark-to-market, so views cannot disagree", () => {
@@ -1643,15 +2249,26 @@ describe("positionBook", () => {
     expect(net.exposure).toBe(2 * 22450);
   });
 
-  it("nets the sample book into fewer rows than it has legs", () => {
+  it("keeps the example sample book's offset legs as separate rows", () => {
     const rows = netPositions(normalisePositions(SAMPLE_POSITION_BOOK));
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.length).toBeLessThan(SAMPLE_POSITION_BOOK.length);
-    // The two RELIANCE legs cancel exactly.
-    expect(rows.find((row) => row.symbol === "RELIANCE")).toBeUndefined();
-    // The two NIFTY option legs net to +45 under the NIFTY underlying.
-    const nifty = rows.find((row) => row.symbol === "NIFTY24APR22500CE");
-    expect(nifty?.netQty).toBe(45);
-    expect(nifty?.underlying).toBe("NIFTY");
+    expect(rows).toHaveLength(SAMPLE_POSITION_BOOK.length);
+    const nifty = rows.filter((row) => row.symbol === "NIFTY24APR22500CE");
+    expect(nifty.map((row) => row.netQty)).toEqual([65, -65]);
+    expect(nifty.every((row) => row.offset)).toBe(true);
+    const reliance = rows.filter((row) => row.symbol === "RELIANCE");
+    expect(reliance.map((row) => [row.product, row.netQty])).toEqual([
+      ["CNC", 80],
+      ["MIS", -80],
+    ]);
+    const bank = rows.find((row) => row.symbol === "BANKNIFTY24APR49000PE");
+    expect(bank?.netQty).toBe(-30);
+    expect(bank?.offset).toBeUndefined();
+  });
+
+  it("prices the example sample book at 16,575 and the offset NIFTY group at 1,625", () => {
+    const rows = normalisePositions(SAMPLE_POSITION_BOOK);
+    expect(totalPositionMtm(rows)).toBe(16_575);
+    const nifty = rows.filter((row) => row.symbol === "NIFTY24APR22500CE");
+    expect(nifty.reduce((sum, row) => sum + row.mtm, 0)).toBe(1_625);
   });
 });

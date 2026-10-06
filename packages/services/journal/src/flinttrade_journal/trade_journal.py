@@ -60,6 +60,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_core.restored_fills import is_restored_from_backup
 
 logger = logging.getLogger("flinttrade.journal.trade_journal")
 
@@ -1034,25 +1035,33 @@ class TradeJournal:
         entries = self.list_entries(filters)
 
         closed = [e for e in entries if e.pnl is not None]
-        wins = [e for e in closed if (e.pnl or 0) > 0]
-        losses = [e for e in closed if (e.pnl or 0) < 0]
+        # P&L keeps restored fills. Win rate, quality, and strategy scores do not.
+        scored = [e for e in closed if not is_restored_from_backup(e.strategy)]
+        wins = [e for e in scored if (e.pnl or 0) > 0]
+        losses = [e for e in scored if (e.pnl or 0) < 0]
 
         total_pnl = sum(e.pnl for e in closed)  # type: ignore[misc]
         avg_pnl = (total_pnl / len(closed)) if closed else 0.0
-        win_rate = (len(wins) / len(closed) * 100) if closed else 0.0
+        win_rate = (len(wins) / len(scored) * 100) if scored else 0.0
 
         best = max((e.pnl for e in closed), default=None)
         worst = min((e.pnl for e in closed), default=None)
 
-        setup_scores = [e.setup_quality for e in entries if e.setup_quality is not None]
-        exec_scores = [e.execution_quality for e in entries if e.execution_quality is not None]
+        setup_scores = [
+            e.setup_quality for e in entries
+            if e.setup_quality is not None and not is_restored_from_backup(e.strategy)
+        ]
+        exec_scores = [
+            e.execution_quality for e in entries
+            if e.execution_quality is not None and not is_restored_from_backup(e.strategy)
+        ]
 
         avg_setup = (sum(setup_scores) / len(setup_scores)) if setup_scores else None
         avg_exec = (sum(exec_scores) / len(exec_scores)) if exec_scores else None
 
-        # By strategy
+        # By strategy — restored fills are not a strategy result.
         by_strategy: dict[str, float] = {}
-        for e in closed:
+        for e in scored:
             key = e.strategy or "Unknown"
             by_strategy[key] = by_strategy.get(key, 0.0) + (e.pnl or 0.0)
 
@@ -1123,7 +1132,7 @@ class TradeJournal:
 
     @_locked
     def import_from_tradebook(self, trades: list[dict[str, Any]]) -> list[str]:
-        """Auto-create journal entries from OpenAlgo tradebook rows.
+        """Auto-create journal entries from broker tradebook rows.
 
         Each tradebook trade becomes a :class:`JournalEntry` with the
         qualitative fields (notes, emotions, quality scores) left blank so the
@@ -1134,7 +1143,7 @@ class TradeJournal:
         is skipped to avoid double-importing.
 
         Args:
-            trades: List of dicts in OpenAlgo tradebook format.  Expected keys:
+            trades: List of dicts in broker tradebook format.  Expected keys:
                 ``symbol``, ``exchange``, ``action`` (BUY/SELL), ``quantity``,
                 ``price``, ``orderid`` (optional), ``product`` (optional),
                 ``timestamp`` / ``time`` (optional).
@@ -1161,7 +1170,7 @@ class TradeJournal:
                 logger.warning("Skipping malformed tradebook row: %r", trade)
                 continue
 
-            # Parse timestamp from tradebook field names OpenAlgo uses
+            # Parse timestamp from tradebook field names broker uses
             raw_ts = trade.get("timestamp") or trade.get("time") or trade.get("order_time")
             entry_time: datetime | None = None
             if raw_ts:

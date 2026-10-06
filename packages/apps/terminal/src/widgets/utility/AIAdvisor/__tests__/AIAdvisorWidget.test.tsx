@@ -122,7 +122,9 @@ vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
 import AIAdvisorWidget, {
   executeApprovedToolCall,
   normaliseToolEndpoint,
+  parseToolCall,
   toPlaceOrderParams,
+  ToolCard,
 } from "../AIAdvisorWidget";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -695,6 +697,37 @@ describe("normaliseToolEndpoint", () => {
   });
 });
 
+describe("model tool-call boundary", () => {
+  const proposal = { type: "tool_call", description: "Buy one share", endpoint: "/api/v1/orders/place", method: "POST", payload: { symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, orderType: "MARKET", product: "CNC" } };
+
+  it("parses explicit object proposals in both supported text formats", () => {
+    expect(parseToolCall(JSON.stringify(proposal))).toMatchObject({ method: "POST", payload: proposal.payload });
+    expect(parseToolCall(`[TOOL_CALL:Buy one share|/api/v1/orders/place|post|${JSON.stringify(proposal.payload)}]`)).toMatchObject({ method: "POST", payload: proposal.payload });
+  });
+
+  it.each([
+    { ...proposal, endpoint: 123 },
+    { ...proposal, method: false },
+    { ...proposal, method: undefined },
+    { ...proposal, description: {} },
+    { ...proposal, payload: null },
+    { ...proposal, payload: [] },
+    { ...proposal, payload: true },
+  ])("refuses malformed model fields without creating a proposal", (value) => {
+    expect(parseToolCall(JSON.stringify(value))).toBeUndefined();
+  });
+
+  it("does not show an Approve button for a non-POST action", () => {
+    useModeStore.setState({ mode: "practice" });
+    const approve = vi.fn();
+    render(<ToolCard toolCall={{ ...proposal, method: "DELETE" }} status="pending" onApprove={approve} onReject={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/not an approvable action/i)).toBeInTheDocument();
+    expect(approve).not.toHaveBeenCalled();
+    useModeStore.setState({ mode: "explore" });
+  });
+});
+
 describe("toPlaceOrderParams", () => {
   const valid = {
     symbol: "NIFTY24JUL25000CE",
@@ -726,9 +759,14 @@ describe("toPlaceOrderParams", () => {
     ["bad action", { ...valid, action: "HOLD" }],
     ["zero quantity", { ...valid, quantity: 0 }],
     ["fractional quantity", { ...valid, quantity: 7.5 }],
+    ["boolean quantity", { ...valid, quantity: true }],
+    ["array quantity", { ...valid, quantity: [1] }],
+    ["unsafe integer quantity", { ...valid, quantity: Number.MAX_SAFE_INTEGER + 1 }],
     ["missing orderType", { ...valid, orderType: undefined }],
     ["bad product", { ...valid, product: "SUPER" }],
     ["negative price", { ...valid, price: -1 }],
+    ["boolean price", { ...valid, price: true }],
+    ["boolean trigger", { ...valid, triggerPrice: true }],
     ["non-numeric trigger", { ...valid, triggerPrice: "abc" }],
   ])("refuses an order with %s — no silent defaults", (_label, payload) => {
     expect(toPlaceOrderParams(payload as Record<string, unknown>)).toBeNull();
@@ -847,6 +885,13 @@ describe("executeApprovedToolCall", () => {
     expect(outcome.executed).toBe(false);
     expect(outcome.message).toContain("not an approvable action");
     expect(outcome.message).toContain("/api/v1/native/accounts");
+  });
+
+  it.each(["DELETE", "GET", "PUT", ""])("refuses %s proposals to an allowlisted placement endpoint", async (method) => {
+    const outcome = await executeApprovedToolCall({ ...orderCall, method });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(outcome.executed).toBe(false);
+    expect(outcome.message).toContain("not an approvable action");
   });
 
   it("refuses an incomplete order payload without any dispatch", async () => {

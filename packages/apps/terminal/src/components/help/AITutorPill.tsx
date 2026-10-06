@@ -1,7 +1,9 @@
 /**
  * AITutorPill.tsx
  *
- * Floating AI tutor assistant pinned to the bottom-right corner of every route.
+ * AI tutor assistant. App routes open it from the TopBar "Ask AI" button
+ * (TOGGLE_AI_TUTOR_EVENT) and it drops down under the bar; other routes keep
+ * the floating bottom-right pill.
  *
  * States:
  *   - Minimized: small pill with sparkle icon + "Ask AI" label, subtle hover glow.
@@ -51,6 +53,8 @@ import { useAuthStore } from "@/stores/authStore";
 import { motionConfig, EASE_ENTER, EASE_EXIT, DURATION } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { getAdvisorBase } from "@/services/advisorApi";
+import { buildHeaders } from "@/services/ftApi.helpers";
+import { TOGGLE_AI_TUTOR_EVENT } from "@/lib/aiTutorEvents";
 import { requestAdvisorReply } from "@/services/advisorChat";
 
 // ---------------------------------------------------------------------------
@@ -76,7 +80,9 @@ interface AdvisorStatusResponse {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
-    const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`);
+    const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`, {
+      headers: buildHeaders(false),
+    });
     if (!resp.ok) return;
     const json = (await resp.json()) as AdvisorStatusResponse;
     if (json.status === "success" && json.data) {
@@ -98,18 +104,41 @@ function routeLabel(pathname: string): string {
   const segment = pathname.split("/")[1] ?? "";
   const labels: Record<string, string> = {
     "": "Home",
+    home: "Home",
     welcome: "Welcome",
-    explore: "Explore",
+    explore: "Demo (example data)",
     setup: "Setup",
     settings: "Settings",
     trade: "Trade",
     invest: "Invest",
     learn: "Learn",
-    lab: "Lab",
+    lab: "Strategy Lab",
     automate: "Automate",
-    ai: "AI Center",
+    ai: "AI Centre",
+    ditto: "Accounts",
   };
   return labels[segment] ?? segment.charAt(0).toUpperCase() + segment.slice(1);
+}
+
+/** Routes whose chrome already offers Ask AI, or that come before any model is set up. */
+const NO_FLOATING_PILL_SEGMENTS = new Set([
+  "home",
+  "trade",
+  "invest",
+  "learn",
+  "lab",
+  "automate",
+  "ai",
+  "ditto",
+  "settings",
+  "admin",
+  "welcome",
+  "setup",
+  "setup-account",
+]);
+
+function hidesFloatingPill(pathname: string): boolean {
+  return NO_FLOATING_PILL_SEGMENTS.has(pathname.split("/")[1] ?? "");
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +219,7 @@ function MessageBubble({ role, content, index }: MessageBubbleProps) {
         className={cn(
           "max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed",
           isUser
-            ? "bg-accent text-white rounded-br-sm"
+            ? "bg-accent text-accent-foreground rounded-br-sm"
             : [
                 "bg-surface-base border border-border-default text-text-secondary",
                 "rounded-bl-sm",
@@ -571,25 +600,35 @@ export function AITutorPill() {
   const handleClose = useCallback(() => setIsOpen(false), []);
   const handleOpen = useCallback(() => setIsOpen(true), []);
 
+  // The TopBar's Ask AI button is the launcher on app routes.
+  useEffect(() => {
+    const toggle = () => setIsOpen((open) => !open);
+    window.addEventListener(TOGGLE_AI_TUTOR_EVENT, toggle);
+    return () => window.removeEventListener(TOGGLE_AI_TUTOR_EVENT, toggle);
+  }, []);
+
   // Only render when the preference is enabled
   if (!aiTutorEnabled) return null;
-  if (location.pathname === "/settings") return null;
+  if (location.pathname === "/settings" && !isOpen) return null;
 
   const routeName = routeLabel(location.pathname);
   const reduced = motionConfig.prefersReducedMotion();
-  const denseWorkspace = location.pathname === "/trade" || location.pathname === "/lab";
 
-  if (denseWorkspace && !isOpen) return null;
+  // No floating pill where it would cover content: app routes launch the
+  // tutor from the TopBar, and onboarding has no model configured yet.
+  if (!isOpen && hidesFloatingPill(location.pathname)) return null;
 
   return (
     /*
-     * Fixed bottom-right, z-50.
-     * The closed pill is hidden on dense workspaces such as Trade and Lab so
-     * it does not obscure order tickets, backtest forms, or result panels.
-     * Hidden on xs screens (< sm) via `hidden sm:flex`.
+     * Fixed, z-50. Opened from the TopBar it drops down under the bar;
+     * elsewhere the closed pill sits bottom-right.
+     * Hidden below the TopBar Ask AI band (480px, FT-MOBILE-002).
      */
     <div
-      className="fixed bottom-24 right-4 z-50 hidden sm:flex flex-col items-end gap-2"
+      className={cn(
+        "fixed z-50 hidden min-[480px]:flex flex-col items-end gap-2",
+        hidesFloatingPill(location.pathname) ? "right-3 top-12" : "bottom-24 right-4",
+      )}
       aria-live="polite"
     >
       <AnimatePresence mode="wait">

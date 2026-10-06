@@ -21,11 +21,20 @@
     "paths": {
       "@/*": ["./src/*"],
       "@flinttrade/design-system/brand": ["../../core/design-system/src/brand/index.ts"],
-      "@flinttrade/design-system": ["../../core/design-system/src/index.ts"]
+      "@flinttrade/design-system": ["../../core/design-system/src/index.ts"],
+      "@flinttrade/indian-charges": ["../../core/core/src/flinttrade_core/data/indian_charges.json"],
+      "@flinttrade/instrument-lots": ["../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json"]
     }
   },
   // No project reference to tsconfig.node.json: vite.reticleConnectGate.ts is
   // imported by both the app tests and vite.config.ts. A composite reference
   // would demand a built *.d.ts (TS6305) instead of the source types.
-  "include": ["src", "vite-env.d.ts", "vite.reticleConnectGate.ts"]
+  "include": [
+    "src",
+    "e2e/about-versions.fixture.tsx",
+    "vite-env.d.ts",
+    "vite.reticleConnectGate.ts",
+    "../../core/core/src/flinttrade_core/data/indian_charges.json",
+    "../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json"
+  ]
 }

@@ -243,7 +243,7 @@ function StrategyTemplatesWidget() {
             className={cn(
               "px-2.5 py-0.5 rounded text-xxs font-medium transition-colors shrink-0",
               outlookFilter === f.value
-                ? "bg-accent text-white"
+                ? "bg-accent text-accent-foreground"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
             )}
             aria-pressed={outlookFilter === f.value}

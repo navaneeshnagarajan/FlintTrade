@@ -13,7 +13,7 @@
  *   - /settings loads and shows the settings sidebar
  *   - Clicking "Appearance" activates that section
  *   - Clicking "Skill & Experience" activates that section
- *   - Deep-link via hash (/settings#api) activates the correct section
+ *   - Deep-link via hash (/settings#brokers) activates the correct section
  */
 
 import { test, expect, type Page, type Request } from '@playwright/test';
@@ -48,9 +48,9 @@ async function mockManagedOllamaConfig(page: Page, model = 'qwen3:8b') {
 
 function managedOllamaStatus(overrides: Record<string, unknown> = {}) {
   return {
-    version: 'v0.32.0',
-    active_version: 'v0.32.0',
-    target_version: 'v0.32.0',
+    version: 'v0.35.0',
+    active_version: 'v0.35.0',
+    target_version: 'v0.35.0',
     previous_version: null,
     update_available: false,
     rollback_available: false,
@@ -91,7 +91,7 @@ test.describe('Settings page', () => {
   test('section tabs contain expected sections', async ({ page }) => {
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
-    for (const label of ['General', 'Appearance', 'Broker Gateway', 'Skill & Experience', 'Report Bug', 'About']) {
+    for (const label of ['General', 'Appearance', 'Broker', 'Skill & Experience', 'Report Bug', 'About']) {
       await expect(sectionTabs.getByText(label, { exact: true })).toBeVisible();
     }
   });
@@ -112,74 +112,26 @@ test.describe('Settings page', () => {
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('back button is present in settings header', async ({ page }) => {
-    // The slim header has a back button with aria-label="Go back"
-    const backBtn = page.getByRole('button', { name: 'Go back' });
-    await expect(backBtn).toBeVisible();
+  test('settings uses the shared page header', async ({ page }) => {
+    // Settings is reached from the sidebar like every page, so its header names
+    // the page and holds its action instead of a Back button.
+    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
-  test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
+  test('legacy /settings#api opens the native Broker page', async ({ page }) => {
     await page.goto('/settings#api');
     await page
       .getByRole('tablist', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
 
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
-    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker Gateway' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
-  });
-
-  test('Broker Gateway edits stay local until one explicit complete save', async ({ page }) => {
-    const posts: Array<Record<string, unknown>> = [];
-    await page.route('**/ft-api/v1/config/openalgo', async (route) => {
-      if (route.request().method() === 'POST') {
-        posts.push(route.request().postDataJSON() as Record<string, unknown>);
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ status: 'ok', message: 'saved' }),
-        });
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          status: 'success',
-          data: {
-            api_key: 'browser-existing-key',
-            api_key_configured: true,
-            api_key_last4: '-key',
-            host: 'http://127.0.0.1:5000',
-            port: 5000,
-            ws_port: 8765,
-          },
-        }),
-      });
-    });
-    // The shared beforeEach has already loaded /settings. Use a distinct query
-    // so this is a full document navigation after the route mock is installed,
-    // rather than a hash-only navigation that reuses the failed initial read.
-    await page.goto('/settings?openalgo-mock=1#api');
-
-    const host = page.getByLabel('OpenAlgo-compatible URL');
-    const apiKey = page.getByLabel('OpenAlgo-compatible API key');
-    await expect(host).toHaveValue('http://127.0.0.1:5000');
-    await expect(apiKey).toHaveValue('');
-    await expect(page.getByText(/A key is saved ending in -key/i)).toBeVisible();
-
-    await host.fill('https://openalgo.local');
-    await page.getByLabel('REST port').fill('5010');
-    expect(posts).toHaveLength(0);
-
-    await page.getByRole('button', { name: 'Save Connection' }).click();
-    await expect.poll(() => posts.length).toBe(1);
-    expect(posts[0]).toEqual({
-      host: 'https://openalgo.local',
-      port: '5010',
-      ws_port: '8765',
-    });
-    await expect(page.getByText('Connection settings saved.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Brokers', exact: true })).toBeVisible();
+    await expect(page.getByText(/connecting an account does not enable live orders/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save Connection' })).toHaveCount(0);
+    await expect(sectionTabs.getByRole('tab', { name: 'Broker Gateway' })).toHaveCount(0);
   });
 
   test('managed Ollama update, rollback, uninstall, and reinstall preserve the model inventory', async ({ page }) => {
@@ -238,7 +190,7 @@ test.describe('Settings page', () => {
           },
         });
         terminalAfterPoll = managedOllamaStatus({
-          active_version: 'v0.32.0',
+          active_version: 'v0.35.0',
           previous_version: 'v0.31.2',
           rollback_available: true,
           rollback_allowed: true,
@@ -313,7 +265,7 @@ test.describe('Settings page', () => {
 
     await page.getByRole('button', { name: 'Update runtime' }).click();
     await page.getByRole('button', { name: 'Download and update' }).click();
-    await expect(page.getByText('Runtime v0.32.0')).toBeVisible();
+    await expect(page.getByText('Runtime v0.35.0')).toBeVisible();
 
     await page.getByRole('button', { name: 'Rollback runtime' }).click();
     await page.getByRole('button', { name: 'Switch to v0.31.2' }).click();
@@ -322,7 +274,7 @@ test.describe('Settings page', () => {
     await page.getByRole('button', { name: 'Uninstall runtime' }).click();
     await expect(page.getByText(/Models and accepted-digest metadata will remain/i)).toBeVisible();
     await page.getByRole('button', { name: 'Remove runtime' }).click();
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     expect(retainedModels).toHaveLength(1);
 
     await page.getByRole('button', { name: 'Install runtime' }).click();
@@ -365,7 +317,7 @@ test.describe('Settings page', () => {
             state: 'ready',
             ready: true,
             managed_process: true,
-            server_version: '0.32.0',
+            server_version: '0.35.0',
           }),
         }),
       });
@@ -572,13 +524,13 @@ test.describe('Settings page', () => {
     const provider = page.getByRole('combobox', { name: 'LLM provider' });
     const refresh = page.getByRole('button', { name: 'Refresh runtime status' });
     await expect(installButton).toBeEnabled();
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     const freshRequestCount = statusRequests;
     failStatus = true;
     await refresh.click();
 
     await expect(page.getByRole('alert')).toContainText('runtime status is stale');
-    await expect(page.getByText('Not installed')).toBeVisible();
+    await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
     await expect(installButton).toBeDisabled();
     await expect(page.getByLabel('LLM model name')).toBeDisabled();
     await expect(provider).toBeEnabled();
@@ -634,7 +586,7 @@ test.describe('Settings page', () => {
     await expect(sectionTabs.getByRole('tab', { name: 'Report Bug' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('switch', { name: 'Include diagnostic summary in GitHub draft' })).not.toBeChecked();
     await expect(page.getByLabel('GitHub draft preview')).toContainText('Not included in this GitHub draft.');
-    await expect(page.getByText(/Diagnostics are unavailable in Explore demo/i)).toBeVisible();
+    await expect(page.getByText(/Diagnostics are unavailable for Example/i)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Download diagnostics' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Open AI Tutor' })).toHaveCount(0);
     expect(diagnosticsRequested).toBe(false);

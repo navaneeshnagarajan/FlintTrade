@@ -3,7 +3,7 @@
  *
  * `brokers.execution.default` (the live write target) may only be pointed at
  * an account that is connected, not already primary, and not read-only —
- * regardless of source (native / gateway / OpenAlgo). A stale or read-only
+ * regardless of source (native / gateway / broker). A stale or read-only
  * row promoted to write default is the exact silent-retarget failure class
  * the "native write-target fail-closed" rule exists to prevent.
  *

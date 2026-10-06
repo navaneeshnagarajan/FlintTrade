@@ -146,7 +146,7 @@ paytm dhan aliceblue upstox compositedge rmoney angel fivepaisa zebu shoonya fir
 kotak kotakneo motilal nubra samco deltaexchange groww wisdom ibulls iifl iiflcapital jainamxts
 indmoney fivepaisaxts definedge dhan_sandbox""".split()
 )
-CREDENTIAL_DB_SCHEMA_VERSION = 2
+CREDENTIAL_DB_SCHEMA_VERSION = 4
 _CREATE_TABLE_SQL = """CREATE TABLE "accounts" (
     account_id TEXT NOT NULL, adapter_id TEXT NOT NULL,
     broker TEXT NOT NULL, label TEXT NOT NULL, salt BLOB NOT NULL,
@@ -203,6 +203,62 @@ _QUARANTINE_SQL = """CREATE TABLE credential_quarantine (
     UNIQUE(source_vault_incarnation,source_schema_version,source_table,source_rowid)
 )"""
 _AUTHORITY_SCHEMA["credential_quarantine"] = _QUARANTINE_SQL
+
+# Schema 2 remains the exact recognised migration source.
+_ACCOUNT_LEDGER_SCHEMA = {
+    "account_store_key": """CREATE TABLE account_store_key (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+        salt BLOB NOT NULL CHECK(typeof(salt)='blob' AND length(salt)=16),
+        encrypted_creds BLOB NOT NULL CHECK(typeof(encrypted_creds)='blob')
+    )""",
+    "account_store_head": """CREATE TABLE account_store_head (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+        body TEXT NOT NULL CHECK(typeof(body)='text'),
+        mac TEXT NOT NULL CHECK(typeof(mac)='text' AND length(mac)=64)
+    )""",
+    "account_operations": """CREATE TABLE account_operations (
+        operation_id TEXT NOT NULL PRIMARY KEY,
+        body TEXT NOT NULL CHECK(typeof(body)='text'),
+        request_mac TEXT NOT NULL CHECK(typeof(request_mac)='text' AND length(request_mac)=64),
+        private_salt BLOB, private_cipher BLOB,
+        plan_salt BLOB, plan_cipher BLOB,
+        mac TEXT NOT NULL CHECK(typeof(mac)='text' AND length(mac)=64),
+        CHECK((private_salt IS NULL AND private_cipher IS NULL) OR
+              (typeof(private_salt)='blob' AND length(private_salt)=16 AND typeof(private_cipher)='blob')),
+        CHECK((plan_salt IS NULL AND plan_cipher IS NULL) OR
+              (typeof(plan_salt)='blob' AND length(plan_salt)=16 AND typeof(plan_cipher)='blob'))
+    )""",
+}
+_AUTHORITY_SCHEMA_THREE = {**_AUTHORITY_SCHEMA, **_ACCOUNT_LEDGER_SCHEMA}
+_AUTHORITY_SCHEMA_THREE["credential_vault_metadata"] = _AUTHORITY_SCHEMA["credential_vault_metadata"].replace(
+    "schema_version=2", "schema_version=3"
+).replace("vault_incarnation TEXT NOT NULL", "vault_incarnation TEXT NOT NULL,\n        account_enrolled INTEGER NOT NULL CHECK(typeof(account_enrolled)='integer' AND account_enrolled IN (0,1))")
+
+_ACCOUNT_AUDIT_SQL = """CREATE TABLE account_audit_outbox (
+    operation_id TEXT NOT NULL PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE,
+    body TEXT NOT NULL CHECK(typeof(body)='text'),
+    delivered INTEGER NOT NULL CHECK(typeof(delivered)='integer' AND delivered IN (0,1)),
+    mac TEXT NOT NULL CHECK(typeof(mac)='text' AND length(mac)=64)
+)"""
+_AUTHORITY_SCHEMA_FOUR = {**_AUTHORITY_SCHEMA_THREE, "account_audit_outbox": _ACCOUNT_AUDIT_SQL}
+_AUTHORITY_SCHEMA_FOUR["credential_vault_metadata"] = _AUTHORITY_SCHEMA_THREE["credential_vault_metadata"].replace(
+    "schema_version=3", "schema_version=4"
+)
+
+
+class _AccountVaultCapability:
+    """Opaque store-issued access, revalidated against the live backend owner."""
+
+    def __init__(self, proof: object) -> None:
+        self.proof = proof
+
+    def __reduce__(self):
+        raise TypeError("account_capability_not_serialisable")
+
+    def __repr__(self) -> str:
+        return "<account vault capability>"
+
 _ACCOUNT_COLUMNS = (
     "account_id",
     "adapter_id",
@@ -269,8 +325,8 @@ def _legacy_identity(row: dict[str, Any]) -> tuple[str | None, str | None]:
             return None, "legacy_role_unresolved"
         adapter = row["broker"]
     elif not (
-        (adapter in _LEGACY_BROKERS and adapter == row["broker"])
-        or (adapter == "openalgo" and row["broker"] in _LEGACY_BROKERS | {"openalgo"})
+        adapter in _LEGACY_BROKERS and adapter == row["broker"]
+
     ):
         return None, "legacy_role_unresolved"
     return adapter, None
@@ -338,7 +394,7 @@ def _selector(value: BrokerSelector, *, mutation: bool = False) -> BrokerSelecto
         value.__post_init__()
     except ValueError:
         raise CredentialValidationError from None
-    if mutation and value == BrokerSelector("openalgo", "default"):
+    if mutation and value.adapter_id == "openalgo":
         raise CredentialValidationError
     return value
 
@@ -366,7 +422,7 @@ def _metadata(selector: BrokerSelector, broker: str, label: str) -> None:
 
 
 def _normalise_setup(selector: BrokerSelector, setup: dict[str, Any]) -> str:
-    """Validate a bounded OpenAlgo origin without DNS or client invocation."""
+    """Validate inert historical origin metadata for quarantine byte preservation."""
     try:
         if (
             selector.adapter_id != "openalgo"
@@ -512,6 +568,7 @@ class CredentialStore:
         self._parent: HeldOwnerDirectory | None = None
         self._ancestor: HeldOwnerDirectory | None = None
         self._receipts: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self._account_capabilities: weakref.WeakSet = weakref.WeakSet()
         with _family_lock(self._db_path):
             self._initialise()
 
@@ -651,7 +708,7 @@ class CredentialStore:
             return False
         if not CredentialStore._binary_indices(conn, "accounts"):
             return False
-        if not legacy and version == 2:
+        if not legacy and version >= 2:
             return ddl[0] == _CREATE_TABLE_SQL
         # table_info omits generated/hidden columns; these are unsupported source
         # shapes, not cells we may discard while quarantining excluded rows.
@@ -700,8 +757,12 @@ class CredentialStore:
                 conn.execute("PRAGMA user_version=2")
             elif legacy or marker == 1:
                 self._migrate_composite(conn, marker)
-            elif marker != CREDENTIAL_DB_SCHEMA_VERSION:
+            elif marker not in (2, 3, CREDENTIAL_DB_SCHEMA_VERSION):
                 raise CredentialVaultInvalidError
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 2:
+                self._migrate_account_ledger(conn)
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 3:
+                self._migrate_account_audit(conn)
             incarnation = self._validate_authority(conn)
             self._validate_family()
             conn.commit()
@@ -713,6 +774,31 @@ class CredentialStore:
             raise CredentialVaultInvalidError from None
         finally:
             conn.close()
+
+    def _migrate_account_ledger(self, conn: sqlite3.Connection) -> None:
+        """Preserve every schema-2 participant; only add authenticated ledger storage."""
+        incarnation = self._validate_authority(conn, version=2)
+        salt, encrypted = self._encrypt({"schema": 1, "vault_incarnation": str(incarnation),
+                                        "mac_key": os.urandom(32).hex()})
+        conn.execute("DROP TABLE credential_vault_metadata")
+        conn.execute(_AUTHORITY_SCHEMA_THREE["credential_vault_metadata"])
+        conn.execute("INSERT INTO credential_vault_metadata VALUES(1,3,?,0)", (str(incarnation),))
+        for sql in _ACCOUNT_LEDGER_SCHEMA.values():
+            conn.execute(sql)
+        conn.execute("INSERT INTO account_store_key VALUES(1,?,?)", (salt, encrypted))
+        conn.execute("PRAGMA user_version=3")
+
+    def _migrate_account_audit(self, conn: sqlite3.Connection) -> None:
+        """Authenticate schema 3 before atomically anchoring rows and audit evidence."""
+        from .account_transaction_store import _upgrade_account_ledger_v4
+
+        incarnation = self._validate_authority(conn, version=3)
+        _upgrade_account_ledger_v4(self, conn, incarnation)
+        conn.execute("DROP TABLE credential_vault_metadata")
+        conn.execute(_AUTHORITY_SCHEMA_FOUR["credential_vault_metadata"])
+        enrolled = int(conn.execute("SELECT 1 FROM account_store_head").fetchone() is not None)
+        conn.execute("INSERT INTO credential_vault_metadata VALUES(1,4,?,?)", (str(incarnation), enrolled))
+        conn.execute("PRAGMA user_version=4")
 
     def _migrate_composite(self, conn: sqlite3.Connection, marker: int) -> None:
         """One disjoint physical-row partition, verified before the owned swap."""
@@ -888,13 +974,13 @@ class CredentialStore:
 
     @staticmethod
     def _validate_account_row(row: dict[str, Any], adapter: str, *, reserved_source: bool = False) -> None:
-        selector = _selector(BrokerSelector(adapter, row["account_id"]), mutation=not reserved_source)
+        selector = _selector(BrokerSelector(adapter, row["account_id"]), mutation=False)
         _metadata(selector, row["broker"], row["label"])
         CredentialStore._validate_account_storage(row)
 
     @staticmethod
     def _reject_authority_triggers(conn: sqlite3.Connection) -> None:
-        tables = ("accounts", *_AUTHORITY_SCHEMA)
+        tables = ("accounts", *_AUTHORITY_SCHEMA_FOUR)
         for schema in ("sqlite_master", "sqlite_temp_master"):
             if conn.execute(
                 f"SELECT 1 FROM {schema} WHERE type='trigger' AND lower(tbl_name) IN ({','.join('?' for _ in tables)}) LIMIT 1",
@@ -902,10 +988,13 @@ class CredentialStore:
             ).fetchone():
                 raise CredentialVaultInvalidError
 
-    def _validate_authority(self, conn: sqlite3.Connection, *, version: int = 2, reserved_source: bool = False) -> UUID:
+    def _validate_authority(self, conn: sqlite3.Connection, *, version: int = 4, reserved_source: bool = False) -> UUID:
         try:
             self._reject_authority_triggers(conn)
-            schema = _AUTHORITY_SCHEMA_ONE if version == 1 else _AUTHORITY_SCHEMA
+            schema = {
+                1: _AUTHORITY_SCHEMA_ONE, 2: _AUTHORITY_SCHEMA,
+                3: _AUTHORITY_SCHEMA_THREE, 4: _AUTHORITY_SCHEMA_FOUR,
+            }[version]
             if {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")} != {
                 "accounts",
                 *schema,
@@ -924,9 +1013,13 @@ class CredentialStore:
                 or index[4] != 0
                 or [row[2] for row in conn.execute(f"PRAGMA index_info({index_name})")]
                 != (["adapter_id", "account_id"] if version == 1 else ["account_id"])
-                or (version == 2 and set(indices) != {"sqlite_autoindex_accounts_1", index_name})
+                or (version >= 2 and set(indices) != {"sqlite_autoindex_accounts_1", index_name})
             ):
                 raise ValueError
+            if version >= 2:
+                index_sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (index_name,)).fetchone()
+                if index_sql is None or index_sql[0] != _ACCOUNT_INDEX_SQL:
+                    raise ValueError
             for name, sql in schema.items():
                 row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
                 # These tables have exactly one producer. Compare its DDL
@@ -964,7 +1057,7 @@ class CredentialStore:
             for row in conn.execute("SELECT * FROM broker_selector_setup"):
                 selector = _selector(
                     BrokerSelector(row["adapter_id"], row["account_id"]),
-                    mutation=bool(row["present"]) and not reserved_source,
+                    mutation=False,
                 )
                 if selector not in versions or type(row["present"]) is not int or row["present"] not in (0, 1):
                     raise ValueError
@@ -981,8 +1074,33 @@ class CredentialStore:
                 bool(present) != (key in accounts or key in setups) for key, present in versions.items()
             ):
                 raise ValueError
-            if version == 2:
+            if version >= 2:
                 self._validate_quarantine(conn, incarnation)
+            if version >= 3:
+                enrolled = metadata[0]["account_enrolled"]
+                heads = conn.execute("SELECT count(*) FROM account_store_head").fetchone()[0]
+                if (type(enrolled) is not int or enrolled not in (0, 1) or heads != enrolled
+                        or (not enrolled and conn.execute("SELECT 1 FROM account_operations LIMIT 1").fetchone())
+                        or (version >= 4 and not enrolled
+                            and conn.execute("SELECT 1 FROM account_audit_outbox LIMIT 1").fetchone())):
+                    raise ValueError
+                for name in schema:
+                    expected_indices = {
+                        "credential_selector_versions": {"sqlite_autoindex_credential_selector_versions_1"},
+                        "broker_selector_setup": {"sqlite_autoindex_broker_selector_setup_1"},
+                        "credential_quarantine": {"sqlite_autoindex_credential_quarantine_1", "sqlite_autoindex_credential_quarantine_2"},
+                        "account_operations": {"sqlite_autoindex_account_operations_1"},
+                        "account_audit_outbox": {
+                            "sqlite_autoindex_account_audit_outbox_1", "sqlite_autoindex_account_audit_outbox_2",
+                        },
+                    }.get(name, set())
+                    if {row[1] for row in conn.execute(f"PRAGMA index_list({name})")} != expected_indices:
+                        raise ValueError
+                key_rows = conn.execute("SELECT * FROM account_store_key").fetchall()
+                if (len(key_rows) != 1 or key_rows[0]["singleton"] != 1
+                        or type(key_rows[0]["salt"]) is not bytes or len(key_rows[0]["salt"]) != 16
+                        or type(key_rows[0]["encrypted_creds"]) is not bytes):
+                    raise ValueError
             return incarnation
         except Exception:
             if self._incarnation is not None:
@@ -1081,20 +1199,45 @@ class CredentialStore:
                 )
             )
 
+    def _issue_account_capability(self, proof: object) -> _AccountVaultCapability:
+        from flinttrade_core.backend_instance import require_backend_lease_proof
+
+        require_backend_lease_proof(proof)
+        if self._db_path.parent.resolve() != proof.workspace_path:
+            raise CredentialValidationError
+        capability = _AccountVaultCapability(proof)
+        self._account_capabilities.add(capability)
+        return capability
+
+    def _require_account_capability(self, capability: object) -> None:
+        from flinttrade_core.backend_instance import require_backend_lease_proof
+
+        if type(capability) is not _AccountVaultCapability or capability not in self._account_capabilities:
+            raise CredentialConflictError
+        require_backend_lease_proof(capability.proof)
+        if self._db_path.parent.resolve() != capability.proof.workspace_path:
+            raise CredentialConflictError
+
     @contextmanager
-    def _transaction(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+    def _transaction(self, *, write: bool = False, _account_capability: object = None) -> Iterator[sqlite3.Connection]:
         with _family_lock(self._db_path):
-            with self._transaction_locked(write=write) as conn:
+            with self._transaction_locked(write=write, _account_capability=_account_capability) as conn:
                 yield conn
 
     @contextmanager
-    def _transaction_locked(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+    def _transaction_locked(self, *, write: bool = False, _account_capability: object = None) -> Iterator[sqlite3.Connection]:
         conn = None
         try:
             conn = self._get_connection()
             conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             self._validate_authority(conn)
+            if _account_capability is not None:
+                self._require_account_capability(_account_capability)
+            if write and conn.execute("SELECT 1 FROM account_store_head").fetchone() is not None:
+                self._require_account_capability(_account_capability)
             yield conn
+            if _account_capability is not None:
+                self._require_account_capability(_account_capability)
             self._validate_family()
             self._validate_authority(conn)
             conn.commit()
@@ -1159,6 +1302,8 @@ class CredentialStore:
         )
 
     def _available(self, conn: sqlite3.Connection, selector: BrokerSelector) -> None:
+        if selector.adapter_id == "openalgo":
+            raise CredentialConflictError
         if self._state(conn, selector).origin == "legacy_interim_candidate":
             raise CredentialConflictError
 
@@ -1199,7 +1344,16 @@ class CredentialStore:
         with self._transaction() as conn:
             return self._state(conn, selector)
 
+    def account_protocol_enrolled(self) -> bool:
+        """Read validated durable enrolment independently of workspace JSON."""
+        with self._transaction() as conn:
+            return bool(conn.execute(
+                "SELECT account_enrolled FROM credential_vault_metadata WHERE singleton=1"
+            ).fetchone()[0])
+
     def account_for_selector(self, selector: BrokerSelector) -> CredentialAccount | None:
+        if selector.adapter_id == "openalgo":
+            return None
         _selector(selector)
         with self._transaction() as conn:
             state = self._state(conn, selector)
@@ -1215,6 +1369,8 @@ class CredentialStore:
             )
 
     def retrieve_credentials(self, selector: BrokerSelector) -> dict[str, Any]:
+        if selector.adapter_id == "openalgo":
+            raise CredentialNotFoundError
         _selector(selector)
         with self._transaction() as conn:
             if self._state(conn, selector).origin == "legacy_interim_candidate":
@@ -1222,6 +1378,8 @@ class CredentialStore:
             return self._decrypt(self._row(conn, selector))
 
     def retrieve_setup(self, selector: BrokerSelector) -> dict[str, Any]:
+        if selector.adapter_id == "openalgo":
+            raise CredentialNotFoundError
         _selector(selector)
         with self._transaction() as conn:
             if self._state(conn, selector).origin == "legacy_interim_candidate":
@@ -1289,19 +1447,7 @@ class CredentialStore:
     def put_setup(
         self, selector: BrokerSelector, setup: dict[str, Any], *, expected: CredentialVersion
     ) -> CredentialVersion:
-        _selector(selector, mutation=True)
-        with self._transaction(write=True) as conn:
-            self._expected(conn, selector, expected)
-            self._check_bump(conn, selector)
-            encoded = _normalise_setup(selector, setup)
-            if not self._state(conn, selector).setup_present:
-                self._admit_new_component(conn, selector)
-            conn.execute(
-                """INSERT INTO broker_selector_setup VALUES(?,?,1,?)
-                            ON CONFLICT(adapter_id,account_id) DO UPDATE SET present=1,setup_json=excluded.setup_json""",
-                (*_pair(selector), encoded),
-            )
-            return self._bump(conn, selector)
+        raise CredentialValidationError
 
     def _remove(
         self, conn: sqlite3.Connection, selector: BrokerSelector, *, credentials: bool, setup: bool
@@ -1521,7 +1667,7 @@ class CredentialStore:
     # Compatibility resolution and writes share one owned transaction.
     def _resolve_legacy(self, conn: sqlite3.Connection, account_id: str) -> BrokerSelector | None:
         BrokerSelector("legacy", account_id)
-        rows = conn.execute("SELECT adapter_id FROM accounts WHERE account_id=?", (account_id,)).fetchall()
+        rows = conn.execute("SELECT adapter_id FROM accounts WHERE account_id=? AND adapter_id!='openalgo'", (account_id,)).fetchall()
         if len(rows) > 1:
             raise CredentialAmbiguityError
         if not rows:
@@ -1549,7 +1695,7 @@ class CredentialStore:
             rows = conn.execute("""SELECT a.account_id,a.adapter_id,a.broker,a.label,a.is_primary,a.created_at
                                    FROM accounts a JOIN credential_selector_versions v
                                    ON a.adapter_id=v.adapter_id AND a.account_id=v.account_id
-                                   WHERE v.origin!='legacy_interim_candidate' ORDER BY a.created_at""").fetchall()
+                                   WHERE v.origin!='legacy_interim_candidate' AND a.adapter_id!='openalgo' ORDER BY a.created_at""").fetchall()
             return [dict(row) | {"is_primary": bool(row["is_primary"])} for row in rows]
 
     def store(

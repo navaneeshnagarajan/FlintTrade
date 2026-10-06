@@ -1,0 +1,125 @@
+{
+  "source": [
+    "https://images.dhan.co/api-data/api-scrip-master.csv",
+    "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/2026-09-29/transformed/nse_fo.csv",
+    "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/2026-09-29/transformed/bse_fo.csv"
+  ],
+  "fetched_at": "2026-09-29T05:45:42+05:30",
+  "note": "Near and next month NIFTY, BANKNIFTY and SENSEX futures from the public Dhan scrip master and the Kotak Neo F&O master dated 2026-09-29. A contract is omitted once its expiry is before the current day in IST.",
+  "rows": [
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "68407",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "NIFTY-Sep2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "NIFTY",
+      "SEM_EXPIRY_DATE": "2026-09-29",
+      "SEM_LOT_UNITS": "65"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "68407",
+      "pSymbolName": "NIFTY",
+      "pTrdSymbol": "NIFTY26SEPFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-09-29",
+      "lLotSize": "65"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "48704",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "NIFTY-Oct2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "NIFTY",
+      "SEM_EXPIRY_DATE": "2026-10-27",
+      "SEM_LOT_UNITS": "65"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "48704",
+      "pSymbolName": "NIFTY",
+      "pTrdSymbol": "NIFTY26OCTFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-10-27",
+      "lLotSize": "65"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "68390",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "BANKNIFTY-Sep2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "BANKNIFTY",
+      "SEM_EXPIRY_DATE": "2026-09-29",
+      "SEM_LOT_UNITS": "30"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "68390",
+      "pSymbolName": "BANKNIFTY",
+      "pTrdSymbol": "BANKNIFTY26SEPFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-09-29",
+      "lLotSize": "30"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "48699",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "BANKNIFTY-Oct2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "BANKNIFTY",
+      "SEM_EXPIRY_DATE": "2026-10-27",
+      "SEM_LOT_UNITS": "30"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "48699",
+      "pSymbolName": "BANKNIFTY",
+      "pTrdSymbol": "BANKNIFTY26OCTFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-10-27",
+      "lLotSize": "30"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "BSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "864571",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "SENSEX-Oct2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "SENSEX",
+      "SEM_EXPIRY_DATE": "2026-10-29",
+      "SEM_LOT_UNITS": "20"
+    },
+    {
+      "pExchSeg": "bse_fo",
+      "pSymbol": "864571",
+      "pSymbolName": "SENSEX",
+      "pTrdSymbol": "SENSEX26OCTFUT",
+      "pInstType": "IF",
+      "pExpiryDate": "2026-10-29",
+      "lLotSize": "20"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "BSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "1100929",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "SENSEX-Nov2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "SENSEX",
+      "SEM_EXPIRY_DATE": "2026-11-26",
+      "SEM_LOT_UNITS": "20"
+    },
+    {
+      "pExchSeg": "bse_fo",
+      "pSymbol": "1100929",
+      "pSymbolName": "SENSEX",
+      "pTrdSymbol": "SENSEX26NOVFUT",
+      "pInstType": "IF",
+      "pExpiryDate": "2026-11-26",
+      "lLotSize": "20"
+    }
+  ]
+}

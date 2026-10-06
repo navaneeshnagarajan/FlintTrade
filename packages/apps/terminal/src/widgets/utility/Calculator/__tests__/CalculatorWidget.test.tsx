@@ -16,6 +16,8 @@ import { useLayoutEffect, type ReactNode } from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
+import { statutoryLeg } from "@/lib/indianCharges";
+import { instrumentLotRows, lotSizeFromMaster, setInstrumentLotRows } from "@/lib/instrumentLots";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
@@ -306,21 +308,21 @@ describe("Sizing tab", () => {
   // ── Numeric characterisation (pins the sizing kernel) ─────────────────────
 
   describe("sizing arithmetic", () => {
-    it("pins the default Fixed % result — 1 lot, clamped above the risk budget", () => {
+    it("pins the default Fixed % result — no lot fits below the risk budget", () => {
       render(<CalculatorWidget {...defaultProps} />);
 
       // Capital ₹5,00,000 · risk 1% → budget ₹5,000. Stop 22,000 → 21,800 is
-      // 200 points, so one 50-unit lot risks ₹10,000: floor() lands on 0 and
-      // the max(1, …) clamp recommends a lot risking 2× the stated budget.
-      expect(resultValue("Position Size (lots)")).toBe("1");
-      expect(resultValue("Units (shares)")).toBe("50");
+      // 200 points, so one 50-unit lot risks ₹10,000: floor() lands on 0. The risk limit forbids rounding up to a whole lot.
+      expect(resultValue("Position Size (lots)")).toBe("0");
+      expect(resultValue("Units (shares)")).toBe("0");
       expect(resultValue("SL Points")).toBe("200.00");
       expect(resultValue("Risk Budget")).toBe("₹5,000");
-      expect(resultValue("Actual Risk")).toBe("₹10,000");
-      expect(resultValue("At Risk")).toBe("2.00%");
-      expect(resultValue("Available")).toBe("98.00%");
+      expect(resultValue("Actual Risk")).toBe("₹0");
+      expect(resultValue("Minimum Unit Risk")).toBe("₹10,000");
+      expect(resultValue("At Risk")).toBe("0.00%");
+      expect(resultValue("Available")).toBe("100.00%");
 
-      // …and the clamp is stated out loud instead of passing silently.
+      // The minimum unit explains why the within-budget size is zero.
       expect(screen.getByRole("status")).toHaveTextContent(
         /single lot risks ₹10,000 — more than the ₹5,000 you allowed/i,
       );
@@ -366,16 +368,16 @@ describe("Sizing tab", () => {
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
     });
 
-    it("pins the default ATR result — also clamped above the risk budget", () => {
+    it("pins the default ATR result — refuses to exceed the risk budget", () => {
       render(<CalculatorWidget {...defaultProps} />);
       selectMethod("ATR");
 
       // Stop distance = ATR 180 × 1.5 = 270 → ₹13,500 per lot vs a ₹5,000
-      // budget, so the clamp again recommends 1 over-risked lot.
-      expect(resultValue("Position Size (lots)")).toBe("1");
-      expect(resultValue("Units (shares)")).toBe("50");
-      expect(resultValue("Actual Risk")).toBe("₹13,500");
-      expect(resultValue("At Risk")).toBe("2.70%");
+      // budget, so no whole lot can fit below this risk limit.
+      expect(resultValue("Position Size (lots)")).toBe("0");
+      expect(resultValue("Units (shares)")).toBe("0");
+      expect(resultValue("Actual Risk")).toBe("₹0");
+      expect(resultValue("At Risk")).toBe("0.00%");
       // The derived stop is shown, because the operator never typed it.
       expect(resultValue("Stop Loss (from ATR)")).toBe("₹21,730");
       expect(screen.getByRole("status")).toHaveTextContent(
@@ -430,7 +432,7 @@ describe("Sizing tab", () => {
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
     });
 
-    it("warns rather than hiding results when one share breaches the risk budget", () => {
+    it("returns zero shares when the minimum unit breaches the risk budget", () => {
       render(<CalculatorWidget {...defaultProps} />);
       setField("Account Capital", "200000");
       setField("Risk per Trade %", "2");
@@ -441,10 +443,10 @@ describe("Sizing tab", () => {
       setField("Entry Price", "100000");
       setField("Stop Loss", "90000");
 
-      expect(resultValue("Position Size (lots)")).toBe("1");
-      expect(resultValue("Units (shares)")).toBe("1");
+      expect(resultValue("Position Size (lots)")).toBe("0");
+      expect(resultValue("Units (shares)")).toBe("0");
       expect(resultValue("Risk Budget")).toBe("₹4,000");
-      expect(resultValue("Actual Risk")).toBe("₹10,000");
+      expect(resultValue("Actual Risk")).toBe("₹0");
       expect(screen.getByRole("status")).toHaveTextContent(
         /single share risks ₹10,000 — more than the ₹4,000 you allowed/i,
       );
@@ -572,18 +574,98 @@ describe("Target / R:R tab", () => {
 // Brokerage tab
 // ---------------------------------------------------------------------------
 
+function chargesAsOfToday(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function inr(amount: number): string {
+  return `₹${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(amount)}`;
+}
+
 describe("Brokerage tab", () => {
+  it("updates the lot size when instrument rows arrive after mounting", async () => {
+    const previousRows = instrumentLotRows();
+    setInstrumentLotRows([]);
+    const { unmount } = renderWithTab("brokerage");
+    try {
+      expect(screen.getByLabelText("Lot Size")).toHaveValue(1);
+      act(() => setInstrumentLotRows([
+        { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "65" },
+      ]));
+      await waitFor(() => expect(screen.getByLabelText("Lot Size")).toHaveValue(65));
+
+      const charges = screen.getByText("Charges Breakdown").closest("div") as HTMLElement;
+      const sell = statutoryLeg({
+        exchange: "NSE", segment: "equity_options", turnover: 65 * 100,
+        isBuy: false, on: chargesAsOfToday(), brokerage: 20,
+      });
+      expect(resultValueIn(charges, "STT")).toBe(inr(sell.stt));
+
+      act(() => setInstrumentLotRows([
+        { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "75" },
+      ]));
+      await waitFor(() => expect(screen.getByLabelText("Lot Size")).toHaveValue(75));
+    } finally {
+      unmount();
+      setInstrumentLotRows(previousRows);
+    }
+  });
+
+  it("preserves an edited lot size when only another underlying changes", async () => {
+    const previousRows = instrumentLotRows();
+    setInstrumentLotRows([
+      { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "65" },
+    ]);
+    const { unmount } = renderWithTab("brokerage");
+    try {
+      setField("Lot Size", "40");
+      await waitFor(() => expect(screen.getByLabelText("Lot Size")).toHaveValue(40));
+      act(() => setInstrumentLotRows([
+        { UNDERLYING_SYMBOL: "NIFTY", SEM_LOT_UNITS: "65" },
+        { UNDERLYING_SYMBOL: "BANKNIFTY", SEM_LOT_UNITS: "30" },
+      ]));
+      expect(screen.getByLabelText("Lot Size")).toHaveValue(40);
+    } finally {
+      unmount();
+      setInstrumentLotRows(previousRows);
+    }
+  });
+
   it("pins the default round-trip charges breakdown", async () => {
     render(<CalculatorWidget {...defaultProps} />);
     await openTab(/brokerage/i);
 
-    // 1 lot × 25 at ₹100 = ₹2,500 turnover, options, round trip, ₹20 flat.
-    // STT 0.15% on the sell leg only = ₹3.75; brokerage ₹40 both legs.
+    const lot = lotSizeFromMaster("NIFTY");
+    expect(lot).not.toBeNull();
+    const turnover = (lot ?? 0) * 100;
+    const on = chargesAsOfToday();
+    const buy = statutoryLeg({
+      exchange: "NSE",
+      segment: "equity_options",
+      turnover,
+      isBuy: true,
+      on,
+      brokerage: 20,
+    });
+    const sell = statutoryLeg({
+      exchange: "NSE",
+      segment: "equity_options",
+      turnover,
+      isBuy: false,
+      on,
+      brokerage: 20,
+    });
     const charges = screen.getByText("Charges Breakdown").closest("div") as HTMLElement;
-    expect(resultValueIn(charges, "STT")).toBe("₹3.75");
-    expect(resultValueIn(charges, "Brokerage")).toBe("₹40");
-    expect(resultValueIn(charges, "Total Cost")).toBe("₹51.22");
-    expect(resultValueIn(charges, "Breakeven/Unit")).toBe("₹2.049");
+    expect(resultValueIn(charges, "STT")).toBe(inr(sell.stt));
+    expect(resultValueIn(charges, "Brokerage")).toBe(inr(buy.brokerage + sell.brokerage));
+    expect(resultValueIn(charges, "Total Cost")).toBe(inr(buy.total + sell.total));
+    expect(resultValueIn(charges, "Breakeven/Unit")).toBe(
+      `₹${((buy.total + sell.total) / (lot ?? 1)).toFixed(3)}`,
+    );
+    expect(screen.getByText("Lot size comes from the broker instrument master.")).toBeInTheDocument();
   });
 
   it("recomputes when the price changes", async () => {
@@ -591,9 +673,17 @@ describe("Brokerage tab", () => {
     await openTab(/brokerage/i);
 
     setField("Price (₹)", "200");
-    // Turnover doubles, so STT doubles.
+    const lot = lotSizeFromMaster("NIFTY") ?? 0;
+    const sell = statutoryLeg({
+      exchange: "NSE",
+      segment: "equity_options",
+      turnover: lot * 200,
+      isBuy: false,
+      on: chargesAsOfToday(),
+      brokerage: 20,
+    });
     const charges = screen.getByText("Charges Breakdown").closest("div") as HTMLElement;
-    expect(resultValueIn(charges, "STT")).toBe("₹7.5");
+    expect(resultValueIn(charges, "STT")).toBe(inr(sell.stt));
   });
 });
 
@@ -617,11 +707,12 @@ describe("Margin tab", () => {
     render(<CalculatorWidget {...defaultProps} />);
     await openTab(/margin/i);
 
-    // Notional 25 × ₹100 × 1 leg = ₹2,500; NRML 15% → ₹375, split 60/40.
+    const lot = lotSizeFromMaster("NIFTY") ?? 0;
+    const total = lot * 100 * 0.15;
     expect(screen.getByText("ESTIMATE")).toBeInTheDocument();
-    expect(resultValue("SPAN Margin")).toBe("₹225");
-    expect(resultValue("Exposure Margin")).toBe("₹150");
-    expect(resultValue("Total Required")).toBe("₹375");
+    expect(resultValue("SPAN Margin")).toBe(inr(total * 0.6));
+    expect(resultValue("Exposure Margin")).toBe(inr(total * 0.4));
+    expect(resultValue("Total Required")).toBe(inr(total));
   });
 
   it("replaces the estimate with the broker's figures and compares funds", async () => {
@@ -663,7 +754,7 @@ describe("Margin tab", () => {
       context,
       "NIFTY",
       "NFO",
-      25,
+      lotSizeFromMaster("NIFTY"),
       "NRML",
       "BUY",
       signal,
@@ -839,4 +930,45 @@ describe("Margin tab", () => {
     expect(fundsSignal?.aborted).toBe(true);
     expect(marginSignal?.aborted).toBe(true);
   });
+});
+
+
+describe("independent calculator boundaries", () => {
+  it("rejects a Kelly win probability above one", () => {
+    render(<CalculatorWidget {...defaultProps} />);
+    selectMethod("Kelly");
+    setField("Win Rate %", "110");
+    expect(screen.getByText(/fill in all fields/i)).toBeInTheDocument();
+    expect(screen.queryByText("Actual Risk")).not.toBeInTheDocument();
+  });
+
+  it("rejects fractional quantities in a whole-lot payoff", () => {
+    renderWithTab("target");
+    setField("Quantity (lots)", "1.5");
+    expect(screen.getByText(/enter entry, stop loss and target/i)).toBeInTheDocument();
+    expect(screen.queryByText("Potential Profit")).not.toBeInTheDocument();
+  });
+
+  it("hides broker observations and aborts when the same account loses read authority", async () => {
+    const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
+    const { rerender } = render(<CalculatorWidget {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
+    const signal = apiMocks.getMargin.mock.calls[0]?.[6] as AbortSignal;
+    act(() => { accountReadState.current = { ...CONNECTED_NATIVE_READ_CONTEXT, enabled: false }; });
+    rerender(<CalculatorWidget {...props} />);
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
+    expect(screen.queryByText("Available Funds")).not.toBeInTheDocument();
+    expect(signal.aborted).toBe(true);
+    expect(screen.getByRole("button", { name: /get live margin/i })).toBeDisabled();
+  });
+});
+
+
+it("labels a Practice margin observation as simulated account data", async () => {
+  accountReadState.current = PRACTICE_READ_CONTEXT;
+  renderWithTab("margin");
+  await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+  await waitFor(() => expect(screen.getByText("PRACTICE")).toBeInTheDocument());
+  expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
 });

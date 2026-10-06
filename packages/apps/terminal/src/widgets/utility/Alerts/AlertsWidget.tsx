@@ -5,7 +5,7 @@
  *   - Two tabs: Active Alerts | Alert Log
  *   - Create alerts with symbol autocomplete, condition dropdown, target price
  *   - Alerts persisted to localStorage (`flinttrade:alerts`)
- *   - LTP polling via OpenAlgo REST (5s market hours, 60s off-hours)
+ *   - LTP polling via broker REST (5s market hours, 60s off-hours)
  *   - Auto-transitions armed → triggered when price condition is met
  *   - Compact workspace-panel layout using FlintTrade design tokens
  */
@@ -449,7 +449,7 @@ function CreateAlertForm({ onSubmit, onCancel }: CreateAlertFormProps) {
         <Button
           type="submit"
           size="sm"
-          className="h-6 px-2.5 text-xxs bg-accent text-white hover:bg-accent/90"
+          className="h-6 px-2.5 text-xxs bg-accent text-accent-foreground hover:bg-accent/90"
         >
           Set Alert
         </Button>
@@ -755,7 +755,7 @@ function AlertsWidget() {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
     // Re-schedule when the set of armed alerts changes (symbol added/removed)
-     
+
   }, [armedAlerts.length]);
 
   // ---------------------------------------------------------------------------

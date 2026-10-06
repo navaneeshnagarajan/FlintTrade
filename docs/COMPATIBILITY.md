@@ -4,37 +4,6 @@
 > NOT bundled with FlintTrade — you install them separately. This page
 > tells you which versions are safe to install.
 
-## External services
-
-| Service | Role | Minimum | Latest tested | Upstream |
-|---|---|---|---|---|
-| **OpenAlgo** | Optional broker gateway (REST + WebSocket) | v2.0.2.2 | `ef1f6b9c` (v2.0.2.2, 2026-08-29) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
-
-The tested pin is **v2.0.2.2**, the latest published OpenAlgo release as of
-2026-08-29. FlintTrade's REST contract tests are grounded in the public
-[`openalgo-eventlet-stability-security`](https://github.com/marketcalls/openalgo/releases/tag/openalgo-eventlet-stability-security)
-tag at commit `ef1f6b9c2165607ae4c01edb9a3e189e26596d4d`.
-
-**OpenAlgo minimum (v2.0.2.2):** required only when you enable the optional
-OpenAlgo-compatible integration path. FlintTrade uses that release's REST
-contract unconditionally — POST `intervals`, revised option-chain / expiry /
-timings / ticker schemas, and the Telegram username snapshot. A v2.0.0
-deployment will fail those calls. Depth mode 4 (50-level book), structured
-`closeposition` with strategy id, `optionchain` greeks, and rate-limit
-headers (`X-RateLimit-Remaining`) remain part of that surface. v1
-deployments will fail the OpenAlgo integration sanity check.
-
-**AI-agent features are native.** FlintTrade drives agent backends in-process
-via the `flinttrade_ai.agent_backends` registry (Claude Code, Cerebras, Codex,
-and catalogued CLI/ACP runtimes). There is no external agent gateway to install
-— the former OpenClaw bridge was removed and reimplemented natively.
-
-**AlgoMirror is not on this list.** Its multi-account mirroring patterns are
-reimplemented natively in `packages/services/ditto/` (PositionMirror,
-TrailingSLManager, MarginCalculator, RiskManager — our own code) and run
-in-process — FlintTrade does not call AlgoMirror at runtime. The upstream repo
-is not tracked or pulled.
-
 ## Runtime stack
 
 Floors and targets are declared once in `flint.toml`'s `[requirements]` table.
@@ -59,118 +28,21 @@ For library purposes and exact resolved versions, see
 
 ## Brokers
 
-FlintTrade supports two broker paths: the recommended OpenAlgo-compatible
-bridge and a first-party native gateway that is **not usable on this
-unreleased line**. OpenAlgo is the working/community-tested broker path.
-Native broker HTTP is frozen until Task 9D (account mutations return a
-stable `503` `broker_account_cutover_unavailable`) and Task 7C.2 / 8B
-(native HTTP account and market-data reads return `409` with zero
-provider calls until cutover onto the in-process `BrokerReadPort`;
-catalogue and vault-backed account-list GETs stay metadata only). Setup → Brokers and Settings →
-Brokers will fail rather than connect or refresh a native session. Use
-the OpenAlgo-compatible bridge for a working broker session.
+Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
+mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
+cannot currently be established through the terminal. Practice uses the local
+sandbox. Funded Live placement remains unproven and fail-closed.
 
-Catalogue connectability remains evidence-gated per broker. That is
-catalogue metadata, not a working native HTTP or Brokers UX path on this
-line. Dhan and Upstox are evidence-gated as connectable after login/read
-verification against real accounts and emergency-planner coverage.
-INDmoney is read-verified and its fail-closed emergency planner is locally
-verified, but it remains disabled because INDstocks does not expose an authoritative
-restart-time discriminator for active regular MARKET/LIMIT rows versus smart parents;
-it also lacks a broker-atomic reduce-only close primitive, and a funded/live-market
-order-safety proof is pending. Kotak Neo's fail-closed emergency planner is
-locally verified and the catalogue marks Neo `connectable=True` for
-Connected (read) / API smoke; funded Live place and
-market-hours order-safety proof remain pending. Groww remains disabled
-until its broker-specific blockers clear. Dhan and
-Upstox use native SDK/API clients, Groww has the official
-`growwapi` SDK pinned for attestation/reference parity while production calls use
-FlintTrade's tested REST transport, and its approved-key probe now proves native
-login/account reads while market-data/API permission, static IP, and order-safety
-evidence remain pending. INDmoney is REST-only with a dashboard-generated token
-that resets at the daily 06:00 IST dashboard cycle. When native connect
-returns, Upstox Developer Apps Analytics Access Tokens would connect as
-read-only native sessions; trading still needs the OAuth/trading-capable
-token path. INDstocks' FAQ advertises an
-`indstocks-sdk`, but no matching PyPI or npm
-package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
-adapter/mapping coverage plus a pinned-SDK-grounded emergency planner, but no
-promoted Live order proof yet. Neo has **no sandbox** —
-never offer Neo Practice; operator copy is `Live read only until
-funded unlock.` Native Dhan + Neo Connected (read) / API smoke is the
-preferred native connect path (OpenAlgo is Settings / fallback only). The
-historical Kotak Neo broker-account evidence covers non-funded REST reads only.
-The v3 async SFeed and order-feed lifecycle is now wired and locally tested with
-synthetic SDK clients; it has not yet been proved against a live broker session
-or at market hours. `dhanhq` stays on latest stable 2.2.0. Neo's runtime is the
-exact upstream `main` commit `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`;
-the separate release baseline is tag `v3.0.7`, peeled to
-`53cccc45fe56a193b30ffce3c03c71c5c0378538`. Both report distribution version
-`kotakneoapi` 3.0.7. The obsolete `neo-api-client` distribution is prohibited,
-while the upstream Python import namespace intentionally remains
-`neo_api_client`. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
-source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
-and fails if a locked SDK is behind upstream metadata; `uv.lock` and
-`brokers.lock` remain the only tracked install/attestation sources.
-`python scripts/check_kotakneo_sdk_contract.py` then builds disposable
-main/release environments, denies network during each probe, checks exclusive
-namespace/provenance/signature ownership, and runs the upstream migration
-scanner from that exact runtime commit. The daily/manual
-`broker-sdk-freshness.yml` workflow runs the drift check against official
-upstreams so a newer main commit or stable release tag cannot age silently.
-In-app credential capture and OAuth start/callback remain implemented
-behind the frozen HTTP surface (`503` until Task 9D). They are not a
-live operator path. Setup → Brokers and Settings → Brokers will fail
-rather than connect or refresh a native session. Closed-market/no-funds
-verification does not prove funded order execution; keep
-order-placement claims scoped to the evidence collected. Kotak Neo sandbox
-proof is unavailable because the broker offers no sandbox. Funded and
-market-hours proof, Live catalogue promotion, and cross-platform v3 lifecycle
-evidence all remain outstanding.
-
-For the OpenAlgo path, whatever broker version OpenAlgo supports is the
-compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)
-under `[packages]` / gateway metadata. The 2026-05 sync added
-**IIFL Capital** as a distinct entry alongside the existing **IIFL** adapter.
-
-### Surface verified at the v2.0.2.2 tested pin
-
-- REST request schemas now use `underlying` plus DDMMMYY `expiry_date` for
-  option-chain and synthetic-future calls, and required fields fail before any
-  network request.
-- Intervals, instruments, timings, ticker, and Telegram notification calls use
-  the v2.0.2.2 methods, paths, and API-key placement.
-- Modify-order requests carry `trigger_price` and `disclosed_quantity`; place
-  requests omit the undeclared `market_protection` field.
-- The upstream release also hardens its eventlet boundary and removes broker
-  credential leakage from logs. Those are OpenAlgo service fixes, not duplicate
-  FlintTrade implementations.
-
-### Surface picked up at the v2.0.1.1 tested pin (added upstream between v2.0.0.8 and v2.0.1.1)
-
-- **GTT (Good Till Triggered) orders** — `placegttorder`, `modifygttorder`,
-  `cancelgttorder`, `gttorderbook`. Live broker support: Dhan + Zerodha.
-  Other brokers return a clean 501 ("GTT orders are not supported for
-  broker 'X' yet") on the OpenAlgo service itself. FlintTrade still
-  registers `/api/v1/orders/gtt-{place,modify,cancel}` so Explore and
-  Practice are refused; Live `gtt-*` returns HTTP 501 rather than
-  forwarding that upstream 501. Gated forever/GTT is
-  `POST /api/v1/orders/forever`.
-- **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
-- **WhatsApp bot** — `POST /api/v1/whatsapp/notify` exists upstream in
-  OpenAlgo. FlintTrade no longer proxies or exposes it: WhatsApp support was
-  removed on 2026-07-26 (maintainer ruling D3). Telegram remains the
-  supported notification channel because it carries the kill switch.
-- **opengreeks** — Rust-based replacement for `py_vollib`. Same response
-  shape, ~12× faster on option-chain refresh. No FlintTrade change.
+INDmoney tokens reset at the daily 06:00 IST dashboard cycle. INDmoney and
+Groww remain disabled until their existing activation blockers are cleared.
+Delta Exchange stays disabled until live order-safety proof and a deadman
+runtime proof exist. India and Global keys are not interchangeable.
 
 ### Sandbox terminology
 
-Upstream renamed "virtual / paper trading" to "sandbox trading" in
-v2.0.0.6. API field names (`analyzer_status`, `analyzer_toggle`) were
-left intact, so FlintTrade's client wrappers needed only docstring
-updates. FlintTrade's own Explore / Practice / Live tri-mode is a
-separate concept and stays named "Practice".
+FlintTrade Modes are Practice, Connected (read), and Live.
+Example is sample data, not a Mode. Simulated fills stay named Practice.
 
 ### Deployment security — `TRUST_PROXY_HEADERS`
 
@@ -188,41 +60,3 @@ brute-force tracker, and 404 abuse guard all see the real source IP.
 > `TRUST_PROXY_HEADERS_X_FOR` (default `1`), `_X_PROTO` (default `1`),
 > `_X_HOST` (default `0`), `_X_PORT` (default `0`), `_X_PREFIX`
 > (default `0`). Match these to your proxy chain depth.
-
-Mirrors the same security gate OpenAlgo added in v2.0.0.7 for its
-`utils/ip_helper.py` (commit `d3e2e0ef`).
-
-## Bumping these
-
-The "Latest tested" column is what we last verified end-to-end. There is
-**no automated drift check** in CI — bumping a pin is a manual action:
-
-1. Pull the new upstream version locally — `cd .local/external/<svc>`, then
-   `git pull` (two commands, not an `&&` chain: Windows PowerShell 5.1 has no
-   `&&`).
-2. Run FlintTrade's integration test paths against it.
-3. If green, update the commit hash + date in this file.
-4. If anything broke, either patch FlintTrade or roll back and file an
-   issue.
-
-The defaults in `scripts/setup-test-deps.sh` should match the "Latest
-tested" column.
-
-## Where the local clones live
-
-Cloned to `.local/external/` (gitignored). Not shipped, not required —
-they exist for contributors who want to run the integration test paths.
-
-```
-.local/external/openalgo/
-```
-
-Install / refresh. This helper is a bash script, so it is POSIX-only — on
-Windows run it in WSL2 or Git Bash, or clone the upstream repository yourself
-into `.local/external/`:
-
-```bash
-bash scripts/setup-test-deps.sh           # clone at "Latest tested" pins
-bash scripts/setup-test-deps.sh --latest  # clone at HEAD of upstream main
-bash scripts/setup-test-deps.sh --update  # git pull existing clones
-```

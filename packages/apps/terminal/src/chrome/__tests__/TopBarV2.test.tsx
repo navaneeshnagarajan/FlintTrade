@@ -91,6 +91,7 @@ vi.mock("@/stores/connectionStore", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useDirectBrokerConnected: () => mockDirectBrokerConnected.value,
+  useBrokerConnected: () => false,
 }));
 
 vi.mock("@/hooks/useMarketStatus", () => ({
@@ -115,6 +116,11 @@ vi.mock("@/hooks/useSkillContent", () => ({
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useModeStore } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useSidebarStore } from "@/stores/sidebarStore";
+import { useSkillStore } from "@/stores/skillStore";
+import { TOGGLE_AI_TUTOR_EVENT } from "@/lib/aiTutorEvents";
+import type { BrokerAccount } from "@/types/broker";
 import TopBarV2 from "../TopBarV2";
 
 function renderTopBarV2(
@@ -184,14 +190,14 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("logo-icon")).toBeInTheDocument();
   });
 
-  it('renders "Flint" wordmark text next to the logo', () => {
+  it('renders the "FlintTrade" wordmark next to the logo', () => {
     renderTopBarV2();
-    expect(screen.getByText("Flint")).toBeInTheDocument();
+    expect(screen.getByText("FlintTrade")).toBeInTheDocument();
   });
 
-  it('logo is wrapped in a link to "/trade"', () => {
+  it('logo is wrapped in a link to "/home"', () => {
     renderTopBarV2();
-    const link = screen.getByRole("link", { name: /flint home/i });
+    const link = screen.getByRole("link", { name: /flinttrade home/i });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/home");
   });
@@ -225,17 +231,35 @@ describe("TopBarV2", () => {
     window.removeEventListener("flinttrade:open-command-palette", listener);
   });
 
-  it("does NOT render an AI pill", () => {
+  it("launches the shared AI tutor from Ask AI instead of hosting a chat pill", () => {
     renderTopBarV2();
-    // AI pill should not exist in the TopBar — it lives at bottom-right as a separate overlay
-    expect(screen.queryByText(/ask ai/i)).not.toBeInTheDocument();
+    const listener = vi.fn();
+    window.addEventListener(TOGGLE_AI_TUTOR_EVENT, listener);
+
+    fireEvent.click(screen.getByTestId("ask-ai-btn"));
+
+    expect(listener).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("ai-pill")).not.toBeInTheDocument();
-    expect(screen.queryByText(/ai assistant/i)).not.toBeInTheDocument();
+    window.removeEventListener(TOGGLE_AI_TUTOR_EVENT, listener);
+  });
+
+  it("hides Ask AI when the tutor preference is off", () => {
+    const helpPrefs = useSkillStore.getState().helpPrefs;
+    useSkillStore.setState({ helpPrefs: { ...helpPrefs, aiTutor: false } });
+    renderTopBarV2();
+    expect(screen.queryByTestId("ask-ai-btn")).not.toBeInTheDocument();
+    useSkillStore.setState({ helpPrefs });
+  });
+
+  it("shows the search field copy so search is discoverable", () => {
+    renderTopBarV2();
+    expect(screen.getByTestId("search-btn")).toHaveTextContent("Search symbols, pages, commands…");
   });
 
   it("reports the market session as unavailable until timing data is trustworthy", () => {
     renderTopBarV2();
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
   });
 
@@ -263,7 +287,7 @@ describe("TopBarV2", () => {
 
     const { unmount } = renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Closed");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
     unmount();
   });
@@ -314,7 +338,7 @@ describe("TopBarV2", () => {
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Closed");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Continuous");
   });
 
@@ -327,6 +351,7 @@ describe("TopBarV2", () => {
     renderTopBarV2();
 
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 
@@ -340,6 +365,7 @@ describe("TopBarV2", () => {
     renderTopBarV2();
 
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 
@@ -360,15 +386,34 @@ describe("TopBarV2", () => {
     expect(screen.queryByRole("region", { name: "Market indices" })).not.toBeInTheDocument();
   });
 
-  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+  it("does not repeat the feed chip in the TopBar or its Status panel", async () => {
     useModeStore.setState({ mode: "explore" });
     renderTopBarV2();
 
-    const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Sample");
-    expect(chip).toHaveAttribute("data-state", "sample");
-    expect(chip).not.toHaveTextContent("Live");
+    expect(screen.queryByTestId("feed-freshness-chip")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Sample");
+
+    fireEvent.click(screen.getByTestId("system-status-btn"));
+    await screen.findByTestId("system-status-panel");
+    expect(screen.queryByTestId("feed-freshness-chip")).not.toBeInTheDocument();
+  });
+
+  it("folds broker, Laya and LLM into one Status control", async () => {
+    useModeStore.setState({ mode: "explore" });
+    renderTopBarV2();
+
+    const status = screen.getByTestId("system-status-btn");
+    expect(status).toHaveAttribute("data-tone", "neutral");
+    expect(status).toHaveAccessibleName("Status: Example data only");
+    expect(screen.queryByTestId("desk-status")).not.toBeInTheDocument();
+
+    fireEvent.click(status);
+    const panel = await screen.findByTestId("system-status-panel");
+    expect(panel).toHaveTextContent("Broker");
+    expect(panel).toHaveTextContent("Laya");
+    expect(panel).toHaveTextContent("LLM");
+    expect(panel).toHaveTextContent("Manage brokers");
   });
 
   it("renders the notification bell", () => {
@@ -376,12 +421,21 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
   });
 
-  it("renders the account switcher slot", () => {
+  it("shows the account switcher once a broker account exists, not before", () => {
     renderTopBarV2();
-    expect(screen.getByTestId("account-switcher")).toBeInTheDocument();
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument();
   });
 
-  it("keeps the terminal connected when a direct broker session exists and OpenAlgo ping fails", async () => {
+  it("renders the account switcher slot when accounts are connected", () => {
+    useBrokerStore.setState({
+      accounts: [{ broker: "dhan", label: "Main" } as unknown as BrokerAccount],
+    });
+    renderTopBarV2();
+    expect(screen.getByTestId("account-switcher")).toBeInTheDocument();
+    useBrokerStore.setState({ accounts: [] });
+  });
+
+  it("keeps the terminal connected when a direct broker session exists and native broker ping fails", async () => {
     mockDirectBrokerConnected.value = true;
     useModeStore.setState({ mode: "live" });
 
@@ -481,6 +535,14 @@ describe("TopBarV2", () => {
     window.removeEventListener("flinttrade:open-tool", listener);
   });
 
+  it.each(["ctrlKey", "metaKey"] as const)("opens one Quick Settings panel with %s+,", (modifier) => {
+    renderTopBarV2();
+    fireEvent.keyDown(window, { key: ",", [modifier]: true });
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeVisible();
+    fireEvent.keyDown(window, { key: ",", [modifier]: true, repeat: true });
+    expect(screen.getAllByRole("dialog", { name: /quick settings/i })).toHaveLength(1);
+  });
+
   it("sends Tools Settings to the full Settings route", () => {
     renderTopBarV2();
     const listener = vi.fn();
@@ -527,8 +589,8 @@ describe("TopBarV2", () => {
 
   it("mounts the trading mode indicator (Explore by default)", () => {
     renderTopBarV2();
-    // ModeIndicator renders the EXPLORE pill when modeStore is at its default.
-    expect(screen.getByText("EXPLORE")).toBeInTheDocument();
+    // Sample data is Example. Practice is a Mode and is not the default chip.
+    expect(screen.getByTestId("execution-mode")).toHaveTextContent("Example");
   });
 
   it("uses adaptive glass chrome tokens for the background", () => {
@@ -598,7 +660,8 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
   it("keeps Mode visible and tappable at ~390px", () => {
     renderTopBarV2();
 
-    const mode = screen.getByText("EXPLORE");
+    const mode = screen.getByTestId("execution-mode");
+    expect(mode).toHaveTextContent("Example");
     expect(mode).toBeVisible();
     expect(mode.closest("button")).toBeEnabled();
   });
@@ -631,6 +694,9 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
   });
 
   it("reaches account, Tools, search, fullscreen, and clock from More", () => {
+    useBrokerStore.setState({
+      accounts: [{ broker: "dhan", label: "Main" } as unknown as BrokerAccount],
+    });
     renderTopBarV2();
 
     expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument();
@@ -646,6 +712,17 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(screen.getByTestId("tools-btn")).toBeVisible();
     expect(screen.getByTestId("fullscreen-btn")).toBeVisible();
     expect(screen.getByLabelText("Current time in IST")).toBeVisible();
+    useBrokerStore.setState({ accounts: [] });
+  });
+
+  it("leaves the Account row out of More until a broker account exists", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    expect(screen.getByTestId("topbar-more-sheet")).toBeVisible();
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument();
+    expect(screen.queryByText("Account")).not.toBeInTheDocument();
   });
 
   it("uses at least 44px hit targets on More sheet controls, not only the row", () => {
@@ -690,7 +767,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
 
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
     expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
-    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
     expect(screen.getByTestId("topbar-more-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
   });
@@ -716,6 +793,17 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(root.className).toMatch(/z-\[110]/);
     expect(root.className).not.toMatch(/z-\[121]/);
   });
+
+  it("opens the navigation drawer from the menu button on phones", () => {
+    useSidebarStore.setState({ mobileOpen: false });
+    renderTopBarV2();
+
+    const menu = screen.getByTestId("nav-drawer-btn");
+    expect(menu).toHaveAccessibleName("Open navigation");
+    fireEvent.click(menu);
+    expect(useSidebarStore.getState().mobileOpen).toBe(true);
+    useSidebarStore.setState({ mobileOpen: false });
+  });
 });
 
 describe("FT-UX-001 Compact desk chrome at 1280", () => {
@@ -738,7 +826,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     mockTimingsQuery.dataUpdatedAt = Date.now();
     renderTopBarV2();
 
-    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toHaveTextContent("Example");
     const session = screen.getByTestId("market-session-status");
     expect(session).toHaveAccessibleName(/market status: continuous/i);
     expect(session).toHaveTextContent(/continuous/i);
@@ -791,9 +879,9 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     useSettingsStore.setState({ density: "comfortable" });
     renderTopBarV2();
 
-    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
     expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.getByTestId("search-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
   });
 
@@ -801,8 +889,15 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     renderTopBarV2("marquee", "/home");
 
     expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.getByTestId("search-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
+  });
+
+  it("leaves the Workspace switcher to the Trade desk toolbar", () => {
+    useSettingsStore.setState({ density: "comfortable" });
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
   });
 });
 

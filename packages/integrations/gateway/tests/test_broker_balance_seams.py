@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import time
+from importlib import import_module
+from types import SimpleNamespace
 
 import pytest
 
-from flinttrade_core.broker_read_port import BalanceEvidence, LotSizeRequest
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BrokerBalanceResponseInvalid,
+    BrokerReadResponseInvalid,
+    LotSizeRequest,
+)
 from flinttrade_gateway.brokers._base import Session
 
 
@@ -537,3 +544,115 @@ def test_groww_and_indmoney_lot_size_wrappers_use_only_existing_instrument_rows(
     assert asyncio.run(groww.instrument_lot_sizes(session, request))[0]["instrument_id"] == "1"
     assert asyncio.run(indmoney.instrument_lot_sizes(session, request))[0]["instrument_id"] == "2"
     assert calls == ["groww", ("indmoney", "equity")]
+
+
+@pytest.fixture(params=["dhan", "upstox", "kotakneo", "indmoney", "groww"])
+def native_balance_read(request):
+    cases = {
+        "dhan": ("DhanAdapter", "get_fund_limits", "availabelBalance", lambda row: {"data": row}),
+        "upstox": ("UpstoxAdapter", "funds", "available_margin", lambda row: {"data": {"equity": row}}),
+        "kotakneo": ("KotakNeoAdapter", "funds", "Net", lambda row: {"stat": "Ok", "stCode": 200, "data": row}),
+        "indmoney": ("IndMoneyAdapter", None, "withdrawal_balance", lambda row: {"status": "success", "data": row}),
+        "groww": ("GrowwAdapter", None, "clear_cash", lambda row: {"status": "SUCCESS", "payload": row}),
+    }
+    name, method, field, envelope = cases[request.param]
+    adapter_type = getattr(import_module(f"flinttrade_gateway.brokers.{request.param}"), name)
+    record: dict[str, object] = {}
+    calls: list[None] = []
+
+    def read(*_args, **_kwargs):
+        calls.append(None)
+        payload = envelope(record)
+        return payload if method else (200, payload)
+
+    if method:
+        adapter = adapter_type(client_factory=lambda _session: SimpleNamespace(**{method: read}))
+    else:
+        adapter = adapter_type(http_factory=lambda: read)
+    session = Session("synthetic", 4_000_000_000.0, "synthetic", request.param)
+    return adapter, session, record, field, calls
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [0, 0.0, "0", " -2.5 ", "1e2"])
+def test_public_balance_read_preserves_direct_scalars(native_balance_read, value) -> None:
+    adapter, session, record, field, calls = native_balance_read
+    record[field] = value
+
+    snapshot = asyncio.run(adapter.balance_snapshot(session))
+
+    assert snapshot.available_balance == float(value)
+    assert snapshot.available_balance_evidence is BalanceEvidence.DIRECT
+    assert (snapshot.used_margin, snapshot.total_balance, snapshot.opening_risk_capital) == (None, None, None)
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [True, False, "", " \t ", "NaN", float("inf"), "-inf", None, 10**400])
+def test_public_balance_read_rejects_malformed_scalars(native_balance_read, value) -> None:
+    adapter, session, record, field, calls = native_balance_read
+    record[field] = value
+
+    with pytest.raises(BrokerBalanceResponseInvalid, match="^broker_balance_response_invalid$"):
+        asyncio.run(adapter.balance_snapshot(session))
+
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_public_balance_read_does_not_coerce_scalar_hooks(native_balance_read) -> None:
+    adapter, session, record, field, calls = native_balance_read
+    trap = _BalanceHookTrap()
+    record[field] = trap
+
+    with pytest.raises(BrokerBalanceResponseInvalid, match="^broker_balance_response_invalid$"):
+        asyncio.run(adapter.balance_snapshot(session))
+
+    assert trap.calls == []
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("base", [int, float, str])
+def test_public_balance_read_rejects_scalar_subclasses_without_hooks(native_balance_read, base) -> None:
+    adapter, session, record, field, calls = native_balance_read
+
+    class ScalarSubclass(base):
+        def __float__(self):
+            raise AssertionError("float hook executed")
+
+        def strip(self):
+            raise AssertionError("strip hook executed")
+
+    record[field] = ScalarSubclass(1)
+
+    with pytest.raises(BrokerBalanceResponseInvalid, match="^broker_balance_response_invalid$"):
+        asyncio.run(adapter.balance_snapshot(session))
+
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_public_balance_read_preserves_empty_response_policy(native_balance_read) -> None:
+    adapter, session, _record, _field, calls = native_balance_read
+
+    if session.adapter_id == "kotakneo":
+        # Neo's existing limits envelope requires an available-balance alias.
+        with pytest.raises(BrokerReadResponseInvalid, match="^broker_read_response_invalid$"):
+            asyncio.run(adapter.balance_snapshot(session))
+        assert len(calls) == 1
+        return
+
+    snapshot = asyncio.run(adapter.balance_snapshot(session))
+
+    assert (
+        snapshot.available_balance,
+        snapshot.used_margin,
+        snapshot.total_balance,
+        snapshot.opening_risk_capital,
+        snapshot.available_balance_evidence,
+        snapshot.used_margin_evidence,
+        snapshot.total_balance_evidence,
+        snapshot.opening_risk_capital_evidence,
+    ) == (None,) * 8
+    assert len(calls) == 1

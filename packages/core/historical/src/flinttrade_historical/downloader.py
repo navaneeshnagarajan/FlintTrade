@@ -1,10 +1,9 @@
-"""Historical OHLCV downloader via OpenAlgo /api/v1/history endpoint.
+"""Synchronous helpers for chunking and combining provider-supplied OHLCV history.
 
-Supports all exchanges (NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX) and all
-intervals (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, D).
-
-Brokers typically limit intraday history to ~30 days per request, so this
-module automatically chunks large date ranges and stitches the results.
+The retained BrokerClient facade refuses history reads until the native read
+cutover; it provides no working broker download path today. Exchange and interval
+support depend on the supplied provider. Recognised storage labels do not grant
+provider support. Independent free-data downloads live in free_data.py.
 """
 
 from __future__ import annotations
@@ -16,8 +15,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import OHLCV
-from flinttrade_core.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.historical.downloader")
 
@@ -29,19 +28,38 @@ _DAILY_INTERVALS = {"D", "1d", "1W", "1M"}
 _DEFAULT_CHUNK_DAYS_INTRADAY = 30
 _DEFAULT_CHUNK_DAYS_DAILY = 365
 
-# All tradeable exchanges. Index segments (*_INDEX, GLOBAL_INDEX) are
-# downloadable too — OpenAlgo's history API resolves NIFTY/BANKNIFTY etc.
-# against NSE_INDEX. NCO arrived upstream in v2.0.0.7 (Zerodha-only).
+# Recognised storage exchange labels. Actual download support is determined
+# by the selected provider and its instrument catalogue.
 SUPPORTED_EXCHANGES = {
-    "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
-    "NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+    "NSE",
+    "BSE",
+    "NFO",
+    "BFO",
+    "CDS",
+    "BCD",
+    "MCX",
+    "NCDEX",
+    "NCO",
+    "NSE_INDEX",
+    "BSE_INDEX",
+    "MCX_INDEX",
+    "GLOBAL_INDEX",
 }
 
-# Canonical interval mapping — normalise user-friendly names to OpenAlgo format
+# Canonical interval mapping — normalise user-friendly names to native broker format
 _INTERVAL_MAP: dict[str, str] = {
-    "1m": "1m", "2m": "2m", "3m": "3m", "5m": "5m", "10m": "10m",
-    "15m": "15m", "30m": "30m", "1h": "1h",
-    "1d": "D", "D": "D", "1W": "1W", "1M": "1M",
+    "1m": "1m",
+    "2m": "2m",
+    "3m": "3m",
+    "5m": "5m",
+    "10m": "10m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h": "1h",
+    "1d": "D",
+    "D": "D",
+    "1W": "1W",
+    "1M": "1M",
 }
 
 
@@ -97,7 +115,7 @@ def resolve_maybe_awaitable(value: Any, *, caller: str) -> Any:
 
 
 class HistoricalDownloader:
-    """Downloads historical OHLCV data via OpenAlgo with automatic date chunking.
+    """Downloads historical OHLCV data via native broker with automatic date chunking.
 
     Usage::
 
@@ -108,7 +126,7 @@ class HistoricalDownloader:
 
     def __init__(
         self,
-        client: OpenAlgoClient,
+        client: BrokerClient,
         chunk_days_intraday: int = _DEFAULT_CHUNK_DAYS_INTRADAY,
         chunk_days_daily: int = _DEFAULT_CHUNK_DAYS_DAILY,
     ) -> None:
@@ -135,8 +153,11 @@ class HistoricalDownloader:
         """
         canonical = _INTERVAL_MAP.get(interval, interval)
         result = DownloadResult(
-            symbol=symbol, exchange=exchange, interval=canonical,
-            start_date=start_date, end_date=end_date,
+            symbol=symbol,
+            exchange=exchange,
+            interval=canonical,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         start = date.fromisoformat(start_date)
@@ -153,7 +174,12 @@ class HistoricalDownloader:
 
         logger.info(
             "Downloading %s %s %s from %s to %s (%d chunks)",
-            symbol, exchange, canonical, start_date, end_date, len(chunks),
+            symbol,
+            exchange,
+            canonical,
+            start_date,
+            end_date,
+            len(chunks),
         )
 
         all_bars: list[OHLCV] = []
@@ -161,7 +187,11 @@ class HistoricalDownloader:
             c_start_str = c_start.isoformat()
             c_end_str = c_end.isoformat()
             logger.info(
-                "  Chunk %d/%d: %s to %s", i, len(chunks), c_start_str, c_end_str,
+                "  Chunk %d/%d: %s to %s",
+                i,
+                len(chunks),
+                c_start_str,
+                c_end_str,
             )
 
             try:
@@ -198,7 +228,11 @@ class HistoricalDownloader:
 
         logger.info(
             "Download complete: %s %s %s — %d bars (%d errors)",
-            symbol, exchange, canonical, result.total_bars, len(result.errors),
+            symbol,
+            exchange,
+            canonical,
+            result.total_bars,
+            len(result.errors),
         )
         return result
 

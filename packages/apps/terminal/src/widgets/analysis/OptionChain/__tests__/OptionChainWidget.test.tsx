@@ -599,7 +599,7 @@ describe("OptionChainWidget", () => {
     expect(placeOrder).not.toHaveBeenCalled();
   });
 
-  it("refuses a Practice order when its OpenAlgo market source changes during symbol resolution", async () => {
+  it("refuses a Practice order when its native broker market source changes during symbol resolution", async () => {
     const symbolResolution = deferred<{ symbol: string; exchange: string }>();
     optionChainHookMocks.overrides = {
       selectedExpiry: "2026-04-10",
@@ -613,7 +613,7 @@ describe("OptionChainWidget", () => {
       brokerType: "sandbox",
       accountId: "default",
     };
-    dataScopeState.value = "practice:openalgo:source-a";
+    dataScopeState.value = "practice:native:dhan:A1";
     vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
     vi.mocked(getOptionSymbol).mockReturnValue(symbolResolution.promise);
     useModeStore.setState({ mode: "practice" });
@@ -621,7 +621,7 @@ describe("OptionChainWidget", () => {
     render(<OptionChainWidget />, { wrapper: Wrapper });
     await vi.waitFor(() => expect(queryClient.getQueryData([
       "symbol",
-      "practice:openalgo:source-a",
+      "practice:native:dhan:A1",
       "NIFTY",
       "NFO",
     ])).toEqual({ lotsize: 50 }));
@@ -631,7 +631,7 @@ describe("OptionChainWidget", () => {
 
     // The account/order authority is still the Practice sandbox. Only the
     // real market-data source retires before React can commit a rerender.
-    dataScopeState.value = "practice:openalgo:source-b";
+    dataScopeState.value = "practice:native:dhan:A2";
     await act(async () => {
       symbolResolution.reject(new MarketDataAuthorityChangedError());
       await symbolResolution.promise.catch(() => undefined);
@@ -654,12 +654,12 @@ describe("OptionChainWidget", () => {
       brokerType: "sandbox",
       accountId: "default",
     };
-    dataScopeState.value = "practice:openalgo:source-a";
+    dataScopeState.value = "practice:native:dhan:A1";
     vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
     vi.mocked(getOptionSymbol).mockImplementation(async () => {
       // Zustand can change synchronously before React commits the rerender that
       // aborts lifecycle-owned work. The imperative guard must still refuse A.
-      dataScopeState.value = "practice:openalgo:source-b";
+      dataScopeState.value = "practice:native:dhan:A2";
       return { symbol: "NIFTY26APR25000CE", exchange: "NFO" };
     });
     useModeStore.setState({ mode: "practice" });
@@ -667,7 +667,7 @@ describe("OptionChainWidget", () => {
     render(<OptionChainWidget />, { wrapper: Wrapper });
     await vi.waitFor(() => expect(queryClient.getQueryData([
       "symbol",
-      "practice:openalgo:source-a",
+      "practice:native:dhan:A1",
       "NIFTY",
       "NFO",
     ])).toEqual({ lotsize: 50 }));
@@ -734,6 +734,40 @@ describe("OptionChainWidget", () => {
         quantity: 50,
       }),
       authorityAtClick,
+    ));
+  });
+
+  it("sends the admission note with a chain place", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockRejectedValue(new Error("resolver unavailable"));
+    useModeStore.setState({ mode: "live" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+      target: { value: "Buy the call" },
+    });
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+
+    await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "NIFTY10APR2625000CE",
+        action: "BUY",
+        rationale: "Buy the call",
+      }),
+      expect.anything(),
     ));
   });
 

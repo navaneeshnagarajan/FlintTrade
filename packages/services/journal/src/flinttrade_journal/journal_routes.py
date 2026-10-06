@@ -16,7 +16,7 @@ DELETE /entries/<id>       — delete one entry
 GET    /search?q=          — FTS5 search over symbol/notes/tags/strategy
 GET    /stats              — aggregate win rate / P&L / breakdowns
 GET    /export             — CSV export (text/csv attachment)
-POST   /import             — bulk import from OpenAlgo tradebook rows
+POST   /import             — bulk import from broker tradebook rows
 GET    /notes              — list daily notes (date desc, preview + word count)
 GET    /notes/<date>       — fetch one daily note (200 with empty content when absent)
 PUT    /notes/<date>       — upsert a daily note (empty content deletes it)
@@ -248,7 +248,7 @@ def export_csv() -> tuple[Response, int]:
 
 @journal_bp.route("/import", methods=["POST"])
 def import_tradebook() -> tuple[Response, int]:
-    """Bulk-create entries from OpenAlgo tradebook rows (skips duplicates)."""
+    """Bulk-create entries from broker tradebook rows (skips duplicates)."""
     journal = _get_journal()
     if journal is None:
         return _err("Journal not initialised", 503)

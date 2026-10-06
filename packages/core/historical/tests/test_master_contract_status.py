@@ -3,6 +3,7 @@
 Run with:
     python -m pytest packages/core/historical/tests/test_master_contract_status.py -v --import-mode=importlib
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ import pytest
 def mcs(tmp_path):
     """Create a fresh MasterContractStatus backed by a temp DuckDB file."""
     from flinttrade_historical.master_contract_status import MasterContractStatus
+
     db_path = str(tmp_path / "test_contracts.duckdb")
     status = MasterContractStatus(db_path=db_path)
     yield status
@@ -157,23 +159,27 @@ class TestChecksumHelper:
 
     def test_returns_64_char_hex(self):
         from flinttrade_historical.master_contract_status import checksum_for_symbols
+
         cs = checksum_for_symbols(["NIFTY", "RELIANCE"])
         assert len(cs) == 64
         assert all(c in "0123456789abcdef" for c in cs)
 
     def test_order_independent(self):
         from flinttrade_historical.master_contract_status import checksum_for_symbols
+
         a = checksum_for_symbols(["NIFTY", "RELIANCE"])
         b = checksum_for_symbols(["RELIANCE", "NIFTY"])
         assert a == b
 
     def test_different_symbols_different_checksum(self):
         from flinttrade_historical.master_contract_status import checksum_for_symbols
+
         a = checksum_for_symbols(["NIFTY"])
         b = checksum_for_symbols(["SENSEX"])
         assert a != b
 
     def test_empty_list(self):
         from flinttrade_historical.master_contract_status import checksum_for_symbols
+
         cs = checksum_for_symbols([])
         assert len(cs) == 64

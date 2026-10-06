@@ -10,6 +10,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  // This journey requires the isolated /demo-app/ server configuration.
+  testIgnore: 'public-demo-presets.spec.ts',
   timeout: 30_000,
   forbidOnly: Boolean(process.env['CI']),
   // Each test gets a fresh context (no shared cookies / localStorage)

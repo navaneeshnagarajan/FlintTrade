@@ -117,7 +117,7 @@ def make_agent(
     executor = make_gated_executor(passed=(order_status == "success")) if with_executor else None
     return AutonomousTrader(
         llm_client=mock_llm,
-        openalgo_client=mock_broker,
+        broker_client=mock_broker,
         config=config,
         order_executor=executor,
         entry_intent_sink=entry_intent_sink,
@@ -456,8 +456,8 @@ async def test_analyze_all_returns_all_symbols() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_works_with_TYPED_openalgo_client() -> None:
-    """The agent must parse the modern OpenAlgoClient's TYPED Pydantic models
+async def test_fetch_works_with_TYPED_broker_client() -> None:
+    """The agent must parse the modern BrokerClient's TYPED Pydantic models
     (Quote/Depth/list[OHLCV]) — not just dict envelopes. Before the fix it
     only handled dicts, so the live-wired agent set data.error on every
     symbol and could never trade (the control plane was dead on arrival)."""
@@ -617,6 +617,132 @@ async def test_monitor_refused_square_off_keeps_position() -> None:
     await agent.monitor(position)
     assert "RELIANCE" in agent.state.active_positions
     assert agent.state.daily_pnl == 0.0
+
+
+@pytest.mark.asyncio
+async def test_loss_braked_cycle_monitors_all_positions_without_new_decisions() -> None:
+    """The daily entry brake must leave long/short SL/TP protection running."""
+    sink = AsyncMock()
+    ist = timezone(timedelta(hours=5, minutes=30))
+    agent = make_agent(
+        symbols=["RELIANCE", "TCS", "ICICIBANK", "INFY"],
+        entry_intent_sink=sink,
+        market_session_provider=lambda *_args: (time(9, 15), time(15, 30)),
+        clock=lambda: datetime(2026, 7, 20, 10, 0, tzinfo=ist),
+    )
+    for symbol, action, entry, sl, tp, quantity in [
+        ("RELIANCE", "BUY", 100.0, 95.0, 110.0, 2),
+        ("TCS", "SELL", 200.0, 205.0, 190.0, 3),
+        ("ICICIBANK", "BUY", 100.0, 95.0, 110.0, 1),
+    ]:
+        await agent.record_approved_entry(
+            symbol=symbol, action=action, quantity=quantity,
+            entry_price=entry, stop_loss=sl, take_profit=tp,
+        )
+    agent.state.daily_pnl = -5000.0
+    agent.state.stop_loss_hit = True
+    prices = {"RELIANCE": 90.0, "TCS": 180.0, "ICICIBANK": 102.0}
+
+    async def quote(*, symbol: str, exchange: str) -> dict[str, Any]:
+        return {"status": "success", "data": {"ltp": prices[symbol]}}
+
+    agent.broker.quotes.side_effect = quote
+
+    result = await agent.run_cycle()
+
+    assert agent.state.active_positions == {"ICICIBANK": 100.0}
+    assert set(agent.state.position_details) == {"ICICIBANK"}
+    assert agent.state.daily_pnl == pytest.approx(-4960.0)
+    assert agent.state.stop_loss_hit is True  # Recovery never unlatches the brake.
+    assert {trade["symbol"] for trade in agent.state.closed_trades} == {"RELIANCE", "TCS"}
+    orders = [call.args[0] for call in agent.order_executor.route_order.await_args_list]
+    assert [(order.symbol, order.action.value, order.quantity) for order in orders] == [
+        ("RELIANCE", "SELL", "2"), ("TCS", "BUY", "3"),
+    ]
+    assert result == {"skipped": True, "reason": "stop_loss_hit"}
+    assert agent.state.cycle_count == 0
+    assert agent.state.trade_counts == {"RELIANCE": 1, "TCS": 1, "ICICIBANK": 1, "INFY": 0}
+    assert not agent.state.squared_off
+    agent.llm.chat.assert_not_called()
+    sink.assert_not_awaited()
+    agent.broker.depth.assert_not_awaited()
+    agent.broker.history.assert_not_awaited()
+
+    # A position still inside its thresholds remains protected on later cycles.
+    prices["ICICIBANK"] = 90.0
+    await agent.run_cycle()
+
+    assert agent.state.active_positions == {}
+    assert agent.state.position_details == {}
+    assert len(agent.state.closed_trades) == 3
+    assert agent.state.daily_pnl == pytest.approx(-4970.0)
+    agent.llm.chat.assert_not_called()
+    sink.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_failure", ["refused", "exception", "no_executor"])
+async def test_loss_braked_cycle_retains_failed_protective_exit_for_retry(exit_failure: str, monkeypatch) -> None:
+    agent = make_agent(quotes_ltp=90.0, entry_intent_sink=AsyncMock())
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+    await agent.record_approved_entry(
+        symbol="RELIANCE", action="BUY", quantity=2,
+        entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+    )
+    agent.state.daily_pnl = -5000.0
+    agent.state.stop_loss_hit = True
+    if exit_failure == "refused":
+        agent.order_executor.route_order.return_value = StubDecision(passed=False, error="kill switch")
+    elif exit_failure == "exception":
+        agent.order_executor.route_order.side_effect = RuntimeError("executor unavailable")
+    else:
+        agent.order_executor = None
+
+    await agent.run_cycle()
+
+    agent.broker.quotes.assert_awaited_once_with(symbol="RELIANCE", exchange="NSE")
+    assert agent.state.active_positions == {"RELIANCE": 100.0}
+    assert agent.state.position_details["RELIANCE"]["quantity"] == 2
+    assert agent.state.closed_trades == []
+    assert agent.state.daily_pnl == -5000.0
+    assert not agent.state.squared_off
+    agent.llm.chat.assert_not_called()
+    agent.entry_intent_sink.assert_not_awaited()
+
+    agent.order_executor = make_gated_executor()
+    await agent.run_cycle()
+
+    assert agent.state.active_positions == {}
+    assert agent.state.position_details == {}
+    assert len(agent.state.closed_trades) == 1
+    assert agent.state.daily_pnl == -5020.0
+    order = agent.order_executor.route_order.await_args.args[0]
+    assert (order.symbol, order.action.value, order.quantity) == ("RELIANCE", "SELL", "2")
+    agent.entry_intent_sink.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["market_closed", "stop_without_square_off", "stop_with_square_off"])
+async def test_loss_braked_cycle_preserves_market_and_stop_boundaries(boundary: str, monkeypatch) -> None:
+    agent = make_agent(quotes_ltp=90.0)
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: boundary != "market_closed")
+    await agent.record_approved_entry(
+        symbol="RELIANCE", action="BUY", quantity=1,
+        entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+    )
+    agent.state.stop_loss_hit = True
+    if boundary != "market_closed":
+        agent.request_stop(square_off=boundary == "stop_with_square_off")
+
+    result = await agent.run_cycle()
+
+    assert result["reason"] == ("market_closed" if boundary == "market_closed" else "stop_requested")
+    assert agent.state.active_positions == {"RELIANCE": 100.0}
+    assert agent.state.cycle_count == 0
+    assert not agent.state.squared_off
+    agent.order_executor.route_order.assert_not_awaited()
+    agent.broker.quotes.assert_not_awaited()
+    agent.llm.chat.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -861,8 +987,12 @@ async def test_failed_stop_square_off_remains_observable_as_stop_failed(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_market_close_with_tracked_position_attempts_square_off_and_preserves_failure(monkeypatch) -> None:
+@pytest.mark.parametrize("loss_braked", [False, True])
+async def test_market_close_with_tracked_position_attempts_square_off_and_preserves_failure(
+    loss_braked: bool, monkeypatch,
+) -> None:
     agent = make_agent()
+    agent.state.stop_loss_hit = loss_braked
     monkeypatch.setattr(agent, "_is_market_open", lambda *_args: False)
     agent.order_executor = make_gated_executor(passed=False, error="market exit refused")
     agent.state.active_positions["RELIANCE"] = 100.0
@@ -879,8 +1009,10 @@ async def test_market_close_with_tracked_position_attempts_square_off_and_preser
 
 
 @pytest.mark.asyncio
-async def test_scheduled_square_off_failure_is_not_retried_during_same_unwind(monkeypatch) -> None:
+@pytest.mark.parametrize("loss_braked", [False, True])
+async def test_scheduled_square_off_failure_is_not_retried_during_same_unwind(loss_braked: bool, monkeypatch) -> None:
     agent = make_agent()
+    agent.state.stop_loss_hit = loss_braked
     monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
     monkeypatch.setattr(agent, "_is_square_off_time", lambda *_args: True)
     agent.order_executor = make_gated_executor(passed=False, error="scheduled exit refused")
@@ -894,6 +1026,28 @@ async def test_scheduled_square_off_failure_is_not_retried_during_same_unwind(mo
 
     agent.order_executor.route_order.assert_awaited_once()
     assert agent.status == AgentStatus.STOP_FAILED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("square_off", [False, True])
+async def test_loss_braked_session_respects_stop_square_off_choice(square_off: bool, monkeypatch) -> None:
+    agent = make_agent(quotes_ltp=90.0)
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+    await agent.record_approved_entry(
+        symbol="RELIANCE", action="BUY", quantity=1,
+        entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+    )
+    agent.state.stop_loss_hit = True
+    agent.request_stop(square_off=square_off)
+
+    await agent.run_session()
+
+    assert agent.status == AgentStatus.STOPPED
+    assert agent.state.squared_off is square_off
+    assert agent.state.cycle_count == 0
+    assert agent.state.active_positions == ({} if square_off else {"RELIANCE": 100.0})
+    assert agent.order_executor.route_order.await_count == int(square_off)
+    agent.llm.chat.assert_not_called()
 
 
 @pytest.mark.asyncio

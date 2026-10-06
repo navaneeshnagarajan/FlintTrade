@@ -1,4 +1,4 @@
-"""Backend auth independence from OpenAlgo configuration."""
+"""Backend auth independence from native broker configuration."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 def _make_app(monkeypatch, tmp_path: Path, *, flint_key: str | None = None):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     master_password = tmp_path / "master_password"
     master_password.write_text("unit-test-master-password", encoding="utf-8")
     master_password.chmod(0o600)
@@ -23,17 +23,18 @@ def _make_app(monkeypatch, tmp_path: Path, *, flint_key: str | None = None):
     return app
 
 
-def test_loopback_native_sandbox_works_without_openalgo_key(monkeypatch, tmp_path: Path) -> None:
+def test_sandbox_requires_credentials_without_dhan_key(monkeypatch, tmp_path: Path) -> None:
     app = _make_app(monkeypatch, tmp_path)
 
     with app.test_client() as client:
-        resp = client.get("/v1/sandbox/capital")
+        missing = client.get("/v1/sandbox/capital")
+        invalid = client.get("/v1/sandbox/positions", headers={"Authorization": "Bearer not-a-token"})
 
-    assert resp.status_code == 200
-    assert resp.get_json()["status"] == "success"
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
 
 
-def test_flinttrade_api_key_authenticates_without_openalgo_key(monkeypatch, tmp_path: Path) -> None:
+def test_flinttrade_api_key_authenticates_without_dhan_key(monkeypatch, tmp_path: Path) -> None:
     app = _make_app(monkeypatch, tmp_path, flint_key="flint-local-key")
 
     with app.test_client() as client:

@@ -31,12 +31,15 @@ from .broker_read_port import (
     ExactReadTarget,
     HistoricalRequest,
     HistoricalSnapshot,
+    InstrumentLotSizeSnapshot,
     InstrumentRef,
+    LotSizeRequest,
     QuoteRequest,
     QuoteSnapshot,
 )
 
 _CONTEXT_TIMEOUT_SECONDS = 15.0
+DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "MCX", "CDS", "BCD"})
 _MAX_CONTEXT_BYTES = 60 * 1024
 _INPUT_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._&:+/\-]{0,127}", re.ASCII)
 _ERROR_STATUS = {
@@ -80,9 +83,12 @@ def _session_identity(token: str) -> tuple[str, str, str]:
     subject, jti, mode = claims.get("sub"), claims.get("jti"), claims.get("mode")
     if (
         claims.get("type") != "session"
-        or type(subject) is not str or not subject.strip()
-        or type(jti) is not str or not jti.strip()
-        or type(mode) is not str or mode not in {"explore", "practice", "live"}
+        or type(subject) is not str
+        or not subject.strip()
+        or type(jti) is not str
+        or not jti.strip()
+        or type(mode) is not str
+        or mode not in {"explore", "practice", "live"}
         or type(claims.get("exp")) not in {int, float}
     ):
         raise BrokerContextError("broker_context_authentication_required")
@@ -103,8 +109,9 @@ def _json_default(value: object) -> str:
 
 
 def _canonical(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                      allow_nan=False, default=_json_default)
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=_json_default
+    )
 
 
 def _read_value(outcome: object, expected: type) -> Any:
@@ -166,11 +173,15 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
     from flinttrade_gateway.routing_config import RoutingConfig
 
     from .app import _BrokerRuntimeDependencies
-    from .openalgo_client import OpenAlgoClient
+    from .broker_client import BrokerClient
     from .workspace_migrations import broker_workspace_version, read_workspace_snapshot
 
-    if (type(symbol) is not str or not _INPUT_PATTERN.fullmatch(symbol)
-            or type(exchange) is not str or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)):
+    if (
+        type(symbol) is not str
+        or not _INPUT_PATTERN.fullmatch(symbol)
+        or type(exchange) is not str
+        or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)
+    ):
         raise BrokerContextError("broker_context_invalid_request")
     auth = request.headers.get("Authorization", "")
     token = auth[7:].strip() if auth.startswith("Bearer ") else request.headers.get("X-FlintTrade-Token", "").strip()
@@ -182,10 +193,14 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
     if type(dependencies) is not _BrokerRuntimeDependencies:
         raise BrokerContextError("broker_context_unavailable")
     owner = dependencies.read_owner
-    client = dependencies.openalgo_client
+    client = dependencies.broker_client
     audit = app.config.get("AUDIT")
-    if (type(owner) is not BrokerReadOwner or not isinstance(client, OpenAlgoClient)
-            or type(audit) is not AuditLogger or type(dependencies.config) is not RoutingConfig):
+    if (
+        type(owner) is not BrokerReadOwner
+        or not isinstance(client, BrokerClient)
+        or type(audit) is not AuditLogger
+        or type(dependencies.config) is not RoutingConfig
+    ):
         raise BrokerContextError("broker_context_unavailable")
     deadline = time.monotonic() + _CONTEXT_TIMEOUT_SECONDS
     started_at = datetime.now(UTC).isoformat()
@@ -205,8 +220,10 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
             app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True
             or app.extensions.get("flinttrade_broker_dependencies") is not dependencies
             or app.extensions.get("flinttrade_broker_dependencies_draining") is not None
-            or dependencies.read_owner is not owner or dependencies.openalgo_client is not client
-            or app.config.get("CLIENT") is not client or app.config.get("OPENALGO_CLIENT") is not client
+            or dependencies.read_owner is not owner
+            or dependencies.broker_client is not client
+            or app.config.get("CLIENT") is not client
+            or app.config.get("BROKER_CLIENT") is not client
             or app.config.get("REGISTRY") is not dependencies.registry
             or app.config.get("ACTIVE_BROKER_ADAPTERS") is not dependencies.adapters
             or type(publication_owner) is not RegistryPublicationOwner
@@ -227,8 +244,9 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
             check_generation()
             if _session_identity(token) != identity:
                 raise BrokerContextError("broker_context_authentication_required")
-        return RequestContext(identity[1], "human", identity[0], identity[2],
-                              selector=serialise_broker_selector(selector))
+        return RequestContext(
+            identity[1], "human", identity[0], identity[2], selector=serialise_broker_selector(selector)
+        )
 
     def check_inputs_current() -> None:
         check_generation()
@@ -237,9 +255,15 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
             selector = provenance.selector
             handle = dependencies.session_provider(authority(selector), selector.adapter_id, selector.account_id)
             binding = handle.version
-            if any(getattr(binding, field, None) != getattr(provenance, field) for field in (
-                "registry_version", "credential_version", "workspace_version", "broker_workspace_version",
-            )):
+            if any(
+                getattr(binding, field, None) != getattr(provenance, field)
+                for field in (
+                    "registry_version",
+                    "credential_version",
+                    "workspace_version",
+                    "broker_workspace_version",
+                )
+            ):
                 raise BrokerContextError("broker_context_stale")
 
     try:
@@ -261,32 +285,53 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
             ports.append(port)
 
         today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-        history_request = HistoricalRequest(instrument, "5m", (today - timedelta(days=3)).isoformat(), today.isoformat())
+        history_request = HistoricalRequest(
+            instrument, "5m", (today - timedelta(days=3)).isoformat(), today.isoformat()
+        )
         quote_request = QuoteRequest(instrument)
+        lot_request = LotSizeRequest(exchange, symbols=(symbol,))
 
         async def collect() -> dict[str, Any]:
             records = {}
-            for name, call, expected, read_request in (
+            reads = [
                 ("quote", lambda: ports[0].quote(quote_request), QuoteSnapshot, quote_request),
                 ("depth", lambda: ports[0].depth(quote_request), DepthSnapshot, quote_request),
                 ("historical", lambda: ports[1].historical(history_request), HistoricalSnapshot, history_request),
                 ("balance", ports[2].balance, BalanceSnapshot, None),
-            ):
+            ]
+            if exchange in DERIVATIVE_EXCHANGES:
+                reads.append(("lot_size", lambda: ports[0].lot_sizes(lot_request), tuple, lot_request))
+            for name, call, expected, read_request in reads:
                 outcome = await call()
                 remaining()
-                if (name == "depth" and type(outcome) is BrokerReadFailure
-                        and outcome.code is BrokerReadErrorCode.UNSUPPORTED):
+                if (
+                    name == "depth"
+                    and type(outcome) is BrokerReadFailure
+                    and outcome.code is BrokerReadErrorCode.UNSUPPORTED
+                ):
                     # Native adapters do not all expose the read-port depth
                     # contract. Missing capability is not empty market depth.
                     records[name] = {
-                        "request": asdict(read_request), "value": None, "provenance": None,
-                        "observed_at": datetime.now(UTC).isoformat(), "source_as_of": None,
+                        "request": asdict(read_request),
+                        "value": None,
+                        "provenance": None,
+                        "observed_at": datetime.now(UTC).isoformat(),
+                        "source_as_of": None,
                         "error_code": "unsupported",
                     }
                     continue
                 value = _read_value(outcome, expected)
                 outcomes.append(outcome)
                 extra = {}
+                if name == "lot_size":
+                    if (
+                        len(value) != 1
+                        or type(value[0]) is not InstrumentLotSizeSnapshot
+                        or value[0].symbol != symbol
+                        or value[0].exchange != exchange
+                    ):
+                        raise BrokerContextError("broker_context_invalid_response")
+                    value = value[0]
                 if name == "quote" and (not value.available or value.ltp is None or value.ltp <= 0):
                     raise BrokerContextError("broker_context_invalid_response")
                 if name == "balance" and value.available_balance is None:
@@ -299,7 +344,8 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
                     value = _recent_history(value, history_request)
                 records[name] = {
                     "request": asdict(read_request) if read_request is not None else None,
-                    "value": asdict(value), "provenance": asdict(outcome.provenance),
+                    "value": asdict(value),
+                    "provenance": asdict(outcome.provenance),
                     "observed_at": datetime.now(UTC).isoformat(),
                     "source_as_of": value.bars[-1].timestamp if name == "historical" else None,
                     **extra,
@@ -309,9 +355,13 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
         records = client.run_sync(collect(), timeout=remaining())
         check_inputs_current()
         market_data = {
-            "schema_version": 1, "symbol": symbol, "exchange": exchange,
-            "capture_started_at": started_at, "capture_completed_at": datetime.now(UTC).isoformat(),
-            "execution_selector": serialise_broker_selector(execution_selector), **records,
+            "schema_version": 1,
+            "symbol": symbol,
+            "exchange": exchange,
+            "capture_started_at": started_at,
+            "capture_completed_at": datetime.now(UTC).isoformat(),
+            "execution_selector": serialise_broker_selector(execution_selector),
+            **records,
         }
         canonical = _canonical(market_data)
         if len(canonical.encode("utf-8")) > _MAX_CONTEXT_BYTES:
@@ -322,7 +372,8 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
         try:
             remaining()
             acknowledged = audit.log_idempotent_event(
-                "AI_BROKER_ANALYSIS_INPUT", event_id=event_id,
+                "AI_BROKER_ANALYSIS_INPUT",
+                event_id=event_id,
                 fields={"input_digest": digest, "market_data": market_data},
             )
             if acknowledged != event_id:
@@ -362,22 +413,22 @@ def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dic
     )
 
     from .app import _BrokerRuntimeDependencies
+    from .broker_client import BrokerClient
     from .broker_identity import serialise_broker_selector
-    from .openalgo_client import OpenAlgoClient
 
     ports: list[Any] = []
     owner: Any = None
     try:
         if (
-            type(symbol) is not str or not _INPUT_PATTERN.fullmatch(symbol)
-            or type(exchange) is not str or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)
+            type(symbol) is not str
+            or not _INPUT_PATTERN.fullmatch(symbol)
+            or type(exchange) is not str
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)
         ):
             return []
         auth = request.headers.get("Authorization", "")
         token = (
-            auth[7:].strip()
-            if auth.startswith("Bearer ")
-            else request.headers.get("X-FlintTrade-Token", "").strip()
+            auth[7:].strip() if auth.startswith("Bearer ") else request.headers.get("X-FlintTrade-Token", "").strip()
         )
         if not token or len(token) > 16_384:
             return []
@@ -392,8 +443,8 @@ def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dic
         if type(dependencies) is not _BrokerRuntimeDependencies:
             return []
         owner = dependencies.read_owner
-        client = dependencies.openalgo_client
-        if type(owner) is not BrokerReadOwner or not isinstance(client, OpenAlgoClient):
+        client = dependencies.broker_client
+        if type(owner) is not BrokerReadOwner or not isinstance(client, BrokerClient):
             return []
         try:
             states = dependencies.registry.list_exact_states()
@@ -442,10 +493,7 @@ def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dic
             for state, port in bound:
                 try:
                     quote_outcome = await port.quote(quote_request)
-                    if (
-                        type(quote_outcome) is not BrokerReadSuccess
-                        or type(quote_outcome.value) is not QuoteSnapshot
-                    ):
+                    if type(quote_outcome) is not BrokerReadSuccess or type(quote_outcome.value) is not QuoteSnapshot:
                         continue
                     value = quote_outcome.value
                     if not value.available or value.ltp is None or value.ltp <= 0:
@@ -453,25 +501,22 @@ def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dic
                     depth_value = None
                     try:
                         depth_outcome = await port.depth(quote_request)
-                        if (
-                            type(depth_outcome) is BrokerReadSuccess
-                            and type(depth_outcome.value) is DepthSnapshot
-                        ):
+                        if type(depth_outcome) is BrokerReadSuccess and type(depth_outcome.value) is DepthSnapshot:
                             depth_value = asdict(depth_outcome.value)
                     except Exception:  # noqa: BLE001 — keep quotes if depth fails
                         depth_value = None
-                    rows.append({
-                        "broker_id": state.selector.adapter_id,
-                        "account_id": state.selector.account_id,
-                        "chrome": CHROME_CONNECTED_READ,
-                        "ok": True,
-                        "quotes": asdict(value),
-                        "depth": depth_value,
-                        "operator_copy": (
-                            NEO_OPERATOR_COPY if state.selector.adapter_id == "kotakneo" else None
-                        ),
-                        "error": None,
-                    })
+                    rows.append(
+                        {
+                            "broker_id": state.selector.adapter_id,
+                            "account_id": state.selector.account_id,
+                            "chrome": CHROME_CONNECTED_READ,
+                            "ok": True,
+                            "quotes": asdict(value),
+                            "depth": depth_value,
+                            "operator_copy": (NEO_OPERATOR_COPY if state.selector.adapter_id == "kotakneo" else None),
+                            "error": None,
+                        }
+                    )
                 except Exception:  # noqa: BLE001 — one broker must not wipe the rest
                     continue
             return rows

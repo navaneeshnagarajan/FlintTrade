@@ -76,12 +76,14 @@ def _run_registry_backtest(strategy_cls: Any, config: Any, bars: list[dict[str, 
     from flinttrade_backtest.engine import BacktestEngine, EngineConfig  # noqa: PLC0415
     from flinttrade_backtest.simulator import BacktestResult, EquityPoint, SimTrade  # noqa: PLC0415
 
-    engine = BacktestEngine(EngineConfig(
-        symbol=config.symbol,
-        exchange=config.exchange,
-        initial_capital=Decimal(str(config.initial_capital)),
-        position_size_pct=Decimal(str(config.position_size_pct)),
-    ))
+    engine = BacktestEngine(
+        EngineConfig(
+            symbol=config.symbol,
+            exchange=config.exchange,
+            initial_capital=Decimal(str(config.initial_capital)),
+            position_size_pct=Decimal(str(config.position_size_pct)),
+        )
+    )
     # The strategy must know its symbol — enter_long/short fall back to
     # ``self.symbol`` for the OrderIntent, so a symbol-less strategy emits orders
     # for "" that the engine cannot fill (zero trades). Pass it; tolerate the rare
@@ -187,10 +189,12 @@ def backtest_run() -> tuple[Any, int]:
     registry_cls = None if strategy_cls is not None else _registry_strategy(strategy_name)
     if strategy_cls is None and registry_cls is None:
         available = sorted(BUILTIN_STRATEGIES.keys())
-        return jsonify({
-            "status": "error",
-            "message": f"Unknown strategy '{strategy_name}'. Available: {available}",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Unknown strategy '{strategy_name}'. Available: {available}",
+            }
+        ), 400
 
     try:
         dc = DataConnector()
@@ -200,10 +204,12 @@ def backtest_run() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     if not data_result.success:
-        return jsonify({
-            "status": "error",
-            "message": f"No data available: {data_result.error or 'unknown error'}",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"No data available: {data_result.error or 'unknown error'}",
+            }
+        ), 400
 
     try:
         config = BacktestConfig(
@@ -310,16 +316,18 @@ def backtest_run() -> tuple[Any, int]:
         for pt in result.equity_curve
     ]
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "trades": trades,
-            "equity_curve": equity_curve,
-            "metrics": metrics,
-            "total_bars": result.total_bars,
-            "final_equity": result.final_equity,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "trades": trades,
+                "equity_curve": equity_curve,
+                "metrics": metrics,
+                "total_bars": result.total_bars,
+                "final_equity": result.final_equity,
+            },
+        }
+    ), 200
 
 
 @backtest_bp.route("/backtest/portfolio", methods=["POST"])
@@ -512,6 +520,7 @@ def list_strategies() -> tuple[Any, int]:
         registry = {}
         try:
             from flinttrade_backtest.strategies import STRATEGY_REGISTRY  # noqa: PLC0415
+
             registry = STRATEGY_REGISTRY
         except Exception:  # noqa: BLE001 - registry import must not break the listing
             registry = {}
@@ -527,18 +536,18 @@ def list_strategies() -> tuple[Any, int]:
         logger.warning("Could not load BUILTIN_STRATEGIES: %s", exc)
         # Hardcoded fallback list matching the known 12 strategies
         strategies = [
-            {"name": "EMACrossover",       "description": "EMA crossover strategy: buy when fast EMA > slow EMA"},
-            {"name": "Supertrend",          "description": "Supertrend indicator strategy"},
-            {"name": "MACD_RSI",            "description": "MACD + RSI combined momentum strategy"},
-            {"name": "BollingerMR",         "description": "Bollinger Bands mean-reversion strategy"},
-            {"name": "VWAPDev",             "description": "VWAP deviation mean-reversion strategy"},
-            {"name": "StraddleSell",        "description": "Short straddle options-selling strategy"},
-            {"name": "StrangleSell",        "description": "Short strangle options-selling strategy"},
-            {"name": "IronCondor",          "description": "Iron condor multi-leg options strategy"},
-            {"name": "BullPutSpread",       "description": "Bull put spread credit strategy"},
-            {"name": "BearCallSpread",      "description": "Bear call spread credit strategy"},
-            {"name": "MomentumBreakout",    "description": "Momentum breakout strategy on volume surge"},
-            {"name": "ORB",                 "description": "Opening Range Breakout intraday strategy"},
+            {"name": "EMACrossover", "description": "EMA crossover strategy: buy when fast EMA > slow EMA"},
+            {"name": "Supertrend", "description": "Supertrend indicator strategy"},
+            {"name": "MACD_RSI", "description": "MACD + RSI combined momentum strategy"},
+            {"name": "BollingerMR", "description": "Bollinger Bands mean-reversion strategy"},
+            {"name": "VWAPDev", "description": "VWAP deviation mean-reversion strategy"},
+            {"name": "StraddleSell", "description": "Short straddle options-selling strategy"},
+            {"name": "StrangleSell", "description": "Short strangle options-selling strategy"},
+            {"name": "IronCondor", "description": "Iron condor multi-leg options strategy"},
+            {"name": "BullPutSpread", "description": "Bull put spread credit strategy"},
+            {"name": "BearCallSpread", "description": "Bear call spread credit strategy"},
+            {"name": "MomentumBreakout", "description": "Momentum breakout strategy on volume surge"},
+            {"name": "ORB", "description": "Opening Range Breakout intraday strategy"},
         ]
     return jsonify({"status": "success", "data": {"strategies": strategies}}), 200
 
@@ -560,10 +569,7 @@ def strategies_running() -> tuple[Any, int]:
 
     try:
         status_map = _scheduler.status()
-        strategies_list = [
-            {"name": name, **info}
-            for name, info in status_map.items()
-        ]
+        strategies_list = [{"name": name, **info} for name, info in status_map.items()]
         return jsonify({"status": "success", "data": {"strategies": strategies_list}}), 200
     except Exception:
         logger.exception("strategies_running error")

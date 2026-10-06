@@ -51,15 +51,11 @@ export function setAccountRuntime({
   act(() => {
     useModeStore.setState({ mode });
     useConnectionStore.setState({
-      host: "",
       apiKey: "",
-      wsUrl: "",
       status: "disconnected",
       wsConnected: false,
       wsFailure: null,
-      lastPing: null,
       demo: false,
-      openAlgoHydrated: true,
     });
     useBrokerStore.setState({ accounts, activeAccountId });
   });
@@ -76,12 +72,9 @@ export function setNativeAccountStatus(
 
 export function currentDataScope(): string {
   const mode = useModeStore.getState().mode;
-  const connection = useConnectionStore.getState();
   const broker = useBrokerStore.getState();
   return resolveDataScope({
     mode,
-    host: connection.host,
-    apiKey: connection.apiKey,
     accounts: broker.accounts,
     activeAccountId: broker.activeAccountId,
   });

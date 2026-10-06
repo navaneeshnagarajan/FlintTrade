@@ -26,18 +26,25 @@ def test_account_action_preflights_preserve_exact_origin_policy(monkeypatch, tmp
     with app.test_client() as client:
         for path, method in paths:
             for origin in origins:
-                response = client.options(path, headers={
-                    "Origin": origin,
-                    "Access-Control-Request-Method": method,
-                    "Access-Control-Request-Headers": "Content-Type,Authorization,If-Match,Idempotency-Key",
-                })
+                response = client.options(
+                    path,
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": method,
+                        "Access-Control-Request-Headers": "Content-Type,Authorization,If-Match,Idempotency-Key",
+                    },
+                )
                 assert response.headers["Access-Control-Allow-Origin"] == origin
                 assert method in response.headers["Access-Control-Allow-Methods"].split(", ")
                 assert {"Content-Type", "Authorization", "If-Match", "Idempotency-Key"} <= set(
                     response.headers["Access-Control-Allow-Headers"].split(", ")
                 )
-            foreign = client.options(path, headers={
-                "Origin": "https://foreign.invalid", "Access-Control-Request-Method": method,
-                "Access-Control-Request-Headers": "Idempotency-Key",
-            })
+            foreign = client.options(
+                path,
+                headers={
+                    "Origin": "https://foreign.invalid",
+                    "Access-Control-Request-Method": method,
+                    "Access-Control-Request-Headers": "Idempotency-Key",
+                },
+            )
             assert "Access-Control-Allow-Origin" not in foreign.headers

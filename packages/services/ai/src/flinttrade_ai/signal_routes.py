@@ -105,9 +105,7 @@ def _request_stream_auth_revalidator() -> StreamAuthRevalidator | None:
         # Preserve only the configured API-key bearer path. A session can be
         # revoked between Flask admission and this capture, so treating every
         # decode failure as an API key would leave that stream open.
-        expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get(
-            "OPENALGO_API_KEY", ""
-        )
+        expected_key = os.environ.get("FLINTTRADE_API_KEY", "")
         if expected_key and hmac.compare_digest(token, expected_key):
             return None
         return lambda: False
@@ -167,7 +165,7 @@ def _signal_stream_shutdown_event(app: Flask) -> threading.Event:
 
 def configure_signal_sources(
     app: Flask,
-    openalgo_client: Any | None = None,
+    broker_client: Any | None = None,
 ) -> tuple[LiveSignalPipeline, SignalPipeline | None]:
     """Install one application signal hub and, when possible, its ML producer."""
     _signal_stream_shutdown_event(app)
@@ -181,10 +179,10 @@ def configure_signal_sources(
     app._live_signal_pipeline = pipeline  # type: ignore[attr-defined]
 
     ml_pipeline: SignalPipeline | None = app.config.get("ML_SIGNAL_PIPELINE")
-    if ml_pipeline is None and openalgo_client is not None:
+    if ml_pipeline is None and broker_client is not None:
         try:
             ml_pipeline = SignalPipeline(
-                openalgo_client=openalgo_client,
+                broker_client=broker_client,
                 signal_sink=pipeline.ingest_ml_cycle,
             )
             app.config["ML_SIGNAL_PIPELINE"] = ml_pipeline

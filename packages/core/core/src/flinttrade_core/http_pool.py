@@ -154,7 +154,7 @@ class HTTPClientPool:
                 response = await client.request(method, url, **kwargs)
 
                 if response.status_code in _RETRYABLE_STATUSES and attempt < _MAX_RETRIES:
-                    wait = _BACKOFF_BASE * (2 ** attempt)
+                    wait = _BACKOFF_BASE * (2**attempt)
                     self._total_retries += 1
                     logger.warning(
                         "HTTPClientPool: HTTP %d from %s, retry %d/%d in %.1fs",
@@ -172,7 +172,7 @@ class HTTPClientPool:
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < _MAX_RETRIES:
-                    wait = _BACKOFF_BASE * (2 ** attempt)
+                    wait = _BACKOFF_BASE * (2**attempt)
                     self._total_retries += 1
                     logger.warning(
                         "HTTPClientPool: transport error for %s (%s), retry %d/%d in %.1fs",
@@ -184,9 +184,7 @@ class HTTPClientPool:
                     )
                     await asyncio.sleep(wait)
                 else:
-                    logger.error(
-                        "HTTPClientPool: all retries exhausted for %s: %s", url, exc
-                    )
+                    logger.error("HTTPClientPool: all retries exhausted for %s: %s", url, exc)
                     raise
 
         # Should only be reached if retryable status persisted across retries

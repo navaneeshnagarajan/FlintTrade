@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Workflow } from "lucide-react";
+import { useLocation } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Page, PageBody, PageHeader } from "@/components/layout/Page";
 import TabTransition from "@/components/motion/TabTransition";
 import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
@@ -10,7 +10,6 @@ import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 
 import AutomateSidebar, { SECTIONS, type SectionId } from "./automate/AutomateSidebar";
-import FlowsSection       from "./automate/FlowsSection";
 import CronSection        from "./automate/CronSection";
 import MonitorsSection    from "./automate/MonitorsSection";
 import LogsSection        from "./automate/LogsSection";
@@ -20,26 +19,42 @@ import WebhooksSection    from "./automate/WebhooksSection";
 
 const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
+function sectionIdFromHash(hash: string): SectionId | null {
+  const id = hash.replace(/^#/, "");
+  return SECTIONS.some((section) => section.id === id) ? (id as SectionId) : null;
+}
+
 export default function AutomateRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("automate", "daysActive"); }, []);
 
+  const location = useLocation();
+  const hashedSection = sectionIdFromHash(location.hash);
   const level = useSkillLevel("automate");
 
   // Density adaptation:
-  // Beginner: Alerts/Monitors + Settings only (hide Flows, Cron, Strategies)
-  // Intermediate: Flows + Schedules + Monitors + Logs + emergency settings
+  // Beginner: Alerts/Monitors + Settings only (hide Schedules and Strategies)
+  // Intermediate: Schedules + Monitors + Logs + emergency settings
   // Advanced: All sections
+  // A deep link such as /automate#schedules still opens that section.
   const visibleSectionIds: SectionId[] = (() => {
-    if (level === "beginner") return ["monitors", "settings"];
-    if (level === "intermediate") return ["flows", "schedules", "monitors", "webhooks", "logs", "settings"];
-    return ["flows", "schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
+    const base: SectionId[] = level === "beginner"
+      ? ["monitors", "settings"]
+      : level === "intermediate"
+        ? ["schedules", "monitors", "webhooks", "logs", "settings"]
+        : ["schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
+    if (hashedSection && !base.includes(hashedSection)) return [hashedSection, ...base];
+    return base;
   })();
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
 
-  // Default to the first visible section for the current skill level
-  const defaultSection = visibleSectionIds[0] ?? "monitors";
+  // Default to the hash target, otherwise the first visible section.
+  const defaultSection = hashedSection ?? visibleSectionIds[0] ?? "monitors";
   const [activeSection, setActiveSection] = useState<SectionId>(defaultSection);
+
+  useEffect(() => {
+    if (hashedSection) setActiveSection(hashedSection);
+  }, [hashedSection]);
 
   // Lightweight queries for rail status dots — same keys fetched by each section on mount,
   // so no extra network requests are made.
@@ -70,7 +85,6 @@ export default function AutomateRoute() {
   ).length;
 
   const sectionContent: Record<SectionId, React.ReactNode> = {
-    flows:      <FlowsSection />,
     schedules:  <CronSection />,
     monitors:   <MonitorsSection />,
     strategies: <StrategiesSection />,
@@ -80,27 +94,23 @@ export default function AutomateRoute() {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="border-b border-glass-chrome bg-glass-chrome backdrop-blur-md px-6 py-4 shrink-0">
-        <div className="flex items-center gap-3">
-          <Workflow className="w-6 h-6 text-accent" />
-          <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">Automation Hub</h1>
-            <p className="text-xxs text-text-muted">
-              Flow builder, cron scheduler, Telegram alerts, and safety controls
-            </p>
-          </div>
-          {killSwitchActive && (
-            <div className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full bg-loss/10 border border-loss/30">
-              <span className="ft-dot-kill" />
-              <span className="text-xs text-loss font-medium">Kill Switch Active</span>
-            </div>
-          )}
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Automate"
+        description="Schedules, strategy monitors, webhooks and the safety controls that stop them."
+        meta={
+          killSwitchActive ? (
+            <span className="flex items-center gap-1.5 rounded-full border border-loss/30 bg-loss/10 px-2.5 py-0.5">
+              <span className="ft-dot-kill" aria-hidden="true" />
+              <span className="text-xs font-medium text-[var(--color-bearish-text,var(--color-loss))]">
+                Kill Switch Active
+              </span>
+            </span>
+          ) : null
+        }
+      />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
         <AutomateSidebar
           activeSection={activeSection}
           onSelect={setActiveSection}
@@ -110,24 +120,15 @@ export default function AutomateRoute() {
           uploadedRunningCount={uploadedRunningCount}
         />
 
-        <ScrollArea className="flex-1">
-          <div
+        <PageBody
             role="tabpanel"
             id={`automate-tabpanel-${activeSection}`}
             aria-labelledby={`automate-tab-${activeSection}`}
           >
-            <TabTransition
-              tabKey={activeSection}
-              className={
-                activeSection === "flows"
-                  ? "h-[calc(100vh-8rem)] p-3"
-                  : "p-6 max-w-4xl mx-auto"
-              }
-            >
+            <TabTransition tabKey={activeSection}>
               {sectionContent[activeSection]}
             </TabTransition>
-          </div>
-        </ScrollArea>
+          </PageBody>
       </div>
 
       {/* Guided tour — beginner only, first visit */}
@@ -137,6 +138,6 @@ export default function AutomateRoute() {
           steps={TOUR_DEFINITIONS["automate-beginner"] ?? []}
         />
       )}
-    </div>
+    </Page>
   );
 }

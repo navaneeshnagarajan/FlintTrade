@@ -57,26 +57,26 @@ def test_authorise_if_unclaimed_claims_empty_selector() -> None:
     provider = AuthenticatingSessionProvider(reg, {})  # empty acls
     # Unauthorised before the claim.
     with pytest.raises(SafetyBypassError, match="not authorised"):
-        provider(_ctx(actor_id="nava"), "openalgo", "default")
-    assert provider.authorise_if_unclaimed("openalgo", "default", "nava") is True
+        provider(_ctx(actor_id="nava"), "dhan", "default")
+    assert provider.authorise_if_unclaimed("dhan", "default", "nava") is True
     # Authorised after the claim — same session is returned.
     with pytest.raises(RegistrySessionUnavailable):
-        provider(_ctx(actor_id="nava"), "openalgo", "default")
+        provider(_ctx(actor_id="nava"), "dhan", "default")
 
 
 def test_authorise_if_unclaimed_noop_when_already_claimed() -> None:
     reg = BrokerRegistry()
-    provider = AuthenticatingSessionProvider(reg, {"openalgo": {"default": ["first"]}})
+    provider = AuthenticatingSessionProvider(reg, {"dhan": {"default": ["first"]}})
     # Already claimed -> a different actor is NOT auto-added.
-    assert provider.authorise_if_unclaimed("openalgo", "default", "second") is False
+    assert provider.authorise_if_unclaimed("dhan", "default", "second") is False
     with pytest.raises(SafetyBypassError, match="not authorised"):
-        provider(_ctx(actor_id="second"), "openalgo", "default")
+        provider(_ctx(actor_id="second"), "dhan", "default")
 
 
 def test_authorise_if_unclaimed_respects_explicit_empty_deny_list() -> None:
     # An explicit empty list is a deliberate deny-all — TOFU must NOT widen it.
     reg = BrokerRegistry()
-    provider = AuthenticatingSessionProvider(reg, {"openalgo": {"default": []}})
-    assert provider.authorise_if_unclaimed("openalgo", "default", "nava") is False
+    provider = AuthenticatingSessionProvider(reg, {"dhan": {"default": []}})
+    assert provider.authorise_if_unclaimed("dhan", "default", "nava") is False
     with pytest.raises(SafetyBypassError, match="not authorised"):
-        provider(_ctx(actor_id="nava"), "openalgo", "default")
+        provider(_ctx(actor_id="nava"), "dhan", "default")

@@ -7,8 +7,10 @@ import { describe, expect, it } from "vitest";
 
 import { PayoffTab } from "../PayoffTab";
 import { UNDERLYINGS, type Leg } from "../types";
+import { formatINR } from "../utils";
 
 const nifty = UNDERLYINGS[0];
+const lot = nifty.lotSize ?? 0;
 
 function callLeg(premium: number | null, extra: Partial<Leg> = {}): Leg {
   return {
@@ -55,9 +57,9 @@ describe("PayoffTab", () => {
       />,
     );
 
-    expect(screen.getByText("Sample premium — edit to model")).toBeInTheDocument();
+    expect(screen.getByText("Example premium — edit to model")).toBeInTheDocument();
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
-    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent(`-${formatINR(45 * lot)}`);
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22545");
   });
 
@@ -65,8 +67,8 @@ describe("PayoffTab", () => {
     render(<PayoffTab legs={[callLeg(180)]} atm={22500} underlying={nifty} />);
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
-    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹13,500.00");
-    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹13,500.00");
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent(`-${formatINR(180 * lot)}`);
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent(formatINR(180 * lot));
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22680");
   });
 
@@ -75,19 +77,19 @@ describe("PayoffTab", () => {
 
     const maxLoss = screen.getByText("Max Loss").nextElementSibling;
     const netPremium = screen.getByText("Net Premium").nextElementSibling;
-    expect(maxLoss).toHaveTextContent("-₹3,375.00");
-    expect(netPremium).toHaveTextContent("₹3,375.00");
+    expect(maxLoss).toHaveTextContent(`-${formatINR(45 * lot)}`);
+    expect(netPremium).toHaveTextContent(formatINR(45 * lot));
     expect(netPremium).not.toHaveTextContent("₹45.00");
-    expect(screen.getAllByText("₹3,375.00 per lot · 1 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryByText("₹45.00 per lot · 1 lots · lot size 75")).not.toBeInTheDocument();
+    expect(screen.getAllByText(`${formatINR(45 * lot)} per lot · 1 lot · lot size ${lot}`).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(`₹45.00 per lot · 1 lot · lot size ${lot}`)).not.toBeInTheDocument();
   });
 
   it("scales a two-lot long call and keeps the per-lot amount in the sublabel only", () => {
     render(<PayoffTab legs={[callLeg(45, { lots: 2 })]} atm={22500} underlying={nifty} />);
 
-    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹6,750.00");
-    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹6,750.00");
-    expect(screen.getAllByText("₹3,375.00 per lot · 2 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent(`-${formatINR(90 * lot)}`);
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent(formatINR(90 * lot));
+    expect(screen.getAllByText(`${formatINR(45 * lot)} per lot · 2 lots · lot size ${lot}`).length).toBeGreaterThanOrEqual(1);
   });
 
   it("tags mixed-lot figures as position when a single per-lot breakdown cannot be formed", () => {
@@ -104,6 +106,6 @@ describe("PayoffTab", () => {
 
     expect(screen.queryByText(/per lot ·/)).not.toBeInTheDocument();
     expect(screen.getAllByText("position").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹375.00");
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent(formatINR(5 * lot));
   });
 });

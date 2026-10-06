@@ -257,7 +257,7 @@ const MCP_BROKERS = [
       login_steps: [
         "Add the Dhan remote MCP URL to a supported MCP client.",
         "Complete the Dhan browser authorisation and explicit consent flow opened by that client.",
-        "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
+        "Keep FlintTrade live orders on the gated native/native broker path.",
       ],
       use_cases: [
         "Portfolio and account review",
@@ -354,7 +354,7 @@ const MCP_BROKERS = [
         "Use an active, non-dormant Upstox account; dormant accounts cannot complete MCP authorisation.",
         "Complete the OAuth authorisation opened by that client.",
         "Repeat authorisation daily before relying on account context.",
-        "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
+        "Keep FlintTrade live orders on the gated native/native broker path.",
       ],
       use_cases: [
         "Read-only holdings, orders, positions, mutual funds, funds, and profile lookup",
@@ -580,14 +580,27 @@ describe("BrokersSection", () => {
     renderSection();
     expect(screen.getByRole("heading", { name: "Brokers" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
-    expect(screen.getByText(/never placeable Live orders/i)).toBeInTheDocument();
-    expect(screen.getByText(/Live read only until funded unlock/i)).toBeInTheDocument();
+    expect(screen.getByText("No connected broker accounts are listed.")).toBeInTheDocument();
+    expect(screen.getByText(/Connecting an account does not enable live orders/i)).toBeInTheDocument();
+    expect(screen.getByText(/Native broker HTTP connectivity is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/Local Practice trading remains available/i)).toBeInTheDocument();
     await waitFor(() => {
-      const nativeWarning = screen.getByText(/never placeable Live orders/i);
-      expect(nativeWarning).toHaveTextContent("Dhan, Upstox, and Kotak Neo");
-      expect(nativeWarning).toHaveTextContent("INDmoney and Groww stay visible");
-      expect(nativeWarning).toHaveTextContent("Native order placement stays fail-closed");
+      const availability = screen.getByText(/Native connection options:/i);
+      expect(availability).toHaveTextContent("Dhan, Upstox, and Kotak Neo");
+      expect(availability).toHaveTextContent("INDmoney and Groww stay listed");
     });
+  });
+
+  it("does not expose retired account snapshots as managed native accounts", async () => {
+    useBrokerStore.setState({ accounts: [makeGatewayAccount()], activeAccountId: "gateway:zerodha:GW1" });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    expect(screen.queryByText("Gateway accounts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /disconnect zerodha main/i })).not.toBeInTheDocument();
+    expect(screen.getByText("No connected broker accounts are listed.")).toBeInTheDocument();
+    expect(setPrimaryBrokerAccount).not.toHaveBeenCalled();
+    expect(removeBrokerAccount).not.toHaveBeenCalled();
   });
 
   it("shows SDK readiness for the selected native broker", async () => {
@@ -624,102 +637,13 @@ describe("BrokersSection", () => {
     expect(screen.getByRole("button", { name: /log in with dhan/i })).toBeDisabled();
   });
 
-  it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {
-    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([makeGatewayAccount()]);
-    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
-    renderSection();
 
-    await waitFor(() => expect(screen.getByText("Gateway accounts")).toBeInTheDocument());
-    expect(screen.getByText("Zerodha Main")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /disconnect zerodha main/i }));
-    await waitFor(() =>
-      expect(removeBrokerAccount).toHaveBeenCalledWith(
-        expect.objectContaining({ source: "gateway", broker: "zerodha", account_id: "GW1" }),
-        expect.any(String),
-      ),
-    );
-  });
 
-  it("can set a connected gateway account as primary", async () => {
-    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
-      makeGatewayAccount({ is_primary: false }),
-    ]);
-    (setPrimaryBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
-    renderSection();
 
-    const promote = await screen.findByRole("button", { name: /set zerodha main as primary/i });
-    fireEvent.click(promote);
 
-    await waitFor(() =>
-      expect(setPrimaryBrokerAccount).toHaveBeenCalledWith(
-        expect.objectContaining({ source: "gateway", broker: "zerodha", account_id: "GW1" }),
-        expect.any(String),
-      ),
-    );
-  });
-
-  it("does not offer primary selection for stale or read-only gateway accounts", async () => {
-    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
-      makeGatewayAccount({ account_id: "GW1", label: "Read Only Bridge", read_only: true }),
-      makeGatewayAccount({
-        account_id: "GW2",
-        label: "Expired Bridge",
-        status: "token_expired",
-        error_message: "Needs a fresh gateway login",
-      }),
-    ]);
-
-    renderSection();
-
-    await waitFor(() => expect(screen.getByText("Gateway accounts")).toBeInTheDocument());
-    expect(screen.getByText("Read Only Bridge")).toBeInTheDocument();
-    expect(screen.getByText(/zerodha.*read-only/i)).toBeInTheDocument();
-    expect(screen.getByText("Expired Bridge")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/set read only bridge as primary/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/set expired bridge as primary/i)).not.toBeInTheDocument();
-    expect(setPrimaryBrokerAccount).not.toHaveBeenCalled();
-  });
-
-  it("removing a gateway account never evicts a same-id native write target", async () => {
-    // Round-3 finding: the same broker-supplied client code can be linked via
-    // BOTH the native adapter and the OpenAlgo bridge. Removing the gateway row
-    // must use a source-qualified key so it cannot cross-evict the native row
-    // (and silently null the active native write target).
-    const sharedAccounts = [
-      makeNativeAccount({ account_id: "SHARED", broker: "upstox", label: "Upstox Native" }),
-      makeGatewayAccount({ account_id: "SHARED", broker: "upstox", label: "Upstox Bridge" }),
-    ];
-    (listBrokerAccounts as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(sharedAccounts)
-      .mockResolvedValue([sharedAccounts[0]]);
-    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-    useBrokerStore.setState({
-      accounts: sharedAccounts,
-      activeAccountId: "native:upstox:SHARED",
-    });
-
-    renderSection();
-
-    const disconnect = await screen.findByRole("button", { name: /disconnect upstox bridge/i });
-    fireEvent.click(disconnect);
-
-    await waitFor(() =>
-      expect(removeBrokerAccount).toHaveBeenCalledWith(
-        expect.objectContaining({ source: "gateway", broker: "upstox", account_id: "SHARED" }),
-        expect.any(String),
-      ),
-    );
-    await waitFor(() => {
-      const accts = useBrokerStore.getState().accounts;
-      expect(accts).toHaveLength(1);
-      expect(accts[0].source).toBe("native");
-    });
-    // The operator's active native write target must survive the gateway removal.
-    expect(useBrokerStore.getState().activeAccountId).toBe("native:upstox:SHARED");
-  });
 
   it("optimistically drops a removed native account from the store (finding #2 — no resurrection)", async () => {
     // A removed native account must leave the write-target store immediately so
@@ -767,7 +691,7 @@ describe("BrokersSection", () => {
       "Upstox MCP cannot place, modify, or cancel orders.",
     );
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
-      "gated native/OpenAlgo path",
+      "gated native/native broker path",
     );
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
       "not treat the hosted MCP as a FlintTrade live order path",
@@ -1283,7 +1207,7 @@ describe("BrokersSection", () => {
     }
   });
 
-  it("preserves the canonical cache gateway slice when an OAuth result publishes", async () => {
+  it("scrubs retired snapshots from both canonical cache and store when native OAuth publishes", async () => {
     const staleGateway = makeGatewayAccount({ account_id: "REMOVED-GATEWAY" });
     const currentGateway = makeGatewayAccount({ account_id: "CURRENT-GATEWAY" });
     const oauthAccount = makeNativeAccount({ account_id: "DHAN-LATE", broker: "dhan" });
@@ -1307,8 +1231,8 @@ describe("BrokersSection", () => {
     fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
     fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
 
-    await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([currentGateway, oauthAccount]));
-    expect(queryClient.getQueryData(["broker", "accounts"])).toEqual([currentGateway, oauthAccount]);
+    await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([oauthAccount]));
+    expect(queryClient.getQueryData(["broker", "accounts"])).toEqual([oauthAccount]);
   });
 
   it("waits for a slow OAuth refresh before starting the next sequential read", async () => {

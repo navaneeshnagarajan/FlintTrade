@@ -20,6 +20,13 @@ import { renderHook, act } from "@testing-library/react";
 import { createStore, Provider } from "jotai";
 import React from "react";
 import { tickAtomFamily, selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { useModeStore } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import type { BrokerAccount } from "@/types/broker";
+function selectNativeAccount(accountId = "A1") {
+  useModeStore.setState({ mode: "live" });
+  useBrokerStore.setState({ accounts: [{ account_id: accountId, broker: "dhan", source: "native", label: "Test", status: "connected", connected_at: null, error_message: null, is_primary: true } as BrokerAccount], activeAccountId: `native:dhan:${accountId}` });
+}
 import type { Quote, WsInstrument } from "@/types/api";
 
 // --- Mocks ------------------------------------------------------------------
@@ -33,9 +40,10 @@ vi.mock("@/services/api", () => ({
 
 // websocket.ts — getWsService returns an object with getSubscriptions()
 const mockGetSubscriptions = vi.fn<(mode: string) => WsInstrument[]>();
+const mockPublishTick = vi.fn();
 
 vi.mock("@/services/websocket", () => ({
-  getWsService: () => ({ getSubscriptions: mockGetSubscriptions }),
+  getWsService: () => ({ getSubscriptions: mockGetSubscriptions, publishTick: mockPublishTick }),
 }));
 
 // connectionStore — exposes wsConnected as a reactive Zustand value.
@@ -50,6 +58,12 @@ vi.mock("@/stores/connectionStore", () => ({
   },
 }));
 
+
+let _marketScope = "live:native:dhan:A1";
+vi.mock("@/hooks/useDataScope", () => ({
+  useMarketDataScope: () => _marketScope,
+  requireCurrentMarketDataScope: (scope: string) => { if (scope !== _marketScope) throw new Error("Market authority changed"); },
+}));
 
 // ----------------------------------------------------------------------------
 
@@ -86,13 +100,63 @@ describe("useTickerFallback", () => {
     vi.useFakeTimers();
     store = createStore();
     _wsConnected = false;
+    _marketScope = "live:native:dhan:A1";
+    selectNativeAccount();
     mockGetTicker.mockReset();
     mockGetSubscriptions.mockReset();
+    mockPublishTick.mockReset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  it("discards pending quote results after polling is disabled", async () => {
+    let resolve!: (quote: Quote) => void;
+    mockGetSubscriptions.mockReturnValue([{ symbol: "INFY", exchange: "NSE" }]);
+    mockGetTicker.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const { rerender, result } = renderHook(({ enabled }) => useTickerFallback(enabled), {
+      initialProps: { enabled: true }, wrapper: makeWrapper(store),
+    });
+    rerender({ enabled: false });
+    await act(async () => { resolve(makeQuote("INFY", "NSE", 100)); await flushMicrotasks(); });
+    expect(store.get(tickAtomFamily("NSE:INFY"))).toBeNull();
+    expect(result.current.active).toBe(false);
+  });
+
+  it("discards pending quotes when the native market authority changes", async () => {
+    let resolve!: (quote: Quote) => void;
+    mockGetSubscriptions.mockReturnValue([{ symbol: "INFY", exchange: "NSE" }]);
+    mockGetTicker.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { rerender } = renderHook(() => useTickerFallback(), { wrapper: makeWrapper(store) });
+    _marketScope = "live:native:dhan:A2";
+    selectNativeAccount("A2");
+    mockGetTicker.mockRejectedValue(new Error("New session unavailable"));
+    rerender();
+    await act(async () => { resolve(makeQuote("INFY", "NSE", 100)); await flushMicrotasks(); });
+    expect(store.get(tickAtomFamily("NSE:INFY"))).toBeNull();
+  });
+
+  it("refuses a pending A quote after a batched account return", async () => {
+    const requests: Array<(quote: Quote) => void> = [];
+    mockGetSubscriptions.mockReturnValue([{ symbol: "INFY", exchange: "NSE" }]);
+    mockGetTicker.mockImplementation(() => new Promise((done) => { requests.push(done); }));
+    const { rerender } = renderHook(() => useTickerFallback(), { wrapper: makeWrapper(store) });
+    act(() => {
+      _marketScope = "live:native:dhan:A2";
+      selectNativeAccount("A2");
+      _marketScope = "live:native:dhan:A1";
+      selectNativeAccount();
+    });
+    rerender();
+    expect(requests).toHaveLength(2);
+    await act(async () => { requests[0](makeQuote("INFY", "NSE", 999)); await flushMicrotasks(); });
+    expect(store.get(tickAtomFamily("NSE:INFY"))).toBeNull();
+    expect(mockPublishTick).not.toHaveBeenCalled();
+    await act(async () => { requests[1](makeQuote("INFY", "NSE", 101)); await flushMicrotasks(); });
+    expect(store.get(tickAtomFamily("NSE:INFY"))?.ltp).toBe(101);
+    expect(mockPublishTick).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ltp: 101 }));
   });
 
   it("does nothing when WebSocket is connected", async () => {
@@ -496,6 +560,8 @@ describe("useTickerFallback — health report", () => {
     vi.useFakeTimers();
     store = createStore();
     _wsConnected = false;
+    _marketScope = "live:native:dhan:A1";
+    selectNativeAccount();
     mockGetTicker.mockReset();
     mockGetSubscriptions.mockReset();
   });

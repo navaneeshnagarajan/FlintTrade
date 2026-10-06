@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from flinttrade_core.openalgo_client import OpenAlgoClient
-
 logger = logging.getLogger("flinttrade.integration.alerter")
 
 
@@ -119,7 +117,7 @@ class Alerter:
 
     Usage::
 
-        alerter = Alerter(client=client, channels=[AlertChannel.TELEGRAM, AlertChannel.CONSOLE])
+        alerter = Alerter(telegram_bot=bot, channels=[AlertChannel.TELEGRAM, AlertChannel.CONSOLE])
         alerter.order_placed(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="10", price="2500")
         alerter.safety_triggered(layer="L1_ORDER", reason="Price deviation 12%", symbol="RELIANCE")
         alerter.send(Alert(alert_type="CUSTOM", message="My custom alert"))
@@ -127,11 +125,11 @@ class Alerter:
 
     def __init__(
         self,
-        client: OpenAlgoClient | None = None,
+        telegram_bot: Any | None = None,
         channels: list[AlertChannel] | None = None,
         throttle_seconds: float = 60.0,
     ) -> None:
-        self._client = client
+        self._telegram_bot = telegram_bot
         self._channels = channels or [AlertChannel.CONSOLE]
         self._throttler = AlertThrottler(throttle_seconds)
         self._history: list[Alert] = []
@@ -238,12 +236,12 @@ class Alerter:
         return True
 
     def _send_telegram(self, message: str) -> None:
-        """Send via OpenAlgo /api/v1/telegram endpoint."""
-        if self._client is None:
-            logger.warning("Telegram alert skipped — no OpenAlgo client")
+        """Deliver through the explicitly supplied native Telegram bot."""
+        if self._telegram_bot is None:
+            logger.warning("Telegram alert skipped — no native Telegram bot")
             return
         try:
-            self._client.telegram(message)
+            self._telegram_bot.send_message(message)
             logger.debug("Telegram alert sent")
         except Exception as exc:
             logger.error("Telegram send failed: %s", exc)

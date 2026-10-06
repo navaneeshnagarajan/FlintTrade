@@ -15,17 +15,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        # NOTE: `submodules: recursive` was removed 2026-05-19. OpenAlgo +
+        # NOTE: `submodules: recursive` was removed 2026-05-19. External services +
         # OpenClaw + AlgoMirror are no longer git submodules — they were
         # detached in commit 3da42e4 and live under `.local/external/`
-        # (gitignored, cloned on demand via scripts/setup-test-deps.sh).
+        # (gitignored, provisioned separately when needed).
         # Trying to recursively check them out triggered noisy warnings
         # on every weekly run.
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       - name: Install dependencies
         run: uv sync --frozen          # SC-07: hash-verified install

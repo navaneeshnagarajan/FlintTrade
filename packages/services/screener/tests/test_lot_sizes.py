@@ -3,7 +3,7 @@
 Covers the built-in fallback table, cache behaviour, live-fetch path
 (mocked), and the synchronous helper function.
 
-No network calls are made — the OpenAlgoClient is mocked throughout.
+No network calls are made — the BrokerClient is mocked throughout.
 Run with: python -m pytest packages/services/screener/tests/test_lot_sizes.py -v --import-mode=importlib
 """
 
@@ -26,8 +26,21 @@ from flinttrade_screener.lot_sizes import (
 
 
 class TestFallbackTable:
-    def test_nifty_lot_size_is_75(self):
-        assert FALLBACK_LOT_SIZES["NIFTY"] == 75
+    def test_nifty_lot_size_comes_from_the_instrument_master(self):
+        from datetime import date
+
+        from flinttrade_core.instrument_lots import lot_size_for_contract, lot_size_from_master
+
+        # Shipped excerpt: Sep and Oct 2026 NIFTY futures, both 65. Tokens 13
+        # and 14 belong to the revision-window fixture, not this master.
+        as_of = date(2026, 9, 1)
+        listed = {
+            lot_size_for_contract("68407", as_of=as_of),
+            lot_size_for_contract("48704", as_of=as_of),
+        }
+        assert listed == {65}
+        assert FALLBACK_LOT_SIZES["NIFTY"] == lot_size_from_master("NIFTY")
+        assert FALLBACK_LOT_SIZES["NIFTY"] == 65
 
     def test_banknifty_lot_size_is_30(self):
         assert FALLBACK_LOT_SIZES["BANKNIFTY"] == 30
@@ -52,11 +65,24 @@ class TestFallbackTable:
         entries that only the fallback table had (NIFTYNXT50, MCX minis,
         agri) must survive the merge.
         """
+        from flinttrade_core.instrument_lots import lot_size_from_master
+
         old_route_table = {
-            "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 65, "MIDCPNIFTY": 120,
-            "SENSEX": 20, "BANKEX": 30, "CRUDEOIL": 100, "NATURALGAS": 1250,
-            "GOLD": 100, "SILVER": 30, "COPPER": 2500, "USDINR": 1000,
-            "EURINR": 1000, "GBPINR": 1000, "JPYINR": 1000,
+            "NIFTY": lot_size_from_master("NIFTY"),
+            "BANKNIFTY": lot_size_from_master("BANKNIFTY"),
+            "FINNIFTY": 65,
+            "MIDCPNIFTY": 120,
+            "SENSEX": lot_size_from_master("SENSEX"),
+            "BANKEX": 30,
+            "CRUDEOIL": 100,
+            "NATURALGAS": 1250,
+            "GOLD": 100,
+            "SILVER": 30,
+            "COPPER": 2500,
+            "USDINR": 1000,
+            "EURINR": 1000,
+            "GBPINR": 1000,
+            "JPYINR": 1000,
         }
         for sym, lot in old_route_table.items():
             assert FALLBACK_LOT_SIZES.get(sym) == lot, f"{sym} lost in merge"
@@ -117,7 +143,7 @@ class TestLotSizeResolverCache:
         client.instruments.return_value = {"status": "success", "data": rows}
         return LotSizeResolver(client, cache_ttl=3600)
 
-    def test_first_call_fetches_from_openalgo(self):
+    def test_first_call_fetches_from_broker(self):
         instruments = [{"symbol": "NIFTY", "exchange": "NFO", "lot_size": 75}]
         resolver = self._make_resolver(instruments)
         lot = resolver.get_lot_size("NIFTY", "NFO")
@@ -142,7 +168,7 @@ class TestLotSizeResolverCache:
         assert resolver.cache_size >= 1
 
     def test_stale_cache_refetches(self):
-        """After TTL expiry, the resolver must re-fetch from OpenAlgo."""
+        """After TTL expiry, the resolver must re-fetch from broker."""
         instruments = [{"symbol": "NIFTY", "exchange": "NFO", "lot_size": 75}]
         resolver = self._make_resolver(instruments)
         resolver._cache_ttl = 0  # expire immediately
@@ -328,7 +354,7 @@ class TestLotSizeResolverResolve:
         assert resolution == LotResolution(FALLBACK_LOT_SIZES["NIFTY"], "fallback")
 
     def test_async_client_with_envelope_is_supported(self):
-        """The REAL OpenAlgoClient.instruments is async and returns an
+        """The REAL BrokerClient.instruments is async and returns an
         envelope dict — the resolver must drive the coroutine and unwrap
         ``data`` (a sync list-returning fake was the only thing the old code
         handled, so the live path never worked against the real client)."""

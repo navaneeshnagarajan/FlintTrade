@@ -3,8 +3,8 @@
  *
  * Three cards inside Settings → Data:
  *   1. Tick capture — recorder status (enabled/running/count) + capture
- *      watchlist from /api/v1/data/ticks/status. Capture itself is opt-in at
- *      boot (FLINTTRADE_TICK_CAPTURE); this surface makes its state visible.
+ *      watchlist from /api/v1/data/ticks/status. Native capture is unavailable
+ *      until a source is supported; retained local stores remain queryable.
  *   2. Local OHLCV store — per-interval row/symbol counts from
  *      /v1/historify/bars/summary (what the downloader has actually saved).
  *   3. Bhavcopy download — fetch NSE full-market EOD archives (equity/F&O/
@@ -141,13 +141,15 @@ export function LocalDataPanel() {
   const persistedTickCount = tick?.persisted_tick_count ?? tick?.tick_count ?? 0;
   const pendingTickCount = tick?.pending_tick_count ?? Math.max(0, (tick?.tick_count ?? 0) - persistedTickCount);
   const droppedTickCount = tick?.dropped_tick_count ?? 0;
+  const hasStoredTickStats = persistedTickCount > 0 || (tick?.tick_count ?? 0) > 0
+    || pendingTickCount > 0 || droppedTickCount > 0 || captureWatchlist.length > 0;
   const nonEmptyTables = Object.entries(storeQuery.data ?? {}).filter(([, t]) => t.rows > 0);
   const tickState = tickQuery.isPending
     ? { label: "checking", className: "bg-surface-hover text-text-muted" }
     : tickQuery.isError
       ? { label: "unavailable", className: "bg-red-500/15 text-loss" }
       : !tick?.enabled
-        ? { label: "off", className: "bg-surface-hover text-text-muted" }
+        ? { label: "unavailable", className: "bg-surface-hover text-text-muted" }
         : tick.last_error && tick.running && tick.connected
           ? { label: "degraded", className: "bg-red-500/15 text-loss" }
           : tick.running && tick.connected
@@ -177,19 +179,24 @@ export function LocalDataPanel() {
           </div>
         ) : tickQuery.isError ? (
           <div className="text-xs text-loss">Tick capture status unavailable.</div>
-        ) : tick?.enabled ? (
-          <div className="text-xs text-text-muted">
-            {persistedTickCount.toLocaleString("en-IN")} persisted ·{" "}
-            {tick.tick_count.toLocaleString("en-IN")} received ·{" "}
-            {pendingTickCount.toLocaleString("en-IN")} pending ·{" "}
-            {droppedTickCount.toLocaleString("en-IN")} dropped ·{" "}
-            {captureWatchlist.map((i) => i.symbol).join(", ") || "no symbols"}
-          </div>
         ) : (
-          <div className="text-xs text-text-muted">
-            {tick?.hint ??
-              "Set FLINTTRADE_TICK_CAPTURE=1 and restart the backend to record live ticks to DuckDB."}
-          </div>
+          <>
+            {!tick?.enabled && (
+              <div className="text-xs text-text-muted">
+                {tick?.hint ??
+                  "Native tick capture is unavailable until a native source is supported. Existing local data and downloads remain available."}
+              </div>
+            )}
+            {tick && (tick.enabled || hasStoredTickStats) && (
+              <div className="text-xs text-text-muted">
+                {persistedTickCount.toLocaleString("en-IN")} persisted ·{" "}
+                {tick.tick_count.toLocaleString("en-IN")} received ·{" "}
+                {pendingTickCount.toLocaleString("en-IN")} pending ·{" "}
+                {droppedTickCount.toLocaleString("en-IN")} dropped ·{" "}
+                {captureWatchlist.map((i) => i.symbol).join(", ") || "no symbols"}
+              </div>
+            )}
+          </>
         )}
         {!tickQuery.isPending && !tickQuery.isError && tick?.last_error && (
           <div className="text-xs text-loss break-words">{tick.last_error}</div>

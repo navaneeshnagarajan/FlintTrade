@@ -1,48 +1,52 @@
-/**
- * useTape — live Time & Sales feed for one instrument (W3).
- *
- * Subscribes the instrument in quote mode directly on the WebSocket service
- * (bypassing the batched useWebSocket hook, which coalesces ticks and would
- * drop prints) and folds every tick through the pure tape logic in tape.ts.
- */
-
+/** Infer individual prints from admitted native quote notifications. */
 import { useEffect, useRef, useState } from "react";
 import { getWsService } from "@/services/websocket";
-import { useConnectionStore } from "@/stores/connectionStore";
-import type { WsInstrument, WsTick } from "@/types/api";
+import { requireCurrentMarketDataScope, useMarketDataScope } from "@/hooks/useDataScope";
+import { useMarketObservationEpoch } from "@/hooks/useMarketObservationEpoch";
+import type { WsInstrument } from "@/types/api";
 import { foldTick, initialTapeState, pushPrint, type TapePrint } from "./tape";
 
 export function useTape(instrument: WsInstrument | null, enabled: boolean): TapePrint[] {
-  const wsUrl = useConnectionStore((s) => s.wsUrl);
-  const apiKey = useConnectionStore((s) => s.apiKey);
-  const [tape, setTape] = useState<TapePrint[]>([]);
-  const stateRef = useRef(initialTapeState());
+  const scope = useMarketDataScope();
+  const { epoch, currentEpoch } = useMarketObservationEpoch();
+  const symbol = instrument?.symbol;
+  const exchange = instrument?.exchange;
+  const identity = JSON.stringify([scope, epoch, symbol, exchange, enabled]);
+  const currentIdentityRef = useRef(identity);
+  currentIdentityRef.current = identity;
+  const [observation, setObservation] = useState<{ identity: string; prints: TapePrint[] }>({ identity, prints: [] });
 
   useEffect(() => {
-    // Reset the tape whenever the instrument changes.
-    stateRef.current = initialTapeState();
-    setTape([]);
-
-    if (!enabled || !instrument || !wsUrl) return;
-
-    const ws = getWsService(wsUrl, apiKey);
-    if (!ws) return;
-    if (!ws.isConnected) ws.connect();
-
-    const unsubTick = ws.onTick((tick: WsTick) => {
-      if (tick.symbol !== instrument.symbol || tick.exchange !== instrument.exchange) return;
-      const { print, state } = foldTick(stateRef.current, tick, new Date());
-      stateRef.current = state;
-      if (print) setTape((prev) => pushPrint(prev, print));
-    });
-
-    ws.subscribe([instrument], "quote");
-
-    return () => {
-      unsubTick();
-      ws.unsubscribe([instrument], "quote");
+    let active = true;
+    // Each effect owns its fold baseline: A's cumulative volume and aggressor
+    // side cannot produce a B print, even after a late callback or StrictMode replay.
+    let foldState = initialTapeState();
+    setObservation({ identity, prints: [] });
+    if (!enabled || !symbol || !exchange) return;
+    const interest = { symbol, exchange };
+    const registry = getWsService();
+    const current = () => {
+      if (!active || currentEpoch.current !== epoch || currentIdentityRef.current !== identity) return false;
+      try { requireCurrentMarketDataScope(scope); return true; } catch { return false; }
     };
-  }, [enabled, instrument?.symbol, instrument?.exchange, wsUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const unsubscribe = registry.onTick((tick) => {
+      if (!current() || tick.symbol !== symbol || tick.exchange !== exchange) return;
+      const folded = foldTick(foldState, tick, new Date());
+      foldState = folded.state;
+      if (!folded.print) return;
+      const print = folded.print;
+      setObservation((previous) => current()
+        ? { identity, prints: pushPrint(previous.identity === identity ? previous.prints : [], print) }
+        : previous);
+    });
+    registry.subscribe([interest], "quote");
+    return () => {
+      active = false;
+      foldState = initialTapeState();
+      unsubscribe();
+      registry.unsubscribe([interest], "quote");
+    };
+  }, [scope, epoch, currentEpoch, identity, enabled, symbol, exchange]);
 
-  return tape;
+  return observation.identity === identity ? observation.prints : [];
 }

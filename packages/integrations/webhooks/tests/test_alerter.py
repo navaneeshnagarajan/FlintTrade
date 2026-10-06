@@ -1,6 +1,6 @@
 """Extended tests for Alerter — alert creation, alert matching, throttling, channels.
 
-No HTTP calls. OpenAlgo client is mocked when Telegram channel is tested.
+No HTTP calls. broker client is mocked when Telegram channel is tested.
 """
 
 from __future__ import annotations
@@ -278,17 +278,17 @@ class TestAlerterTelegramChannel:
         from flinttrade_webhooks.alerter import Alert, AlertChannel, Alerter
         mock_client = MagicMock()
         alerter = Alerter(
-            client=mock_client,
+            telegram_bot=mock_client,
             channels=[AlertChannel.TELEGRAM],
             throttle_seconds=0,
         )
         alerter.send(Alert(alert_type="CUSTOM", message="Telegram test"))
-        mock_client.telegram.assert_called_once()
+        mock_client.send_message.assert_called_once()
 
     def test_telegram_no_client_does_not_raise(self):
         from flinttrade_webhooks.alerter import Alert, AlertChannel, Alerter
         alerter = Alerter(
-            client=None,
+            telegram_bot=None,
             channels=[AlertChannel.TELEGRAM],
             throttle_seconds=0,
         )
@@ -299,19 +299,19 @@ class TestAlerterTelegramChannel:
         from flinttrade_webhooks.alerter import Alert, AlertChannel, Alerter
         mock_client = MagicMock()
         alerter = Alerter(
-            client=mock_client,
+            telegram_bot=mock_client,
             channels=[AlertChannel.TELEGRAM, AlertChannel.CONSOLE],
             throttle_seconds=0,
         )
         alerter.send(Alert(alert_type="CUSTOM", message="both"))
-        mock_client.telegram.assert_called_once()
+        mock_client.send_message.assert_called_once()
 
     def test_telegram_client_exception_does_not_propagate(self):
         from flinttrade_webhooks.alerter import Alert, AlertChannel, Alerter
         mock_client = MagicMock()
-        mock_client.telegram = MagicMock(side_effect=RuntimeError("network error"))
+        mock_client.send_message = MagicMock(side_effect=RuntimeError("network error"))
         alerter = Alerter(
-            client=mock_client,
+            telegram_bot=mock_client,
             channels=[AlertChannel.TELEGRAM],
             throttle_seconds=0,
         )

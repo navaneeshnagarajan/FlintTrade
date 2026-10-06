@@ -82,9 +82,7 @@ def test_service_connection_import_probe_detects_caught_forbidden_attempts(tmp_p
         "os.environ.__getitem__:HERMES_API_KEY"
     ]
     assert observations["caught-named"].returncode != 0
-    assert json.loads(observations["caught-named"].stdout)["attempts"] == [
-        "flinttrade_ai.llm_client.LLMClient"
-    ]
+    assert json.loads(observations["caught-named"].stdout)["attempts"] == ["flinttrade_ai.llm_client.LLMClient"]
 
 
 def test_service_connection_imports_are_inert_under_transport_and_credential_poison(tmp_path):
@@ -100,8 +98,7 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
         "flinttrade_core.ollama_runtime.OllamaRuntime.start_async",
         "flinttrade_ai.agent_backends.codex_session.CodexAppServerSession.ensure_started",
         "flinttrade_ai.agent_backends.hermes_session.HermesACPSession.ensure_started",
-        "flinttrade_gateway.adapter.load_broker_adapter",
-        "flinttrade_gateway.session.load_broker_adapter",
+        "flinttrade_gateway.brokers.native_factory.build_native_adapters",
         "flinttrade_gateway.registry.BrokerRegistry",
         "flinttrade_gateway.credentials.CredentialStore",
         "flinttrade_gateway.contracts.ContractManager",
@@ -116,7 +113,11 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
         ("POST", "/v1/accounts/operator/reconnect", "/v1/accounts/{account_id}/reconnect"),
         ("GET", "/v1/auth/oauth/callback?code=private", "/v1/auth/oauth/callback"),
         ("POST", "/v1/auth/otp/verify", "/v1/auth/otp/verify"),
-        ("POST", "/api/v1/native/accounts/dhan/operator/login", "/api/v1/native/accounts/{adapter_id}/{account_id}/login"),
+        (
+            "POST",
+            "/api/v1/native/accounts/dhan/operator/login",
+            "/api/v1/native/accounts/{adapter_id}/{account_id}/login",
+        ),
         (
             "POST",
             "/ft-api/api/v1/native/postbacks/upstox?token=private",
@@ -127,7 +128,6 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
         ("POST", "/v1/auth/totp/enable", "/v1/auth/totp/enable"),
         ("POST", "/v1/auth/reset-password-otp", "/v1/auth/reset-password-otp"),
         ("POST", "/v1/config/llm", "/v1/config/llm"),
-        ("POST", "/v1/config/openalgo", "/v1/config/openalgo"),
         ("POST", "/v1/test-connection", "/v1/test-connection"),
         ("POST", "/api/v1/ditto/accounts", "/api/v1/ditto/accounts"),
         ("DELETE", "/ft-api/api/v1/ditto/accounts/private?key=private", "/api/v1/ditto/accounts/{account_id}"),
@@ -138,9 +138,11 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
 )
 def test_secret_envelope_classifier_returns_fixed_templates_for_untrusted_paths(method, path, want):
     """Catch malformed or external secret routes escaping into body-aware sinks."""
-    module = importlib.import_module("flinttrade_core.request_observability") if importlib.util.find_spec(
-        "flinttrade_core.request_observability"
-    ) else None
+    module = (
+        importlib.import_module("flinttrade_core.request_observability")
+        if importlib.util.find_spec("flinttrade_core.request_observability")
+        else None
+    )
     classify = getattr(module, "classify_secret_envelope", lambda method, path: None)
     assert classify(method, path) == want
 
@@ -164,9 +166,11 @@ def test_secret_envelope_classifier_returns_fixed_templates_for_untrusted_paths(
 )
 def test_secret_envelope_classifier_leaves_lookalike_non_secret_routes_useful(path):
     """Catch prefix matching that suppresses diagnostics for unrelated siblings."""
-    module = importlib.import_module("flinttrade_core.request_observability") if importlib.util.find_spec(
-        "flinttrade_core.request_observability"
-    ) else None
+    module = (
+        importlib.import_module("flinttrade_core.request_observability")
+        if importlib.util.find_spec("flinttrade_core.request_observability")
+        else None
+    )
     classify = getattr(module, "classify_secret_envelope", lambda method, path: None)
     assert classify("POST", path) is None
 
@@ -446,9 +450,7 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
     environment_get = os.environ.get
     environment_getitem = type(os.environ).__getitem__
     forbidden_provider_environment_reads: list[str] = []
-    provider_credentials = frozenset(
-        profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env
-    )
+    provider_credentials = frozenset(profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env)
 
     def guarded_environment_get(name, default=None):
         if name in provider_credentials:
@@ -515,14 +517,8 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
             ),
             poisons.enter_context(
                 patch(
-                    "flinttrade_gateway.adapter.load_broker_adapter",
+                    "flinttrade_gateway.brokers.native_factory.build_native_adapters",
                     side_effect=AssertionError("broker factory"),
-                )
-            ),
-            poisons.enter_context(
-                patch(
-                    "flinttrade_gateway.session.load_broker_adapter",
-                    side_effect=AssertionError("gateway constructor"),
                 )
             ),
             poisons.enter_context(
@@ -535,7 +531,6 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
                 patch.object(app_module, "ContractManager", side_effect=AssertionError("contract manager"))
             ),
         )
-        poisons.enter_context(patch.object(app_module, "_open_ditto_credential_store", return_value=None))
         poisons.enter_context(
             patch.object(app_module.sentry_sdk, "init", side_effect=lambda **options: sentry_options.update(options))
         )
@@ -728,9 +723,7 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
     assert sentry_options["max_request_body_size"] == "never"
     assert sentry_options["include_local_variables"] is False
     assert sentry_options["send_default_pii"] is False
-    token = set_safe_request_summary(
-        SafeRequestSummary("/v1/services/connections", "POST", 1, True)
-    )
+    token = set_safe_request_summary(SafeRequestSummary("/v1/services/connections", "POST", 1, True))
     try:
         assert sentry_options["before_send"]({"event": "private"}, {}) is None
         assert sentry_options["before_send_transaction"]({"transaction": "private"}, {}) is None
@@ -739,9 +732,12 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
         reset_safe_request_summary(token)
     assert sentry_options["before_send"]({"event": "ordinary"}, {}) == {"event": "ordinary"}
     assert sentry_options["traces_sampler"]({}) == 0.1
-    assert sentry_options["traces_sampler"]({
-        "wsgi_environ": {"REQUEST_METHOD": "POST", "PATH_INFO": "/ft-api/v1/services/connections/bad"}
-    }) == 0.0
+    assert (
+        sentry_options["traces_sampler"](
+            {"wsgi_environ": {"REQUEST_METHOD": "POST", "PATH_INFO": "/ft-api/v1/services/connections/bad"}}
+        )
+        == 0.0
+    )
 
     from sentry_sdk.integrations import wsgi as sentry_wsgi
     from sentry_sdk.integrations.wsgi import SentryWsgiMiddleware
@@ -1249,8 +1245,20 @@ def test_verified_invalid_identity_is_never_recast_as_same_bearer_key(tmp_path, 
         ),
         ({}, None, "{}", "text/plain", 415, "unsupported_media_type"),
         ({}, None, "{", "application/json", 400, "invalid_request"),
-        ({}, None, "{\"padding\":\"" + "x" * (32 * 1024) + "\"}", "application/json", 413, "request_too_large"),
+        ({}, None, '{"padding":"' + "x" * (32 * 1024) + '"}', "application/json", 413, "request_too_large"),
     ],
+    # Pytest publishes node IDs in PYTEST_CURRENT_TEST; Windows environment
+    # values cannot contain the oversized body used by the final case.
+    ids=(
+        "missing-revision",
+        "missing-idempotency-key",
+        "wildcard-revision",
+        "weak-revision",
+        "multiple-revisions",
+        "unsupported-media-type",
+        "invalid-json",
+        "oversized-body",
+    ),
 )
 def test_mutation_http_boundary_errors_are_closed(
     headers, json_body, raw_body, content_type, status, error, tmp_path, monkeypatch
@@ -1297,7 +1305,7 @@ def test_repeated_if_match_fields_are_rejected_as_a_list(tmp_path, monkeypatch):
     assert response.get_json() == {"error": "invalid_request"}
 
 
-@pytest.mark.parametrize("tag", ['"' + "a" * 4095 + '"', '"snowman\u2603"'])
+@pytest.mark.parametrize("tag", ['"' + "a" * 4095 + '"', '"snowman\u2603"'], ids=("over-limit", "non-latin1"))
 def test_over_limit_or_non_latin1_if_match_is_rejected(tag, tmp_path, monkeypatch):
     app = _unit_app(tmp_path / "workspace", monkeypatch)
 

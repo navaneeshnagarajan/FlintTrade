@@ -350,9 +350,7 @@ class TestLazySingletons:
         assert fresh_singletons.get_health_aggregator() is fresh_singletons.get_health_aggregator()
 
     @pytest.mark.unit
-    def test_monitor_honours_a_workspace_override_set_after_import(
-        self, tmp_path, monkeypatch, fresh_singletons
-    ):
+    def test_monitor_honours_a_workspace_override_set_after_import(self, tmp_path, monkeypatch, fresh_singletons):
         """The monitor probes the workspace active at first use, not at import.
 
         This is the regression test for the import-time

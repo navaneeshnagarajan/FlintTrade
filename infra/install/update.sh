@@ -164,7 +164,6 @@ if [ "$MODE" = "docker" ] && [ "$RESTART" = true ]; then
     docker compose ps
 elif [ "$MODE" = "native" ] && [ "$RESTART" = true ]; then
     sleep 3
-    systemctl is-active flinttrade-openalgo.service && ok "OpenAlgo: running" || warn "OpenAlgo: not running"
     systemctl is-active flinttrade-backend.service && ok "Backend: running" || warn "Backend: not running"
 fi
 

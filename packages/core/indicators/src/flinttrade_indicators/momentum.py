@@ -426,9 +426,7 @@ def bop(
     validate_ohlcv(high, low, close, min_length=1)
     validate_series(open_, min_length=1)
     if len(open_) != len(close):
-        raise ValueError(
-            f"Array length mismatch: open={len(open_)}, close={len(close)}"
-        )
+        raise ValueError(f"Array length mismatch: open={len(open_)}, close={len(close)}")
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
     for i in range(n):
@@ -499,9 +497,7 @@ def awesome_oscillator(
     if slow < 1:
         raise ValueError(f"awesome_oscillator slow period must be >= 1, got {slow}")
     if fast >= slow:
-        raise ValueError(
-            f"awesome_oscillator fast ({fast}) must be < slow ({slow})"
-        )
+        raise ValueError(f"awesome_oscillator fast ({fast}) must be < slow ({slow})")
 
     midpoint = (high + low) / 2.0
     return _sma(midpoint, fast) - _sma(midpoint, slow)

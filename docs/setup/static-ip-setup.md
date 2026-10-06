@@ -11,7 +11,7 @@ it directly in your broker's developer console.
 2. Confirm the IP from the exact machine or network that will run FlintTrade.
 3. Add that IP in the broker developer console.
 4. Wait for the broker's activation window to complete.
-5. Test in Explore and Practice first, then unlock Live only after the broker
+5. Test with example data and Practice first, then unlock Live only after the broker
    dashboard shows the IP as active.
 
 ## Broker Notes
@@ -34,11 +34,6 @@ now-wired v3 async SFeed/order-feed lifecycle and not funded Live unlock. The
 stream lifecycle has local synthetic coverage only; live-account,
 market-hours, funded-order, Live-promotion, and cross-platform proof remain
 outstanding.
-
-When those reads succeed (not login-only), chrome is **Connected (read)**
-/ **API smoke** — never imply placeable Live orders. Neo copy is
-`Live read only until funded unlock.` Prefer native; OpenAlgo is
-Settings / fallback only. Keep personal IPs out of this repository.
 
 ## FlintTrade Boundary
 

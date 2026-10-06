@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -24,5 +24,29 @@ describe("TabTransition", () => {
       "min-h-0",
       "overflow-hidden"
     );
+  });
+
+  it("mounts the next tab immediately and completes its real fade", async () => {
+    vi.spyOn(motionConfig, "prefersReducedMotion").mockReturnValue(false);
+    const { rerender } = render(
+      <TabTransition tabKey="overview" className="h-full min-h-0 overflow-hidden">
+        <span>Overview panel</span>
+      </TabTransition>,
+    );
+    const previousWrapper = screen.getByText("Overview panel").parentElement;
+
+    rerender(
+      <TabTransition tabKey="details" className="h-full min-h-0 overflow-hidden">
+        <span>Details panel</span>
+      </TabTransition>,
+    );
+
+    expect(screen.queryByText("Overview panel")).not.toBeInTheDocument();
+    const wrapper = screen.getByText("Details panel").parentElement;
+    expect(wrapper).not.toBe(previousWrapper);
+    expect(previousWrapper).not.toBeInTheDocument();
+    expect(wrapper).toHaveClass("h-full", "min-h-0", "overflow-hidden");
+    expect(wrapper).toHaveStyle({ opacity: "0" });
+    await waitFor(() => expect(wrapper).toHaveStyle({ opacity: "1" }));
   });
 });

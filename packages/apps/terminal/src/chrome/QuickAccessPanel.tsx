@@ -192,14 +192,14 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
             variant="outline"
             className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
           >
-            PRACTICE
+            Practice
           </Badge>
         )}
       </div>
       {authFailed && wsFailure && (
         <p className="mt-1 pl-4 text-xxs text-text-muted" role="status">
           {wsFailure.reason}
-          {wsFailure.fatal ? " — update the API key in Settings to retry" : ""}
+          {wsFailure.fatal ? " — re-authenticate the broker in Settings to retry" : ""}
         </p>
       )}
     </div>
@@ -211,7 +211,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
 // ---------------------------------------------------------------------------
 
 const MODE_LABEL: Record<"explore" | "practice" | "live", { text: string; className: string }> = {
-  explore: { text: "Explore", className: "text-text-secondary" },
+  explore: { text: "Example", className: "text-text-secondary" },
   practice: { text: "Practice", className: "text-amber-400" },
   live: { text: "Live", className: "text-profit" },
 };

@@ -62,7 +62,7 @@ describe("resolveScopedAccountReadsEnabled", () => {
     expect(resolveScopedAccountReadsEnabled({
       mode: "live",
       apiKey: "",
-      openAlgoStatus: "disconnected",
+      connectionStatus: "disconnected",
       activeAccountId: null,
       accounts: [
         account({ status: "disconnected" }),
@@ -90,26 +90,16 @@ describe("resolveScopedAccountReadsEnabled", () => {
     expect(resolveScopedAccountReadsEnabled({
       mode: "live",
       apiKey: "",
-      openAlgoStatus: "disconnected",
+      connectionStatus: "disconnected",
       activeAccountId: "native:upstox:B2",
       accounts,
     })).toBe(true);
   });
 
-  it("uses OpenAlgo connection truth whenever OpenAlgo owns the data scope", () => {
+  it("ignores stale transport status and binds availability to the selected native account", () => {
     expect(resolveScopedAccountReadsEnabled({
-      mode: "live",
-      apiKey: "configured-key",
-      openAlgoStatus: "disconnected",
-      activeAccountId: null,
-      accounts: [account({})],
+      mode: "live", apiKey: "stale", connectionStatus: "connected", accounts: [], activeAccountId: null,
     })).toBe(false);
-    expect(resolveScopedAccountReadsEnabled({
-      mode: "live",
-      apiKey: "configured-key",
-      openAlgoStatus: "connected",
-      activeAccountId: null,
-      accounts: [account({ status: "disconnected" })],
-    })).toBe(true);
   });
+
 });

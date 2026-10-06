@@ -9,21 +9,22 @@ FlintTrade is an AGPL-3.0 monorepo for self-hosted trading software: a React
 terminal, Python backend and services, Rust/PyO3 tick engine, Electron desktop
 shell, shared design system and public documentation site.
 
-FlintTrade owns its backend and native broker gateway. OpenAlgo is an optional
-external integration. Its development copy under `.local/external/openalgo/`
-is not bundled or a tracked submodule.
-
 Current source version: v0.0.1 (tracked in `VERSION`).
 
 ## Current Sources of Truth
 
 - `docs/TECH_STACK.md` explains dependency purposes and links manifests and lockfiles.
+
 - `docs/DEVELOPER_GUIDE.md` maps the packages and contributor workflow.
+
 - `VERSION`, `PLAN.md` and the handoff in root `AGENTS.md` describe release and work status.
+
 - Widget, broker and package catalogue tests own their count pins; completed test runs supply test totals.
+
 - `packages/apps/terminal/src/main.tsx` defines routes and aliases; `src/layout/widgetFactory.tsx` defines widgets; `src/layout/workspacePresets.ts` defines FlexLayout presets.
+
 - `docs/CI.md` describes current verification and cross-platform checks.
-- Root `AGENTS.md`, `.env.example` and `docs/setup/QUICKSTART.md` govern configuration. Native broker credentials use the encrypted gateway vault; OpenAlgo manages its own bridge-path broker authentication.
+
 
 ## Workflow
 

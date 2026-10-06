@@ -1,8 +1,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
-import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { ConnectionStep } from "./ConnectionStep";
@@ -29,7 +28,7 @@ describe("ConnectionStep", () => {
     setupMocks.brokerConnectProps = null;
     act(() => {
       useBrokerStore.setState({ accounts: [], activeAccountId: null });
-      useConnectionStore.setState({ host: "", apiKey: "", wsUrl: "" });
+      useConnectionStore.setState({ apiKey: "" });
     });
   });
 
@@ -37,133 +36,44 @@ describe("ConnectionStep", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not present OpenAlgo as the primary connect CTA", () => {
+  it("keeps brokerless Practice as the primary connect CTA", () => {
     const onComplete = vi.fn();
     render(<ConnectionStep onComplete={onComplete} />);
 
     const skip = screen.getByRole("button", { name: /continue without a broker/i });
     expect(skip).toBeEnabled();
-    expect(screen.getByText(/SandboxEngine/i)).toBeInTheDocument();
+    expect(screen.getByText(/simulated fills, no real money/i)).toBeInTheDocument();
+    expect(screen.queryByText(/SandboxEngine/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Settings fallback/i)).toBeInTheDocument();
     expect(screen.queryByText(/Recommended/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/openalgo-compatible url/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
 
     fireEvent.click(skip);
-    expect(onComplete).toHaveBeenCalledWith({
-      host: "",
-      port: "5000",
-      apiKey: "",
-      wsPort: "8765",
-    });
+    expect(onComplete).toHaveBeenCalledWith({ brokerConnected: false });
   });
 
-  it("does not commit untested values to the connection store when Test Connection runs", async () => {
-    // Item 4: the old handleTest wrote host/apiKey into connectionStore BEFORE
-    // the test ran, so a failed test still repointed the app at an unverified
-    // host. The test must exercise the candidate values only; the store is
-    // written only after the explicit Continue save succeeds.
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify({ status: "error", message: "unreachable" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+  it("records brokerless continuation through its own callback", () => {
+    const onComplete = vi.fn();
+    const onContinueWithoutBroker = vi.fn();
+    render(
+      <ConnectionStep
+        onComplete={onComplete}
+        onContinueWithoutBroker={onContinueWithoutBroker}
+      />,
     );
-    vi.stubGlobal("fetch", fetchMock);
 
-    render(<ConnectionStep onComplete={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
-
-    fireEvent.change(screen.getByLabelText(/openalgo-compatible url/i), {
-      target: { value: "http://unverified-host:5000" },
-    });
-    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
-      target: { value: "candidate-api-key" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-
-    // The candidate values went to the backend test endpoint...
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/ft-api/v1/test-connection");
-    // ...but the live connection store was NOT touched.
-    expect(useConnectionStore.getState().host).toBe("");
-    expect(useConnectionStore.getState().apiKey).toBe("");
-  });
-
-  it("persists one complete OpenAlgo configuration before advancing", async () => {
-    const onComplete = vi.fn();
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({ status: "ok", message: "saved" }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ));
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ConnectionStep onComplete={onComplete} />);
-    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
-    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
-      target: { value: "candidate-api-key" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
-
-    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/ft-api/v1/config/openalgo",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          api_key: "candidate-api-key",
-          host: DEFAULT_OPENALGO_HOST,
-          port: "5000",
-          ws_port: "8765",
-        }),
-      }),
-    );
-    expect(useConnectionStore.getState()).toEqual(expect.objectContaining({
-      host: DEFAULT_OPENALGO_HOST,
-      apiKey: "candidate-api-key",
-      wsUrl: "ws://127.0.0.1:8765",
-    }));
-  });
-
-  it("keeps the wizard on the connection step when persistence fails", async () => {
-    const onComplete = vi.fn();
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ status: "error", message: "workspace locked" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    )));
-
-    render(<ConnectionStep onComplete={onComplete} />);
-    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
-    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
-      target: { value: "candidate-api-key" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("workspace locked");
+    fireEvent.click(screen.getByRole("button", { name: /continue without a broker/i }));
+    expect(onContinueWithoutBroker).toHaveBeenCalledTimes(1);
     expect(onComplete).not.toHaveBeenCalled();
-    expect(useConnectionStore.getState().apiKey).toBe("");
   });
 
-  it("does not advance when the backend reports an incomplete hot reload", async () => {
-    const onComplete = vi.fn();
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ status: "partial", message: "tick capture requires a restart" }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    )));
 
-    render(<ConnectionStep onComplete={onComplete} />);
-    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
-    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
-      target: { value: "candidate-api-key" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/requires a restart/i);
-    expect(onComplete).not.toHaveBeenCalled();
-    expect(useConnectionStore.getState().apiKey).toBe("");
-  });
+
+
+
+
+
 
   it("shows the native connect (with the risk note) after selecting the FlintTrade Native tab", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
@@ -246,15 +156,15 @@ describe("ConnectionStep", () => {
     expect(note).toHaveTextContent(/re-authenticate/i);
   });
 
-  it("allows continuing when a gateway broker account is connected", () => {
+  it("rejects a retired account source even when marked connected", () => {
     act(() => {
       useBrokerStore.setState({
         activeAccountId: null,
         accounts: [
           {
-            account_id: "OA1",
+            account_id: "retired-account",
             broker: "zerodha",
-            label: "OpenAlgo Zerodha",
+            label: "Retired account",
             status: "connected",
             connected_at: null,
             error_message: null,
@@ -268,7 +178,7 @@ describe("ConnectionStep", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
-    expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /connect dhan or neo/i })).toBeDisabled();
   });
 
   it("keeps continuing disabled for stale broker accounts", () => {
@@ -304,7 +214,7 @@ describe("ConnectionStep", () => {
           {
             account_id: "N1",
             broker: "kotakneo",
-            label: "Neo via OpenAlgo",
+            label: "Neo via native broker",
             status: "connected",
             connected_at: null,
             error_message: null,

@@ -1,7 +1,7 @@
 [project]
 name = "flinttrade-backtest"
 version = "0.0.1"
-description = "Simulator, performance metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 101 strategies"
+description = "Simulator, performance metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 94 strategy template modules"
 requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
@@ -14,7 +14,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "flask>=3.0",
     "scipy>=1.18.1",
-    "quantstats>=0.0.62",
+    "quantstats>=0.0.86",
 ]
 
 [project.optional-dependencies]

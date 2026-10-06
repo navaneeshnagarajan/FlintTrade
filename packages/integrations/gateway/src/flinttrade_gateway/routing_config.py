@@ -239,6 +239,9 @@ class RoutingConfig:
 
     def _validate(self) -> None:
         registered = set(self.registered)
+        for selector in registered:
+            if parse_selector(selector)[0] == "openalgo":
+                raise RoutingConfigError("retired broker adapter is unavailable")
 
         # Every selector referenced anywhere must parse to (adapter_id, account_id)
         # and appear in ``registered``.
@@ -254,6 +257,8 @@ class RoutingConfig:
             referenced.append((sel, "brokers.failover.order"))
 
         for selector, path in referenced:
+            if not selector:
+                continue
             try:
                 adapter_id, account_id = parse_selector(selector)
             except ValueError as exc:
@@ -261,6 +266,8 @@ class RoutingConfig:
                     f"invalid routing selector {selector!r} at {path}: "
                     "must be 'adapter_id:account_id'"
                 ) from exc
+            if adapter_id == "openalgo":
+                raise RoutingConfigError("retired broker adapter is unavailable")
             if registered and selector not in registered:
                 raise RoutingConfigError(
                     f"routing selector {selector!r} at {path} is not in "

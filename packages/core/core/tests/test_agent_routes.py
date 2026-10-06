@@ -100,7 +100,7 @@ def _make_app(broker_router: object | None = None) -> Flask:
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["BROKER_ROUTER"] = broker_router if broker_router is not None else object()
-    app.config["OPENALGO_CLIENT"] = object()
+    app.config["BROKER_CLIENT"] = object()
     app.config["SAFETY"] = SafetySystem(SafetyConfig(check_market_hours=False))
     app.config["SAFETY_CONFIG_READY"] = True
     app.config["PENDING_ORDER_QUEUE"] = MagicMock()
@@ -108,9 +108,7 @@ def _make_app(broker_router: object | None = None) -> Flask:
         "_TimeScheduler",
         (),
         {
-            "now_ist": staticmethod(
-                lambda: datetime.fromisoformat("2026-07-13T10:00:00+05:30")
-            ),
+            "now_ist": staticmethod(lambda: datetime.fromisoformat("2026-07-13T10:00:00+05:30")),
             "get_market_session": staticmethod(
                 lambda exchange, *, on, symbol: (
                     (wall_time(9, 15), wall_time(15, 30))
@@ -125,7 +123,13 @@ def _make_app(broker_router: object | None = None) -> Flask:
 
 
 def _start_body() -> dict:
-    return {"symbols": ["RELIANCE"], "exchange": "NSE", "cycle_interval_sec": 1}
+    return {
+        "symbols": ["RELIANCE"],
+        "exchange": "NSE",
+        "cycle_interval_sec": 1,
+        "broker": "dhan",
+        "account_id": "default",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -242,14 +246,16 @@ def test_no_jwt_401(monkeypatch):
     assert resp.status_code == 401
 
 
-def test_practice_mode_403(monkeypatch):
+def test_practice_mode_requires_the_original_full_session_token(monkeypatch):
     monkeypatch.setattr(
         order_routes_mod,
         "_decode_request_payload",
         lambda: {"mode": "practice", "sub": "user-1", "jti": "jti-1"},
     )
     resp = _make_app().test_client().post("/api/v1/ai/agent/start", json=_start_body())
-    assert resp.status_code == 403
+    # Claims mocked for the legacy routing decision are not Practice authority.
+    # The new isolated runtime re-verifies the original signed session token.
+    assert resp.status_code == 401
 
 
 def test_missing_acl_grant_403_with_instruction(monkeypatch, live_auth):
@@ -315,14 +321,12 @@ def test_start_wires_gated_executor_with_agent_principal(live_auth):
     assert ctx.actor_type == "agent"
     assert ctx.actor_id == "autonomous-trader"
     assert ctx.mode == "live"
-    assert ctx.selector == "openalgo:default"
+    assert ctx.selector == "dhan:default"
     # The mid-flight revocation brake is wired.
     assert executor._pre_dispatch_check is not None  # noqa: SLF001
     assert callable(executor._router_provider)  # noqa: SLF001
     assert callable(trader.kwargs["entry_intent_sink"])
-    assert trader.kwargs["clock"]() == datetime.fromisoformat(
-        "2026-07-13T10:00:00+05:30"
-    )
+    assert trader.kwargs["clock"]() == datetime.fromisoformat("2026-07-13T10:00:00+05:30")
     assert trader.kwargs["market_session_provider"](
         "NSE",
         "RELIANCE",
@@ -366,7 +370,7 @@ async def test_agent_entry_sink_persists_only_order_target_and_session_metadata(
 
     assert result == {"id": "intent-1", "status": "pending"}
     _, kwargs = queue.enqueue.call_args
-    assert kwargs["adapter_id"] == "openalgo"
+    assert kwargs["adapter_id"] == "dhan"
     assert kwargs["account_id"] == "default"
     assert kwargs["source"] == "autonomous-agent"
     assert kwargs["intent_type"] == "entry"
@@ -389,11 +393,58 @@ def test_start_uses_configured_execution_default_when_target_omitted(live_auth):
         default_selector = "upstox:U1"  # public accessor the routes now read
 
     app = _make_app(broker_router=_Router())
-    resp = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+    resp = app.test_client().post(
+        "/api/v1/ai/agent/start",
+        json={key: value for key, value in _start_body().items() if key not in {"broker", "account_id"}},
+    )
     assert resp.status_code == 202
 
     executor = _FakeTrader.instances[-1].kwargs["order_executor"]
     assert executor._request_ctx.selector == "upstox:U1"  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_agent_acknowledgement_keeps_audit_without_recording_fill(
+    live_auth, monkeypatch, backend_lease_proof
+):
+    """The route-wired child executor receives no authoritative fill facts."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from flinttrade_core.models import Action, Order
+
+    router = MagicMock()
+    router.backend_lease_proof = backend_lease_proof
+    router.place_order = AsyncMock(return_value="AGENT-ACK")
+    app = _make_app(router)
+    app.config["SAFETY"].check_order = MagicMock(return_value=[])
+    store = MagicMock()
+    audit = MagicMock()
+    app.config.update(TRADE_STORAGE=store, AUDIT=audit)
+    state = SimpleNamespace(
+        total_balance=100000.0,
+        daily_pnl=0.0,
+        starting_capital=100000.0,
+        ltp_for=lambda _order: 100.0,
+        admission_for=lambda _index: SimpleNamespace(
+            positions=[], used_margin=0.0, net_delta=0.0, net_vega=0.0
+        ),
+    )
+    monkeypatch.setattr(
+        "flinttrade_core.smart_order_routes.gather_portfolio_state", AsyncMock(return_value=state)
+    )
+    monkeypatch.setattr("flinttrade_core.auth_routes._is_jti_revoked", lambda _jti: False)
+
+    response = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+    assert response.status_code == 202
+    executor = _FakeTrader.instances[-1].kwargs["order_executor"]
+    decision = await executor.route_order(Order(symbol="RELIANCE", quantity="1", price="100", action=Action.BUY))
+
+    assert decision.passed, decision.error
+    router.place_order.assert_awaited_once()
+    audit.log_event.assert_called_once()
+    assert audit.log_event.call_args.args == ("ORDER_PLACED",)
+    store.insert_trade.assert_not_called()
 
 
 def test_double_start_409(live_auth):
@@ -423,7 +474,8 @@ def test_failed_construction_releases_the_slot(live_auth, monkeypatch):
     """If trader construction raises, the 'starting' sentinel is rolled back so
     the slot is not wedged forever."""
     monkeypatch.setattr(
-        mod, "_trader_factory",
+        mod,
+        "_trader_factory",
         lambda **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     resp = _make_app().test_client().post("/api/v1/ai/agent/start", json=_start_body())
@@ -1124,9 +1176,7 @@ def test_runtime_shutdown_cannot_finish_before_registered_thread_starts(
     monkeypatch.setattr(mod.threading, "Thread", _ControlledAgentThread)
 
     def issue_start() -> None:
-        start_status.append(
-            app.test_client().post("/api/v1/ai/agent/start", json=_start_body()).status_code
-        )
+        start_status.append(app.test_client().post("/api/v1/ai/agent/start", json=_start_body()).status_code)
 
     def issue_shutdown() -> None:
         shutdown_result.append(mod.shutdown_agent_runtime(app, timeout=1.0))
@@ -1177,3 +1227,69 @@ def test_stop_and_status_require_auth(monkeypatch):
     client = _make_app().test_client()
     assert client.get("/api/v1/ai/agent/status").status_code == 401
     assert client.post("/api/v1/ai/agent/stop", json={}).status_code == 401
+
+
+def test_approved_agent_entry_places_and_gtt_is_refused(live_auth, monkeypatch):
+    """An approved entry reaches the live place path. GTT does not."""
+    from types import SimpleNamespace
+
+    from flask import jsonify
+
+    calls: list[tuple[str, str]] = []
+
+    def _dispatch(action, body, _payload, *, adapter_id, account_id):
+        calls.append((action, str(body.get("variety") or "")))
+        assert adapter_id == "dhan"
+        assert account_id == "default"
+        return jsonify({"status": "success", "orderid": "AGENT-1"}), 200
+
+    monkeypatch.setattr(order_routes_mod, "_dispatch_live_order", _dispatch)
+    stopped = threading.Event()
+    thread = threading.Thread(target=stopped.wait, daemon=True)
+    thread.start()
+    trader = MagicMock()
+    trader.stop_requested = False
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.update(
+            {  # noqa: SLF001
+                "producer_ref": "prod-1",
+                "trader": trader,
+                "thread": thread,
+                "loop": None,
+                "params": {"broker": "dhan", "account_id": "default"},
+            }
+        )
+    approval = SimpleNamespace(
+        id="req-1",
+        source="autonomous-agent",
+        intent_type="entry",
+        producer_ref="prod-1",
+        adapter_id="dhan",
+        account_id="default",
+        order_params={
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 1,
+            "price": 1500,
+            "product": "MIS",
+        },
+        intent_context={"entry_price": 1500.0, "stop_loss": 1400.0, "take_profit": 1600.0},
+    )
+    app = _make_app()
+    try:
+        with app.test_request_context("/api/v1/action-center/approve/req-1", method="POST"):
+            placed = mod.dispatch_action_center_approval(approval)
+        assert placed.succeeded is True
+        assert placed.broker_order_id == "AGENT-1"
+        assert calls == [("place", "")]
+
+        approval.order_params = {**approval.order_params, "variety": "gtt"}
+        with app.test_request_context("/api/v1/action-center/approve/req-1", method="POST"):
+            refused = mod.dispatch_action_center_approval(approval)
+        assert refused.succeeded is False
+        assert refused.status_code == 422
+        assert calls == [("place", "")]
+    finally:
+        stopped.set()
+        thread.join(timeout=1.0)

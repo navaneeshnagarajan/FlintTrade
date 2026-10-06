@@ -50,7 +50,7 @@ export function isUnsupportedForBroker(error: unknown): boolean {
 // Shared types
 // ---------------------------------------------------------------------------
 
-/** Broker/account routing target. Defaults to the active native account in native-only Live mode, else OpenAlgo/default. */
+/** Broker/account routing target. Omitted fields require an exact selected native account. */
 export interface BrokerTarget {
   broker?: string;
   account_id?: string;
@@ -156,10 +156,8 @@ function targetQuery(target: BrokerTarget): Record<string, string | undefined> {
 
 function resolvedBrokerOrderTarget(target: BrokerTarget): Required<BrokerTarget> {
   const resolvedTarget = withNativeBrokerTarget(target);
-  return {
-    broker: resolvedTarget.broker ?? "openalgo",
-    account_id: resolvedTarget.account_id ?? "default",
-  };
+  if (!resolvedTarget.broker || !resolvedTarget.account_id) throw new Error("A connected native broker account is required.");
+  return { broker: resolvedTarget.broker, account_id: resolvedTarget.account_id };
 }
 
 function extractMessage(json: unknown): string | null {
@@ -178,10 +176,7 @@ async function request<T>(
   const mode = useModeStore.getState().mode;
   // Every non-GET here is a live broker-management WRITE (forever/GTT, super,
   // conditional-trigger, multi, cancel-all, cancel-smart). Fail closed on the
-  // same conditions as the primary order path: refuse while the OpenAlgo config
-  // is still hydrating after a reload (so a write can't fall through to the
-  // openalgo/default target on a transiently-empty apiKey), and when the
-  // selected native account is not confirmed connected.
+  // An exact, confirmed native selection is required for every broker write.
   if (method !== "GET") {
     assertNativeWriteTargetReadyOrThrow(
       mode,
@@ -247,7 +242,7 @@ export async function listForeverOrders(target: BrokerTarget = {}): Promise<Brok
 }
 
 export function placeForeverOrder(params: ForeverOrderPlaceParams): Promise<unknown> {
-  return request<unknown>("POST", "orders/forever", {
+  return request<unknown>("POST", "orders/place", {
     body: { variety: "gtt", ...withNativeBrokerTarget(params) },
   });
 }
@@ -334,13 +329,23 @@ export function cancelConditionalTrigger(
 // Batch + sweep verbs
 // ---------------------------------------------------------------------------
 
-/** Place a batch of typed orders — every leg passes SafetySystem L1–L5. */
-export function placeMultiOrder(
+/** Place each leg through ``POST /api/v1/orders/place``. */
+export async function placeMultiOrder(
   params: { orders: TypedOrderFields[] } & BrokerTarget,
-): Promise<unknown> {
-  return request<unknown>("POST", "orders/multi", {
-    body: withNativeBrokerTarget(params),
-  });
+): Promise<unknown[]> {
+  const { orders, ...target } = params;
+  if (!Array.isArray(orders) || orders.length === 0) {
+    throw new BrokerOrdersApiError("'orders' must be a non-empty list of order objects", 400);
+  }
+  const placed: unknown[] = [];
+  for (const order of orders) {
+    placed.push(
+      await request<unknown>("POST", "orders/place", {
+        body: withNativeBrokerTarget({ ...order, ...target }),
+      }),
+    );
+  }
+  return placed;
 }
 
 /** Cancel all open orders for a broker (optionally narrowed by tag/segment). */

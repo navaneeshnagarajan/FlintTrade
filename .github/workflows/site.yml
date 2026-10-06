@@ -1,35 +1,8 @@
 name: Site
 
 on:
-  pull_request:
-    branches: [main, dev]
-    types: [opened, synchronize, ready_for_review, reopened]
-    paths:
-      - 'packages/apps/site/**'
-      - 'packages/apps/terminal/**'
-      - 'packages/core/design-system/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'docs/**'
-      - 'packages/*/*/README.md'
-      - '.github/workflows/site.yml'
-  push:
-    branches: [main, dev]
-    paths:
-      - 'packages/apps/site/**'
-      - 'packages/apps/terminal/**'
-      - 'packages/core/design-system/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'docs/**'
-      - 'packages/*/*/README.md'
-      - '.github/workflows/site.yml'
-
-concurrency:
-  group: site-${{ github.ref }}
-  cancel-in-progress: true
+  # Test owns triggers, concurrency and the shared affected-surface plan.
+  workflow_call:
 
 # Least-privilege default: this workflow only reads the repo to build/test the site.
 permissions:

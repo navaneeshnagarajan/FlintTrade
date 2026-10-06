@@ -7,6 +7,7 @@ Endpoints
 GET  /v1/tax/summary?fy=2025-26  — TaxSummary JSON
 GET  /v1/tax/report?fy=2025-26   — Detailed breakdown by segment
 """
+
 from __future__ import annotations
 
 import logging
@@ -104,14 +105,11 @@ def _get_trades_for_fy(fy: str) -> list[TaxableTransaction]:
 
     starts_on = date(start_year, 4, 1)
     ends_before = date(start_year + 1, 4, 1)
-    return [
-        trade
-        for trade in _SAMPLE_TRADES
-        if starts_on <= date.fromisoformat(trade.date) < ends_before
-    ]
+    return [trade for trade in _SAMPLE_TRADES if starts_on <= date.fromisoformat(trade.date) < ends_before]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
 
 def _current_fy() -> str:
     """Return the current Indian fiscal year (e.g. ``"2026-27"``).
@@ -146,31 +144,33 @@ def tax_summary() -> tuple[Any, int]:
     summary = _generator.compute_pnl_by_segment(trades, fy)
     sample_meta = _sample_meta()
 
-    return jsonify({
-        "status": "success",
-        **sample_meta,
-        "data": {
-            "fy": summary.fy,
-            "equity_ltcg": summary.equity_ltcg,
-            "equity_stcg": summary.equity_stcg,
-            "intraday_pnl": summary.intraday_pnl,
-            "fno_pnl": summary.fno_pnl,
-            "commodity_pnl": summary.commodity_pnl,
-            "stt_paid": summary.stt_paid,
-            "turnover": summary.turnover,
-            "tax_liability_estimated": summary.tax_liability_estimated,
-            "ltcg_exemption_used": summary.ltcg_exemption_used,
-            "needs_audit": summary.needs_audit,
-            "audit_assessment": summary.audit_assessment,
-            "audit_assessment_reason": summary.audit_assessment_reason,
-            "tax_estimate_methodology": summary.tax_estimate_methodology,
-            "stt_methodology": summary.stt_methodology,
-            "stt_rate_provenance": summary.stt_rate_provenance,
-            "stt_rate_schedule": summary.stt_rate_schedule,
-            "trade_count": summary.trade_count,
+    return jsonify(
+        {
+            "status": "success",
             **sample_meta,
-        },
-    }), 200
+            "data": {
+                "fy": summary.fy,
+                "equity_ltcg": summary.equity_ltcg,
+                "equity_stcg": summary.equity_stcg,
+                "intraday_pnl": summary.intraday_pnl,
+                "fno_pnl": summary.fno_pnl,
+                "commodity_pnl": summary.commodity_pnl,
+                "stt_paid": summary.stt_paid,
+                "turnover": summary.turnover,
+                "tax_liability_estimated": summary.tax_liability_estimated,
+                "ltcg_exemption_used": summary.ltcg_exemption_used,
+                "needs_audit": summary.needs_audit,
+                "audit_assessment": summary.audit_assessment,
+                "audit_assessment_reason": summary.audit_assessment_reason,
+                "tax_estimate_methodology": summary.tax_estimate_methodology,
+                "stt_methodology": summary.stt_methodology,
+                "stt_rate_provenance": summary.stt_rate_provenance,
+                "stt_rate_schedule": summary.stt_rate_schedule,
+                "trade_count": summary.trade_count,
+                **sample_meta,
+            },
+        }
+    ), 200
 
 
 @tax_bp.route("/v1/tax/report", methods=["GET"])

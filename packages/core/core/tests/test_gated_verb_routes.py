@@ -2,8 +2,8 @@
 
 Covers the routes that expose ``BrokerRouter.execute_gated``'s 12-verb table:
 
-- ``/api/v1/orders/forever`` (place via the gated trio with ``variety="gtt"``,
-  modify/cancel via ``modify_forever`` / ``cancel_forever``, plus the listing)
+- ``/api/v1/orders/forever`` (place is refused; modify/cancel via
+  ``modify_forever`` / ``cancel_forever``, plus the listing)
 - ``/api/v1/orders/super`` (list / ``modify_super_order`` / ``cancel_super_order``)
 - ``/api/v1/orders/triggers`` (conditional trigger place/modify/cancel/list)
 - ``/api/v1/orders/multi`` (``place_multi_order``) and the gated
@@ -51,6 +51,8 @@ def _app(broker_router: object | None = None, safety: object | None = None, *, b
 
     if broker_router is not None and not isinstance(broker_router, BrokerRouter):
         broker_router.backend_lease_proof = backend_lease_factory()
+        if isinstance(broker_router, MagicMock):
+            broker_router.default_selector = "dhan:default"
     if safety is None:
         safety = _passing_safety()
     app = Flask(__name__)
@@ -107,6 +109,7 @@ def _app(broker_router: object | None = None, safety: object | None = None, *, b
     }
     state_adapter.forever_orders = AsyncMock(return_value=[forever_order])
     state_adapter.super_orders = AsyncMock(return_value=[super_order])
+
     def quote_rows(_session: object, symbols: list[str]) -> list[dict[str, Any]]:
         return [
             {
@@ -118,13 +121,11 @@ def _app(broker_router: object | None = None, safety: object | None = None, *, b
         ]
 
     state_adapter.quotes = AsyncMock(side_effect=quote_rows)
-    app.config["NATIVE_ADAPTERS"] = {
-        broker: state_adapter for broker in ("dhan", "indmoney", "upstox")
-    }
+    app.config["NATIVE_ADAPTERS"] = {broker: state_adapter for broker in ("dhan", "indmoney", "upstox")}
     registry = MagicMock()
     registry.get_session_for.return_value = object()
     app.config["REGISTRY"] = registry
-    app.config["OPENALGO_CLIENT"] = SimpleNamespace(
+    app.config["BROKER_CLIENT"] = SimpleNamespace(
         positionbook=AsyncMock(return_value=[]),
         holdings=AsyncMock(return_value=[]),
         funds=AsyncMock(
@@ -179,10 +180,7 @@ def _practice_headers() -> dict[str, str]:
     ids=("forever-cancel", "positions-exit-all"),
 )
 def test_extended_live_write_rejects_mode_header_mismatch_before_unlock_gate_or_router(
-    monkeypatch: pytest.MonkeyPatch,
-    method: str,
-    path: str,
-    body: dict[str, Any] | None, *, backend_lease_factory
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: dict[str, Any] | None, *, backend_lease_factory
 ) -> None:
     """A client mode assertion may narrow, never contradict, signed JWT authority."""
     import flinttrade_core.order_routes as order_routes_module
@@ -266,7 +264,8 @@ def _app_with_native_state(
     adapter_id: str,
     account_id: str,
     positions: list[Any] | None = None,
-    funds: dict[str, Any] | None = None, backend_lease_factory
+    funds: dict[str, Any] | None = None,
+    backend_lease_factory,
 ) -> tuple[Flask, MagicMock, MagicMock]:
     app = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory)
     session = object()
@@ -321,7 +320,7 @@ def test_gated_target_uses_execution_default_only_when_target_omitted(*, backend
     with app.app_context():
         assert _gated_target({}) == ("upstox", "U1")
         assert _gated_target({"broker": "dhan"}) == ("dhan", "default")
-        assert _gated_target({"account_id": "D1"}) == ("openalgo", "D1")
+        assert _gated_target({"account_id": "D1"}) == ("", "D1")
 
 
 # ---------------------------------------------------------------------------
@@ -330,30 +329,51 @@ def test_gated_target_uses_execution_default_only_when_target_omitted(*, backend
 
 
 def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_factory) -> None:
-    """POST /forever rides the gated place trio with variety="gtt" + OCO legs."""
+    """GTT is refused on place. POST /forever does not call the broker."""
+    from flinttrade_core.order_routes import forever_place
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
     router = MagicMock()
     router.place_order = AsyncMock(return_value="GTT-77")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    safety = _passing_safety()
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     body = {
-        "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1,
-        "pricetype": "LIMIT", "price": "2900", "trigger_price": "2890",
-        "product": "CNC", "validity": "DAY",
-        "price1": "2800", "trigger_price1": "2805", "quantity1": "5",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": 1,
+        "pricetype": "LIMIT",
+        "price": "2900",
+        "trigger_price": "2890",
+        "product": "CNC",
+        "validity": "DAY",
+        "variety": "gtt",
+        "price1": "2800",
+        "trigger_price1": "2805",
+        "quantity1": "5",
         "broker": "dhan",
     }
-    resp = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["status"] == "success"
-    kw = router.place_order.await_args.kwargs
-    order = kw["order"]
-    assert order.variety == "gtt"
-    assert order.validity == "DAY"
-    assert (order.price1, order.trigger_price1, order.quantity1) == ("2800", "2805", "5")
-    assert kw["hint"].adapter_id == "dhan"
+    refused = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
+    assert refused.status_code == 501
+    forever_doc = forever_place.__doc__ or ""
+    assert "501" in forever_doc
+    assert "gtt_unsupported" in forever_doc
+    assert "is the place path" not in forever_doc
+    router.place_order.assert_not_called()
+    resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
+    assert resp.status_code == 422
+    assert resp.get_json()["code"] == "gtt_unsupported"
+    assert resp.get_json()["message"] == "Not placed. GTT orders aren't supported right now."
+    router.place_order.assert_not_called()
+    safety.check_order.assert_not_called()
 
 
 def test_forever_place_keeps_upstox_protective_rules_inside_gated_order(*, backend_lease_factory) -> None:
-    """Upstox TARGET/STOPLOSS prices survive typing and SafetyContext minting."""
+    """An Upstox GTT body is refused before SafetySystem or the router."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
     router = MagicMock()
     router.place_order = AsyncMock(return_value="GTT-88")
     safety = _passing_safety()
@@ -370,30 +390,25 @@ def test_forever_place_keeps_upstox_protective_rules_inside_gated_order(*, backe
         "target_trigger_type": "IMMEDIATE",
         "stop_loss_trigger_type": "IMMEDIATE",
         "product": "CNC",
+        "variety": "GTT",
         "broker": "upstox",
         "account_id": "U1",
     }
 
-    resp = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
+    resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
 
-    assert resp.status_code == 200
-    kw = router.place_order.await_args.kwargs
-    order = kw["order"]
-    assert order.variety == "gtt"
-    assert order.target_price == "3100"
-    assert order.stop_loss_price == "2800"
-    assert order.entry_trigger_type == "ABOVE"
-    assert order.target_trigger_type == "IMMEDIATE"
-    assert order.stop_loss_trigger_type == "IMMEDIATE"
-    assert kw["hint"].adapter_id == "upstox"
-    assert kw["hint"].account_id == "U1"
-    safety.check_order.assert_called_once()
+    assert resp.status_code == 422
+    assert resp.get_json()["code"] == "gtt_unsupported"
+    router.place_order.assert_not_called()
+    safety.check_order.assert_not_called()
 
 
 def test_forever_place_rejects_dhan_oco_fields_for_upstox(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="GTT-88")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
 
     resp = client.post(
         "/api/v1/orders/forever",
@@ -417,9 +432,12 @@ def test_forever_place_rejects_dhan_oco_fields_for_upstox(*, backend_lease_facto
 def test_forever_place_practice_jwt_rejected(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post(
-        "/api/v1/orders/forever", json={"symbol": "RELIANCE", "action": "BUY"},
+        "/api/v1/orders/forever",
+        json={"symbol": "RELIANCE", "action": "BUY"},
         headers=_practice_headers(),
     )
     assert resp.status_code == 403
@@ -436,9 +454,12 @@ def test_forever_place_requires_auth(*, backend_lease_factory) -> None:
 def test_forever_place_locked_live_jwt_rejected(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post(
-        "/api/v1/orders/forever", json={"symbol": "RELIANCE", "action": "BUY"},
+        "/api/v1/orders/forever",
+        json={"symbol": "RELIANCE", "action": "BUY"},
         headers=_locked_live_headers(),
     )
     assert resp.status_code == 403
@@ -449,7 +470,9 @@ def test_forever_place_locked_live_jwt_rejected(*, backend_lease_factory) -> Non
 def test_forever_place_malformed_body_returns_400(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post(
         "/api/v1/orders/forever",
         json={"symbol": "RELIANCE", "action": "SIDEWAYS", "broker": "dhan"},
@@ -487,17 +510,19 @@ def test_forever_modify_happy_path_mints_and_dispatches(*, backend_lease_factory
 
 def test_forever_modify_missing_changes_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.put(
-        "/api/v1/orders/forever/GTT-1", json={"broker": "dhan"}, headers=_live_headers()
-    )
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.put("/api/v1/orders/forever/GTT-1", json={"broker": "dhan"}, headers=_live_headers())
     assert resp.status_code == 400
     router.execute_gated.assert_not_called()
 
 
 def test_forever_modify_rejects_partial_dhan_replacement(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
 
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
@@ -512,7 +537,9 @@ def test_forever_modify_rejects_partial_dhan_replacement(*, backend_lease_factor
 
 def test_forever_modify_rejects_upstox_rules_for_dhan(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
 
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
@@ -723,7 +750,8 @@ def test_forever_modify_practice_jwt_rejected(*, backend_lease_factory) -> None:
     router = _gated_router()
     client = _app(broker_router=router, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.put(
-        "/api/v1/orders/forever/GTT-1", json={"changes": {"price": "1"}},
+        "/api/v1/orders/forever/GTT-1",
+        json={"changes": {"price": "1"}},
         headers=_practice_headers(),
     )
     assert resp.status_code == 403
@@ -749,10 +777,10 @@ def test_forever_modify_kill_switch_blocks(*, backend_lease_factory) -> None:
 
 def test_forever_cancel_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.delete(
-        "/api/v1/orders/forever/GTT-9?broker=dhan", headers=_live_headers()
-    )
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/forever/GTT-9?broker=dhan", headers=_live_headers())
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "cancel_forever"
@@ -779,7 +807,8 @@ def test_forever_unsupported_broker_returns_501(*, backend_lease_factory) -> Non
         router,
         _passing_safety(),
         adapter_id="kotakneo",
-        account_id="default", backend_lease_factory=backend_lease_factory
+        account_id="default",
+        backend_lease_factory=backend_lease_factory,
     )
     adapter.forever_orders = AsyncMock(
         return_value=[
@@ -813,9 +842,12 @@ def test_forever_unsupported_broker_returns_501(*, backend_lease_factory) -> Non
 
 
 def test_gated_write_no_router_returns_503(*, backend_lease_factory) -> None:
-    client = _app(broker_router=None, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=None, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.put(
-        "/api/v1/orders/forever/GTT-1", json={"changes": {"price": "1"}},
+        "/api/v1/orders/forever/GTT-1",
+        json={"changes": {"price": "1"}},
         headers=_live_headers(),
     )
     assert resp.status_code == 503
@@ -825,7 +857,9 @@ def test_gated_write_no_router_returns_503(*, backend_lease_factory) -> None:
 def test_gated_write_acl_refusal_returns_403(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.execute_gated = AsyncMock(side_effect=SafetyBypassError("actor not authorised"))
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.delete("/api/v1/orders/forever/GTT-1?broker=dhan", headers=_live_headers())
     assert resp.status_code == 403
     assert "refused" in resp.get_json()["message"].lower()
@@ -862,54 +896,27 @@ class _ReadRouter:
         return object()
 
 
-def test_forever_list_happy_path(*, backend_lease_factory) -> None:
-    client = _app(broker_router=_ReadRouter(_ReadAdapter()), backend_lease_factory=backend_lease_factory).test_client()
+@pytest.mark.parametrize("path", ["forever", "super", "triggers"])
+@pytest.mark.parametrize("broker", ["dhan", "upstox"])
+def test_native_listings_remain_frozen_without_provider_calls(path: str, broker: str, *, backend_lease_factory) -> None:
+    class PoisonRouter:
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"_session_provider", "_adapters"}:
+                raise AssertionError("Frozen HTTP listings must not access native authority")
+            return object.__getattribute__(self, name)
+
+    client = _app(broker_router=PoisonRouter(), backend_lease_factory=backend_lease_factory).test_client()
+    resp = client.get(f"/api/v1/orders/{path}?broker={broker}", headers=_live_headers())
+    assert resp.status_code == 409
+    assert "read cutover" in resp.get_json()["message"]
+    assert "data" not in resp.get_json()
+
+
+def test_native_listings_stay_frozen_without_router(*, backend_lease_factory) -> None:
+    client = _app(broker_router=None, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.get("/api/v1/orders/forever?broker=dhan", headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == [{"order_id": "GTT-1", "status": "PENDING"}]
-
-
-def test_super_list_happy_path(*, backend_lease_factory) -> None:
-    client = _app(broker_router=_ReadRouter(_ReadAdapter()), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.get("/api/v1/orders/super?broker=dhan", headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == [{"order_id": "SUP-1"}]
-
-
-def test_trigger_list_happy_path(*, backend_lease_factory) -> None:
-    client = _app(broker_router=_ReadRouter(_ReadAdapter()), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.get("/api/v1/orders/triggers?broker=dhan", headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == [{"alert_id": "AL-1"}]
-
-
-def test_list_unsupported_adapter_returns_501(*, backend_lease_factory) -> None:
-    """An adapter without the listing (e.g. the OpenAlgo bridge) 501s cleanly."""
-
-    class _Bare:
-        pass
-
-    client = _app(broker_router=_ReadRouter(_Bare()), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.get("/api/v1/orders/forever?broker=dhan", headers=_live_headers())
-    assert resp.status_code == 501
-    assert "forever_orders" in resp.get_json()["message"]
-
-
-def test_list_acl_refusal_returns_403(*, backend_lease_factory) -> None:
-    router = _ReadRouter(_ReadAdapter(), provider_exc=SafetyBypassError("actor not authorised"))
-    client = _app(broker_router=router, backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.get("/api/v1/orders/forever?broker=dhan", headers=_live_headers())
-    assert resp.status_code == 403
-
-
-def test_list_unknown_broker_returns_503(*, backend_lease_factory) -> None:
-    from flinttrade_gateway.exceptions import BrokerNotFoundError
-
-    router = _ReadRouter(_ReadAdapter(), provider_exc=BrokerNotFoundError("no session"))
-    client = _app(broker_router=router, backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.get("/api/v1/orders/forever?broker=upstox", headers=_live_headers())
-    assert resp.status_code == 503
-    assert "not connected" in resp.get_json()["message"].lower()
+    assert resp.status_code == 409
+    assert "read cutover" in resp.get_json()["message"]
 
 
 def test_list_practice_jwt_rejected(*, backend_lease_factory) -> None:
@@ -954,18 +961,14 @@ def test_super_modify_happy_path(*, backend_lease_factory) -> None:
     ],
 )
 def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
-    path: str,
-    reader_name: str, *, backend_lease_factory
+    path: str, reader_name: str, *, backend_lease_factory
 ) -> None:
     blocked = MagicMock(passed=False, layer="L1_ORDER", reason="quantity limit")
     safety = _passing_safety()
     safety.check_order.return_value = [blocked]
     router = _gated_router(result=None)
     app, adapter, _registry = _app_with_native_state(
-        router,
-        safety,
-        adapter_id="dhan",
-        account_id="D1", backend_lease_factory=backend_lease_factory
+        router, safety, adapter_id="dhan", account_id="D1", backend_lease_factory=backend_lease_factory
     )
     current = {
         "orderid": path.rsplit("/", 1)[-1],
@@ -1077,9 +1080,7 @@ def test_advanced_modify_cannot_spoof_authoritative_buy_as_sell(
             }
         )
     else:
-        current["legs"] = [
-            {"leg_name": "TARGET_LEG", "status": "PENDING", "price": "105"}
-        ]
+        current["legs"] = [{"leg_name": "TARGET_LEG", "status": "PENDING", "price": "105"}]
     setattr(adapter, reader_name, AsyncMock(return_value=[current]))
 
     response = app.test_client().put(
@@ -1096,7 +1097,9 @@ def test_advanced_modify_cannot_spoof_authoritative_buy_as_sell(
 
 def test_super_modify_missing_changes_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.put("/api/v1/orders/super/SUP-1", json={}, headers=_live_headers())
     assert resp.status_code == 400
     router.execute_gated.assert_not_called()
@@ -1104,10 +1107,10 @@ def test_super_modify_missing_changes_returns_400(*, backend_lease_factory) -> N
 
 def test_super_cancel_with_leg_query(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.delete(
-        "/api/v1/orders/super/SUP-1?leg=target_leg&broker=dhan", headers=_live_headers()
-    )
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/super/SUP-1?leg=target_leg&broker=dhan", headers=_live_headers())
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "cancel_super_order"
@@ -1117,7 +1120,9 @@ def test_super_cancel_with_leg_query(*, backend_lease_factory) -> None:
 def test_super_cancel_without_leg_omits_field(*, backend_lease_factory) -> None:
     """No ?leg= → the field stays out of the signed payload (adapter defaults ENTRY_LEG)."""
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.delete("/api/v1/orders/super/SUP-1?broker=dhan", headers=_live_headers())
     assert resp.status_code == 200
     assert "leg" not in router.execute_gated.await_args.kwargs["payload"]
@@ -1125,10 +1130,10 @@ def test_super_cancel_without_leg_omits_field(*, backend_lease_factory) -> None:
 
 def test_super_cancel_invalid_leg_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.delete(
-        "/api/v1/orders/super/SUP-1?leg=BANANA_LEG&broker=dhan", headers=_live_headers()
-    )
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/super/SUP-1?leg=BANANA_LEG&broker=dhan", headers=_live_headers())
     assert resp.status_code == 400
     router.execute_gated.assert_not_called()
 
@@ -1136,13 +1141,15 @@ def test_super_cancel_invalid_leg_returns_400(*, backend_lease_factory) -> None:
 def test_super_practice_jwt_rejected(*, backend_lease_factory) -> None:
     router = _gated_router()
     client = _app(broker_router=router, backend_lease_factory=backend_lease_factory).test_client()
-    assert client.put(
-        "/api/v1/orders/super/SUP-1", json={"changes": {"price": "1"}},
-        headers=_practice_headers(),
-    ).status_code == 403
-    assert client.delete(
-        "/api/v1/orders/super/SUP-1", headers=_practice_headers()
-    ).status_code == 403
+    assert (
+        client.put(
+            "/api/v1/orders/super/SUP-1",
+            json={"changes": {"price": "1"}},
+            headers=_practice_headers(),
+        ).status_code
+        == 403
+    )
+    assert client.delete("/api/v1/orders/super/SUP-1", headers=_practice_headers()).status_code == 403
     router.execute_gated.assert_not_called()
 
 
@@ -1151,7 +1158,9 @@ def test_super_unsupported_broker_returns_501(*, backend_lease_factory) -> None:
     router.execute_gated = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'upstox' does not support 'cancel_super_order'")
     )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.delete("/api/v1/orders/super/SUP-1?broker=upstox", headers=_live_headers())
     assert resp.status_code == 501
 
@@ -1169,25 +1178,20 @@ _TRIGGER_BODY = {
 
 def test_trigger_place_happy_path_carries_typed_legs(*, backend_lease_factory) -> None:
     router = _gated_router(result="AL-9")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == "AL-9"
-    kw = router.execute_gated.await_args.kwargs
-    assert kw["verb"] == "place_conditional_trigger"
-    assert kw["payload"]["condition"]["field"] == "LTP"
-    # Legs are typed Orders, so the signed canonical hash covers every field.
-    from flinttrade_core.models import Order
-
-    leg = kw["payload"]["orders"][0]
-    assert isinstance(leg, Order)
-    assert leg.symbol == "RELIANCE"
-    assert leg.quantity == "5"
+    assert resp.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
 
 
 def test_trigger_place_missing_condition_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     body = {k: v for k, v in _TRIGGER_BODY.items() if k != "condition"}
     resp = client.post("/api/v1/orders/triggers", json=body, headers=_live_headers())
     assert resp.status_code == 400
@@ -1196,7 +1200,9 @@ def test_trigger_place_missing_condition_returns_400(*, backend_lease_factory) -
 
 def test_trigger_place_bad_leg_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     body = {**_TRIGGER_BODY, "orders": [{"symbol": "RELIANCE", "action": "SIDEWAYS"}]}
     resp = client.post("/api/v1/orders/triggers", json=body, headers=_live_headers())
     assert resp.status_code == 400
@@ -1213,7 +1219,9 @@ def test_trigger_place_practice_jwt_rejected(*, backend_lease_factory) -> None:
 
 def test_trigger_modify_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.put("/api/v1/orders/triggers/AL-1", json=_TRIGGER_BODY, headers=_live_headers())
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
@@ -1221,9 +1229,119 @@ def test_trigger_modify_happy_path(*, backend_lease_factory) -> None:
     assert kw["payload"]["alert_id"] == "AL-1"
 
 
+@pytest.mark.parametrize("endpoint", ["/api/v1/orders/place", "/api/v1/orders/dhan/place"])
+@pytest.mark.parametrize("order_type,pricetype", [(" slm ", "SL-M"), ("SL-M", " slm ")])
+def test_place_stop_market_aliases_agree_for_laya_and_router(
+    monkeypatch, backend_lease_factory, endpoint, order_type, pricetype
+) -> None:
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    laya = process_laya()
+    laya.set_status(DecisionStatus.READY)
+    admit = MagicMock(wraps=laya.admit)
+    monkeypatch.setattr(laya, "admit", admit)
+    safety = _passing_safety()
+    router = _gated_router()
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+
+    response = client.post(
+        endpoint,
+        json={
+            **_TRIGGER_BODY["orders"][0],
+            "broker": "dhan",
+            "order_type": order_type,
+            "pricetype": pricetype,
+            "trigger_price": 2890,
+        },
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200, response.get_json()
+    admit.assert_called_once()
+    safety.check_order.assert_called_once()
+    router.place_order.assert_awaited_once()
+    assert admit.call_args.args[0].order_type == "SL-M"
+    assert safety.check_order.call_args.args[0].pricetype.value == "SL-M"
+    assert router.place_order.await_args.kwargs["order"].pricetype.value == "SL-M"
+
+
+@pytest.mark.parametrize("order_type,pricetype", [("LIMIT", "MARKET"), ("MARKET", "LIMIT")])
+@pytest.mark.parametrize("conflicting_leg", [0, 1])
+def test_trigger_modify_conflicting_types_rejected_before_safety_or_gate(
+    monkeypatch, backend_lease_factory, order_type, pricetype, conflicting_leg
+) -> None:
+    import flinttrade_engine.safety as safety_module
+
+    router = _gated_router(result=None)
+    safety = _passing_safety()
+    gate = MagicMock(wraps=safety_module.gate_broker_write)
+    monkeypatch.setattr(safety_module, "gate_broker_write", gate)
+    admission = MagicMock(wraps=safety.order_admission)
+    monkeypatch.setattr(safety, "order_admission", admission)
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+    orders = [{**_TRIGGER_BODY["orders"][0]}, {**_TRIGGER_BODY["orders"][0]}]
+    orders[conflicting_leg].update(order_type=order_type, pricetype=pricetype, price=2900)
+
+    response = client.put(
+        "/api/v1/orders/triggers/AL-1", json={**_TRIGGER_BODY, "orders": orders}, headers=_live_headers()
+    )
+
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json() == {"status": "error", "message": "Trigger validation failed"}
+    admission.assert_not_called()
+    safety.check_order.assert_not_called()
+    safety.l5_kill.validate.assert_not_called()
+    gate.assert_not_called()
+    router.execute_gated.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "type_fields,expected",
+    [
+        ({"order_type": " limit ", "pricetype": "LIMIT"}, "LIMIT"),
+        ({"order_type": "LIMIT", "pricetype": " limit "}, "LIMIT"),
+        ({"order_type": " limit "}, "LIMIT"),
+        ({"pricetype": " limit "}, "LIMIT"),
+        ({"order_type": " slm ", "pricetype": "SL-M"}, "SL-M"),
+        ({"order_type": "SL-M", "pricetype": " slm "}, "SL-M"),
+        ({}, "MARKET"),
+    ],
+)
+def test_trigger_modify_aliases_reach_safety_and_gate_as_the_same_typed_order(
+    monkeypatch, backend_lease_factory, type_fields, expected
+) -> None:
+    import flinttrade_engine.safety as safety_module
+
+    router = _gated_router(result=None)
+    safety = _passing_safety()
+    gate = MagicMock(wraps=safety_module.gate_broker_write)
+    monkeypatch.setattr(safety_module, "gate_broker_write", gate)
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+    leg = {**_TRIGGER_BODY["orders"][0], **type_fields, "price": 2900, "trigger_price": 2890}
+
+    response = client.put(
+        "/api/v1/orders/triggers/AL-1", json={**_TRIGGER_BODY, "orders": [leg]}, headers=_live_headers()
+    )
+
+    assert response.status_code == 200, response.get_json()
+    safety.check_order.assert_called_once()
+    gate.assert_called_once()
+    router.execute_gated.assert_awaited_once()
+    checked_order = safety.check_order.call_args.args[0]
+    assert checked_order.pricetype.value == expected
+    dispatched = router.execute_gated.await_args.kwargs
+    assert dispatched["verb"] == "modify_conditional_trigger"
+    assert dispatched["payload"]["orders"] == [checked_order]
+    assert gate.call_args.args[1] == dispatched["payload"]
+    assert isinstance(dispatched["safety_ctx"], safety_module.SafetyContext)
+
+
 def test_trigger_cancel_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.delete("/api/v1/orders/triggers/AL-1?broker=dhan", headers=_live_headers())
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
@@ -1236,7 +1354,9 @@ def test_trigger_unsupported_broker_returns_501(*, backend_lease_factory) -> Non
     router.execute_gated = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'indmoney' does not support 'place_conditional_trigger'")
     )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     body = {**_TRIGGER_BODY, "broker": "indmoney"}
     resp = client.post("/api/v1/orders/triggers", json=body, headers=_live_headers())
     assert resp.status_code == 501
@@ -1249,11 +1369,9 @@ def test_trigger_place_runs_full_safetysystem_per_leg(*, backend_lease_factory) 
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
-    assert resp.status_code == 200
-    # The single leg cleared the full risk pipeline before the gate was minted.
-    assert safety.check_order.call_count == 1
-    leg = safety.check_order.call_args.args[0]
-    assert leg.symbol == "RELIANCE"
+    assert resp.status_code == 501
+    safety.check_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 def test_trigger_place_over_limit_leg_blocked_by_l1_before_gate(*, backend_lease_factory) -> None:
@@ -1271,9 +1389,8 @@ def test_trigger_place_over_limit_leg_blocked_by_l1_before_gate(*, backend_lease
         "broker": "dhan",
     }
     resp = client.post("/api/v1/orders/triggers", json=body, headers=_live_headers())
-    assert resp.status_code == 403
-    assert "L1_ORDER" in resp.get_json()["message"]
-    router.execute_gated.assert_not_called()  # no gate minted
+    assert resp.status_code == 501
+    router.execute_gated.assert_not_called()
 
 
 def test_trigger_modify_over_limit_leg_blocked_by_l1(*, backend_lease_factory) -> None:
@@ -1306,17 +1423,15 @@ def test_trigger_place_native_l2_blocks_before_gate(*, backend_lease_factory) ->
         adapter_id="dhan",
         account_id="D1",
         positions=[Position(symbol="INFY", exchange="NSE", product="MIS", quantity="50")],
-        funds={"used_margin": "0", "total_balance": "100000"}, backend_lease_factory=backend_lease_factory
+        funds={"used_margin": "0", "total_balance": "100000"},
+        backend_lease_factory=backend_lease_factory,
     )
     body = {**_TRIGGER_BODY, "account_id": "D1"}
     resp = app.test_client().post("/api/v1/orders/triggers", json=body, headers=_live_headers())
 
-    assert resp.status_code == 403
-    assert "L2_POSITION" in resp.get_json()["message"]
+    assert resp.status_code == 501
     router.execute_gated.assert_not_called()
-    registry.get_session_for.assert_called_once_with("dhan", "D1")
-    assert adapter.positions.await_count == 2
-    adapter.funds.assert_awaited_once()
+    registry.get_session_for.assert_not_called()
 
 
 def test_gated_verb_bounds_broker_rejection_message(*, backend_lease_factory) -> None:
@@ -1327,19 +1442,21 @@ def test_gated_verb_bounds_broker_rejection_message(*, backend_lease_factory) ->
     router.execute_gated = AsyncMock(
         side_effect=OrderRejectedByBroker("Dhan rejected: segment not enabled for this account")
     )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
-    assert resp.status_code == 502
-    assert resp.get_json()["message"] == "Conditional trigger placement failed"
+    assert resp.status_code == 501
+    assert resp.get_json()["message"] == "Orders are placed through /api/v1/orders/place."
 
 
 def test_gated_verb_bounds_mapping_value_error_message(*, backend_lease_factory) -> None:
     """Adapter mapping ValueErrors must not expose internals in responses."""
     router = MagicMock()
-    router.execute_gated = AsyncMock(
-        side_effect=ValueError("No Dhan segment for exchange 'XYZ'")
-    )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    router.execute_gated = AsyncMock(side_effect=ValueError("No Dhan segment for exchange 'XYZ'"))
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
         json={"changes": _dhan_forever_changes(), "broker": "dhan"},
@@ -1393,8 +1510,7 @@ def _batch_state(*admissions: SimpleNamespace) -> SimpleNamespace:
 
 @pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
 def test_batch_writes_accumulate_position_count_before_gate(
-    path: str,
-    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
+    path: str, monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
 ) -> None:
     from flinttrade_core import order_routes
 
@@ -1413,24 +1529,25 @@ def test_batch_writes_accumulate_position_count_before_gate(
     else:
         monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: state)
     router = _gated_router()
-    response = _app(router, _real_safety(max_positions=1), backend_lease_factory=backend_lease_factory).test_client().post(
-        path,
-        json=_batch_request(path),
-        headers=_live_headers(),
+    response = (
+        _app(router, _real_safety(max_positions=1), backend_lease_factory=backend_lease_factory)
+        .test_client()
+        .post(
+            path,
+            json=_batch_request(path),
+            headers=_live_headers(),
+        )
     )
 
-    assert response.status_code == 403
-    assert "L2_POSITION" in response.get_json()["message"]
-    if path.endswith("/multi"):
-        router.place_order.assert_awaited_once()
-    else:
-        router.execute_gated.assert_not_called()
+    assert response.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in response.get_json()["message"]
+    router.place_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 @pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
 def test_batch_writes_accumulate_margin_before_gate(
-    path: str,
-    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
+    path: str, monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
 ) -> None:
     from flinttrade_core import order_routes
 
@@ -1444,24 +1561,25 @@ def test_batch_writes_accumulate_margin_before_gate(
     else:
         monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: state)
     router = _gated_router()
-    response = _app(router, _real_safety(max_margin_pct=60.0), backend_lease_factory=backend_lease_factory).test_client().post(
-        path,
-        json=_batch_request(path),
-        headers=_live_headers(),
+    response = (
+        _app(router, _real_safety(max_margin_pct=60.0), backend_lease_factory=backend_lease_factory)
+        .test_client()
+        .post(
+            path,
+            json=_batch_request(path),
+            headers=_live_headers(),
+        )
     )
 
-    assert response.status_code == 403
-    assert "L2_POSITION" in response.get_json()["message"]
-    if path.endswith("/multi"):
-        router.place_order.assert_awaited_once()
-    else:
-        router.execute_gated.assert_not_called()
+    assert response.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in response.get_json()["message"]
+    router.place_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 @pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
 def test_batch_writes_accumulate_greeks_before_gate(
-    path: str,
-    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
+    path: str, monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
 ) -> None:
     from flinttrade_core import order_routes
 
@@ -1475,18 +1593,20 @@ def test_batch_writes_accumulate_greeks_before_gate(
     else:
         monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: state)
     router = _gated_router()
-    response = _app(router, _real_safety(max_net_delta=50.0), backend_lease_factory=backend_lease_factory).test_client().post(
-        path,
-        json=_batch_request(path),
-        headers=_live_headers(),
+    response = (
+        _app(router, _real_safety(max_net_delta=50.0), backend_lease_factory=backend_lease_factory)
+        .test_client()
+        .post(
+            path,
+            json=_batch_request(path),
+            headers=_live_headers(),
+        )
     )
 
-    assert response.status_code == 403
-    assert "L3_PORTFOLIO" in response.get_json()["message"]
-    if path.endswith("/multi"):
-        router.place_order.assert_awaited_once()
-    else:
-        router.execute_gated.assert_not_called()
+    assert response.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in response.get_json()["message"]
+    router.place_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 def test_multi_place_happy_path(*, backend_lease_factory) -> None:
@@ -1495,11 +1615,10 @@ def test_multi_place_happy_path(*, backend_lease_factory) -> None:
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/multi", json=_MULTI_BODY, headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == {"order_ids": ["OID-0", "OID-1"]}
-    assert [call.kwargs["order"].symbol for call in router.place_order.await_args_list] == ["RELIANCE", "TCS"]
-    # L1-L5 ran immediately before each independently gated leg.
-    assert safety.check_order.call_count == 2
+    assert resp.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
+    router.place_order.assert_not_called()
+    safety.check_order.assert_not_called()
 
 
 def test_multi_place_safety_block_returns_403(*, backend_lease_factory) -> None:
@@ -1509,8 +1628,7 @@ def test_multi_place_safety_block_returns_403(*, backend_lease_factory) -> None:
     router = _gated_router()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/multi", json=_MULTI_BODY, headers=_live_headers())
-    assert resp.status_code == 403
-    assert "L1_ORDER" in resp.get_json()["message"]
+    assert resp.status_code == 501
     router.place_order.assert_not_called()
 
 
@@ -1525,22 +1643,22 @@ def test_multi_place_native_l2_blocks_before_gate(*, backend_lease_factory) -> N
         adapter_id="upstox",
         account_id="U1",
         positions=[Position(symbol="INFY", exchange="NSE", product="MIS", quantity="50")],
-        funds={"used_margin": "0", "total_balance": "100000"}, backend_lease_factory=backend_lease_factory
+        funds={"used_margin": "0", "total_balance": "100000"},
+        backend_lease_factory=backend_lease_factory,
     )
     body = {**_MULTI_BODY, "account_id": "U1"}
     resp = app.test_client().post("/api/v1/orders/multi", json=body, headers=_live_headers())
 
-    assert resp.status_code == 403
-    assert "L2_POSITION" in resp.get_json()["message"]
+    assert resp.status_code == 501
     router.execute_gated.assert_not_called()
-    registry.get_session_for.assert_called_once_with("upstox", "U1")
-    assert adapter.positions.await_count == 2
-    adapter.funds.assert_awaited_once()
+    registry.get_session_for.assert_not_called()
 
 
 def test_multi_place_empty_orders_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post("/api/v1/orders/multi", json={"orders": []}, headers=_live_headers())
     assert resp.status_code == 400
     router.execute_gated.assert_not_called()
@@ -1548,7 +1666,9 @@ def test_multi_place_empty_orders_returns_400(*, backend_lease_factory) -> None:
 
 def test_multi_place_bad_leg_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     body = {"orders": [{"symbol": "X", "quantity": "ten"}], "broker": "upstox"}
     resp = client.post("/api/v1/orders/multi", json=body, headers=_live_headers())
     assert resp.status_code == 400
@@ -1568,22 +1688,27 @@ def test_multi_place_unsupported_broker_returns_501(*, backend_lease_factory) ->
     router.place_order = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'dhan' does not support 'place_multi_order'")
     )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post("/api/v1/orders/multi", json={**_MULTI_BODY, "broker": "dhan"}, headers=_live_headers())
     assert resp.status_code == 501
 
 
 # ---------------------------------------------------------------------------
-# cancel-all — gated verb for explicitly-named native brokers; OpenAlgo bridge
+# cancel-all — gated verb for explicitly-named native brokers; native broker bridge
 # cancel-all is disabled until it has a gated BrokerRouter verb.
 # ---------------------------------------------------------------------------
 
 
 def test_cancel_all_named_native_broker_routes_gated(*, backend_lease_factory) -> None:
     router = _gated_router(result={"status": "ok"})
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post(
-        "/api/v1/orders/cancel-all", json={"broker": "upstox", "tag": "ALGO1", "segment": "EQ"},
+        "/api/v1/orders/cancel-all",
+        json={"broker": "upstox", "tag": "ALGO1", "segment": "EQ"},
         headers=_live_headers(),
     )
     assert resp.status_code == 200
@@ -1601,7 +1726,9 @@ def test_native_cancel_all_with_strategy_scope_fails_closed(*, backend_lease_fac
     fails closed with 400 and the router is NEVER invoked (Codex-wave review
     finding 3)."""
     router = _gated_router(result={"status": "ok"})
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post(
         "/api/v1/orders/cancel-all",
         json={"broker": "upstox", "strategy": "FlintScalper"},
@@ -1612,21 +1739,20 @@ def test_native_cancel_all_with_strategy_scope_fails_closed(*, backend_lease_fac
     router.execute_gated.assert_not_called()
 
 
-def test_cancel_all_without_broker_uses_gated_openalgo_target(monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory) -> None:
-    """The default OpenAlgo sweep must use BrokerRouter, never the raw forward."""
-    import flinttrade_core.order_routes as orr
-
-    def _fake_forward(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]:
-        raise AssertionError(f"raw OpenAlgo forward reached for {endpoint}: {body}")
-
-    monkeypatch.setattr(orr, "_forward_to_openalgo", _fake_forward)
+def test_cancel_all_without_broker_uses_gated_dhan_target(
+    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
+) -> None:
+    """The default native broker sweep must use BrokerRouter, never the raw forward."""
     router = _gated_router(result={"status": "ok"})
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    router.default_selector = "dhan:default"
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post("/api/v1/orders/cancel-all", json={}, headers=_live_headers())
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "cancel_all_orders"
-    assert kw["hint"].adapter_id == "openalgo"
+    assert kw["hint"].adapter_id == "dhan"
 
 
 def test_cancel_all_unsupported_broker_returns_501(*, backend_lease_factory) -> None:
@@ -1634,10 +1760,10 @@ def test_cancel_all_unsupported_broker_returns_501(*, backend_lease_factory) -> 
     router.execute_gated = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'kotakneo' does not support 'cancel_all_orders'")
     )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.post(
-        "/api/v1/orders/cancel-all", json={"broker": "kotakneo"}, headers=_live_headers()
-    )
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.post("/api/v1/orders/cancel-all", json={"broker": "kotakneo"}, headers=_live_headers())
     assert resp.status_code == 501
 
 
@@ -1648,10 +1774,10 @@ def test_cancel_all_unsupported_broker_returns_501(*, backend_lease_factory) -> 
 
 def test_smart_cancel_happy_path_with_segment(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.delete(
-        "/api/v1/orders/smart/DRV-1?segment=DERIVATIVE&broker=indmoney", headers=_live_headers()
-    )
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/smart/DRV-1?segment=DERIVATIVE&broker=indmoney", headers=_live_headers())
     assert resp.status_code == 200
     assert resp.get_json()["orderid"] == "DRV-1"
     kw = router.execute_gated.await_args.kwargs
@@ -1672,7 +1798,9 @@ def test_smart_cancel_unsupported_broker_returns_501(*, backend_lease_factory) -
     router.execute_gated = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'dhan' does not support 'cancel_smart_order'")
     )
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.delete("/api/v1/orders/smart/DRV-1?broker=dhan", headers=_live_headers())
     assert resp.status_code == 501
 
@@ -1682,8 +1810,12 @@ def test_smart_cancel_unsupported_broker_returns_501(*, backend_lease_factory) -
 # ---------------------------------------------------------------------------
 
 _CONVERT_BODY = {
-    "symbol": "RELIANCE", "exchange": "NSE", "from_product": "MIS",
-    "to_product": "CNC", "position_type": "LONG", "quantity": 5,
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "from_product": "MIS",
+    "to_product": "CNC",
+    "position_type": "LONG",
+    "quantity": 5,
     "broker": "dhan",
 }
 
@@ -1697,11 +1829,10 @@ def test_positions_convert_happy_path(*, backend_lease_factory) -> None:
         _passing_safety(),
         adapter_id="dhan",
         account_id="default",
-        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")], backend_lease_factory=backend_lease_factory
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")],
+        backend_lease_factory=backend_lease_factory,
     )
-    resp = app.test_client().post(
-        "/api/v1/positions/convert", json=_CONVERT_BODY, headers=_live_headers()
-    )
+    resp = app.test_client().post("/api/v1/positions/convert", json=_CONVERT_BODY, headers=_live_headers())
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "convert_position"
@@ -1724,7 +1855,8 @@ def test_positions_convert_margin_increase_runs_full_safety_before_gate(*, backe
         adapter_id="dhan",
         account_id="default",
         positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")],
-        funds={"used_margin": "100"}, backend_lease_factory=backend_lease_factory
+        funds={"used_margin": "100"},
+        backend_lease_factory=backend_lease_factory,
     )
     adapter.margin_calculator = AsyncMock(
         side_effect=[
@@ -1759,7 +1891,8 @@ def test_positions_convert_margin_reduction_skips_l1_l4_and_dispatches(*, backen
         safety,
         adapter_id="dhan",
         account_id="default",
-        positions=[Position(symbol="RELIANCE", exchange="NSE", product="CNC", quantity="5")], backend_lease_factory=backend_lease_factory
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="CNC", quantity="5")],
+        backend_lease_factory=backend_lease_factory,
     )
     adapter.margin_calculator = AsyncMock(
         side_effect=[
@@ -1788,7 +1921,8 @@ def test_positions_convert_unmatched_position_fails_closed_before_gate(*, backen
         _passing_safety(),
         adapter_id="dhan",
         account_id="default",
-        positions=[], backend_lease_factory=backend_lease_factory
+        positions=[],
+        backend_lease_factory=backend_lease_factory,
     )
 
     response = app.test_client().post(
@@ -1803,7 +1937,9 @@ def test_positions_convert_unmatched_position_fails_closed_before_gate(*, backen
 
 def test_positions_convert_empty_body_returns_400(*, backend_lease_factory) -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post("/api/v1/positions/convert", json={}, headers=_live_headers())
     assert resp.status_code == 400
     router.execute_gated.assert_not_called()
@@ -1829,11 +1965,13 @@ def test_positions_convert_unsupported_broker_returns_501(*, backend_lease_facto
         _passing_safety(),
         adapter_id="kotakneo",
         account_id="default",
-        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")], backend_lease_factory=backend_lease_factory
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")],
+        backend_lease_factory=backend_lease_factory,
     )
     client = app.test_client()
     resp = client.post(
-        "/api/v1/positions/convert", json={**_CONVERT_BODY, "broker": "kotakneo"},
+        "/api/v1/positions/convert",
+        json={**_CONVERT_BODY, "broker": "kotakneo"},
         headers=_live_headers(),
     )
     assert resp.status_code == 501
@@ -1842,7 +1980,9 @@ def test_positions_convert_unsupported_broker_returns_501(*, backend_lease_facto
 def test_positions_exit_all_requires_explicit_confirmation(*, backend_lease_factory) -> None:
     """SAFETY: exit-all flattens the whole account — no confirm, no dispatch."""
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     for body in ({}, {"confirm": False}, {"confirm": "yes"}, {"broker": "dhan"}):
         resp = client.post("/api/v1/positions/exit-all", json=body, headers=_live_headers())
         assert resp.status_code == 400
@@ -1852,7 +1992,9 @@ def test_positions_exit_all_requires_explicit_confirmation(*, backend_lease_fact
 
 def test_positions_exit_all_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result={"status": "ok"})
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.post(
         "/api/v1/positions/exit-all",
         json={"confirm": True, "segment": "EQ", "broker": "upstox"},
@@ -1873,7 +2015,8 @@ def test_positions_exit_all_is_blocked_by_kill_switch(*, backend_lease_factory) 
     router = _gated_router(result={"status": "ok"})
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post(
-        "/api/v1/positions/exit-all", json={"confirm": True, "broker": "dhan"},
+        "/api/v1/positions/exit-all",
+        json={"confirm": True, "broker": "dhan"},
         headers=_live_headers(),
     )
     assert resp.status_code == 403
@@ -1883,9 +2026,7 @@ def test_positions_exit_all_is_blocked_by_kill_switch(*, backend_lease_factory) 
 def test_positions_exit_all_practice_jwt_rejected(*, backend_lease_factory) -> None:
     router = _gated_router()
     client = _app(broker_router=router, backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.post(
-        "/api/v1/positions/exit-all", json={"confirm": True}, headers=_practice_headers()
-    )
+    resp = client.post("/api/v1/positions/exit-all", json={"confirm": True}, headers=_practice_headers())
     assert resp.status_code == 403
     router.execute_gated.assert_not_called()
 
@@ -1924,9 +2065,7 @@ def test_cancel_without_extras_keeps_legacy_shape(*, backend_lease_factory) -> N
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
     client = _app(broker_router=router, backend_lease_factory=backend_lease_factory).test_client()
-    resp = client.post(
-        "/api/v1/orders/cancel", json={"orderid": "OA-7"}, headers=_live_headers()
-    )
+    resp = client.post("/api/v1/orders/cancel", json={"orderid": "OA-7"}, headers=_live_headers())
     assert resp.status_code == 200
     kw = router.cancel_order.await_args.kwargs
     assert kw["extras"] is None
@@ -1960,12 +2099,16 @@ def test_route_minted_context_verifies_against_real_router(*, backend_lease_fact
         import time
 
         return Session(
-            access_token="tok", expires_at=time.time() + 3600,
-            account_id="default", adapter_id="dhan",
+            access_token="tok",
+            expires_at=time.time() + 3600,
+            account_id="default",
+            adapter_id="dhan",
         )
 
     router = BrokerRouter({"dhan": _Adapter()}, _session, backend_lease_proof=backend_lease_factory())
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
         json={"changes": _dhan_forever_changes(), "broker": "dhan"},
@@ -1982,7 +2125,9 @@ def test_gated_verb_algo_tag_limit_returns_429(*, backend_lease_factory) -> None
 
     router = MagicMock()
     router.execute_gated = AsyncMock(side_effect=AlgoTagLimitError("dhan/NSE algo ceiling reached"))
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
     resp = client.delete("/api/v1/orders/forever/GTT-9?broker=dhan", headers=_live_headers())
     assert resp.status_code == 429
     assert "refused" in resp.get_json()["message"].lower()

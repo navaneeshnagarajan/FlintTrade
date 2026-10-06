@@ -298,9 +298,7 @@ def vwap(
     n = len(close)
 
     if timestamps is not None and len(timestamps) != n:
-        raise ValueError(
-            f"timestamps length {len(timestamps)} does not match close length {n}"
-        )
+        raise ValueError(f"timestamps length {len(timestamps)} does not match close length {n}")
 
     typical_price = (high + low + close) / 3.0
     result = np.full(n, np.nan, dtype=np.float64)
@@ -405,9 +403,7 @@ def tema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
     e3[valid2_indices] = e3_valid
 
     all_valid = ~np.isnan(e1) & ~np.isnan(e2) & ~np.isnan(e3)
-    result[all_valid] = (
-        3.0 * e1[all_valid] - 3.0 * e2[all_valid] + e3[all_valid]
-    )
+    result[all_valid] = 3.0 * e1[all_valid] - 3.0 * e2[all_valid] + e3[all_valid]
     return result
 
 
@@ -513,10 +509,7 @@ def ichimoku(
     def _donchian_mid(period: int) -> NDArray[np.float64]:
         result = np.full(n, np.nan, dtype=np.float64)
         for i in range(period - 1, n):
-            result[i] = (
-                np.max(high[i - period + 1 : i + 1])
-                + np.min(low[i - period + 1 : i + 1])
-            ) / 2.0
+            result[i] = (np.max(high[i - period + 1 : i + 1]) + np.min(low[i - period + 1 : i + 1])) / 2.0
         return result
 
     tenkan = _donchian_mid(conversion_period)
@@ -645,9 +638,7 @@ def kama(
     if period < 1:
         raise ValueError(f"KAMA period must be >= 1, got {period}")
     if fast_period >= slow_period:
-        raise ValueError(
-            f"fast_period ({fast_period}) must be < slow_period ({slow_period})"
-        )
+        raise ValueError(f"fast_period ({fast_period}) must be < slow_period ({slow_period})")
 
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
@@ -1005,9 +996,7 @@ def t3(
     n = len(close)
     result = np.full(n, np.nan, dtype=np.float64)
     valid = ~np.isnan(e3) & ~np.isnan(e4) & ~np.isnan(e5) & ~np.isnan(e6)
-    result[valid] = (
-        c1 * e6[valid] + c2 * e5[valid] + c3 * e4[valid] + c4 * e3[valid]
-    )
+    result[valid] = c1 * e6[valid] + c2 * e5[valid] + c3 * e4[valid] + c4 * e3[valid]
     return result
 
 
@@ -1131,7 +1120,7 @@ def mcginley_dynamic(
     for i in range(period, n):
         prev = result[i - 1]
         ratio = close[i] / prev
-        denom = period * (ratio ** 4)
+        denom = period * (ratio**4)
         result[i] = prev + (close[i] - prev) / denom if denom != 0.0 else prev
 
     return result

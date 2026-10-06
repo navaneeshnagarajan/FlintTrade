@@ -1,0 +1,90 @@
+{
+  "note": "Test-only revision window. Not shipped. October stays at 75 while November is already listed at 65. September rows are the contracts a frozen date can still treat as live. clash_row is the same October contract with a different lot.",
+  "rows": [
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "13",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "NIFTY-OCT2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "NIFTY",
+      "SEM_EXPIRY_DATE": "2026-10-27",
+      "SEM_LOT_UNITS": "75"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "14",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "NIFTY-NOV2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "NIFTY",
+      "SEM_EXPIRY_DATE": "2026-11-24",
+      "SEM_LOT_UNITS": "65"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "NSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "25",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "BANKNIFTY-SEP2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "BANKNIFTY",
+      "SEM_EXPIRY_DATE": "2026-09-24",
+      "SEM_LOT_UNITS": "30"
+    },
+    {
+      "SEM_EXM_EXCH_ID": "BSE",
+      "SEM_SEGMENT": "D",
+      "SEM_SMST_SECURITY_ID": "51",
+      "SEM_INSTRUMENT_NAME": "FUTIDX",
+      "SEM_TRADING_SYMBOL": "SENSEX-SEP2026-FUT",
+      "SEM_CUSTOM_SYMBOL": "SENSEX",
+      "SEM_EXPIRY_DATE": "2026-09-24",
+      "SEM_LOT_UNITS": "20"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "9013",
+      "pSymbolName": "NIFTY",
+      "pTrdSymbol": "NIFTY26OCTFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-10-27",
+      "lLotSize": "75"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "9014",
+      "pSymbolName": "NIFTY",
+      "pTrdSymbol": "NIFTY26NOVFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-11-24",
+      "lLotSize": "65"
+    },
+    {
+      "pExchSeg": "nse_fo",
+      "pSymbol": "9025",
+      "pSymbolName": "BANKNIFTY",
+      "pTrdSymbol": "BANKNIFTY26SEPFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-09-24",
+      "lLotSize": "30"
+    },
+    {
+      "pExchSeg": "bse_fo",
+      "pSymbol": "9051",
+      "pSymbolName": "SENSEX",
+      "pTrdSymbol": "SENSEX26SEPFUT",
+      "pInstType": "FUTIDX",
+      "pExpiryDate": "2026-09-24",
+      "lLotSize": "20"
+    }
+  ],
+  "clash_row": {
+    "pExchSeg": "nse_fo",
+    "pSymbol": "9013",
+    "pSymbolName": "NIFTY",
+    "pTrdSymbol": "NIFTY26OCTFUT",
+    "pInstType": "FUTIDX",
+    "pExpiryDate": "2026-10-27",
+    "lLotSize": "65"
+  }
+}

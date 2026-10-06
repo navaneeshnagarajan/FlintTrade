@@ -1,6 +1,6 @@
 """Tests for ExpiryDataCollector — expired F&O contract data collection.
 
-All tests mock the OpenAlgo client. No network calls.
+All tests mock the native broker client. No network calls.
 """
 
 from __future__ import annotations
@@ -20,18 +20,21 @@ class TestExpiryDataCollectorInit:
 
     def test_default_data_dir(self):
         from flinttrade_historical.expiry_collector import ExpiryDataCollector
+
         mock_client = MagicMock()
         collector = ExpiryDataCollector(mock_client)
         assert "expiry_data" in str(collector.data_dir)
 
     def test_custom_data_dir(self, tmp_path):
         from flinttrade_historical.expiry_collector import ExpiryDataCollector
+
         mock_client = MagicMock()
         collector = ExpiryDataCollector(mock_client, data_dir=str(tmp_path / "custom"))
         assert "custom" in str(collector.data_dir)
 
     def test_ensure_data_dir_creates_directory(self, tmp_path):
         from flinttrade_historical.expiry_collector import ExpiryDataCollector
+
         mock_client = MagicMock()
         target = tmp_path / "new_dir"
         collector = ExpiryDataCollector(mock_client, data_dir=str(target))
@@ -49,6 +52,7 @@ class TestExpiryDataResult:
 
     def test_empty_result(self):
         from flinttrade_historical.expiry_collector import ExpiryDataResult
+
         result = ExpiryDataResult(symbol="NIFTY", expiry="260327", exchange="NFO")
         assert result.total_bars == 0
         assert not result.success
@@ -58,6 +62,7 @@ class TestExpiryDataResult:
             ExpiryDataRecord,
             ExpiryDataResult,
         )
+
         result = ExpiryDataResult(
             symbol="NIFTY",
             expiry="260327",
@@ -65,9 +70,13 @@ class TestExpiryDataResult:
             records=[
                 ExpiryDataRecord(
                     timestamp="2026-01-15T09:15:00",
-                    open=22000.0, high=22100.0, low=21900.0,
-                    close=22050.0, volume=10000,
-                    symbol="NIFTY", expiry="260327",
+                    open=22000.0,
+                    high=22100.0,
+                    low=21900.0,
+                    close=22050.0,
+                    volume=10000,
+                    symbol="NIFTY",
+                    expiry="260327",
                 ),
             ],
         )
@@ -85,6 +94,7 @@ class TestExpiryDataRecord:
 
     def test_default_values(self):
         from flinttrade_historical.expiry_collector import ExpiryDataRecord
+
         record = ExpiryDataRecord()
         assert record.timestamp == ""
         assert record.open == 0.0
@@ -110,7 +120,8 @@ class TestGetPastExpiries:
 
         # Mock the expiry manager to return our dates
         mock_info = ExpiryInfo(
-            symbol="NIFTY", exchange="NFO",
+            symbol="NIFTY",
+            exchange="NFO",
             expiry_dates=expiry_dates,
         )
         collector._expiry_mgr.get_expiries = MagicMock(return_value=mock_info)
@@ -168,17 +179,23 @@ class TestDownloadExpiryData:
         default_bars = bars or [
             OHLCV(
                 timestamp=f"2026-01-{d:02d}T09:15:00",
-                open=22000.0 + d, high=22100.0 + d,
-                low=21900.0 + d, close=22050.0 + d,
+                open=22000.0 + d,
+                high=22100.0 + d,
+                low=21900.0 + d,
+                close=22050.0 + d,
                 volume=10000 * d,
             )
             for d in range(1, 6)
         ]
 
         mock_result = DownloadResult(
-            symbol="NIFTY", exchange="NFO", interval="D",
-            start_date="2025-12-27", end_date="2026-03-27",
-            bars=default_bars, chunks_fetched=1,
+            symbol="NIFTY",
+            exchange="NFO",
+            interval="D",
+            start_date="2025-12-27",
+            end_date="2026-03-27",
+            bars=default_bars,
+            chunks_fetched=1,
         )
         collector._downloader.download = MagicMock(return_value=mock_result)
         return collector
@@ -226,14 +243,21 @@ class TestExportCsv:
         bars = [
             OHLCV(
                 timestamp="2026-01-15T09:15:00",
-                open=22000.0, high=22100.0, low=21900.0,
-                close=22050.0, volume=10000,
+                open=22000.0,
+                high=22100.0,
+                low=21900.0,
+                close=22050.0,
+                volume=10000,
             ),
         ]
         mock_result = DownloadResult(
-            symbol="NIFTY", exchange="NFO", interval="D",
-            start_date="2025-12-27", end_date="2026-03-27",
-            bars=bars, chunks_fetched=1,
+            symbol="NIFTY",
+            exchange="NFO",
+            interval="D",
+            start_date="2025-12-27",
+            end_date="2026-03-27",
+            bars=bars,
+            chunks_fetched=1,
         )
         collector._downloader.download = MagicMock(return_value=mock_result)
 
@@ -251,9 +275,13 @@ class TestExportCsv:
         collector = ExpiryDataCollector(mock_client, data_dir=str(tmp_path))
         collector._downloader.download = MagicMock(
             return_value=DownloadResult(
-                symbol="BANKNIFTY", exchange="NFO", interval="D",
-                start_date="2025-12-27", end_date="2026-03-27",
-                bars=[], chunks_fetched=0,
+                symbol="BANKNIFTY",
+                exchange="NFO",
+                interval="D",
+                start_date="2025-12-27",
+                end_date="2026-03-27",
+                bars=[],
+                chunks_fetched=0,
             ),
         )
 
@@ -280,15 +308,22 @@ class TestExportJson:
         bars = [
             OHLCV(
                 timestamp="2026-01-15T09:15:00",
-                open=22000.0, high=22100.0, low=21900.0,
-                close=22050.0, volume=10000,
+                open=22000.0,
+                high=22100.0,
+                low=21900.0,
+                close=22050.0,
+                volume=10000,
             ),
         ]
         collector._downloader.download = MagicMock(
             return_value=DownloadResult(
-                symbol="NIFTY", exchange="NFO", interval="D",
-                start_date="2025-12-27", end_date="2026-03-27",
-                bars=bars, chunks_fetched=1,
+                symbol="NIFTY",
+                exchange="NFO",
+                interval="D",
+                start_date="2025-12-27",
+                end_date="2026-03-27",
+                bars=bars,
+                chunks_fetched=1,
             ),
         )
 

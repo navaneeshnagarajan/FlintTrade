@@ -58,7 +58,7 @@ peerDependencyRules:
     '@napi-rs/wasm-runtime>@emnapi/core': '1'
     '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
 
-# These twenty entries are now the only copy: the duplicate "pnpm.overrides"
+# These entries are now the only copy: the duplicate "pnpm.overrides"
 # block in package.json was removed in the pnpm 10 migration, so this block is
 # what pnpm actually resolves against. Nothing cross-checks it any more - the
 # lockfile's own `overrides:` header is the audit trail, and an entry deleted
@@ -68,27 +68,28 @@ peerDependencyRules:
 # including every brace-expansion selector. Re-check the lockfile header after
 # touching anything below.
 #
-# brace-expansion overrides (GHSA-mh99-v99m-4gvg / CVE-2026-14257, advisory
-# range <=5.0.7): the selectors below cover EVERY vulnerable range, not just the
-# ones the tree happens to resolve today, so a future transitive copy cannot
-# silently reintroduce the flaw behind the audit allowlist entry.
-# Patched releases per major line: 1.1.18 (dist-tag maintenance-v1), 2.1.4
-# (maintenance-v2), 3.0.6 (maintenance-v3), 5.0.9 (latest).
+# brace-expansion overrides. The selectors below cover EVERY vulnerable range,
+# not just the ones the tree happens to resolve today, so a future transitive
+# copy cannot silently reintroduce a flaw.
+# Patched releases per major line: 1.1.21 (dist-tag 1.x), 2.1.7 (2.x),
+# 3.0.9 (3.x), 5.0.12 (latest).
 #
-# These are the SECOND round of fixes, published 2026-07-30. Do not pin back to
-# the first round (2.1.3 / 3.0.5 / 5.0.8): that round bounded only the `combine`
-# accumulator and left two paths unbounded - `expandSequence`, and the loop that
-# concatenates each comma part's expansion into `values`. Measured on a 512 MB
-# heap, the input '{' + '0'.repeat(4000000) + '1..99999}' still runs for over
-# 120 s on 5.0.8 and 2.1.3 but returns in under 100 ms on 5.0.9 and 2.1.4, for
-# byte-identical output.
+# GHSA-mh99-v99m-4gvg / CVE-2026-14257 was republished on 2026-07-31 with
+# per-line ranges (patched at 1.1.17 / 2.1.3 / 3.0.3 / 5.0.8). Two later HIGH
+# advisories, GHSA-6j4f-fj2g-mc7p and GHSA-qhr7-859c-m2p7, patched the recursion
+# depth at 1.1.19 / 2.1.5 / 3.0.7 / 5.0.10 and 1.1.20 / 2.1.6 / 3.0.8 / 5.0.11.
+# Do not pin back to the first round (2.1.3 / 3.0.5 / 5.0.8) or the second
+# (2.1.4 / 3.0.6 / 5.0.9): the first bounded only the `combine` accumulator,
+# and the second is still inside both recursion advisories. 2.1.7 keeps
+# `module.exports = expandTop`, so minimatch's `require('brace-expansion')(pattern)`
+# still works.
 #
-# 1.x is pulled onto 2.1.4 rather than onto its own 1.1.18 backport: 2.x keeps
+# 1.x is pulled onto 2.1.7 rather than onto its own 1.x backport: 2.x keeps
 # the same callable CommonJS default export that minimatch 3.x/5.x/9.x require,
 # and collapsing both lines onto one release keeps a single copy in the store.
 # The 4.x line has no patched release of its own - npm publishes only 4.0.0 and
-# 4.0.1, both inside the advisory range, and there is no maintenance-v4 dist-tag.
-# It is therefore mapped to 3.0.6, the newest patched release that keeps 4.x's
+# 4.0.1, both inside the advisory ranges, and there is no maintenance-v4 dist-tag.
+# It is therefore mapped to 3.0.9, the newest patched release that keeps 4.x's
 # API: 3.x and 4.x are both ESM-only with the same `export default expandTop`
 # shape (3.x additionally accepts an options argument), and the only
 # 3.0.4 -> 4.0.1 change is an internal split/join -> regex refactor.
@@ -96,40 +97,47 @@ peerDependencyRules:
 # Nothing on 3.x or newer can serve minimatch 3.x/5.x/9.x, which `require()` the
 # package and call the result directly: 3.x and 4.x are ESM-only, and 5.x
 # replaced the callable default export with a named `expand`. That is why those
-# paths stay on the 2.x line, and why the pnpm-audit allowlist entry for this
-# advisory has to exist at all.
+# paths stay on the 2.x line. 2.1.7 is outside every current advisory range,
+# so this pin is a fix, not an allowlist.
 # Verify a target exists before pinning to it: npm view brace-expansion@<version> version
 overrides:
-  '@hono/node-server': 2.0.10
+  '@hono/node-server': 2.1.3
   'body-parser@>=2.0.0 <2.3.0': 2.3.0
-  'brace-expansion@<2.0.0': 2.1.4
-  'brace-expansion@>=2.0.0 <2.1.4': 2.1.4
-  'brace-expansion@>=3.0.0 <3.0.6': 3.0.6
-  'brace-expansion@>=4.0.0 <5.0.0': 3.0.6
-  'brace-expansion@>=5.0.0 <5.0.9': 5.0.9
+  'brace-expansion@<2.0.0': 2.1.7
+  'brace-expansion@>=2.0.0 <2.1.7': 2.1.7
+  'brace-expansion@>=3.0.0 <3.0.9': 3.0.9
+  'brace-expansion@>=4.0.0 <5.0.0': 3.0.9
+  'brace-expansion@>=5.0.0 <5.0.12': 5.0.12
   # GHSA-c83g-rgw3-j3cx / GHSA-73wf-gq98-2v4g (CVE-2026-73089 / CVE-2026-73088):
   # unbounded query-cache growth and normalizeStats prototype writes, patched in 4.28.7.
-  # Pin the current 4.28.8 line so Babel's helper-compilation-targets cannot keep 4.28.2.
-  browserslist: 4.28.8
+  # Pin the latest 4.x so Babel's helper-compilation-targets cannot keep 4.28.2.
+  browserslist: 4.29.3
   esbuild: 0.28.2
   # GHSA-5jgf-p345-68v8 / GHSA-f65p-4m7j-42xc / GHSA-fph4-wmhf-6fwf /
-  # GHSA-jqff-g426-hqxp: host-confusion and SSRF fixes, patched in 4.1.3.
-  # Pin the current 4.1.4 line so ajv cannot keep 4.1.2.
-  fast-uri: 4.1.4
-  hono: 4.12.27
-  ip-address: 10.3.1
+  # GHSA-jqff-g426-hqxp, plus the 4.1.5 host-normalization and mailto-header
+  # fixes. Pin the latest 4.x so ajv cannot keep 4.1.4.
+  fast-uri: 4.2.1
+  hono: 4.13.13
+  # isInSubnet family confusion, unbounded Address6 diagnostics, fe80::/10,
+  # and NAT64 64:ff9b:1::/48. Latest 10.x, not the 10.7.1 floor.
+  ip-address: 10.7.3
   # GHSA-2883-xcg3-v3hh / CVE-2026-84375: empty merge-source CPU bypass,
   # patched in 4.3.2 (and 3.15.2). The tree is already on the 4.x line.
   js-yaml: 4.3.2
   # GHSA-jrc7-96c5-q579 / CVE-2026-85061: XSS sanitizer bypass, patched in
-  # 6.4.1. Keep the source dependency on the patched 6.8.0 line. The terminal
+  # 6.4.1. Keep the source dependency on the latest 6.x line. The terminal
   # renders through the matching plotly.js-dist-min bundle, whose embedded
   # dependencies must be checked separately when upgrading Plotly.
-  maplibre-gl: 6.8.0
-  postcss: 8.5.23
+  maplibre-gl: 6.12.0
+  postcss: 8.5.29
   # GHSA-rgj7-g3m4-5g8c: inherited libheif RCEs, patched in 0.35.4.
-  sharp: 0.35.4
-  undici: 7.29.0
+  # Stay on the latest 0.35.x.
+  sharp: 0.35.5
+  # GHSA-rfgv-xxqx-mfg5 (unrequested WebSocket subprotocol DoS) and
+  # GHSA-w293-vg96-wgc3 (BalancedPool TLS validation bypass) are patched in
+  # 7.29.1. Pin the current 7.30.0 line (dist-tag seven) so a transitive
+  # 7.29.0 cannot remain. 8.x is patched in 8.10.2; this tree is forced onto 7.x.
+  undici: 7.30.0
   # Eight HIGH name-injection / ReDoS advisories on the 0.8 line that
   # electron-builder's plist@3.1.0 still requests. 0.8.15 is the patched
   # release for that line (0.9.12 is the 0.9 equivalent).
@@ -142,3 +150,20 @@ overrides:
   # 0.6.0-0.6.10; 0.6.11 is the 0.6-line backport (0.8.3 is already in the
   # tree via @types/three). three-stdlib still requests 0.6.10.
   'fflate@<0.6.11': 0.6.11
+  # 4.3.0 fixes Vary matching, not the disputed GHSA-ch52-4w7c-c8xp report.
+  # The local patch below enforces mandatory validation on every stale route;
+  # being outside an advisory's version range is not evidence of a fix.
+  http-cache-semantics: 4.3.0
+  # GHSA-gjj5-9665-rwrc / CVE-2026-104861: quadratic SVG parse DoS, patched
+  # in 7.4.0. plotly.js still requests 7.3.0.
+  probe-image-size: 7.4.0
+  # GHSA-p6vx-979v-rg4c (CVE-2026-104846) and GHSA-jp82-f5mq-hwhp
+  # (CVE-2026-104845): promise thenable invocation and unbounded TypedArray
+  # allocation. solid-js 1.9.15 still requests seroval 1.5.6. Stay on the
+  # latest 1.6.x, not the minimum patched release.
+  seroval: 1.6.8
+
+# Keep the upstream tarball/integrity and BSD-2-Clause licence. Fail installation
+# if this exact-version patch no longer applies. See patches/README.md.
+patchedDependencies:
+  http-cache-semantics@4.3.0: patches/http-cache-semantics@4.3.0.patch

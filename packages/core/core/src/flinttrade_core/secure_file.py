@@ -13,7 +13,12 @@ import sys
 import tempfile
 
 SENSITIVE_PATTERNS = (
-    "*master*", "*pepper*", "*secret*", "*jwt*", "*credentials*", "*.db",
+    "*master*",
+    "*pepper*",
+    "*secret*",
+    "*jwt*",
+    "*credentials*",
+    "*.db",
 )
 
 _MOVEFILE_REPLACE_EXISTING = 0x1
@@ -808,8 +813,7 @@ def _install_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) 
     ace_flags = _DIRECTORY_ACE_FLAGS if path.is_dir() else 0
     sid_values = (_windows_account_sid(user), _SYSTEM_SID)
     acl_size = ctypes.sizeof(_Acl) + sum(
-        ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid)
-        for sid in sid_values
+        ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid) for sid in sid_values
     )
     acl = ctypes.create_string_buffer(acl_size)
     if not advapi32.InitializeAcl(acl, acl_size, _ACL_REVISION):
@@ -848,8 +852,7 @@ def _install_exact_windows_descriptor_dacl(
     ace_flags = _DIRECTORY_ACE_FLAGS if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 0
     sid_values = (_windows_account_sid(user), _SYSTEM_SID)
     acl_size = ctypes.sizeof(_Acl) + sum(
-        ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid)
-        for sid in sid_values
+        ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid) for sid in sid_values
     )
     acl = ctypes.create_string_buffer(acl_size)
     if not advapi32.InitializeAcl(acl, acl_size, _ACL_REVISION):
@@ -923,9 +926,7 @@ def _verify_windows_security_descriptor(
             return False, "DACL ACE inheritance flags do not match the object type"
         if ace.access_mask != _FILE_ALL_ACCESS:
             return False, "DACL ACE does not grant exact full control"
-        sid_pointer = ctypes.c_void_p(
-            ace_pointer.value + _AccessAllowedAce.sid_start.offset
-        )
+        sid_pointer = ctypes.c_void_p(ace_pointer.value + _AccessAllowedAce.sid_start.offset)
         actual_sids.add(_copy_windows_sid(sid_pointer))
     if actual_sids != {_windows_account_sid(user), _SYSTEM_SID}:
         return False, "DACL contains an unexpected SID"
@@ -991,9 +992,7 @@ def _verify_exact_windows_descriptor_dacl(
             dacl,
             security_descriptor,
             user=user,
-            expected_ace_flags=(
-                _DIRECTORY_ACE_FLAGS if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 0
-            ),
+            expected_ace_flags=(_DIRECTORY_ACE_FLAGS if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 0),
         )
     finally:
         if security_descriptor:
@@ -1084,9 +1083,7 @@ def cleanup_pending_unlink(path: pathlib.Path) -> None:
     except FileNotFoundError:
         return
     except OSError as exc:
-        raise PendingDurableUnlinkError(
-            f"durable unlink cleanup remains pending for {path.name}"
-        ) from exc
+        raise PendingDurableUnlinkError(f"durable unlink cleanup remains pending for {path.name}") from exc
 
 
 def durable_unlink(path: pathlib.Path) -> None:
@@ -1111,9 +1108,7 @@ def durable_unlink(path: pathlib.Path) -> None:
     except FileNotFoundError:
         return
     except OSError as exc:
-        raise PendingDurableUnlinkError(
-            f"durable unlink committed; cleanup remains pending for {path.name}"
-        ) from exc
+        raise PendingDurableUnlinkError(f"durable unlink committed; cleanup remains pending for {path.name}") from exc
 
 
 def write_secret_text(path: pathlib.Path, value: str, user: str | None = None) -> None:
@@ -1232,16 +1227,12 @@ def _assert_hardened_descriptor(
         raise OSError("secure file must have exactly one directory entry")
     if not _is_windows():
         if stat.S_IMODE(path_stat.st_mode) != 0o600:
-            raise InsecureFilePermissionsError(
-                "secure file is not hardened for the current user"
-            )
+            raise InsecureFilePermissionsError("secure file is not hardened for the current user")
         return
 
     hardened, reason = _verify_exact_windows_descriptor_dacl(descriptor)
     if not hardened:
-        raise InsecureFilePermissionsError(
-            f"secure file is not hardened for the current user: {reason}"
-        )
+        raise InsecureFilePermissionsError(f"secure file is not hardened for the current user: {reason}")
     current_path_stat = path.lstat()
     if (
         not _same_file_identity(path_stat, current_path_stat)
@@ -1259,11 +1250,7 @@ def _read_bounded_descriptor(
     require_hardened: bool,
 ) -> bytes:
     file_stat = os.fstat(descriptor)
-    if (
-        not stat.S_ISREG(file_stat.st_mode)
-        or _is_reparse_point(file_stat)
-        or file_stat.st_size > max_bytes
-    ):
+    if not stat.S_ISREG(file_stat.st_mode) or _is_reparse_point(file_stat) or file_stat.st_size > max_bytes:
         raise OSError("secure file is not a bounded regular file")
     _assert_current_user_owns(descriptor, file_stat)
     if require_hardened:
@@ -1335,22 +1322,14 @@ def _read_owner_owned_bytes(
             os.close(descriptor)
 
     parent_flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     )
     parent_descriptor = os.open(path.parent, parent_flags)
     try:
         parent_stat = os.fstat(parent_descriptor)
         if not stat.S_ISDIR(parent_stat.st_mode):
             raise OSError("secure file parent is not a directory")
-        flags = (
-            os.O_RDONLY
-            | getattr(os, "O_BINARY", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-        )
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         try:
             path_stat = os.stat(
                 path.name,
@@ -1384,10 +1363,7 @@ def _read_owner_owned_bytes(
                 dir_fd=parent_descriptor,
                 follow_symlinks=False,
             )
-            if (
-                not _same_file_identity(opened_stat, final_path_stat)
-                or stat.S_ISLNK(final_path_stat.st_mode)
-            ):
+            if not _same_file_identity(opened_stat, final_path_stat) or stat.S_ISLNK(final_path_stat.st_mode):
                 raise OSError("secure file changed while it was read")
             return payload
         finally:
@@ -1574,11 +1550,7 @@ def copy_owner_owned_file_durable(source: pathlib.Path, destination: pathlib.Pat
     destination = pathlib.Path(destination)
     source_stat = validate_owner_owned_regular_file(source, require_hardened=True)
     parent_stat = destination.parent.lstat()
-    if (
-        not stat.S_ISDIR(parent_stat.st_mode)
-        or stat.S_ISLNK(parent_stat.st_mode)
-        or _is_reparse_point(parent_stat)
-    ):
+    if not stat.S_ISDIR(parent_stat.st_mode) or stat.S_ISLNK(parent_stat.st_mode) or _is_reparse_point(parent_stat):
         raise OSError("secure copy destination parent is unsafe")
     source_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
     if not _is_windows():
@@ -1595,11 +1567,7 @@ def copy_owner_owned_file_durable(source: pathlib.Path, destination: pathlib.Pat
         _assert_current_user_owns(source_descriptor, opened_source_stat)
         _assert_hardened_descriptor(source_descriptor, opened_source_stat, path=source)
         destination_flags = (
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_BINARY", 0)
-            | getattr(os, "O_CLOEXEC", 0)
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
         )
         destination_descriptor = os.open(destination, destination_flags, 0o600)
         if _is_windows():

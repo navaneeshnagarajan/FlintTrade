@@ -18,7 +18,7 @@ description: Delta, gamma, theta, vega explained with practical trading implicat
 
 **Practical use:**
 - Delta-neutral portfolio: sum of all deltas = 0 (fully hedged)
-- Position delta tells you equivalent futures exposure: delta 0.5 × 75 (Nifty lot) = 37.5 equivalent futures
+- Example: delta 0.5 × 65 = 32.5 equivalent futures. The 65 is an example quantity, not a live lot.
 
 ## Gamma (Γ)
 
@@ -68,10 +68,10 @@ description: Delta, gamma, theta, vega explained with practical trading implicat
 - Payoff drivers: big move (gamma) + IV spike (vega)
 - Risk: time decay (theta) if no move occurs
 
-## Fetching Greeks via OpenAlgo
+## Fetching Greeks via broker
 
 ```
-POST /api/v1/optiongreeks
+Read option Greeks from an authorised native option-chain snapshot
 Body: { "symbol": "NIFTY", "expiry": "26APR2025", "strike": 22000, "option_type": "CE" }
 Returns: delta, gamma, theta, vega, IV
 ```

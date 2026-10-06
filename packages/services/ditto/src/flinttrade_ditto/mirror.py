@@ -26,8 +26,7 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Callable, Literal
 
-import httpx
-
+from flinttrade_core.indian_charges import statutory_mirror_defaults
 from flinttrade_core.models import Order, OrderResponse
 from flinttrade_gateway.log_safety import account_ref
 from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
@@ -35,6 +34,11 @@ from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
 from .account_manager import BrokerAccount
 
 logger = logging.getLogger("flinttrade.ditto.mirror")
+
+
+def _statutory(name: str) -> float:
+    """One statutory mirror field, generated from the shared charges table."""
+    return statutory_mirror_defaults()[name]
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -184,22 +188,10 @@ class BrokerCostMetadata:
     This metadata is attached to a mirror config so the orchestration layer
     can route cost-sensitive orders to the cheapest execution venue.
 
-    Example (Kotak Neo post-April 2026)::
-
-        BrokerCostMetadata(
-            broker_key="kotak",
-            brokerage_frac=0.0,          # ₹0 brokerage
-            stt_futures_sell=0.0005,     # 0.05% from April 2026
-            stt_options_sell=0.0015,     # 0.15% from April 2026
-            exchange_charge_futures=1.73e-5,
-            exchange_charge_options=3.503e-4,
-            gst_rate=0.18,
-            sebi_charge_per_crore=10.0,
-            stamp_duty_buy_futures=2e-5,
-            stamp_duty_buy_options=3e-5,
-            demat_amc_annual=600.0,
-            notes="Zero brokerage on all API orders from Nov 2025",
-        )
+    Statutory fields default from ``flinttrade_core.indian_charges``. NSE and
+    BSE transaction totals differ: BSE futures are nil, and Sensex options
+    have their own premium rate. Brokerage stays on this object because it is
+    a broker setting, not a statutory rate.
     """
 
     broker_key: str = ""
@@ -209,19 +201,24 @@ class BrokerCostMetadata:
     brokerage_frac: float = 0.0002          # fraction of trade value
     brokerage_flat_per_order: float = 0.0   # flat ₹ per order (if applicable)
 
-    # STT (Securities Transaction Tax)
-    stt_futures_sell: float = 0.0005        # fraction of futures sell-side value
-    stt_options_sell: float = 0.0015        # fraction of options sell-side premium
-
-    # Exchange transaction charges (NSE defaults)
-    exchange_charge_futures: float = 1.73e-5    # ₹1.73 per lakh
-    exchange_charge_options: float = 3.503e-4   # ₹35.03 per lakh premium
-
-    # Regulatory
-    gst_rate: float = 0.18                  # 18% on brokerage + exchange + SEBI
-    sebi_charge_per_crore: float = 10.0     # ₹10 per crore
-    stamp_duty_buy_futures: float = 2e-5    # 0.002% buy-side futures
-    stamp_duty_buy_options: float = 3e-5    # 0.003% buy-side options
+    # Statutory fields are generated from the shared Indian charges table.
+    stt_futures_sell: float = field(default_factory=lambda: _statutory("stt_futures_sell"))
+    stt_options_sell: float = field(default_factory=lambda: _statutory("stt_options_sell"))
+    exchange_charge_futures: float = field(default_factory=lambda: _statutory("exchange_charge_futures"))
+    exchange_charge_options: float = field(default_factory=lambda: _statutory("exchange_charge_options"))
+    exchange_charge_futures_bse: float = field(
+        default_factory=lambda: _statutory("exchange_charge_futures_bse")
+    )
+    exchange_charge_sensex_options: float = field(
+        default_factory=lambda: _statutory("exchange_charge_sensex_options")
+    )
+    exchange_charge_bse_stock_options: float = field(
+        default_factory=lambda: _statutory("exchange_charge_bse_stock_options")
+    )
+    gst_rate: float = field(default_factory=lambda: _statutory("gst_rate"))
+    sebi_charge_per_crore: float = field(default_factory=lambda: _statutory("sebi_charge_per_crore"))
+    stamp_duty_buy_futures: float = field(default_factory=lambda: _statutory("stamp_duty_buy_futures"))
+    stamp_duty_buy_options: float = field(default_factory=lambda: _statutory("stamp_duty_buy_options"))
 
     # Annual fixed costs (not per-trade, but tracked for cost modelling)
     demat_amc_annual: float = 0.0           # Annual maintenance charge ₹
@@ -387,14 +384,14 @@ def compute_multiplier_allocation(
 # ---------------------------------------------------------------------------
 
 #: Callback type: receives ``(account_id, position_snapshot)`` where
-#: ``position_snapshot`` is the raw dict from the OpenAlgo positionbook API.
+#: ``position_snapshot`` is the raw dict from the broker positionbook API.
 PositionChangeCallback = Callable[[str, dict], None]
 PositionErrorCallback = Callable[[str], None]
 PositionIdentity = tuple[str, str, str]
 
 
 def normalise_position_row(row: Any) -> dict[str, Any]:
-    """Validate one canonical OpenAlgo position row used for mirroring."""
+    """Validate one canonical broker position row used for mirroring."""
     if not isinstance(row, dict):
         raise RuntimeError("source positionbook returned a malformed position row")
 
@@ -438,35 +435,20 @@ def position_identity(position: dict[str, Any]) -> PositionIdentity:
 
 
 class PositionWatcher:
-    """Poll positionbook over REST and fire callbacks on detected changes.
+    """Observe account-bound native position snapshots from an injected reader.
 
-    OpenAlgo does not currently emit position events over its WebSocket
-    (which is limited to market data feeds).  This class bridges the gap by
-    polling the ``/api/v1/positionbook`` endpoint at a configurable interval
-    and detecting net position changes by comparing consecutive snapshots.
-
-    When the WebSocket protocol gains position events this class can be
-    extended to subscribe instead of polling — the callback interface remains
-    identical.
-
-    Usage::
-
-        watcher = PositionWatcher(account, poll_interval=2.0)
-        watcher.on_change(lambda acc_id, snap: print(acc_id, snap))
-        watcher.start()
-        # ... later ...
-        watcher.stop()
-
-    Args:
-        account: The ``BrokerAccount`` whose positions are watched.
-        poll_interval: Seconds between positionbook polls.
+    Validation rejects malformed/duplicate identities before snapshot adoption.
+    Missing reader capability fails explicitly; no endpoint is inferred.
     """
 
     def __init__(
         self,
         account: BrokerAccount,
         poll_interval: float = 2.0,
+        *,
+        snapshot_reader: Callable[[BrokerAccount], dict[str, Any]] | None = None,
     ) -> None:
+        self._snapshot_reader = snapshot_reader
         self._account = account
         self._poll_interval = max(0.5, poll_interval)
         self._callbacks: list[PositionChangeCallback] = []
@@ -618,31 +600,23 @@ class PositionWatcher:
                     )
 
     def _fetch_snapshot(self) -> dict[PositionIdentity, dict[str, Any]]:
-        """Read and validate one authoritative OpenAlgo position snapshot."""
-        url = f"{self._account.openalgo_host.rstrip('/')}/api/v1/positionbook"
-        payload = {"apikey": self._account.api_key}
-
-        with httpx.Client(timeout=10.0) as http:
-            resp = http.post(url, json=payload)
-            if resp.status_code != 200:
-                raise RuntimeError("source positionbook request was not successful")
-
-        data = resp.json()
+        """Read and validate one authoritative broker position snapshot."""
+        if self._snapshot_reader is None:
+            raise RuntimeError("Native copy-trading position reader is unavailable")
+        data = self._snapshot_reader(self._account)
         if not isinstance(data, dict):
-            raise RuntimeError("source positionbook returned an invalid response")
-
+            raise RuntimeError("source position reader returned an invalid response")
         if str(data.get("status") or "").strip().lower() != "success" or "data" not in data:
-            raise RuntimeError("source positionbook returned an incomplete response")
+            raise RuntimeError("source position reader returned an incomplete response")
         positions = data["data"]
         if not isinstance(positions, list):
-            raise RuntimeError("source positionbook returned an invalid data envelope")
-
+            raise RuntimeError("source position reader returned an invalid data envelope")
         snapshot: dict[PositionIdentity, dict[str, Any]] = {}
         for position in positions:
             normalised = normalise_position_row(position)
             identity = position_identity(normalised)
             if identity in snapshot:
-                raise RuntimeError("source positionbook returned duplicate position rows")
+                raise RuntimeError("source position reader returned duplicate position rows")
             snapshot[identity] = normalised
         return snapshot
 
@@ -729,7 +703,7 @@ class PositionMirror:
         self._mirror_config = mirror_config
         self._history: list[MirrorResult] = []
         # The operator's three-mode trading state (live/practice/explore) — NOT
-        # the AllocationMode above. The gated dispatch targets a live OpenAlgo
+        # the AllocationMode above. The gated dispatch targets a live broker
         # account directly (it does not consult the Practice SandboxEngine), so a
         # non-live mode fails closed rather than routing a paper mirror to a live
         # broker. Threaded from the caller's session; defaults to "live" because
@@ -740,7 +714,7 @@ class PositionMirror:
         # one-shot consume). There is NO ungated path — without an injected
         # router the mirror fails closed per account (the raw-httpx fallback was
         # retired 2026-07-04; contract §8.1). ``actor_id`` must be authorised in
-        # workspace.json.brokers.account_acls for each openalgo:<account_id>
+        # workspace.json.brokers.account_acls for each broker:<account_id>
         # the mirror targets.
         self._broker_router = broker_router
         self._actor_id = actor_id
@@ -863,7 +837,7 @@ class PositionMirror:
 
         Dispatches through ``gate_order`` -> ``BrokerRouter.place_order`` (G6).
         Without an injected router this fails closed — there is no ungated
-        path (contract §8.1; the raw OpenAlgo httpx POST was retired
+        path (contract §8.1; the raw broker httpx POST was retired
         2026-07-04).
         """
         result = MirrorOrderResult(
@@ -893,10 +867,10 @@ class PositionMirror:
     ) -> MirrorOrderResult:
         """Dispatch one mirrored order through the safety-gated BrokerRouter (G6).
 
-        Each account resolves to the ``openalgo:<account_id>`` selector; the
+        Each account resolves to the ``broker:<account_id>`` selector; the
         router's AuthenticatingSessionProvider checks ``self._actor_id`` against
         ``account_acls`` and verifies the account-bound SafetyContext before the
-        OpenAlgo bridge adapter places the order.
+        broker bridge adapter places the order.
         """
         import uuid  # noqa: PLC0415
 
@@ -905,7 +879,7 @@ class PositionMirror:
         from flinttrade_engine.safety import gate_order  # noqa: PLC0415
 
         # Fail closed on a non-live operator mode. This path dispatches straight
-        # to a live OpenAlgo account and never routes to the Practice
+        # to a live broker account and never routes to the Practice
         # SandboxEngine, so honouring a "practice"/"explore" mode here would send
         # a paper mirror to a live broker — refuse instead.
         if self._trading_mode != "live":
@@ -934,7 +908,7 @@ class PositionMirror:
             actor_type=self._actor_type,
             actor_id=self._actor_id,
             mode=self._trading_mode,
-            selector=f"openalgo:{account.account_id}",
+            selector=f"{account.adapter_id}:{account.account_id}",
         )
         try:
             with self._admit_order(account.account_id, mirror_order) as (lease, positions):
@@ -942,7 +916,7 @@ class PositionMirror:
                     mirror_order,
                     request_ctx,
                     backend_lease_proof=self._broker_router.backend_lease_proof,
-                    adapter_id="openalgo",
+                    adapter_id=account.adapter_id,
                     account_id=account.account_id,
                 )
                 reservation = lease.reserve(mirror_order, positions)
@@ -952,7 +926,7 @@ class PositionMirror:
                         request_ctx,
                         order=mirror_order,
                         safety_ctx=safety_ctx,
-                        adapter_id="openalgo",
+                        adapter_id=account.adapter_id,
                         account_id=account.account_id,
                     ),
                 )

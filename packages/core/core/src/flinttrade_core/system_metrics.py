@@ -97,7 +97,7 @@ def get_system_metrics() -> SystemMetrics:
         cpu = _psutil.cpu_percent(interval=0.1)
 
         mem = _psutil.virtual_memory()
-        _GIB = 1024 ** 3
+        _GIB = 1024**3
         memory_used_gb = round(mem.used / _GIB, 2)
         memory_total_gb = round(mem.total / _GIB, 2)
 

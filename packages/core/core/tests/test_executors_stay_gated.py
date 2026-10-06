@@ -775,7 +775,7 @@ def test_emergency_executors_expose_parent_injection_contract() -> None:
 
 
 def test_scheduled_live_strategy_dispatcher_stays_on_canonical_gate() -> None:
-    """A scheduler contract must never become a raw OpenAlgo write capability."""
+    """A scheduler contract must never become a raw native broker write capability."""
     source = _STRATEGY_EXECUTION.read_text(encoding="utf-8")
 
     assert "class GatedStrategyDispatcher" in source

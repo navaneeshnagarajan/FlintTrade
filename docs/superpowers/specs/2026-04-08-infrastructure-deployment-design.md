@@ -1,64 +1,12 @@
 # FlintTrade — Infrastructure & Deployment Design Spec
 
-> **Date:** 2026-04-08
-> **Author:** Navaneesh + Claude Code (research agents + OpenAlgo analysis)
-> **Status:** Draft — awaiting approval
-> **Scope:** Production infrastructure, deployment, monitoring, logging, backups
-> **Principle:** Mirror OpenAlgo's deployment model. 100% open source. Deploy anywhere.
-
 ---
 
 ## 1. Design Principles
 
-1. **Mirror OpenAlgo** — same deployment patterns, same toolchain (Nginx, gunicorn, systemd, Docker)
-2. **100% open source** — every component MIT, Apache, AGPL, or BSD. No BSL/SSPL.
-3. **Deploy anywhere** — NAS, Raspberry Pi, cloud VM, bare metal, Docker
-4. **Single-user first** — no Kubernetes, no Elasticsearch, no Redis. Lightweight.
-5. **5-minute setup** — `git clone && make setup && make start` (current v0.6.0-beta.1 flow; OpenAlgo is optional)
-6. **Zero vendor lock-in** — self-hosted everything, user owns all data
-
 ---
 
 ## 2. Service Architecture
-
-```
-Internet / VPN
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  Nginx (reverse proxy + SSL)            │
-│  :80 → redirect to :443                 │
-│  :443 → auto HTTPS (Let's Encrypt)      │
-│  :443/ws → WebSocket upgrade            │
-└─────────┬───────────┬───────────────────┘
-          │           │
-    ┌─────▼─────┐ ┌───▼────────────┐ ┌──────────────┐
-    │ React     │ │ FlintTrade     │ │ OpenAlgo     │
-    │ (static)  │ │ Backend        │ │ (submodule)  │
-    │ /dist     │ │ :5100          │ │ :5000 + :8765│
-    │ served by │ │ gunicorn +     │ │ gunicorn +   │
-    │ Nginx     │ │ eventlet       │ │ eventlet     │
-    └───────────┘ └───────┬────────┘ └──────┬───────┘
-                          │                  │
-              ┌───────────▼──────────────────▼───────┐
-              │  Data Layer                          │
-              │  ~/.flinttrade/                      │
-              │  ├── auth.db (SQLite — credentials)  │
-              │  ├── credentials.db (Fernet enc)     │
-              │  ├── flint.duckdb (analytics)        │
-              │  ├── chroma/ (vector store)           │
-              │  ├── audit/ (JSONL local archive)     │
-              │  ├── logs/ (JSON structured logs)    │
-              │  └── jwt_secret (auto-generated)     │
-              └──────────────────────────────────────┘
-              
-              ┌──────────────────────────────────────┐
-              │  Monitoring Layer                    │
-              │  ├── Uptime Kuma :3001 (MIT)         │
-              │  ├── Glitchtip :8000 (MIT)           │
-              │  └── /admin route (built-in)         │
-              └──────────────────────────────────────┘
-```
 
 ---
 
@@ -66,49 +14,7 @@ Internet / VPN
 
 ### 3.1 Reverse Proxy: Nginx (not Caddy)
 
-**Why Nginx over Caddy:**
-- OpenAlgo uses Nginx — same toolchain, shared configs, proven patterns
-- OpenAlgo's install scripts generate Nginx configs automatically
-- certbot for Let's Encrypt is battle-tested
-- FlintTrade and OpenAlgo share ONE Nginx instance
-
-**Nginx routes:**
-```
-/              → React static files (dist/)
-/api/          → OpenAlgo Flask (:5000)
-/ft-api/       → FlintTrade Flask (:5100) — strip /ft-api prefix
-/ws            → OpenAlgo WebSocket (:8765) — upgrade
-```
-
 ### 3.2 Process Management: gunicorn + eventlet + systemd
-
-**Why (mirrors OpenAlgo exactly):**
-- gunicorn with eventlet worker (single worker for WebSocket state)
-- systemd service files for auto-restart, journal logging
-- Docker Compose as alternative for container deployments
-
-**FlintTrade systemd service:**
-```ini
-[Unit]
-Description=FlintTrade Backend
-After=network.target openalgo.service
-
-[Service]
-User=www-data
-WorkingDirectory=/opt/flinttrade
-Environment="FLINTTRADE_DEV=0"
-Environment="OPENBLAS_NUM_THREADS=2"
-ExecStart=/opt/flinttrade/venv/bin/gunicorn \
-  --worker-class eventlet -w 1 \
-  --bind 127.0.0.1:5100 \
-  --timeout 300 \
-  packages.core.src.app:create_flask_app()
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
 
 ### 3.3 Error Tracking: Glitchtip (MIT)
 
@@ -150,12 +56,6 @@ Flask request → structlog → JSON → ~/.flinttrade/logs/flinttrade.log
 - 88% less RAM than Prometheus, 36% less CPU
 - Built-in alerting (Telegram, email, Slack, Discord)
 - ~100-300MB RAM
-
-**Uptime Kuma (MIT)** — endpoint monitoring + status page:
-- MIT licence, single Docker container, SQLite
-- ~128MB RAM, 90+ notification integrations
-- Beautiful public/private status page
-- Checks every 60s: OpenAlgo :5000, FlintTrade :5100, WS :8765, Nginx :443
 
 ### 3.6 Log Aggregation: VictoriaLogs (Apache 2.0)
 
@@ -202,12 +102,6 @@ CORS(app, origins=["https://your-domain.com"],
 
 ### 3.8 Rate Limiting: flask-limiter (MIT)
 
-**Limits:**
-- Auth endpoints: 5/minute per IP
-- Order endpoints: 10/second (matches OpenAlgo)
-- General API: 50/second
-- Storage: in-memory (single-user, no Redis needed)
-
 ---
 
 ## 4. Port Map (Final)
@@ -216,12 +110,8 @@ CORS(app, origins=["https://your-domain.com"],
 |------|---------|-------|---------|-------|
 | 80 | HTTP redirect | Nginx | Public | → 443 |
 | 443 | HTTPS | Nginx | Public | Let's Encrypt auto |
-| 5000 | Flask | OpenAlgo | Internal | Primary instance |
-| 5001-5009 | Flask | OpenAlgo | Internal | Multi-broker |
 | 5100 | Flask | FlintTrade | Internal | No IANA conflict |
 | 5173 | Vite | FlintTrade | Dev only | Not in production |
-| 5555 | ZMQ | OpenAlgo | Internal | Inter-process |
-| 8765 | WebSocket | OpenAlgo | Internal | Market data |
 | 3001 | HTTP | Uptime Kuma | Internal | Endpoint monitoring |
 | 8000 | HTTP | Glitchtip | Internal | Error tracking |
 | 9090 | HTTP | VictoriaLogs | Internal | Log aggregation |
@@ -230,99 +120,9 @@ CORS(app, origins=["https://your-domain.com"],
 
 ---
 
-## 5. Deployment Patterns (mirrors OpenAlgo)
-
 ### Pattern A: Docker Compose (recommended)
 
-```yaml
-services:
-  openalgo:
-    image: python:3.12-slim
-    ports: ["127.0.0.1:5000:5000", "127.0.0.1:8765:8765"]
-    volumes: [openalgo_db:/app/db]
-    
-  flinttrade:
-    image: python:3.12-slim
-    ports: ["127.0.0.1:5100:5100"]
-    volumes: [flinttrade_data:/data]
-    depends_on: [openalgo]
-    
-  terminal:
-    build: ./packages/apps/terminal
-    # Static build served by Nginx, no runtime container needed
-    
-  nginx:
-    image: nginx:alpine
-    ports: ["80:80", "443:443"]
-    volumes: [./infra/nginx:/etc/nginx/conf.d, certbot_data:/etc/letsencrypt]
-    
-  uptime-kuma:
-    image: louislam/uptime-kuma:1
-    ports: ["127.0.0.1:3001:3001"]
-    volumes: [kuma_data:/app/data]
-    restart: unless-stopped
-    
-  glitchtip:
-    image: glitchtip/glitchtip:latest
-    ports: ["127.0.0.1:8000:8000"]
-    depends_on: [glitchtip-db]
-    environment:
-      - DATABASE_URL=postgres://glitchtip:glitchtip@glitchtip-db:5432/glitchtip
-      - SECRET_KEY=${GLITCHTIP_SECRET_KEY}
-    restart: unless-stopped
-    
-  glitchtip-worker:
-    image: glitchtip/glitchtip:latest
-    command: bin/run-celery-with-beat.sh
-    depends_on: [glitchtip-db]
-    environment:
-      - DATABASE_URL=postgres://glitchtip:glitchtip@glitchtip-db:5432/glitchtip
-      - SECRET_KEY=${GLITCHTIP_SECRET_KEY}
-    restart: unless-stopped
-    
-  glitchtip-db:
-    image: postgres:16-alpine
-    volumes: [glitchtip_pg:/var/lib/postgresql/data]
-    environment:
-      - POSTGRES_USER=glitchtip
-      - POSTGRES_PASSWORD=glitchtip
-      - POSTGRES_DB=glitchtip
-    restart: unless-stopped
-    
-  victorialogs:
-    image: victoriametrics/victoria-logs:latest
-    ports: ["127.0.0.1:9090:9090"]
-    volumes: [victorialogs_data:/vlogs]
-    restart: unless-stopped
-    
-  netdata:
-    image: netdata/netdata:latest
-    ports: ["127.0.0.1:19999:19999"]
-    cap_add: [SYS_PTRACE, SYS_ADMIN]
-    security_opt: [apparmor=unconfined]
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: unless-stopped
-```
-
 ### Pattern B: Bare Metal (systemd)
-
-```bash
-# 1. Install
-git clone https://github.com/navaneeshnagarajan/FlintTrade.git /opt/flinttrade
-cd /opt/flinttrade && make setup
-
-# 2. Configure local server fallbacks only if needed
-$EDITOR .env.example  # copy selected fallback values into .env when running the raw server
-
-# 3. Install services
-sudo make install-native  # installs current FlintTrade service scripts
-
-# 4. Start
-make start  # starts the FlintTrade backend; start OpenAlgo separately only if enabled
-```
 
 ### Pattern C: Home Server + VPN
 
@@ -334,23 +134,6 @@ Same as Pattern A or B, plus:
 ---
 
 ## 6. Setup Flow — git clone to running
-
-```
-1. git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-2. cd FlintTrade
-3. make setup                    # installs Python + Node deps, builds React
-4. make start                    # starts the FlintTrade backend
-5. open the desktop app/terminal Setup flow and save OpenAlgo from Settings
-6. make start-openalgo           # optional: start a local-dev OpenAlgo clone when present
-```
-
-For Docker:
-```
-1. git clone ...
-2. docker compose up -d
-3. open https://localhost
-4. save OpenAlgo connection details from Setup/Settings
-```
 
 ---
 
@@ -396,19 +179,6 @@ For Docker:
 ---
 
 ## 10. Files to Create
-
-### New Files
-- `infra/nginx/flinttrade.conf` — Nginx reverse proxy config
-- `infra/systemd/flinttrade.service` — systemd unit
-- `infra/systemd/openalgo.service` — systemd unit (mirrors OpenAlgo's)
-- `infra/docker/Dockerfile` — multi-stage build
-- `infra/docker/Dockerfile.terminal` — React build stage
-- `infra/backup/backup.sh` — Restic backup script
-- `infra/backup/restore.sh` — Restic restore script
-- `infra/install/install-docker.sh` — Docker deployment installer
-- `infra/install/install-native.sh` — Bare metal installer
-- `Caddyfile` — REMOVED (using Nginx to match OpenAlgo)
-- `docker-compose.yml` — UPDATED with correct ports + monitoring services
 
 ### Modified Files
 - `packages/core/core/src/app.py` — add structlog, flask-cors, flask-limiter, Sentry

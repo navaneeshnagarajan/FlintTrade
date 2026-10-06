@@ -114,9 +114,9 @@ class TestOtpHelpers:
         from flinttrade_core.auth_routes import _otp_rate_ok
 
         email = "rate@test.com"
-        assert _otp_rate_ok(email) is True   # 1st
-        assert _otp_rate_ok(email) is True   # 2nd
-        assert _otp_rate_ok(email) is True   # 3rd
+        assert _otp_rate_ok(email) is True  # 1st
+        assert _otp_rate_ok(email) is True  # 2nd
+        assert _otp_rate_ok(email) is True  # 3rd
         assert _otp_rate_ok(email) is False  # 4th — blocked
 
     def test_otp_rate_limit_resets_after_hour(self):

@@ -52,12 +52,12 @@ describe('docs index generation', () => {
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`29 ${'analysis'}`);
   });
 
-  it('keeps broker catalogue count pins aligned at 37', () => {
+  it('keeps broker catalogue count pins aligned at 6', () => {
     const claude = readFileSync(resolve(process.cwd(), '../../../CLAUDE.md'), 'utf8');
     const agents = readFileSync(resolve(process.cwd(), '../../../AGENTS.md'), 'utf8');
 
-    expect(claude).toContain('`BROKER_CATALOG` (37 brokers)');
-    expect(agents).toContain('37 brokers');
+    expect(claude).toContain('`BROKER_CATALOG` (6 brokers)');
+    expect(agents).toContain('6 brokers');
     expect(claude).not.toContain('`BROKER_CATALOG` (35 brokers)');
     expect(agents).not.toContain('35 brokers');
   });
@@ -78,11 +78,10 @@ describe('docs index generation', () => {
 
     expect(pageSource).toContain('<strong>71</strong>');
     expect(pageSource).not.toContain('<strong>84</strong>');
-    expect(pageSource).toContain('OpenAlgo is the working broker path');
+    expect(pageSource).toContain('Broker connections use the native gateway.');
     expect(pageSource).toContain('Native broker HTTP is frozen until Task 9D and Task 7C.2');
     expect(pageSource).toContain('adapters stay evidence-gated behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>84</strong>');
-    expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
     expect(pageSource).not.toContain('verified native brokers');
   });
 
@@ -130,7 +129,7 @@ describe('docs index generation', () => {
     expect(heroActions).toContain('Install the web app');
     expect(heroActions).toContain('href="/demo-app/welcome"');
     expect(heroActions).toContain('target="_blank"');
-    expect(heroActions).toContain('Explore demo');
+    expect(heroActions).toContain('Demo (example data)');
     expect((heroActions.match(/href="\/download"/g) || []).length).toBe(1);
     expect(heroActions).not.toContain('Download desktop app');
     expect(heroActions).not.toContain('Run the web app');
@@ -155,14 +154,30 @@ describe('MCP capabilities', () => {
   it('recommends terminal checks for terminal source changes', () => {
     const recommendation = recommendTests(['packages/apps/terminal/src/foo.tsx']);
 
-    expect(recommendation.commands).toContain('cd packages/apps/terminal && npm run typecheck');
-    expect(recommendation.commands).toContain('cd packages/apps/terminal && npm run test');
+    expect(recommendation.commands).toEqual([
+      'pnpm --filter @flinttrade/terminal typecheck',
+      'pnpm --filter @flinttrade/terminal exec vitest run',
+      'pnpm --filter @flinttrade/terminal build',
+    ]);
+  });
+
+  it('recommends Electron checks instead of a nonexistent Python suite for desktop changes', () => {
+    const recommendation = recommendTests(['packages/apps/desktop/electron/source-updater.ts']);
+
+    expect(recommendation.commands).toEqual([
+      'pnpm --filter @flinttrade/desktop typecheck',
+      'pnpm --filter @flinttrade/desktop test',
+    ]);
+    expect(recommendation.reason).toContain('Electron desktop shell');
   });
 
   it('recommends nested package checks for Python source changes', () => {
     const recommendation = recommendTests(['packages/services/journal/src/entries.py']);
 
-    expect(recommendation.commands).toContain('python -m pytest packages/services/journal/tests/ -v --import-mode=importlib');
+    expect(recommendation.commands).toEqual([
+      'python scripts/ft.py test-fast packages/services/journal/tests/ -v',
+      'python scripts/ft.py lint',
+    ]);
     expect(recommendation.reason).toContain('services/journal');
   });
 

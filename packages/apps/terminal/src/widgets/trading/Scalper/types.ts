@@ -2,7 +2,7 @@
 
 import type { WsTick } from "@/types/api";
 
-/** WsTick extended with optional prev_close that some OpenAlgo responses carry */
+/** WsTick extended with optional prev_close that some broker responses carry */
 export interface TickData extends WsTick {
   prev_close?: number;
 }
@@ -31,27 +31,29 @@ export interface StatusState {
 export interface IndexConfig {
   exchange: string;
   optExchange: string;
-  lotSize: number;
   step: number;
 }
 
 /**
- * LAST-RESORT lot-size fallback — DISPLAY ONLY, never order-sizing.
- *
- * The Scalper resolves the real lot size at runtime from the broker symbol
- * master (`getSymbol` — the same symbol-info API QuickTrade uses), then from
- * the backend lot-size resolver route. Until one of those confirms, these
- * built-in values are shown with an "(unverified)" marker and order
- * placement FAILS CLOSED — a stale hardcoded lot size mis-sizes every order.
- * Values mirror `flinttrade_screener.lot_sizes.FALLBACK_LOT_SIZES`.
+ * Shown on a Scalper row when the broker instrument master has no lot size.
+ * Orders still fail closed until a live symbol master confirms the multiplier.
+ */
+export const LOT_SIZE_MASTER_HINT = "Lot size comes from the broker instrument master.";
+
+/**
+ * Index rows for the Scalper. Lot size is not stored here. The display reads
+ * the cached broker instrument master and names the near-month contract,
+ * plus the next month when its size differs. A missing row shows an em dash
+ * with {@link LOT_SIZE_MASTER_HINT}. Strike steps are not contract multipliers.
+ * Order placement stays fail-closed until the live symbol master confirms.
  */
 export const INDEX_CONFIG: Record<string, IndexConfig> = {
-  NIFTY:      { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 75,  step: 50  },
-  BANKNIFTY:  { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 30,  step: 100 },
-  FINNIFTY:   { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 65,  step: 50  },
-  MIDCPNIFTY: { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 120, step: 25  },
-  SENSEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  lotSize: 20,  step: 100 },
-  BANKEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  lotSize: 30,  step: 100 },
+  NIFTY:      { exchange: "NSE_INDEX", optExchange: "NFO",  step: 50  },
+  BANKNIFTY:  { exchange: "NSE_INDEX", optExchange: "NFO",  step: 100 },
+  FINNIFTY:   { exchange: "NSE_INDEX", optExchange: "NFO",  step: 50  },
+  MIDCPNIFTY: { exchange: "NSE_INDEX", optExchange: "NFO",  step: 25  },
+  SENSEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  step: 100 },
+  BANKEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  step: 100 },
 };
 
 export const SYMBOLS = Object.keys(INDEX_CONFIG);

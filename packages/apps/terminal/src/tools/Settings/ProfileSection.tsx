@@ -3,21 +3,18 @@
  *
  * Single-operator model (operator == user == data principal), so "profile"
  * is intentionally light: an editable operator display name, the live session
- * context (mode + broker-gateway connection), quick links into the settings
- * sections that hold preferences and performance optimisations, and the
+ * context (mode + broker-gateway connection), and the
  * session-security actions (lock / sign out).
  *
  * Reachable from the avatar button (TopBar) and the quick-settings panel, both
  * of which deep-link to `/settings#profile`.
  */
 
-import { useCallback } from "react";
 import { Compass, FlaskConical, Zap, Wifi, WifiOff, Lock, LogOut } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAuthStore } from "@/stores/authStore";
-import { SECTIONS, type SectionId } from "./settingsConfig";
 import { SectionTitle, FieldRow, TextInput } from "./shared";
 
 // ---------------------------------------------------------------------------
@@ -29,7 +26,7 @@ const MODE_META: Record<
   { label: string; icon: typeof Compass; className: string }
 > = {
   explore: {
-    label: "Explore",
+    label: "Example",
     icon: Compass,
     className: "bg-text-muted/15 text-text-secondary border-text-muted/25",
   },
@@ -44,16 +41,6 @@ const MODE_META: Record<
     className: "bg-profit/15 text-profit border-profit/40",
   },
 };
-
-// Settings sections surfaced as "optimisation & preferences" quick links.
-const QUICK_LINK_IDS: SectionId[] = [
-  "appearance",
-  "brokers",
-  "risk",
-  "monitoring",
-  "dataPaths",
-  "security",
-];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -75,17 +62,10 @@ export function ProfileSection() {
 
   const loggedIn = authStatus === "logged-in";
 
-  // Navigate within Settings by mutating the hash — SettingsRoute listens for
-  // `hashchange` and swaps the active section (no router import needed here).
-  const jumpTo = useCallback((id: SectionId) => {
-    window.location.hash = id;
-  }, []);
-
   const modeMeta = MODE_META[mode];
   const ModeIcon = modeMeta.icon;
   const initial = (name.trim()[0] ?? "T").toUpperCase();
 
-  const quickLinks = SECTIONS.filter((s) => QUICK_LINK_IDS.includes(s.id));
 
   return (
     <div className="space-y-6">
@@ -108,7 +88,7 @@ export function ProfileSection() {
               ? `Signed in as ${username}`
               : "Local operator · not signed in"}
             {" · "}
-            <span className="capitalize">{experience}</span>
+            <span className="capitalize">{{ beginner: "Getting Started", intermediate: "Confident", pro: "Expert", custom: "Custom" }[experience]}</span>
           </div>
         </div>
       </div>
@@ -155,27 +135,6 @@ export function ProfileSection() {
         </div>
       </div>
 
-      {/* Preferences & optimisations ----------------------------------------- */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          Preferences &amp; optimisation
-        </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {quickLinks.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => jumpTo(id)}
-              className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors text-left"
-              aria-label={`Open ${label} settings`}
-            >
-              <Icon size={13} className="flex-none text-text-muted" />
-              <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Session security ----------------------------------------------------- */}
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
@@ -202,15 +161,7 @@ export function ProfileSection() {
           </div>
         ) : (
           <p className="text-xs text-text-muted">
-            No active broker session. Connect a broker account from{" "}
-            <button
-              type="button"
-              onClick={() => jumpTo("brokers")}
-              className="text-accent hover:underline"
-            >
-              Brokers settings
-            </button>
-            .
+            You are not signed in to FlintTrade.
           </p>
         )}
       </div>

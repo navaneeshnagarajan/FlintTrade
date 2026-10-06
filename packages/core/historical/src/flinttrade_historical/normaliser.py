@@ -45,9 +45,7 @@ _INTRADAY_CUTOFF_MM = 29
 _INTRADAY_CUTOFF_SS = 59
 
 # Intraday intervals that should have the 15:29:59 cutoff applied
-_INTRADAY_INTERVALS: frozenset[str] = frozenset(
-    {"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"}
-)
+_INTRADAY_INTERVALS: frozenset[str] = frozenset({"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"})
 
 # Column aliases — maps many source-specific names to our standard names
 # Adapted from openchart (Open/High/Low/Close/Volume/Timestamp) and
@@ -280,7 +278,7 @@ class OHLCVNormaliser:
 
         normaliser = OHLCVNormaliser()
 
-        # From a list of dicts (historify / openalgo format)
+        # From a list of dicts (historify / broker format)
         result = normaliser.normalise(raw_bars, symbol="RELIANCE", exchange="NSE", interval="5m")
 
         # From a pandas DataFrame (openchart format)
@@ -344,7 +342,10 @@ class OHLCVNormaliser:
 
         try:
             normalised_bars = self._process_dicts(
-                bars, symbol=symbol, exchange=exchange, interval=interval,
+                bars,
+                symbol=symbol,
+                exchange=exchange,
+                interval=interval,
             )
             result.bars = normalised_bars.bars
             result.dropped = normalised_bars.dropped
@@ -470,8 +471,7 @@ class OHLCVNormaliser:
             if self._cutoff and is_intraday:
                 try:
                     bar_time = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").time()
-                    cutoff = datetime(2000, 1, 1, _INTRADAY_CUTOFF_HH,
-                                      _INTRADAY_CUTOFF_MM, _INTRADAY_CUTOFF_SS).time()
+                    cutoff = datetime(2000, 1, 1, _INTRADAY_CUTOFF_HH, _INTRADAY_CUTOFF_MM, _INTRADAY_CUTOFF_SS).time()
                     if bar_time > cutoff:
                         result.dropped += 1
                         continue
@@ -496,8 +496,12 @@ class OHLCVNormaliser:
                 close = prev_close
 
             bar_dict = {
-                "open": open_, "high": high, "low": low,
-                "close": close, "volume": volume, "oi": oi,
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
+                "oi": oi,
             }
 
             # Validation
@@ -536,7 +540,9 @@ class OHLCVNormaliser:
         if result.dropped:
             logger.info(
                 "Normaliser: %d/%d bars dropped (%d valid)",
-                result.dropped, len(bars), result.total_bars,
+                result.dropped,
+                len(bars),
+                result.total_bars,
             )
 
         return result

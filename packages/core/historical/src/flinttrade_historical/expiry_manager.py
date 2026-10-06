@@ -6,7 +6,7 @@ Tracks expiry dates for all derivative segments:
 - CDS: USDINR, EURINR monthly
 - MCX: commodity-specific expiries
 
-Uses OpenAlgo /api/v1/expiry to fetch available expiry dates.
+Uses native broker /api/v1/expiry to fetch available expiry dates.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from flinttrade_core.openalgo_client import OpenAlgoClient
+from flinttrade_core.broker_client import BrokerClient
 
 from .downloader import resolve_maybe_awaitable
 
@@ -28,7 +28,7 @@ class ExpiryInfo:
 
     symbol: str
     exchange: str
-    expiry_dates: list[str] = field(default_factory=list)  # YYMMDD format from OpenAlgo
+    expiry_dates: list[str] = field(default_factory=list)  # YYMMDD format from native broker
 
     @property
     def count(self) -> int:
@@ -68,7 +68,7 @@ class ExpiryInfo:
 
 
 def _parse_expiry_date(exp_str: str) -> date:
-    """Parse historical and official OpenAlgo expiry strings to a date."""
+    """Parse historical and official native broker expiry strings to a date."""
     from flinttrade_core.symbol_utils import parse_expiry
 
     text = str(exp_str or "").strip()
@@ -121,7 +121,7 @@ class ExpiryManager:
         bars = mgr.build_continuous_futures("NIFTY", "NFO", "1d", "2025-01-01", "2025-12-31")
     """
 
-    def __init__(self, client: OpenAlgoClient) -> None:
+    def __init__(self, client: BrokerClient) -> None:
         self._client = client
         self._cache: dict[str, ExpiryInfo] = {}
 
@@ -132,7 +132,7 @@ class ExpiryManager:
         *,
         instrumenttype: str,
     ) -> ExpiryInfo:
-        """Fetch expiry dates from OpenAlgo /api/v1/expiry.
+        """Fetch expiry dates from native broker /api/v1/expiry.
 
         Results are cached per (symbol, exchange, instrumenttype).
         """
@@ -147,7 +147,7 @@ class ExpiryManager:
                 self._client.expiry(symbol, exchange, instrumenttype=instrumenttype),
                 caller="ExpiryManager.get_expiries",
             )
-            # OpenAlgo returns expiries in various formats depending on broker
+            # native broker returns expiries in various formats depending on broker
             if isinstance(data, dict):
                 nested = data.get("data")
                 if isinstance(nested, list):
@@ -163,7 +163,10 @@ class ExpiryManager:
 
             info.expiry_dates = [str(e) for e in expiry_list]
             logger.info(
-                "Loaded %d expiries for %s:%s", info.count, exchange, symbol,
+                "Loaded %d expiries for %s:%s",
+                info.count,
+                exchange,
+                symbol,
             )
         except Exception as exc:
             logger.error("Failed to fetch expiries for %s:%s: %s", exchange, symbol, exc)
@@ -203,7 +206,7 @@ class ExpiryManager:
            - Download OHLCV for that specific FUT contract
         3. Stitch together with roll markers
 
-        The contract symbol format follows OpenAlgo conventions:
+        The contract symbol format follows native broker conventions:
         e.g. "NIFTY26MARFUT", "BANKNIFTY26MARFUT"
         """
         info = self.get_expiries(underlying, exchange, instrumenttype="futures")
@@ -261,25 +264,32 @@ class ExpiryManager:
                 contract_bars = list(bars or [])
                 is_first = True
                 for bar in contract_bars:
-                    continuous.append(ContinuousFuturesBar(
-                        timestamp=bar.timestamp,
-                        open=bar.open,
-                        high=bar.high,
-                        low=bar.low,
-                        close=bar.close,
-                        volume=bar.volume,
-                        contract=contract_symbol,
-                        is_roll=(i > 0 and is_first),
-                    ))
+                    continuous.append(
+                        ContinuousFuturesBar(
+                            timestamp=bar.timestamp,
+                            open=bar.open,
+                            high=bar.high,
+                            low=bar.low,
+                            close=bar.close,
+                            volume=bar.volume,
+                            contract=contract_symbol,
+                            is_roll=(i > 0 and is_first),
+                        )
+                    )
                     is_first = False
 
                 logger.info(
                     "Continuous futures: %s %s to %s — %d bars",
-                    contract_symbol, c_start, c_end, len(contract_bars),
+                    contract_symbol,
+                    c_start,
+                    c_end,
+                    len(contract_bars),
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to fetch %s: %s", contract_symbol, exc,
+                    "Failed to fetch %s: %s",
+                    contract_symbol,
+                    exc,
                 )
 
             prev_expiry_date = exp_date
@@ -294,8 +304,18 @@ class ExpiryManager:
         Output: "NIFTY26MARFUT"
         """
         _MONTH_MAP = {
-            1: "JAN", 2: "FEB", 3: "MAR", 4: "APR", 5: "MAY", 6: "JUN",
-            7: "JUL", 8: "AUG", 9: "SEP", 10: "OCT", 11: "NOV", 12: "DEC",
+            1: "JAN",
+            2: "FEB",
+            3: "MAR",
+            4: "APR",
+            5: "MAY",
+            6: "JUN",
+            7: "JUL",
+            8: "AUG",
+            9: "SEP",
+            10: "OCT",
+            11: "NOV",
+            12: "DEC",
         }
         try:
             d = _parse_expiry_date(expiry_str)

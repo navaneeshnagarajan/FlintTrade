@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from flask import Flask
@@ -35,7 +35,7 @@ def app(tmp_path, monkeypatch):
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
     flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
-    limiter = BrokerRateLimiter({"openalgo": {"order": 10.0, "data": 5.0}})
+    limiter = BrokerRateLimiter({"dhan": {"order": 10.0, "data": 5.0}})
     flask_app.config["BROKER_ROUTER"] = _FakeRouter(limiter)
     flask_app.register_blueprint(gateway_bp)
     flask_app.config["_TEST_LIMITER"] = limiter
@@ -52,7 +52,7 @@ def test_get_returns_live_limits(client):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
-    assert body["limits"]["openalgo"] == {"order": 10.0, "data": 5.0}
+    assert body["limits"]["dhan"] == {"order": 10.0, "data": 5.0}
 
 
 def test_get_is_empty_when_no_limiter():
@@ -64,13 +64,13 @@ def test_get_is_empty_when_no_limiter():
 
 
 def test_put_applies_live_and_keeps_untouched_kind(app, client):
-    resp = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": 3})
+    resp = client.put("/v1/rate-limits", json={"broker_id": "dhan", "order": 3})
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["limits"]["openalgo"]["order"] == 3.0
-    assert body["limits"]["openalgo"]["data"] == 5.0  # untouched
+    assert body["limits"]["dhan"]["order"] == 3.0
+    assert body["limits"]["dhan"]["data"] == 5.0  # untouched
     # The change reached the live limiter.
-    assert app.config["_TEST_LIMITER"]._rate("openalgo", "order") == 3.0
+    assert app.config["_TEST_LIMITER"]._rate("dhan", "order") == 3.0
 
 
 def test_put_persists_to_workspace(client, tmp_path):
@@ -131,8 +131,55 @@ def test_put_requires_broker_id(client):
 
 
 def test_put_rejects_negative_rate(client):
-    resp = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": -1})
+    resp = client.put("/v1/rate-limits", json={"broker_id": "dhan", "order": -1})
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("with_registry", [False, True], ids=["standalone", "managed"])
+@pytest.mark.parametrize("field", ["order", "data"])
+@pytest.mark.parametrize(
+    "rate_json",
+    ["Infinity", "-Infinity", "NaN", '"1e309"', '"-1e309"', str(10**400), str(-(10**400)), "1e309"],
+    ids=[
+        "infinity",
+        "negative-infinity",
+        "nan",
+        "overflow-string",
+        "negative-overflow-string",
+        "overflow-integer",
+        "negative-overflow-integer",
+        "overflow-json-number",
+    ],
+)
+def test_put_rejects_nonfinite_rates_before_side_effects(app, client, tmp_path, with_registry, field, rate_json):
+    from flinttrade_core.workspace import Workspace
+
+    Workspace(tmp_path).initialise()
+    workspace_path = tmp_path / "workspace.json"
+    before = workspace_path.read_bytes()
+    limiter = app.config["_TEST_LIMITER"]
+    before_limits = limiter.snapshot()
+    if with_registry:
+        app.config["REGISTRY"] = object()
+
+    with (
+        patch.object(Workspace, "update", autospec=True, side_effect=Workspace.update) as persist,
+        patch.object(limiter, "apply_override", wraps=limiter.apply_override) as apply_override,
+        patch("flinttrade_core.app.retire_broker_dependencies", return_value=True) as retire,
+    ):
+        response = client.put(
+            "/v1/rate-limits",
+            data=f'{{"broker_id": "dhan", "{field}": {rate_json}}}',
+            content_type="application/json",
+        )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "error"
+    persist.assert_not_called()
+    apply_override.assert_not_called()
+    retire.assert_not_called()
+    assert workspace_path.read_bytes() == before
+    assert limiter.snapshot() == before_limits
 
 
 def test_rejected_workspace_write_leaves_live_rate_limits_unchanged(app, client, tmp_path):
@@ -144,12 +191,12 @@ def test_rejected_workspace_write_leaves_live_rate_limits_unchanged(app, client,
     config["workspace_generation"] = (1 << 63) - 1
     path.write_text(json.dumps(config))
     before = path.read_bytes()
-    response = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": 3})
+    response = client.put("/v1/rate-limits", json={"broker_id": "dhan", "order": 3})
     assert response.status_code == 503
-    assert app.config["_TEST_LIMITER"]._rate("openalgo", "order") == 10.0
+    assert app.config["_TEST_LIMITER"]._rate("dhan", "order") == 10.0
     assert path.read_bytes() == before
 
 
 def test_put_requires_at_least_one_field(client):
-    resp = client.put("/v1/rate-limits", json={"broker_id": "openalgo"})
+    resp = client.put("/v1/rate-limits", json={"broker_id": "dhan"})
     assert resp.status_code == 400

@@ -5,7 +5,7 @@ Endpoint
 GET /api/v1/leverage/margin/current  — current margin: available, used, total,
                                        leverage_ratio
 
-Proxies through :class:`flinttrade_core.openalgo_client.OpenAlgoClient`
+Proxies through :class:`flinttrade_core.broker_client.BrokerClient`
 ``margin()`` using an empty positions list to fetch account-level margin info.
 
 Register in ``create_flask_app()``::
@@ -26,9 +26,9 @@ logger = logging.getLogger("flinttrade.engine.leverage_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import resolve_openalgo_client
+    from flinttrade_core.broker_client import resolve_broker_client
 except Exception:  # pragma: no cover
-    resolve_openalgo_client = None  # type: ignore[assignment,misc]
+    resolve_broker_client = None  # type: ignore[assignment,misc]
 
 leverage_bp = Blueprint("leverage", __name__, url_prefix="/api/v1")
 
@@ -51,26 +51,26 @@ def _run_async(coro: Any) -> Any:
 
 @leverage_bp.route("/leverage/margin/current", methods=["GET"])
 def get_current_margin() -> tuple[Any, int]:
-    """Return current margin utilisation from OpenAlgo.
+    """Return current margin utilisation from broker.
 
-    Calls the OpenAlgo ``/api/v1/margin`` endpoint with an empty positions
+    Calls the broker ``/api/v1/margin`` endpoint with an empty positions
     list to retrieve account-level margin figures.
 
     Returns:
         JSON ``{"status": "success", "available": <float>, "used": <float>,
         "total": <float>, "leverage_ratio": <float>}`` on success.
 
-        Returns HTTP 503 when OpenAlgo is unreachable or not configured.
+        Returns HTTP 503 when broker is unreachable or not configured.
 
     Notes:
         ``leverage_ratio`` is ``used / total`` when ``total > 0``,
         otherwise ``0.0``.
     """
     try:
-        if resolve_openalgo_client is None:
-            raise ImportError("OpenAlgo client resolver not available")
+        if resolve_broker_client is None:
+            raise ImportError("broker client resolver not available")
 
-        client, close_client = resolve_openalgo_client()
+        client, close_client = resolve_broker_client()
 
         # Call margin with an empty positions list — returns account-level margin
         try:
@@ -81,7 +81,7 @@ def get_current_margin() -> tuple[Any, int]:
 
         data: dict[str, Any] = raw.get("data", raw) if isinstance(raw, dict) else {}
 
-        # Normalise field names — OpenAlgo uses both snake_case and flat names
+        # Normalise field names — broker uses both snake_case and flat names
         available = float(data.get("available", data.get("availablecash", data.get("available_balance", 0))))
         used = float(data.get("used", data.get("usedmargin", data.get("used_margin", 0))))
         total = float(data.get("total", data.get("totalbalance", data.get("total_balance", available + used))))
@@ -100,12 +100,12 @@ def get_current_margin() -> tuple[Any, int]:
             200,
         )
     except Exception as exc:
-        logger.warning("OpenAlgo margin fetch failed: %s", exc)
+        logger.warning("broker margin fetch failed: %s", exc)
         return (
             jsonify(
                 {
                     "status": "error",
-                    "message": "Could not fetch margin from OpenAlgo",
+                    "message": "Could not fetch margin from broker",
                     "detail": "margin fetch failed",
                 }
             ),

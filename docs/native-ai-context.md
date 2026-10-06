@@ -24,12 +24,6 @@ Send a full FlintTrade operator-session JWT and this request:
 }
 ```
 
-The operator needs `admin.accounts.read` and access to **each** selected broker
-account. The request does not grant permissions, connect accounts or unlock
-Live mode. Native accounts do not require an OpenAlgo login: broker reads reuse
-FlintTrade's existing gateway and app-owned event loop. An explicitly configured
-OpenAlgo bridge still requires its own valid connection.
-
 ## What the model receives
 
 FlintTrade reads the configured quote account for quote and optional depth, the historical
@@ -49,7 +43,11 @@ If the quote adapter does not implement the read-port depth capability, the
 depth record explicitly contains `error_code: "unsupported"` with null value,
 provenance and source timestamp. This is not an empty order book. Native
 adapters' separate depth-stream and `market_depth` interfaces are not adapted
-by this feature. All other depth failures still prevent model invocation.
+by this feature. Dhan cash-equity instruments now have an explicit in-process
+read-port depth adapter using the existing `quote_data` transport, with exact
+canonical instrument matching and strict ladder validation. Native HTTP reads
+and account mutations remain frozen. All other depth failures still prevent
+model invocation.
 
 Before invoking the model, FlintTrade durably appends the exact input to its
 existing hash-chained audit log as `AI_BROKER_ANALYSIS_INPUT`. Successful JSON
