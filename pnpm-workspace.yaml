@@ -154,6 +154,11 @@ overrides:
   # GHSA-gjj5-9665-rwrc / CVE-2026-104861: quadratic SVG parse DoS, patched
   # in 7.4.0. plotly.js still requests 7.3.0.
   probe-image-size: 7.4.0
+  # GHSA-p6vx-979v-rg4c (CVE-2026-104846) and GHSA-jp82-f5mq-hwhp
+  # (CVE-2026-104845): promise thenable invocation and unbounded TypedArray
+  # allocation. solid-js 1.9.15 still requests seroval 1.5.6. Stay on the
+  # latest 1.6.x, not the minimum patched release.
+  seroval: 1.6.8
 
 # Keep the upstream tarball/integrity and BSD-2-Clause licence. Fail installation
 # if this exact-version patch no longer applies. See patches/README.md.
