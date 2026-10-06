@@ -1,6 +1,6 @@
 """Native-adapter activation factory (the dormant -> live bridge).
 
-The native adapters (Dhan / Upstox / Kotak Neo / INDmoney / Groww) are written,
+The native adapters (Dhan / Upstox / Kotak Neo / INDmoney / Groww / Delta Exchange) are written,
 gated and mock-tested, but stay dormant until every activation requirement holds
 for a broker:
 
@@ -32,6 +32,7 @@ from flinttrade_gateway.capabilities import Capabilities
 from flinttrade_gateway.monday_read_smoke import monday_read_connectable
 
 from ._base import BrokerAdapter
+from .delta import DELTA_CAPABILITIES, DeltaAdapter
 from .dhan import DHAN_CAPABILITIES, DhanAdapter
 from .groww import GROWW_CAPABILITIES, GrowwAdapter
 from .indmoney import INDMONEY_CAPABILITIES, IndMoneyAdapter
@@ -54,6 +55,7 @@ NATIVE_ADAPTER_SPECS: MappingProxyType[str, NativeAdapterSpec] = MappingProxyTyp
         "kotakneo": NativeAdapterSpec(KotakNeoAdapter, KOTAKNEO_CAPABILITIES),
         "indmoney": NativeAdapterSpec(IndMoneyAdapter, INDMONEY_CAPABILITIES),
         "groww": NativeAdapterSpec(GrowwAdapter, GROWW_CAPABILITIES),
+        "deltaexchange": NativeAdapterSpec(DeltaAdapter, DELTA_CAPABILITIES),
     }
 )
 

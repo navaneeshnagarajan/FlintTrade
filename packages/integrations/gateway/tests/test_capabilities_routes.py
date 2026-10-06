@@ -217,9 +217,9 @@ class TestCapabilitiesRoute:
         response = client.get("/api/v1/broker/mcp")
         assert response.status_code == 200
         data = response.get_json()
-        assert data["count"] == 3
+        assert data["count"] == 4
         brokers = {b["adapter_id"]: b for b in data["brokers"]}
-        assert set(brokers) == {"dhan", "upstox", "groww"}
+        assert set(brokers) == {"dhan", "upstox", "groww", "deltaexchange"}
         assert brokers["dhan"]["native"] is True
         assert brokers["dhan"]["connectable"] is True
         assert brokers["dhan"]["requires_static_ip"] is True
@@ -239,6 +239,10 @@ class TestCapabilitiesRoute:
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
         assert "DDPI" in " ".join(brokers["groww"]["mcp"]["cautions"])
         assert "market-data/API permissions" in " ".join(brokers["groww"]["mcp"]["cautions"])
+        assert brokers["deltaexchange"]["connectable"] is False
+        assert brokers["deltaexchange"]["mcp"]["read_only"] is True
+        assert brokers["deltaexchange"]["mcp"]["trading_supported"] is False
+        assert brokers["deltaexchange"]["mcp"]["docs_url"] == "https://mcp.delta.exchange/docs"
         dhan_configs = {c["id"]: c for c in brokers["dhan"]["mcp"]["client_configs"]}
         assert dhan_configs["claude_code"]["args"] == [
             "mcp",
@@ -336,7 +340,7 @@ class TestCapabilitiesRoute:
         payload = response.get_json()
         assert payload["status"] == "error"
         assert "not found" in payload["message"]
-        assert set(payload["known_brokers"]) == {"dhan", "groww", "upstox"}
+        assert set(payload["known_brokers"]) == {"dhan", "groww", "upstox", "deltaexchange"}
 
     def test_mcp_catalogue_rejects_broker_without_catalogued_mcp(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp?broker=kotakneo")
@@ -344,7 +348,7 @@ class TestCapabilitiesRoute:
         payload = response.get_json()
         assert payload["status"] == "error"
         assert "no FlintTrade-catalogued MCP endpoint" in payload["message"]
-        assert set(payload["known_brokers"]) == {"dhan", "groww", "upstox"}
+        assert set(payload["known_brokers"]) == {"dhan", "groww", "upstox", "deltaexchange"}
 
     def test_all_brokers_have_broker_name(self, client) -> None:  # type: ignore[no-untyped-def]
         """Every broker entry in the full list contains broker_name."""

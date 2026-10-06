@@ -52,12 +52,12 @@ describe('docs index generation', () => {
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`29 ${'analysis'}`);
   });
 
-  it('keeps broker catalogue count pins aligned at 5', () => {
+  it('keeps broker catalogue count pins aligned at 6', () => {
     const claude = readFileSync(resolve(process.cwd(), '../../../CLAUDE.md'), 'utf8');
     const agents = readFileSync(resolve(process.cwd(), '../../../AGENTS.md'), 'utf8');
 
-    expect(claude).toContain('`BROKER_CATALOG` (5 brokers)');
-    expect(agents).toContain('5 brokers');
+    expect(claude).toContain('`BROKER_CATALOG` (6 brokers)');
+    expect(agents).toContain('6 brokers');
     expect(claude).not.toContain('`BROKER_CATALOG` (35 brokers)');
     expect(agents).not.toContain('35 brokers');
   });

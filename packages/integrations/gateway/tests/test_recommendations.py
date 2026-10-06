@@ -94,9 +94,12 @@ def test_options_history_scorer_rewards_rolling_series() -> None:
 def test_streaming_recommends_only_runtime_ready_feed() -> None:
     top = best_broker_for(BrokerUseCase.STREAMING)
     assert top is not None
-    assert top.broker_id == "kotakneo"
-    assert "live streaming" in top.rationale.lower()
     by_broker = {r.broker_id: r for r in recommend(BrokerUseCase.STREAMING)}
+    # Kotak Neo and Delta both expose a live socket and the same base score.
+    # The documented tie-break is broker_id, so Delta sorts first.
+    assert top.broker_id == "deltaexchange"
+    assert by_broker["deltaexchange"].raw_score == by_broker["kotakneo"].raw_score
+    assert "live streaming" in top.rationale.lower()
     assert by_broker["kotakneo"].raw_score > 0.0
     assert by_broker["dhan"].raw_score == 0.0
     assert "not enabled yet" in by_broker["dhan"].rationale
@@ -197,12 +200,13 @@ def test_historical_data_full_ranking_with_indmoney() -> None:
     #   dhan (5 intervals + 1825-day lookback = 70.83)
     #   > groww (5 intervals + 1080-day lookback = 46.0)
     #   > indmoney (12 intervals * 2 = 24.0; lookback honestly unset)
+    #   > deltaexchange (9 intervals * 2 = 18.0; total lookback honestly unset)
     #   > kotakneo (7 intervals * 2 = 14.0; total lookback honestly unset)
     #   > upstox (5 intervals + 31-day lookback = 11.03).
     # Groww's captured docs advertise broad intraday history, but Dhan's real
     # ~5-year intraday depth keeps it #1 — the doc-honest outcome.
     ranked_ids = [r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)]
-    assert ranked_ids == ["dhan", "groww", "indmoney", "kotakneo", "upstox"]
+    assert ranked_ids == ["dhan", "groww", "indmoney", "deltaexchange", "kotakneo", "upstox"]
 
 
 def test_indmoney_scores_zero_for_options() -> None:

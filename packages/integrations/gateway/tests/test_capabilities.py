@@ -147,8 +147,8 @@ def test_registry_register_overwrites_existing() -> None:
 
 
 def test_default_registry_contains_14_brokers() -> None:
-    """The default REGISTRY contains 9 bridge/legacy rows plus 5 native rows."""
-    assert len(REGISTRY.all()) == 14
+    """The default REGISTRY contains 9 bridge/legacy rows plus 6 native rows."""
+    assert len(REGISTRY.all()) == 15
 
 
 def test_default_registry_zerodha_websocket() -> None:
@@ -231,11 +231,13 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
         assert reg_caps.supports_bracket_orders == adapter_caps.bracket_order_native, name
         assert reg_caps.supports_cover_orders == adapter_caps.cover_order_native, name
         assert reg_caps.supports_basket_orders == adapter_caps.basket_order_native, name
-        assert reg_caps.supports_options == bool(adapter_caps.segments & (Segments.NFO | Segments.BFO)), name
+        assert reg_caps.supports_options == bool(
+            adapter_caps.segments & (Segments.NFO | Segments.BFO | Segments.CRYPTO)
+        ), name
         assert reg_caps.supports_equity == bool(adapter_caps.segments & (Segments.NSE_EQ | Segments.BSE_EQ)), name
         assert reg_caps.supports_multi_quote == adapter_caps.multi_quote_supported, name
         assert reg_caps.supports_multi_option_greeks == adapter_caps.multi_option_greeks_supported, name
-    assert checked == 5  # all natives, including Groww, are adapter-derived; guard the loop ran
+    assert checked == 6  # all natives, including Groww and Delta, are adapter-derived
 
 
 def test_auto_native_registry_derives_native_rows_without_seeded_duplicates() -> None:

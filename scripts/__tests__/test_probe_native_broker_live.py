@@ -435,6 +435,10 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "ordertrades" in probe._resolve_reads("groww", ["all"])
     assert "orderstatus" in probe._resolve_reads("indmoney", ["all"])
     assert "ordertrades" in probe._resolve_reads("indmoney", ["all"])
+    assert "quotes" in probe._resolve_reads("deltaexchange", ["default"])
+    assert "history" in probe._resolve_reads("deltaexchange", ["default"])
+    assert "optionchain" in probe._resolve_reads("deltaexchange", ["all"])
+    assert probe.ADAPTER_FACTORIES["deltaexchange"].__name__ == "DeltaAdapter"
     assert "market_depth" in probe._resolve_reads("kotakneo", ["all"])
     assert "quote_details" in probe._resolve_reads("kotakneo", ["default"])
     assert "orderstatus" not in probe._resolve_reads("kotakneo", ["all"])

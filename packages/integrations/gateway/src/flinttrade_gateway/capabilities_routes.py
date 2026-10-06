@@ -146,6 +146,10 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         "cover_order_native": native.cover_order_native,
         "basket_order_native": native.basket_order_native,
     }
+    if info is not None:
+        data["supported_exchanges"] = list(info.exchanges)
+        if info.exchanges == ["CRYPTO"]:
+            data["broker_type"] = "crypto"
     data.update(_catalog_mcp_fields(broker_name))
     data.update(_catalog_sdk_fields(broker_name))
     return data

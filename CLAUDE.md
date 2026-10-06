@@ -85,7 +85,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `ditto` | services | Py | Multi-account mirror, margin calc, trailing SL, risk manager (AlgoMirror patterns reimplemented natively) |
 | `automation` | services | Py | Cron, Telegram bot (kill switch), post-market analysis |
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
-| `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter`, `BrokerRouter`, `BROKER_CATALOG` (5 brokers), encrypted vault and exact-account reads |
+| `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter`, `BrokerRouter`, `BROKER_CATALOG` (6 brokers), encrypted vault and exact-account reads |
 | `webhooks` | integrations | Py | Generic HMAC-signed custom webhooks (the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed on 2026-07-26; a retired provider source now 404s) |
 | `terminal` | apps | TS/React | SPA: FlexLayout workspace, 71 widgets, FDC3 channel bus, routes — single source of truth for UI |
 | `desktop` | apps | TS/Electron | Sandboxed Electron 44 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |

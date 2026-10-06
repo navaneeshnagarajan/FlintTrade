@@ -28,14 +28,16 @@ For library purposes and exact resolved versions, see
 
 ## Brokers
 
-Broker connections use five native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney and Groww. Availability remains evidence-gated. Native broker HTTP
+Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
+INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
 mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
 cannot currently be established through the terminal. Practice uses the local
 sandbox. Funded Live placement remains unproven and fail-closed.
 
 INDmoney tokens reset at the daily 06:00 IST dashboard cycle. INDmoney and
 Groww remain disabled until their existing activation blockers are cleared.
+Delta Exchange stays disabled until live order-safety proof and a deadman
+runtime proof exist. India and Global keys are not interchangeable.
 
 ### Sandbox terminology
 

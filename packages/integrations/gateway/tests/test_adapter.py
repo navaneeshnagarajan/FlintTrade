@@ -4,8 +4,8 @@ from flinttrade_gateway.adapter import BROKER_CATALOG
 from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_SPECS
 
 
-def test_native_catalogue_has_five_supported_brokers():
-    assert len(BROKER_CATALOG) == 5
+def test_native_catalogue_has_six_supported_brokers():
+    assert len(BROKER_CATALOG) == 6
     assert set(BROKER_CATALOG) == set(NATIVE_ADAPTER_SPECS)
     assert all(info.native for info in BROKER_CATALOG.values())
 

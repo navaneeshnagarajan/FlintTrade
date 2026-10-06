@@ -46,7 +46,7 @@ def test_catalogue_route_is_authenticated_read_only_and_generic_forecast_only(mo
     assert response.status_code == 200
     body = response.get_json()
     assert body["status"] == "success"
-    assert body["data"]["count"] == 33
+    assert body["data"]["count"] == 34
     ids = {item["provider_id"] for item in body["data"]["providers"]}
     assert {
         "broker:dhan",
@@ -70,14 +70,21 @@ def test_catalogue_composition_preserves_contributor_order_and_static_payload(mo
     ids = tuple(provider.provider_id for provider in catalogue.list())
     ai_ids = tuple(provider.provider_id for provider in ai_service_descriptors())
     assert len(ai_ids) == 25
-    assert len(ids) == 33
+    assert len(ids) == 34
     assert ids[: len(ai_ids)] == ai_ids
     assert ids[len(ai_ids) : len(ai_ids) + 3] == (
         "market-data:native-history",
         "market-data:openchart",
         "market-data:yfinance",
     )
-    assert set(ids[-5:]) == {"broker:dhan", "broker:upstox", "broker:kotakneo", "broker:indmoney", "broker:groww"}
+    assert set(ids[-6:]) == {
+        "broker:dhan",
+        "broker:upstox",
+        "broker:kotakneo",
+        "broker:indmoney",
+        "broker:groww",
+        "broker:deltaexchange",
+    }
 
     payload = catalogue.to_public_payload()
     forbidden = {"connection", "secret", "health", "readiness", "budget", "entitlement"}
@@ -170,13 +177,14 @@ def test_gateway_contribution_reads_catalogue_without_broker_or_credential_io() 
     ):
         descriptors = broker_service_descriptors()
 
-    assert len(descriptors) == 5
+    assert len(descriptors) == 6
     assert {item.provider_id for item in descriptors} == {
         "broker:dhan",
         "broker:upstox",
         "broker:kotakneo",
         "broker:indmoney",
         "broker:groww",
+        "broker:deltaexchange",
     }
 
 
