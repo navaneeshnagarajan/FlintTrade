@@ -604,7 +604,6 @@ def start_agent() -> tuple[Any, int]:
         _decode_request_payload,
         _gated_target,
         _is_live_mode_unlocked,
-        _record_trade_journal,
         _require_live_safety,
         _safety_runtime_unavailable_response,
     )
@@ -791,13 +790,6 @@ def start_agent() -> tuple[Any, int]:
             selector=f"{adapter_id}:{account_id}",
         )
 
-        journal_store = current_app.config.get("TRADE_STORAGE")
-
-        def _journal_write(order: Any, orderid: str) -> None:
-            with app_obj.app_context():
-                if journal_store is not None:
-                    _record_trade_journal(order, orderid, strategy="AutonomousAgent")
-
         # Mid-flight brake: the session outlives this HTTP request, so the
         # operator's logout / live→practice downgrade (both revoke the starting
         # jti) must stop the agent's ORDERS even while its analysis loop runs.
@@ -848,7 +840,6 @@ def start_agent() -> tuple[Any, int]:
             adapter_id=adapter_id,
             account_id=account_id,
             audit=current_app.config.get("AUDIT"),
-            journal_write=_journal_write,
             pre_dispatch_check=_pre_dispatch_check,
             portfolio_state_provider=_agent_safety_state_provider,
         )

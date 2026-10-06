@@ -57,25 +57,8 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import upstox_mapping as M
+from ._balance import _balance_number, _balance_record
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
-
-
-def _balance_number(value: object) -> float:
-    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
-        raise BrokerBalanceResponseInvalid
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        raise BrokerBalanceResponseInvalid from None
-    if not math.isfinite(number):
-        raise BrokerBalanceResponseInvalid
-    return number
-
-
-def _balance_record(value: object) -> dict[str, object]:
-    if type(value) is not dict or any(type(key) is not str for key in value):
-        raise BrokerBalanceResponseInvalid
-    return value
 
 
 def _balance_snapshot_from_upstox(response: object) -> BalanceSnapshot:
@@ -2007,40 +1990,11 @@ class UpstoxAdapter(BrokerAdapter):
         broker fetch failure is captured on the report's
         ``error`` field instead of raised, so the runner retries next cycle.
         """
-        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
-            EMPTY_LOCAL_STATE,
-            build_report,
-            declare_unavailable_order_fields,
-        )
+        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, _reconcile_adapter  # noqa: PLC0415
 
         generated_at = datetime.now(tz=UTC)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
-        try:
-            broker_orders = declare_unavailable_order_fields(
-                await self.order_book(session),
-                fields=("variety", "validity", "strategy"),
-            )
-            broker_positions = await self.positions(session)
-            broker_holdings = await self.holdings(session)
-        except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes
-            return build_report(
-                adapter_id=self.broker_id,
-                account_id=session.account_id,
-                generated_at=generated_at,
-                local_state=local,
-                error=f"broker fetch failed: {exc}",
-            )
-        # The read methods return the normalised row dicts at runtime (see the
-        # mapping layer); build_report consumes them as plain mappings.
-        return build_report(
-            adapter_id=self.broker_id,
-            account_id=session.account_id,
-            generated_at=generated_at,
-            broker_orders=broker_orders,  # type: ignore[arg-type]
-            broker_positions=broker_positions,  # type: ignore[arg-type]
-            broker_holdings=broker_holdings,
-            local_state=local,
-        )
+        return await _reconcile_adapter(self, session, generated_at=generated_at, local_state=local)
 
 
 from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # noqa: E402  shared per-process token (§8.0c)

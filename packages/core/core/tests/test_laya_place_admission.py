@@ -163,6 +163,63 @@ def test_client_cannot_mark_an_operator_place_as_chat(backend_lease_proof) -> No
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("order_type,pricetype", [("LIMIT", "MARKET"), ("market", " limit ")])
+def test_practice_conflicting_types_never_reach_laya_or_the_book(monkeypatch, order_type, pricetype) -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    process_laya().set_status(DecisionStatus.READY)
+    admit = MagicMock(wraps=process_laya().admit)
+    monkeypatch.setattr(process_laya(), "admit", admit)
+    app, _ = _practice_app()
+    sandbox = SandboxEngine(db_path=":memory:")
+    app.config["DATA_SANDBOX_ENGINE"] = sandbox
+    app.config["TICK_RECORDER"] = MagicMock()
+    try:
+        response = app.test_client().post(
+            "/api/v1/orders/place",
+            json={**_BODY, "order_type": order_type, "pricetype": pricetype, "price": 100, "price_basis": "ltp"},
+            headers=_headers("practice"),
+        )
+        assert response.status_code == 400
+        admit.assert_not_called()
+        assert sandbox.get_orders() == []
+        assert sandbox.get_positions() == []
+    finally:
+        sandbox.close()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("type_fields", [
+    {"order_type": " limit ", "pricetype": "LIMIT"},
+    {"order_type": "LIMIT", "pricetype": " limit "},
+    {"pricetype": "limit"},
+])
+def test_practice_aliases_admit_and_rest_the_same_type(monkeypatch, type_fields) -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    process_laya().set_status(DecisionStatus.READY)
+    admit = MagicMock(wraps=process_laya().admit)
+    monkeypatch.setattr(process_laya(), "admit", admit)
+    app, _ = _practice_app()
+    sandbox = SandboxEngine(db_path=":memory:")
+    app.config["DATA_SANDBOX_ENGINE"] = sandbox
+    app.config["TICK_RECORDER"] = MagicMock()
+    body = {key: value for key, value in _BODY.items() if key != "order_type"}
+    try:
+        response = app.test_client().post(
+            "/api/v1/orders/place",
+            json={**body, **type_fields, "price": 100},
+            headers=_headers("practice"),
+        )
+        assert response.status_code == 200, response.get_json()
+        assert admit.call_args.args[0].order_type == "LIMIT"
+        assert sandbox.get_orders()[0]["pricetype"] == "LIMIT"
+        assert sandbox.get_orders()[0]["status"] == "PENDING"
+    finally:
+        sandbox.close()
+
+
+@pytest.mark.unit
 def test_practice_down_denies_before_the_sandbox() -> None:
     app, sandbox = _practice_app()
     response = app.test_client().post(

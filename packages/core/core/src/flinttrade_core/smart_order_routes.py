@@ -139,8 +139,6 @@ class GatedChildExecutor:
         adapter_id: Broker adapter id (e.g. ``"dhan"``).
         account_id: Broker account id within the adapter.
         audit: Optional audit logger (``log_event``); best-effort.
-        journal_write: Optional callable ``(order, orderid) -> None`` appending
-            to the trade journal; best-effort.
         pre_dispatch_check: Optional ``() -> str | None`` evaluated BEFORE
             every child — a non-None return (e.g. "session token revoked",
             "cancelled by operator") raises
@@ -167,7 +165,6 @@ class GatedChildExecutor:
         adapter_id: str,
         account_id: str,
         audit: Any = None,
-        journal_write: Any = None,
         pre_dispatch_check: Any = None,
         portfolio_state_provider: Any = None,
     ) -> None:
@@ -178,7 +175,6 @@ class GatedChildExecutor:
         self._adapter_id = adapter_id
         self._account_id = account_id
         self._audit = audit
-        self._journal_write = journal_write
         self._pre_dispatch_check = pre_dispatch_check
         self._portfolio_state_provider = portfolio_state_provider
 
@@ -287,7 +283,7 @@ class GatedChildExecutor:
 
             orderid = str(result)
 
-        # Best-effort audit + journal — never break the child path.
+        # Best-effort submission audit — an acknowledgement is not fill evidence.
         try:
             if self._audit is not None:
                 self._audit.log_event(
@@ -300,11 +296,6 @@ class GatedChildExecutor:
                 )
         except Exception:  # pragma: no cover
             logger.debug("audit stamp failed for smart-route child", exc_info=True)
-        try:
-            if self._journal_write is not None:
-                self._journal_write(order, orderid)
-        except Exception:  # pragma: no cover
-            logger.debug("journal stamp failed for smart-route child", exc_info=True)
 
         return _GatedDecision(True, _GatedOrderResponse(orderid))
 

@@ -18,9 +18,9 @@ that hole and pin the four properties that have actually broken:
   4. ``ft.py`` imports nothing outside the standard library, and joins
      ``PYTHONPATH`` with :data:`os.pathsep` rather than a hardcoded ``:``.
 
-Everything here is hermetic: ``Path.home`` and the workspace env vars are
-redirected into ``tmp_path``, no command is really executed, and no network or
-real home directory is touched.
+Everything here is hermetic: workspace paths and CLI subprocess fixtures are
+redirected into ``tmp_path``. Public dispatch uses harmless stand-in tools and
+processes; no backend, network or real user workspace is touched.
 """
 
 from __future__ import annotations
@@ -31,10 +31,14 @@ import json
 import os
 import platform
 import re
+import shutil
+import signal
 import subprocess
 import sys
+import time
+from contextlib import nullcontext
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -558,15 +562,466 @@ def test_pytest_worker_override_is_runner_only(
     assert not any(arg.startswith("--workers") for arg in calls[0])
 
 
+def _copy_runner_fixture(root: Path) -> Path:
+    """Run the real CLI in a disposable checkout, never the user's workspace."""
+    scripts = root / "scripts"
+    scripts.mkdir()
+    for source in (_FT_PATH, _BOOTSTRAP_HELPER_PATH):
+        shutil.copyfile(source, scripts / source.name)
+    return scripts / "ft.py"
+
+
 @pytest.mark.unit
-def test_pytest_does_not_add_xdist_flags_when_plugin_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("command", ["test", "test-fast"])
+@pytest.mark.parametrize("override_source", ["cli", "environment"])
+@pytest.mark.parametrize("addopts_source", ["environment", "configuration"])
+def test_public_cli_serial_workers_override_inherited_parallelism(
+    command: str, override_source: str, addopts_source: str, tmp_path: Path,
+) -> None:
+    """Zero workers must actively override pytest's inherited -n, not omit a flag."""
+    runner = _copy_runner_fixture(tmp_path)
+    configuration = tmp_path / "pytest.ini"
+    configuration.write_text(
+        "[pytest]\n" + ("addopts = -n 2\n" if addopts_source == "configuration" else ""), encoding="utf-8",
+    )
+    target = tmp_path / "test_serial.py"
+    target.write_text(
+        "import os\n"
+        "def test_serial(request):\n"
+        "    assert not os.environ.get('PYTEST_XDIST_WORKER'), 'serial override still started workers'\n"
+        "    assert request.config.getoption('numprocesses') == 0\n",
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "PYTEST_ADDOPTS": "-n 2" if addopts_source == "environment" else "",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_PLUGINS": "xdist.plugin",
+        "FLINTTRADE_TEST_WORKERS": "0" if override_source == "environment" else "2",
+        "FLINTTRADE_WORKSPACE_DIR": str(tmp_path / "workspace"),
+    }
+    env = {name: value for name, value in env.items() if not name.startswith("PYTEST_XDIST_")}
+    options = ["--workers", "0"] if override_source == "cli" else []
+    result = subprocess.run(
+        [sys.executable, str(runner), command, *options, str(target), "-c", str(configuration), "-q"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+    assert "bringing up nodes" not in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["explicit-workers", "disabled-cli", "disabled-addopts", "autoload-disabled"])
+def test_public_cli_serial_override_preserves_explicit_workers_and_plugin_disables(mode: str, tmp_path: Path) -> None:
+    runner = _copy_runner_fixture(tmp_path)
+    target = tmp_path / "test_plugin_options.py"
+    assertion = (
+        "os.environ.get('PYTEST_XDIST_WORKER_COUNT') == '1'" if mode == "explicit-workers"
+        else "request.config.getoption('numprocesses', default=None) is None"
+    )
+    target.write_text(
+        f"import os\ndef test_options(request):\n    assert {assertion}\n", encoding="utf-8",
+    )
+    configuration = tmp_path / "pytest.ini"
+    configuration.write_text("[pytest]\n", encoding="utf-8")
+    options = ["-n", "1"] if mode == "explicit-workers" else (["-p", "no:xdist"] if mode == "disabled-cli" else [])
+    env = os.environ | {
+        "PYTEST_ADDOPTS": "-p no:xdist" if mode == "disabled-addopts" else "",
+        "PYTEST_PLUGINS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1" if mode == "autoload-disabled" else "",
+        "FLINTTRADE_WORKSPACE_DIR": str(tmp_path / "workspace"),
+    }
+    result = subprocess.run(
+        [sys.executable, str(runner), "test-fast", "--workers", "0", str(target), "-c", str(configuration), *options],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("configuration_kind", ["ini", "toml", "setup-cfg", "override", "autoload"])
+def test_public_cli_respects_configuration_plugin_disables(configuration_kind: str, tmp_path: Path) -> None:
+    """Selected pytest configuration controls whether automatic worker flags are valid."""
+    runner = _copy_runner_fixture(tmp_path)
+    addopts = "--disable-plugin-autoload" if configuration_kind == "autoload" else "-p no:xdist"
+    if configuration_kind == "toml":
+        configuration = tmp_path / "custom.toml"
+        content = f'[tool.pytest.ini_options]\naddopts = "{addopts}"\n'
+    elif configuration_kind == "setup-cfg":
+        configuration = tmp_path / "setup.cfg"
+        content = f"[tool:pytest]\naddopts = {addopts}\n"
+    else:
+        configuration = tmp_path / "pytest.ini"
+        content = "[pytest]\n" + ("" if configuration_kind == "override" else f"addopts = {addopts}\n")
+    configuration.write_text(content, encoding="utf-8")
+    target = tmp_path / "test_configuration.py"
+    target.write_text(
+        "def test_configuration(request):\n"
+        "    assert request.config.getoption('numprocesses', default=None) is None\n"
+        "    assert request.config.getoption('timeout') > 0\n"
+        "    assert request.config.getoption('timeout_method') == 'thread'\n",
+        encoding="utf-8",
+    )
+    options = ["-o", f"addopts={addopts}"] if configuration_kind == "override" else []
+    env = {name: value for name, value in os.environ.items() if not name.startswith("PYTEST_XDIST_")}
+    env |= {"PYTEST_ADDOPTS": "", "PYTEST_PLUGINS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""}
+    result = subprocess.run(
+        [sys.executable, str(runner), "test-fast", str(target), "--workers", "0", "-c", str(configuration), *options],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("plugin", ["xdist", "pytest_timeout"])
+@pytest.mark.parametrize("override_source", ["cli", "environment"])
+def test_public_cli_applies_plugin_overrides_in_pytest_order(
+    plugin: str, override_source: str, tmp_path: Path,
+) -> None:
+    """A later enable must undo a disable, including watchdog and worker defaults."""
+    runner = _copy_runner_fixture(tmp_path)
+    configuration = tmp_path / "pytest.ini"
+    disable = f"-p no:{plugin}"
+    enable = f"-p {plugin}"
+    worker_opts = " -n 2" if plugin == "xdist" else ""
+    configuration.write_text(
+        "[pytest]\n" + (f"addopts = {disable}\n" if override_source == "environment" else ""),
+        encoding="utf-8",
+    )
+    target = tmp_path / "test_plugin_order.py"
+    target.write_text(
+        "import os\n"
+        "def test_plugin_order(request):\n"
+        "    assert request.config.getoption('timeout') > 0\n"
+        "    assert request.config.getoption('timeout_method') == 'thread'\n"
+        + ("    assert os.environ.get('PYTEST_XDIST_WORKER_COUNT') == '1'\n" if plugin == "xdist" else ""),
+        encoding="utf-8",
+    )
+    env = {name: value for name, value in os.environ.items() if not name.startswith("PYTEST_XDIST_")}
+    env |= {
+        "PYTEST_ADDOPTS": (disable if override_source == "cli" else enable) + worker_opts,
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_PLUGINS": "",
+    }
+    options = ["-p", plugin] if override_source == "cli" else []
+    result = subprocess.run(
+        [sys.executable, str(runner), "test-fast", str(target), "--workers", "1", "-c", str(configuration), *options],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+@pytest.mark.unit
+def test_public_cli_plugin_probe_preserves_conftest_options_without_importing_it(tmp_path: Path) -> None:
+    """Configuration probing must not execute project setup or consume custom flags."""
+    runner = _copy_runner_fixture(tmp_path)
+    configuration = tmp_path / "pytest.ini"
+    configuration.write_text("[pytest]\n", encoding="utf-8")
+    (tmp_path / "conftest.py").write_text(
+        "from pathlib import Path\n"
+        "counter = Path(__file__).with_name('conftest-imports')\n"
+        "counter.write_text(counter.read_text() + 'x' if counter.exists() else 'x')\n"
+        "def pytest_addoption(parser):\n"
+        "    parser.addoption('--fixture-value')\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "test_custom_option.py"
+    target.write_text(
+        "def test_custom_option(request):\n"
+        "    assert request.config.getoption('fixture_value') == 'kept'\n",
+        encoding="utf-8",
+    )
+    env = {name: value for name, value in os.environ.items() if not name.startswith("PYTEST_XDIST_")}
+    env |= {"PYTEST_ADDOPTS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_PLUGINS": ""}
+    result = subprocess.run(
+        [sys.executable, str(runner), "test-fast", "--workers", "0", str(target), "-c", str(configuration),
+         "--fixture-value", "kept"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+    assert (tmp_path / "conftest-imports").read_text() == "x"
+
+
+def _pid_running(pid: int) -> bool:
+    """Treat an already dead orphan awaiting init's reap as stopped, on either POSIX host."""
+    result = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False)
+    state = result.stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def _wait_until(predicate, *, timeout: float = 10) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            pytest.fail("Timed out waiting for the harmless dev-process fixture")
+        time.sleep(0.02)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group integration; Windows taskkill has a separate contract")
+@pytest.mark.parametrize("ending", ["backend-failure", "interrupt", "terminate", "hangup", "nohup-hangup"])
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_public_dev_cli_cleans_owned_process_trees(
+    ending: str, ignore_term: bool, tmp_path: Path,
+) -> None:
+    """Both dev trees stop even after a leader exits or a descendant ignores SIGTERM."""
+    runner = _copy_runner_fixture(tmp_path)
+    package = tmp_path / "packages/core/core/src/flinttrade_core"
+    package.mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "cli.py").write_text("# Harmless stand-in for first-run provisioning.\n", encoding="utf-8")
+    (package / "app.py").write_text("from fake_dev import serve\nserve('backend')\n", encoding="utf-8")
+    fake = tmp_path / "fake_dev.py"
+    fake.write_text(
+        "import os, pathlib, signal, subprocess, sys, time\n"
+        "root = pathlib.Path(__file__).parent\n"
+        "def serve(role):\n"
+        "    if role.endswith('-child'):\n"
+        "        if os.environ['IGNORE_TERM'] == '1':\n"
+        "            signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "    else:\n"
+        "        subprocess.Popen([sys.executable, __file__, role + '-child'])\n"
+        "    (root / (role + '.pid')).write_text(str(os.getpid()))\n"
+        "    deadline = time.monotonic() + 60\n"
+        "    while time.monotonic() < deadline:\n"
+        "        if role == 'backend' and (root / 'observe-hup').exists():\n"
+        "            (root / 'alive-after-hup').touch()\n"
+        "        if role == 'backend' and (root / 'finish').exists():\n"
+        "            raise SystemExit(7)\n"
+        "        time.sleep(0.02)\n"
+        "if __name__ == '__main__': serve(sys.argv[1])\n",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    corepack = bin_dir / "corepack"
+    corepack.write_text(
+        f"#!{sys.executable}\nfrom fake_dev import serve\nserve('terminal')\n", encoding="utf-8",
+    )
+    corepack.chmod(0o755)
+    env = os.environ | {
+        "HOME": str(tmp_path), "USERPROFILE": str(tmp_path), "PATH": str(bin_dir), "PYTHONPATH": str(tmp_path),
+        "FLINTTRADE_WORKSPACE_DIR": str(tmp_path / "workspace"), "FLINTTRADE_HOME": str(tmp_path / "workspace"),
+        "IGNORE_TERM": str(int(ignore_term)),
+    }
+    pid_files = [tmp_path / f"{role}.pid" for role in ("backend", "backend-child", "terminal", "terminal-child")]
+    command = [sys.executable, str(runner), "dev"]
+    if ending == "nohup-hangup":
+        nohup = shutil.which("nohup")
+        if nohup is None:
+            pytest.skip("nohup is unavailable on this POSIX host")
+        command.insert(0, nohup)
+    unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    cli = subprocess.Popen(
+        command, cwd=tmp_path, env=env, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _wait_until(lambda: all(path.exists() and path.stat().st_size for path in pid_files))
+        pids = [int(path.read_text()) for path in pid_files]
+        if ending in {"terminate", "hangup"}:
+            termination_signal = signal.SIGTERM if ending == "terminate" else signal.SIGHUP
+            os.killpg(cli.pid, termination_signal)
+            expected_code = -termination_signal
+        elif ending == "interrupt":
+            cli.send_signal(signal.SIGINT)
+            expected_code = 0
+        else:
+            if ending == "nohup-hangup":
+                os.killpg(cli.pid, signal.SIGHUP)
+                (tmp_path / "observe-hup").touch()
+                _wait_until(lambda: (tmp_path / "alive-after-hup").exists())
+                assert cli.poll() is None, "Inherited ignored SIGHUP must not stop the supervisor"
+            (tmp_path / "finish").touch()
+            expected_code = 7
+        stdout, stderr = cli.communicate(timeout=15)
+        assert cli.returncode == expected_code, stdout + stderr
+        assert unrelated.poll() is None, "Cleanup must not touch a process it did not launch"
+        _wait_until(lambda: not any(_pid_running(pid) for pid in pids), timeout=2)
+    finally:
+        # Tear down only fixture-created processes even when the regression is red.
+        for path in pid_files:
+            if path.exists() and path.stat().st_size:
+                pid = int(path.read_text())
+                if _pid_running(pid):
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+        if cli.poll() is None:
+            cli.kill()
+        cli.communicate(timeout=5)
+        unrelated.kill()
+        unrelated.wait(timeout=5)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signal disposition contract")
+@pytest.mark.parametrize("ending", ["normal", "signal-at-spawn", "signal-at-wait", "launch-failure"])
+def test_dev_supervisor_restores_handlers_after_owned_cleanup(
+    ending: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Signals cannot interrupt ownership registration or repeated-signal cleanup."""
+    original = dict.fromkeys((signal.SIGINT, signal.SIGTERM, signal.SIGHUP), lambda signum, frame: None)
+    handlers = original.copy()
+    created = []
+    cleaned = []
+    forwarded = []
+
+    def install(signum, handler):
+        previous = handlers[signum]
+        handlers[signum] = handler
+        return previous
+
+    def spawn(*args, **kwargs):
+        assert kwargs["start_new_session"] is True
+        assert handlers != original, "Install cleanup handlers before detaching children"
+        if ending == "launch-failure" and created:
+            raise OSError("terminal fixture could not launch")
+        child = SimpleNamespace(pid=len(created) + 100, returncode=None)
+        created.append(child)
+        if ending == "signal-at-spawn":
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+        return child
+
+    def wait(child, *, stop_requested):
+        if ending == "signal-at-wait":
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+        assert stop_requested() == ending.startswith("signal-")
+
+    def cleanup(children):
+        assert children == created
+        cleaned.extend(children)
+        if ending.startswith("signal-"):
+            # A second signal during TERM/KILL must neither abort cleanup nor
+            # replace the first exit reason (SIGINT would incorrectly exit 0).
+            handlers[signal.SIGINT](signal.SIGINT, None)
+        for child in children:
+            child.returncode = 7
+
+    def forward(signum):
+        assert cleaned == created
+        assert handlers == original
+        forwarded.append(signum)
+
+    monkeypatch.setattr(ft, "IS_WINDOWS", False)
+    monkeypatch.setattr(ft, "DEV_LOG_DIR", tmp_path)
+    monkeypatch.setattr(ft, "resolve_python", lambda: sys.executable)
+    monkeypatch.setattr(ft, "provision_workspace", lambda *args: None)
+    monkeypatch.setattr(ft, "pnpm_argv", lambda: ["fixture-pnpm"])
+    monkeypatch.setattr(ft.subprocess, "Popen", spawn)
+    monkeypatch.setattr(ft, "_wait_dev_backend_exit", wait)
+    monkeypatch.setattr(ft, "_stop_dev_processes", cleanup)
+    monkeypatch.setattr(ft, "signal", SimpleNamespace(
+        SIGINT=signal.SIGINT, SIGTERM=signal.SIGTERM, SIGHUP=signal.SIGHUP, SIG_IGN=signal.SIG_IGN,
+        getsignal=handlers.__getitem__, signal=install, raise_signal=forward,
+    ))
+    if ending == "launch-failure":
+        with pytest.raises(OSError, match="terminal fixture could not launch"):
+            ft.cmd_dev([])
+    else:
+        assert ft.cmd_dev([]) == (128 + signal.SIGTERM if ending.startswith("signal-") else 7)
+    assert created and cleaned == created
+    assert handlers == original
+    assert forwarded == ([signal.SIGTERM] if ending.startswith("signal-") else [])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("already_exited", [False, True])
+def test_dev_exit_wait_uses_non_reaping_kqueue_on_python312_macos(
+    already_exited: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The older supported macOS Python must retain PID ownership without os.waitid."""
+    events = []
+    calls = []
+
+    def event(pid, **kwargs):
+        events.append((pid, kwargs))
+        return "exit-event"
+
+    def control(changes, maximum, timeout):
+        calls.append((changes, maximum, timeout))
+        if already_exited:
+            raise ProcessLookupError("The owned child exited before kevent registration")
+        return ["exited"]
+
+    monkeypatch.setattr(ft, "IS_WINDOWS", False)
+    monkeypatch.setattr(ft, "os", SimpleNamespace())
+    monkeypatch.setattr(ft, "select", SimpleNamespace(
+        kqueue=lambda: nullcontext(SimpleNamespace(control=control)), kevent=event,
+        KQ_FILTER_PROC=1, KQ_EV_ADD=2, KQ_EV_ONESHOT=4, KQ_NOTE_EXIT=8,
+    ))
+    child = SimpleNamespace(pid=12345, wait=lambda: pytest.fail("Do not reap a POSIX group leader"))
+    ft._wait_dev_backend_exit(child)
+    assert events == [(12345, {"filter": 1, "flags": 6, "fflags": 8})]
+    assert calls == [(["exit-event"], 1, None)]
+
+
+@pytest.mark.unit
+def test_dev_exit_wait_retains_windows_popen_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(ft, "IS_WINDOWS", True)
+    ft._wait_dev_backend_exit(SimpleNamespace(wait=lambda: calls.append(True)))
+    assert calls == [True]
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX group ownership")
+def test_dev_cleanup_never_signals_a_reaped_leaders_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Once wait/poll reaps a root, its PID may be reused and no longer grants group authority."""
+    monkeypatch.setattr(ft.os, "killpg", lambda *args: pytest.fail("A reaped PID is not owned group authority"))
+    reaped = SimpleNamespace(pid=12345, returncode=7, poll=lambda: 7, wait=lambda **kwargs: 7)
+    ft._stop_dev_processes([reaped], timeout=0.01)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("taskkill_timeout", [False, True])
+def test_windows_dev_cleanup_keeps_bounded_tree_kill_and_reaps_children(
+    taskkill_timeout: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows retains /T /F tree cleanup and a bounded fallback if taskkill stalls."""
+    calls = []
+    waits = []
+    kills = []
+
+    def run_tree(argv, **kwargs):
+        calls.append(argv)
+        assert 0 < kwargs["timeout"] <= 5
+        if taskkill_timeout:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return SimpleNamespace(returncode=0)
+
+    def wait(*, timeout):
+        waits.append(timeout)
+        if taskkill_timeout and len(waits) == 1:
+            raise subprocess.TimeoutExpired("fake child", timeout)
+        return 0
+
+    monkeypatch.setattr(ft, "IS_WINDOWS", True)
+    monkeypatch.setattr(ft.shutil, "which", lambda name: "taskkill" if name == "taskkill" else None)
+    monkeypatch.setattr(ft.subprocess, "run", run_tree)
+    monkeypatch.setattr(ft.os, "kill", lambda *args: pytest.fail("Must use Windows tree termination"))
+    child = SimpleNamespace(pid=12345, poll=lambda: None, wait=wait, kill=lambda: kills.append(True))
+    exited = SimpleNamespace(pid=54321, poll=lambda: 7, wait=lambda **kwargs: 7)
+    ft._stop_dev_processes([child, exited], timeout=0.1)
+    assert calls == [["taskkill", "/PID", "12345", "/T", "/F"]]
+    assert waits == ([0.1, 0.1] if taskkill_timeout else [0.1])
+    assert kills == ([True] if taskkill_timeout else [])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workers", ["0", "2"])
+def test_pytest_does_not_add_xdist_flags_when_plugin_is_missing(
+    workers: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A Python environment without the optional plugin can still run focused tests."""
     calls: list[list[str]] = []
     monkeypatch.setattr(ft, "resolve_python", lambda: "/repo/.venv/bin/python")
     monkeypatch.setattr(ft, "capture", lambda *args, **kwargs: None)
     monkeypatch.setattr(ft, "run", lambda argv, **kwargs: calls.append(list(argv)) or 0)
 
-    assert ft.cmd_test_fast(["tests/test_ft_runner.py", "--workers", "2"]) == 0
+    assert ft.cmd_test_fast(["tests/test_ft_runner.py", "--workers", workers]) == 0
     assert "-n" not in calls[0]
     assert "--workers" not in calls[0]
 
@@ -745,20 +1200,23 @@ def test_invalid_worker_override_never_starts_pytest(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.unit
-def test_existing_pytest_xdist_option_wins_without_duplicate_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("workers", [[], ["--workers", "0"]])
+def test_existing_pytest_xdist_option_wins_without_duplicate_workers(
+    workers: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Explicit pytest -n remains usable and must not conflict with the default."""
     calls: list[list[str]] = []
     monkeypatch.setattr(ft, "resolve_python", lambda: "/repo/.venv/bin/python")
     monkeypatch.setattr(ft, "run", lambda argv, **kwargs: calls.append(list(argv)) or 0)
     monkeypatch.setenv("FLINTTRADE_TEST_WORKERS", "invalid-but-unused")
-    assert ft.cmd_test_fast(["tests/test_ft_runner.py", "-n", "1"]) == 0
+    assert ft.cmd_test_fast(["tests/test_ft_runner.py", *workers, "-n", "1"]) == 0
     assert calls[0].count("-n") == 1
     assert calls[0][calls[0].index("-n") + 1] == "1"
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("disable", [["-p", "no:xdist"], ["-pno:xdist"]])
-@pytest.mark.parametrize("workers", [[], ["--workers", "2"]])
+@pytest.mark.parametrize("workers", [[], ["--workers", "0"], ["--workers", "2"]])
 def test_explicitly_disabled_xdist_suppresses_automatic_workers(
     disable: list[str], workers: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

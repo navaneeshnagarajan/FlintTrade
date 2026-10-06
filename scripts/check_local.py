@@ -108,7 +108,8 @@ def scan_secrets(root: Path = REPO_ROOT, *, paths: Sequence[str] | None = None) 
         paths = sorted({os.fsdecode(item) for item in result.stdout.split(b"\0") if item})
     patterns = (
         re.compile(r"BROKER_API_KEY\s*=\s*['\"][^'\"]+['\"]"),
-        re.compile(r"sk-[a-zA-Z0-9]{20,}"),
+        # Provider prefixes and URL-safe key bodies include hyphens/underscores.
+        re.compile(r"sk-[a-zA-Z0-9_-]{20,}"),
     )
     failed = False
     for relative in paths:
@@ -168,8 +169,11 @@ def run_checks(args: Sequence[str], *, runner: ModuleType | SimpleNamespace) -> 
     pytest_args = [] if surfaces.get("python") else ["tests", "scripts/__tests__"]
     if options.workers is not None:
         pytest_args.extend(["--workers", str(options.workers)])
+    # Resolve plugins against the very same fixed environment the gate executes,
+    # not interactive addopts which are deliberately excluded from this gate.
+    test_env = runner.pytest_env({"PYTEST_ADDOPTS": ""})
     try:
-        python_command = runner.pytest_argv([*pytest_args, "-v"])
+        python_command = runner.pytest_argv([*pytest_args, "-v"], env=test_env)
     except ValueError as exc:
         runner.fail(str(exc))
         return 2
@@ -180,7 +184,7 @@ def run_checks(args: Sequence[str], *, runner: ModuleType | SimpleNamespace) -> 
     if surfaces.get("rust") and cargo is None:
         runner.info("cargo not found - Rust ticks tests are optional on this host")
     plan = build_plan(surfaces, python=python, python_command=python_command, pnpm=pnpm or ["pnpm"],
-                      pytest_env=runner.PYTEST_NATIVE_THREAD_ENV, cargo=cargo)
+                      pytest_env=test_env, cargo=cargo)
     for check in plan:
         runner.info(f"\n{check.label}:")
         runner.info(subprocess.list2cmdline(check.argv) if runner.IS_WINDOWS else shlex.join(check.argv))

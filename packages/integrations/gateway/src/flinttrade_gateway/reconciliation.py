@@ -51,7 +51,12 @@ import math
 from dataclasses import asdict, dataclass, field as dataclass_field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Iterable, Mapping
+
+from flinttrade_core.exceptions import BrokerError
+
+if TYPE_CHECKING:
+    from flinttrade_gateway.brokers._base import BrokerAdapter, Session
 
 # ---------------------------------------------------------------------------
 # Severity + discrepancy vocabulary
@@ -1052,4 +1057,44 @@ def build_report(
         broker_positions=positions_snapshot,
         broker_holdings=holdings_snapshot,
         local_state=frozen_local,
+    )
+
+
+async def _reconcile_adapter(
+    adapter: BrokerAdapter,
+    session: Session,
+    *,
+    generated_at: datetime,
+    local_state: LocalStateSnapshot,
+) -> ReconciliationReport:
+    """Collect sequential public reads without swallowing local-provider failures.
+
+    The adapter captures its timestamp and evaluates its local provider before
+    calling this helper. Only broker and mapping failures become error reports;
+    cancellation and unexpected exceptions must still propagate.
+    """
+    try:
+        broker_orders = declare_unavailable_order_fields(
+            await adapter.order_book(session),
+            fields=("variety", "validity", "strategy"),
+        )
+        broker_positions = await adapter.positions(session)
+        broker_holdings = await adapter.holdings(session)
+    except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes
+        return build_report(
+            adapter_id=adapter.broker_id,
+            account_id=session.account_id,
+            generated_at=generated_at,
+            local_state=local_state,
+            error=f"broker fetch failed: {exc}",
+        )
+    # Public reads return normalised row dicts; report validation owns the evidence.
+    return build_report(
+        adapter_id=adapter.broker_id,
+        account_id=session.account_id,
+        generated_at=generated_at,
+        broker_orders=broker_orders,
+        broker_positions=broker_positions,
+        broker_holdings=broker_holdings,
+        local_state=local_state,
     )

@@ -209,6 +209,56 @@ async def test_dispatcher_stop(dispatcher: TickDispatcher) -> None:
     assert not run_task.cancelled()
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ingress", ["before_run", "event_loop", "broker_thread"])
+async def test_inbound_overflow_drops_incoming_ticks_without_loop_errors(ingress: str) -> None:
+    """A bounded feed retains queued ticks and the newest polling snapshot."""
+    dispatcher = TickDispatcher(maxsize=1)
+    client_q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    dispatcher.subscribe([{"symbol": "NIFTY", "exchange": "NSE_INDEX"}], "LTP", client_q)
+    loop = asyncio.get_running_loop()
+    errors: list[dict[str, Any]] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: errors.append(context))
+    run_task = None
+    ticks = [_make_tick(ltp=price) for price in (22_001.0, 22_002.0, 22_003.0)]
+
+    def burst() -> None:
+        for tick in ticks:
+            dispatcher.enqueue(tick)
+
+    try:
+        if ingress != "before_run":
+            run_task = asyncio.create_task(dispatcher.run())
+            dispatcher.enqueue(_make_tick())
+            await _recv(client_q)
+
+        if ingress == "broker_thread":
+            # Queue the complete SDK burst before allowing the loop to drain it.
+            from threading import Thread
+
+            thread = Thread(target=burst)
+            thread.start()
+            thread.join(timeout=1.0)
+            assert not thread.is_alive()
+        else:
+            burst()
+
+        if run_task is None:
+            run_task = asyncio.create_task(dispatcher.run())
+        assert await _recv(client_q) == ticks[0]
+        assert dispatcher.get_latest("nifty", "nse_index") == ticks[-1]
+    finally:
+        dispatcher.stop()
+        if run_task is not None:
+            await asyncio.wait_for(run_task, timeout=1.0)
+        loop.set_exception_handler(previous_handler)
+
+    assert client_q.empty()
+    assert errors == []
+
+
 # ---------------------------------------------------------------------------
 # BrokerTicker tests
 # ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from flinttrade_gateway.log_safety import account_ref, log_ref
 
+from .order_input import json_object_body, normalise_order_type_fields
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
@@ -229,6 +230,10 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         Product,
     )
 
+    # Validate aliases at the shared construction seam, including replacement legs
+    # that do not pass through place admission. Never mutate the caller's body.
+    body = normalise_order_type_fields(body)
+
     # Quantity is represented as a decimal string but must be a whole number of units —
     # validate up-front so a fat-finger "10.5"/"abc" is a clean 400, not a 500
     # from the int(...) coercion inside SafetySystem.check_order.
@@ -397,8 +402,11 @@ def _quantity_from_body(body: Mapping[str, Any]) -> int:
         return raw
     if isinstance(raw, float) and math.isfinite(raw) and raw.is_integer():
         return int(raw)
-    if isinstance(raw, str) and raw.strip().isdigit():
-        return int(raw.strip())
+    if isinstance(raw, str):
+        try:
+            return int(raw.strip())
+        except ValueError:
+            return 0
     return 0
 
 
@@ -1369,6 +1377,7 @@ def _dispatch_live_order(
         return _safety_runtime_unavailable_response()
 
     try:
+        body = normalise_order_type_fields(body)
         typed_order = _body_to_order(body, variety=variety)
     except ValueError as exc:
         logger.warning(
@@ -1539,13 +1548,8 @@ def _dispatch_live_order(
     except Exception:  # pragma: no cover — audit must never break the order path
         logger.debug("audit stamp failed for live order", exc_info=True)
 
-    # Trade journal (best-effort — never break the order path). Without this
-    # producer the journal + P&L analytics stayed empty in Live mode (the
-    # /trades/journal route read a store nothing ever wrote to).
-    try:
-        _record_trade_journal(typed_order, str(result))
-    except Exception:  # pragma: no cover — journalling must never break orders
-        logger.debug("trade journal stamp failed for live order", exc_info=True)
+    # A broker acknowledgement proves submission, not execution. Fill records
+    # require authoritative execution evidence, never the requested price/size.
     logger.info(
         "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
         ft_action,
@@ -1572,62 +1576,6 @@ def _desktop_notify(title: str, body: str = "") -> None:
         notify(title, body)
     except Exception:  # noqa: BLE001 - order/safety path must be unaffected
         pass
-
-
-def _record_trade_journal(typed_order: Any, orderid: str, strategy: str = "manual") -> None:
-    """Append an executed live order to the shared trade journal (best-effort).
-
-    Writes to the same DuckDB store the ``/trades/journal`` route reads, so the
-    journal and downstream P&L analytics populate in Live mode. No-ops when no
-    ``TRADE_STORAGE`` is configured (e.g. minimal test apps) so it never creates
-    DuckDB side effects where journalling isn't wired. Serialises writes against
-    the route's reads via the shared ``TRADE_STORAGE_LOCK`` (DuckDB connections
-    are not safe for concurrent use). Never raises.
-
-    Args:
-        typed_order: The dispatched :class:`flinttrade_core.models.Order`. The
-            journalled side (BUY/SELL) is read from ``typed_order.action`` — NOT
-            the route-level operation label (which is always ``"place"`` here).
-        orderid: The broker order id returned by the router.
-        strategy: Journal bucket for the trade; manual terminal orders use
-            ``"manual"`` so they group separately from strategy-runner fills.
-    """
-    store = current_app.config.get("TRADE_STORAGE")
-    if store is None:
-        return
-
-    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
-
-    ist = timezone(timedelta(hours=5, minutes=30))
-
-    def _enum_value(value: Any) -> str:
-        return str(getattr(value, "value", value) or "")
-
-    def _to_number(value: Any) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
-
-    def _insert() -> None:
-        store.insert_trade(
-            ts=datetime.now(ist),
-            orderid=str(orderid),
-            symbol=getattr(typed_order, "symbol", "") or "",
-            exchange=_enum_value(getattr(typed_order, "exchange", "")),
-            action=_enum_value(getattr(typed_order, "action", "")),
-            quantity=int(_to_number(getattr(typed_order, "quantity", 0))),
-            price=_to_number(getattr(typed_order, "price", 0.0)),
-            product=_enum_value(getattr(typed_order, "product", "")),
-            strategy=strategy,
-        )
-
-    lock = current_app.config.get("TRADE_STORAGE_LOCK")
-    if lock is not None:
-        with lock:
-            _insert()
-    else:
-        _insert()
 
 
 def _audit_write_event(event_type: str, adapter_id: str, account_id: str, actor_id: str, order_id: str) -> None:
@@ -1901,9 +1849,9 @@ def _dispatch_live_modify(
             }
         ), 403
 
-    changes = _modify_changes(body)
     requested_fields = _requested_modify_fields(body)
     try:
+        changes = _modify_changes(normalise_order_type_fields(body))
         ModifyOrder(orderid=order_id, **changes)  # validate up-front; no gate consumed on bad input
     except (ValueError, ValidationError) as exc:
         logger.warning("Live modify rejected by order-model validation | order=%s: %s", safe_order, exc)
@@ -2121,7 +2069,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             }
         ), 400
 
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     if ft_action not in _ORDER_ACTIONS:
         raise ValueError("Unknown local order action")
     broker_action = ft_action
@@ -2147,6 +2095,11 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     # Practice mode — paper trading via SandboxEngine
     # ------------------------------------------------------------------
     if mode == _MODE_PRACTICE:
+        if ft_action == "modify":
+            try:
+                body = normalise_order_type_fields(body)
+            except ValueError:
+                return jsonify({"status": "error", "message": "order_type and pricetype must agree"}), 400
         if ft_action == "place":
             laya_block = _laya_place_response(body, mode=_MODE_PRACTICE, source="operator")
             if laya_block is not None:
@@ -2328,11 +2281,6 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
     trigger_price_raw = body.get("trigger_price", 0.0)
 
     try:
-        quantity = int(body.get("quantity", 0))
-    except (TypeError, ValueError):
-        quantity = 0
-
-    try:
         price = float(body.get("price", 0.0))
     except (TypeError, ValueError):
         price = 0.0
@@ -2351,6 +2299,13 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
     if ft_action == "modify":
         changes: dict[str, Any] = {}
         if "quantity" in body:
+            quantity = _quantity_from_body(body)
+            if quantity <= 0:
+                return {
+                    "order_id": "",
+                    "status": "REJECTED",
+                    "message": "Quantity must be a positive whole number",
+                }
             changes["quantity"] = quantity
         if "price" in body:
             changes["price"] = price
@@ -2476,6 +2431,11 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     decided here under the contract lock. A client flag is ignored.
     """
     from flinttrade_engine.reduce_only import contract_key, contract_lock  # noqa: PLC0415
+
+    try:
+        body = normalise_order_type_fields(body)
+    except ValueError:
+        return jsonify({"status": "error", "message": "order_type and pricetype must agree"}), 400
 
     key = contract_key(
         mode=_MODE_PRACTICE,
@@ -2690,7 +2650,7 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
     This is the only request entry that may create an order. A GTT body
     is refused here, before Practice, Laya, or a live broker place.
     """
-    payload_body = body if body is not None else (request.get_json(silent=True) or {})
+    payload_body = body if body is not None else json_object_body()
     gtt_refusal = _gtt_contract_refusal(payload_body)
     if gtt_refusal is not None:
         return gtt_refusal
@@ -2836,11 +2796,7 @@ def place_order() -> tuple[Any, int]:
         JSON with ``status``, ``order_id``, and ``message``.
         HTTP 200 on success, 400/403/500/502 on error.
     """
-    body = request.get_json(silent=True) or {}
-    refusal = _gtt_contract_refusal(body)
-    if refusal is not None:
-        return refusal
-    return _dispatch_live_place_from_request(body)
+    return _dispatch_live_place_from_request()
 
 
 def _decode_request_payload() -> dict[str, Any] | None:
@@ -2923,7 +2879,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
         actor not authorised / verification failed), 503 (routing unavailable or
         the broker is not connected yet).
     """
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     refusal = _gtt_contract_refusal(body)
     if refusal is not None:
         return refusal
@@ -2968,7 +2924,7 @@ def modify_order_routed(broker: str) -> tuple[Any, int]:
     if error is not None:
         return error
 
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     return _dispatch_live_modify(body, payload, adapter_id=broker)
 
 
@@ -2997,7 +2953,7 @@ def cancel_order_routed(broker: str) -> tuple[Any, int]:
     if error is not None:
         return error
 
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     return _dispatch_live_cancel(body, payload, adapter_id=broker)
 
 
@@ -3589,7 +3545,7 @@ def forever_place() -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     adapter_id, account_id = _gated_target(body)
     contract_error = _forever_contract_error(body, adapter_id)
     if contract_error is not None:
@@ -3615,7 +3571,7 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     changes = _changes_from_body(body)
     if changes is None:
         return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
@@ -3672,7 +3628,7 @@ def forever_cancel(order_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    params = {**request.args.to_dict(), **json_object_body()}
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
         "cancel_forever",
@@ -3721,7 +3677,7 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     changes = _changes_from_body(body)
     if changes is None:
         return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
@@ -3774,7 +3730,7 @@ def super_order_cancel(order_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    params = {**request.args.to_dict(), **json_object_body()}
     fields: dict[str, Any] = {"order_id": order_id}
     leg = params.get("leg")
     if leg is not None:
@@ -3814,7 +3770,7 @@ def trigger_place() -> tuple[Any, int]:
     _payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     try:
         _trigger_legs_from_body(body)
     except ValueError:
@@ -3843,7 +3799,7 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     try:
         condition, legs = _trigger_legs_from_body(body)
     except ValueError:
@@ -3891,7 +3847,7 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    params = {**request.args.to_dict(), **json_object_body()}
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
         "cancel_conditional_trigger",
@@ -3922,7 +3878,7 @@ def multi_order_place() -> tuple[Any, int]:
     _payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
+    body = json_object_body()
     raw_orders = body.get("orders")
     if not isinstance(raw_orders, list) or not raw_orders:
         return jsonify({"status": "error", "message": "'orders' must be a non-empty list of order objects"}), 400
@@ -3948,7 +3904,7 @@ def smart_order_cancel(order_id: str) -> tuple[Any, int]:
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    params = {**request.args.to_dict(), **json_object_body()}
     fields: dict[str, Any] = {"order_id": order_id}
     if params.get("segment") is not None:
         fields["segment"] = str(params["segment"])
@@ -4053,7 +4009,7 @@ def place_basket() -> tuple[Any, int]:
     if err:
         return err
 
-    body: dict[str, Any] = request.get_json(silent=True) or {}
+    body: dict[str, Any] = json_object_body()
     legs_raw = body.get("legs")
     if not legs_raw or not isinstance(legs_raw, list):
         return jsonify({"status": "error", "message": "'legs' array is required"}), 400
@@ -4116,7 +4072,7 @@ def place_split() -> tuple[Any, int]:
     if err:
         return err
 
-    body: dict[str, Any] = request.get_json(silent=True) or {}
+    body: dict[str, Any] = json_object_body()
 
     required_fields = ["symbol", "exchange", "action", "total_qty", "chunk_size"]
     for field_name in required_fields:
@@ -4204,7 +4160,7 @@ def place_options_strategy() -> tuple[Any, int]:
     if err:
         return err
 
-    body: dict[str, Any] = request.get_json(silent=True) or {}
+    body: dict[str, Any] = json_object_body()
 
     strategy_name: str = str(body.get("strategy_name", "")).lower()
     if strategy_name not in _ADVANCED_STRATEGY_NAMES:

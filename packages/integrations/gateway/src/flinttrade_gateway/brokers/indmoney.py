@@ -57,26 +57,10 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import indmoney_mapping as M
+from ._balance import _balance_number, _balance_record
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+from ._http_transport import _build_httpx_transport
 from ._session_expiry import next_6am_ist_timestamp
-
-
-def _balance_number(value: object) -> float:
-    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
-        raise BrokerBalanceResponseInvalid
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        raise BrokerBalanceResponseInvalid from None
-    if not math.isfinite(number):
-        raise BrokerBalanceResponseInvalid
-    return number
-
-
-def _balance_record(value: object) -> dict[str, object]:
-    if type(value) is not dict or any(type(key) is not str for key in value):
-        raise BrokerBalanceResponseInvalid
-    return value
 
 
 def _lot_record(value: object) -> dict[str, object]:
@@ -371,36 +355,6 @@ _EMERGENCY_POSITION_SCOPES = (
     ("equity", "cnc", "CNC"),
     ("equity", "intraday", "MIS"),
 )
-
-
-def _build_httpx_transport(timeout: float = 10.0) -> Transport:
-    """Build the default HTTP transport over httpx (lazy import).
-
-    Args:
-        timeout: Per-request timeout in seconds.
-
-    Returns:
-        A synchronous transport callable returning ``(status_code, payload)``
-        where payload is decoded JSON when possible, else raw text.
-    """
-    import httpx  # noqa: PLC0415
-
-    def _request(
-        method: str,
-        url: str,
-        *,
-        headers: dict[str, str],
-        params: dict[str, Any] | None = None,
-        json_body: Any | None = None,
-    ) -> tuple[int, Any]:
-        resp = httpx.request(method, url, headers=headers, params=params, json=json_body, timeout=timeout)
-        try:
-            payload: Any = resp.json()
-        except ValueError:
-            payload = resp.text
-        return resp.status_code, payload
-
-    return _request
 
 
 class IndMoneyAdapter(BrokerAdapter):
@@ -1902,40 +1856,11 @@ class IndMoneyAdapter(BrokerAdapter):
         broker fetch failure is captured on the report's
         ``error`` field instead of raised, so the runner retries next cycle.
         """
-        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
-            EMPTY_LOCAL_STATE,
-            build_report,
-            declare_unavailable_order_fields,
-        )
+        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, _reconcile_adapter  # noqa: PLC0415
 
         generated_at = datetime.now(tz=UTC)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
-        try:
-            broker_orders = declare_unavailable_order_fields(
-                await self.order_book(session),
-                fields=("variety", "validity", "strategy"),
-            )
-            broker_positions = await self.positions(session)
-            broker_holdings = await self.holdings(session)
-        except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes
-            return build_report(
-                adapter_id=self.broker_id,
-                account_id=session.account_id,
-                generated_at=generated_at,
-                local_state=local,
-                error=f"broker fetch failed: {exc}",
-            )
-        # The read methods return the normalised row dicts at runtime (see the
-        # mapping layer); build_report consumes them as plain mappings.
-        return build_report(
-            adapter_id=self.broker_id,
-            account_id=session.account_id,
-            generated_at=generated_at,
-            broker_orders=broker_orders,  # type: ignore[arg-type]
-            broker_positions=broker_positions,  # type: ignore[arg-type]
-            broker_holdings=broker_holdings,
-            local_state=local,
-        )
+        return await _reconcile_adapter(self, session, generated_at=generated_at, local_state=local)
 
 
 from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # noqa: E402  shared per-process token (§8.0c)

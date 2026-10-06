@@ -24,7 +24,7 @@ from flinttrade_gateway.log_safety import account_ref, log_ref
 from flinttrade_gateway.routing_config import RoutingHint
 from flinttrade_webhooks.webhook_receiver import WebhookPayload
 
-from .order_routes import _body_to_order, _gtt_contract_refusal, _record_trade_journal
+from .order_routes import _body_to_order, _gtt_contract_refusal
 from .safety_config import SafetyRuntimeUnavailable, require_ready_safety
 
 logger = logging.getLogger("flinttrade.core.webhook_dispatch")
@@ -276,13 +276,6 @@ class WebhookOrderDispatcher:
             "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED" if acknowledgement_failed else "WEBHOOK_ORDER_PLACED"
         )
         self._audit(audit_event, adapter_id, account_id, authority.actor_id, payload, result)
-        self._journal(
-            typed_order,
-            str(result),
-            adapter_id=adapter_id,
-            account_id=account_id,
-            strategy=f"webhook:{payload.source}",
-        )
         logger.info(
             "Webhook place dispatched | source=%s adapter=%s account=%s symbol=%s",
             payload.source,
@@ -502,22 +495,6 @@ class WebhookOrderDispatcher:
                 )
         except Exception:
             logger.debug("webhook audit stamp failed", exc_info=True)
-
-    def _journal(
-        self,
-        typed_order: Any,
-        order_id: str,
-        *,
-        adapter_id: str,
-        account_id: str,
-        strategy: str,
-    ) -> None:
-        try:
-            with self._app.app_context():
-                _record_trade_journal(typed_order, order_id, strategy=strategy)
-        except Exception:
-            logger.debug("webhook trade journal stamp failed", exc_info=True)
-
 
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):

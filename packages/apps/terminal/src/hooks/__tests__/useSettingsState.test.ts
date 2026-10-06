@@ -11,6 +11,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
   probeSettingsLlmHydration,
+  probeSettingsLlmReadiness,
   useSettingsState,
 } from "../useSettingsState";
 import type { LlmProviderId } from "@/generated/serviceProviders";
@@ -1104,6 +1105,40 @@ describe("useSettingsState", () => {
         data: { provider: "", model: "", api_key_configured: false },
       }))));
       await expect(probeSettingsLlmHydration()).resolves.toBe("empty");
+    },
+  );
+
+  it.each([
+    ["explore", "session-jwt", "empty"],
+    ["practice", "practice-jwt", "error"],
+    ["live", "live-jwt", "error"],
+    ["live", "demo-user", "empty"],
+    ["practice", "dev-bypass", "empty"],
+  ] as const)(
+    "keeps rejected HTTP-success LLM config protected in %s with %s (%s)",
+    async (mode, token, hydration) => {
+      useModeStore.setState({ mode });
+      useAuthStore.setState({ token });
+      useSettingsStore.getState().setLLM({ provider: "ollama", model: "qwen3:9b" });
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+        status: "error",
+        message: "workspace locked",
+        data: { provider: "openai", model: "gpt-4o", api_key_configured: true, api_key_last4: "last" },
+      })));
+      vi.stubGlobal("fetch", fetchMock);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const { result } = renderHook(() => useSettingsState());
+
+      await waitFor(() => expect(result.current.llmHydrationState).toBe(hydration));
+      await expect(probeSettingsLlmReadiness()).resolves.toEqual({ hydration, provider: "" });
+      expect(result.current.llm.provider).toBe("ollama");
+      expect(result.current.llmCredentialConfigured).toBe(false);
+      expect(result.current.llmCredentialLast4).toBe("");
+      act(() => result.current.updateLLM("model", "blocked-edit"));
+      expect(result.current.llm.model).toBe("qwen3:9b");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      warnSpy.mockRestore();
     },
   );
 

@@ -1639,9 +1639,9 @@ class TestFrontendErrors:
 class TestTradesJournal:
     """GET /api/v1/trades/journal — reads the shared trade store.
 
-    The order dispatch writes to ``TRADE_STORAGE`` and this route reads the same
-    store, so a row inserted there must surface here — keyed as ``timestamp``
-    (the terminal's JournalTrade contract), not the DuckDB ``ts`` column.
+    Execution records in ``TRADE_STORAGE`` must surface here — keyed as
+    ``timestamp`` (the terminal's JournalTrade contract), not the DuckDB ``ts``
+    column. Submission acknowledgements are not execution records.
     """
 
     @staticmethod

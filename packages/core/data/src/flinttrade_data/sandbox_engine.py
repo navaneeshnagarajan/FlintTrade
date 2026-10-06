@@ -920,7 +920,7 @@ class SandboxEngine:
         self,
         order_id: str,
         *,
-        quantity: int | None = None,
+        quantity: int | float | str | None = None,
         price: float | None = None,
         trigger_price: float | None = None,
         order_type: str | None = None,
@@ -940,13 +940,19 @@ class SandboxEngine:
                     "message": "Only a pending Practice order can be modified",
                 }
             symbol, exchange, action, old_qty, old_price, old_trigger, old_type, product = row
-            new_qty = int(old_qty if quantity is None else quantity)
+            raw_qty = old_qty if quantity is None else quantity
+            try:
+                new_qty = int(raw_qty)
+                if isinstance(raw_qty, bool) or new_qty <= 0 or (not isinstance(raw_qty, str) and new_qty != raw_qty):
+                    raise ValueError("Quantity must be a positive whole number")
+            except (TypeError, ValueError, OverflowError):
+                return {"order_id": "", "status": "REJECTED", "message": "Quantity must be a positive whole number"}
             new_price = float(old_price if price is None else price)
             new_trigger = float(old_trigger if trigger_price is None else trigger_price)
             new_type = str(old_type if order_type is None else order_type).strip().upper()
             if new_type == "SLM":
                 new_type = "SL-M"
-            if new_qty <= 0 or new_type not in {"LIMIT", "SL", "SL-M"}:
+            if new_type not in {"LIMIT", "SL", "SL-M"}:
                 return {"order_id": "", "status": "REJECTED", "message": "Invalid modification"}
             if not all(math.isfinite(value) for value in (new_price, new_trigger)):
                 return {"order_id": "", "status": "REJECTED", "message": "Prices must be finite"}

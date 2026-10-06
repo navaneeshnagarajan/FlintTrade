@@ -371,8 +371,8 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
         MagicMock(side_effect=OSError("reservation store unavailable")),
     )
     dispatcher = _dispatcher(app, "place_order")
-    journal = MagicMock()
-    monkeypatch.setattr(dispatcher, "_journal", journal)
+    store = MagicMock()
+    app.config["TRADE_STORAGE"] = store
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -391,7 +391,7 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
     router.place_order.assert_awaited_once()
     audit.log_event.assert_called_once()
     assert audit.log_event.call_args.args[0] == "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED"
-    journal.assert_called_once()
+    store.insert_trade.assert_not_called()
 
 
 def test_place_order_refuses_unvalidated_safety_runtime(*, backend_lease_factory) -> None:

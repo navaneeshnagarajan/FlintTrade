@@ -29,6 +29,8 @@ from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from flinttrade_core.order_input import json_object_body, normalise_order_type_fields
+
 logger = logging.getLogger("flinttrade.data.sandbox_routes")
 
 data_sandbox_bp = Blueprint(
@@ -212,6 +214,7 @@ def cancel_order(order_id: str) -> Response:
     engine, err = _engine_required()
     if err:
         return err
+    json_object_body()
     result = engine.cancel_order(order_id)
     accepted = result["status"] == "CANCELLED"
     return jsonify(
@@ -228,11 +231,14 @@ def modify_order(order_id: str) -> Response:
     engine, err = _engine_required()
     if err:
         return err
-    body: dict[str, Any] = request.get_json(silent=True) or {}
+    body = json_object_body()
     changes: dict[str, Any] = {}
     try:
+        body = normalise_order_type_fields(body)
         if "quantity" in body:
-            changes["quantity"] = int(body["quantity"])
+            if body["quantity"] is None:
+                raise ValueError("quantity cannot be null")
+            changes["quantity"] = body["quantity"]
         if "price" in body:
             changes["price"] = float(body["price"])
         if "trigger_price" in body:
@@ -257,6 +263,7 @@ def cancel_all_orders() -> Response:
     engine, err = _engine_required()
     if err:
         return err
+    json_object_body()
     return jsonify(
         {
             "status": "success",

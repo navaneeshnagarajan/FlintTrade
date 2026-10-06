@@ -30,8 +30,9 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify
 
+from flinttrade_core.order_input import json_object_body, normalise_order_type_fields
 from flinttrade_core.rate_limiter import rate_limit
 
 from .bracket_order import BracketOrderError, BracketPrincipal
@@ -176,7 +177,7 @@ def place_bracket() -> Response:
     if err:
         return err
 
-    body: dict[str, Any] = request.get_json(silent=True) or {}
+    body: dict[str, Any] = json_object_body()
 
     entry = body.get("entry")
     if not entry or not isinstance(entry, dict):
@@ -275,6 +276,18 @@ def place_bracket() -> Response:
             ),
             422,
         )
+
+    try:
+        entry = normalise_order_type_fields(entry)
+    except ValueError:
+        return jsonify({"status": "error", "message": "order_type and pricetype must agree"}), 400
+    if not str(entry.get("order_type") or entry.get("pricetype") or "").strip():
+        # Blank/null aliases use the same price-based default as omitted aliases.
+        try:
+            price = float(entry.get("price", 0))
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "Entry price must be a number"}), 400
+        entry["order_type"] = entry["pricetype"] = "MARKET" if price == 0 else "LIMIT"
 
     entry_action = str(entry.get("action") or "").strip().upper()
     exit_action = "SELL" if entry_action == "BUY" else "BUY"
@@ -402,7 +415,7 @@ def cancel_bracket(bracket_id: str) -> Response:
         return jsonify({"status": "error", "message": f"Bracket '{bracket_id}' not found"}), 404
 
     try:
-        principal = _request_principal(request.get_json(silent=True) or {})
+        principal = _request_principal(json_object_body())
     except ValueError:
         return jsonify({"status": "error", "message": "Native execution account not configured"}), 503
     try:

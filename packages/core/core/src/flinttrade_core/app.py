@@ -4247,14 +4247,11 @@ def create_flask_app(
     app.config["LOGIN_ACTIVITY"] = _LoginActivity(str(_login_db))
     app.config["SESSION_TRACKER"] = _SessionTracker(str(_login_db))
 
-    # Shared trade-journal store (DuckDB). The gated order dispatch writes every
-    # executed live order here and the /trades/journal route reads the SAME
-    # store, so the journal + P&L analytics populate in Live (previously the
-    # producer was missing → permanently empty journal). One shared, pre-
-    # initialised connection keeps the per-order cost to a single INSERT (latency
-    # is paramount). A lock serialises the writer against the route's reads —
-    # DuckDB connections are not safe for concurrent use. Best-effort: a storage
-    # failure degrades to "no journalling", never blocks boot.
+    # Shared execution-journal store (DuckDB), retained for existing records and
+    # /trades/journal reads. Native fill ingestion is not connected yet: gated
+    # submission acknowledgements belong in the audit, not this fill store.
+    # The shared lock protects the connection because DuckDB connections are not
+    # safe for concurrent use. Storage failure never blocks boot.
     try:
         from flinttrade_data.storage import StorageManager as _TradeStore  # noqa: PLC0415
 

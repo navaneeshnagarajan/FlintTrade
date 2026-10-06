@@ -5,9 +5,11 @@ happy path (fakes via the established client_factory/transport injections).
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import Any
 
 import pytest
@@ -24,6 +26,7 @@ from flinttrade_gateway.brokers import (
 )
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.dhan import DhanAdapter
+from flinttrade_gateway.brokers.groww import GrowwAdapter
 from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
 from flinttrade_gateway.brokers.upstox import UpstoxAdapter
@@ -1099,3 +1102,169 @@ async def test_indmoney_reconcile_clean_round_trip() -> None:
     assert len(holder["snap"].orders) == 1
     assert len(holder["snap"].positions) == 1
     assert len(holder["snap"].holdings) == 1
+
+
+@pytest.fixture(params=[DhanAdapter, UpstoxAdapter, KotakNeoAdapter, IndMoneyAdapter, GrowwAdapter])
+def reconcile_adapter_type(request):
+    return request.param
+
+
+def _reconcile_with_public_reads(adapter_type, monkeypatch, *, failure_at=None, failure=None):
+    """Replace only the public reads; exercise each real reconcile entrypoint."""
+    events: list[str] = []
+    unavailable = {"variety", "validity", "strategy"}
+    order = {key: value for key, value in _order().items() if key not in unavailable}
+    rows = {"order_book": [order], "positions": [_pos()], "holdings": [_hold()]}
+    local = LocalStateSnapshot(
+        orders=(_order(variety="UNKNOWN", validity="UNKNOWN", strategy="UNKNOWN"),),
+        positions=(_pos(),),
+        holdings=(_hold(),),
+    )
+
+    class Clock:
+        @staticmethod
+        def now(*, tz):
+            assert tz is timezone.utc
+            events.append("clock")
+            return _NOW
+
+    def local_provider(session):
+        assert session is target_session
+        events.append("local")
+        if failure_at == "local":
+            raise failure
+        return local
+
+    adapter = adapter_type(local_state_provider=local_provider)
+    target_session = _session(adapter.broker_id, "synthetic-account")
+    monkeypatch.setattr(import_module(adapter_type.__module__), "datetime", Clock)
+
+    def read_surface(surface):
+        async def read(session):
+            assert session is target_session
+            events.append(f"{surface}:start")
+            await asyncio.sleep(0)
+            events.append(f"{surface}:end")
+            if surface == failure_at:
+                raise failure
+            return rows[surface]
+        return read
+
+    for surface in rows:
+        monkeypatch.setattr(adapter, surface, read_surface(surface))
+    return adapter, target_session, events, rows, local
+
+
+def _read_events_through(surface):
+    surfaces = ("order_book", "positions", "holdings")
+    return ["clock", "local"] + [
+        f"{name}:{stage}"
+        for name in surfaces[:surfaces.index(surface) + 1]
+        for stage in ("start", "end")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_uses_sequential_public_reads_and_preserves_capture_time(reconcile_adapter_type, monkeypatch):
+    adapter, session, events, rows, local = _reconcile_with_public_reads(reconcile_adapter_type, monkeypatch)
+
+    report = await adapter.reconcile(session)
+
+    assert events == _read_events_through("holdings")
+    assert report.generated_at is _NOW
+    assert (report.adapter_id, report.account_id) == (adapter.broker_id, "synthetic-account")
+    assert report.clean and report.error == ""
+    assert report.broker_orders == local.orders
+    assert report.broker_positions == local.positions
+    assert report.broker_holdings == local.holdings
+    assert report.local_state == local
+    assert {"variety", "validity", "strategy"}.isdisjoint(rows["order_book"][0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["order_book", "positions", "holdings"])
+@pytest.mark.parametrize("error_type", [BrokerError, ValueError])
+async def test_reconcile_captures_only_fetch_errors_without_partial_evidence(
+    reconcile_adapter_type, monkeypatch, surface, error_type,
+):
+    error = error_type("synthetic fetch failure")
+    adapter, session, events, _rows, _local = _reconcile_with_public_reads(
+        reconcile_adapter_type, monkeypatch, failure_at=surface, failure=error,
+    )
+
+    report = await adapter.reconcile(session)
+
+    assert events == _read_events_through(surface)
+    assert report.generated_at is _NOW
+    assert (report.adapter_id, report.account_id) == (adapter.broker_id, session.account_id)
+    assert report.error == "broker fetch failed: synthetic fetch failure"
+    assert not report.clean and report.severity == SEVERITY_CRITICAL
+    assert report.orders_diff == report.positions_diff == report.holdings_diff == ()
+    assert report.broker_orders == report.broker_positions == report.broker_holdings == ()
+    assert report.local_state == EMPTY_LOCAL_STATE
+    assert report._evidence_sha256 == ""  # noqa: SLF001 - failed fetches must retain no evidence
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [BrokerError, ValueError, RuntimeError, asyncio.CancelledError])
+async def test_reconcile_local_provider_exceptions_propagate_before_reads(
+    reconcile_adapter_type, monkeypatch, error_type,
+):
+    error = error_type("synthetic local failure")
+    adapter, session, events, _rows, _local = _reconcile_with_public_reads(
+        reconcile_adapter_type, monkeypatch, failure_at="local", failure=error,
+    )
+
+    with pytest.raises(error_type) as caught:
+        await adapter.reconcile(session)
+
+    assert caught.value is error
+    assert events == ["clock", "local"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["order_book", "positions", "holdings"])
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_reconcile_cancellation_and_unexpected_read_errors_propagate(
+    reconcile_adapter_type, monkeypatch, surface, error_type,
+):
+    error = error_type("synthetic interrupted read")
+    adapter, session, events, _rows, _local = _reconcile_with_public_reads(
+        reconcile_adapter_type, monkeypatch, failure_at=surface, failure=error,
+    )
+
+    with pytest.raises(error_type) as caught:
+        await adapter.reconcile(session)
+
+    assert caught.value is error
+    assert events == _read_events_through(surface)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_rejects_unusable_order_collection_before_other_reads(reconcile_adapter_type, monkeypatch):
+    adapter, session, events, rows, _local = _reconcile_with_public_reads(reconcile_adapter_type, monkeypatch)
+    rows["order_book"] = None
+
+    report = await adapter.reconcile(session)
+
+    assert events == _read_events_through("order_book")
+    assert report.error.startswith("broker fetch failed:")
+    assert report.severity == SEVERITY_CRITICAL
+    assert report.broker_orders == report.broker_positions == report.broker_holdings == ()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_report_errors_are_not_mislabelled_as_fetch_errors(reconcile_adapter_type, monkeypatch):
+    adapter, session, events, _rows, _local = _reconcile_with_public_reads(reconcile_adapter_type, monkeypatch)
+    error = ValueError("synthetic report failure")
+
+    def fail_report(**_kwargs):
+        raise error
+
+    monkeypatch.setattr(reconciliation_module, "build_report", fail_report)
+
+    with pytest.raises(ValueError) as caught:
+        await adapter.reconcile(session)
+
+    assert caught.value is error
+    assert events == _read_events_through("holdings")

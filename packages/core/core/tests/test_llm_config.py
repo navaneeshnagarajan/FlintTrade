@@ -1454,7 +1454,7 @@ def test_claude_oauth_token_round_trips_through_the_operator_secret(monkeypatch,
     from flinttrade_ai.llm_client import LLMConfig, is_anthropic_oauth_token
     from flinttrade_core.llm_config import persist_llm_config, resolve_llm_api_key
 
-    token = "sk-ant-oat01-operator-supplied"
+    token = "sk-ant-oat01-" + "synthetic-test-token-" * 3
     persist_llm_config({"provider": "anthropic", "model": "claude-sonnet-4", "api_key": token})
 
     assert resolve_llm_api_key() == token

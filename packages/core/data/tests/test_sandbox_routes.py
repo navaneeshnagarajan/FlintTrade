@@ -1,6 +1,6 @@
 """Tests for packages/core/data/src/sandbox_routes.py (Flask Blueprint).
 
-Uses Flask test client with a mock SandboxEngine.
+Uses Flask test clients with mock and isolated in-memory SandboxEngine instances.
 
 Run with:
     python -m pytest packages/core/data/tests/test_sandbox_routes.py -v --import-mode=importlib
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from flask import Flask
 
-from flinttrade_data.sandbox_engine import SandboxConfig
+from flinttrade_data.sandbox_engine import SandboxConfig, SandboxEngine
 from flinttrade_data.sandbox_routes import data_sandbox_bp
 
 
@@ -101,6 +101,211 @@ def client_no_engine():
     flask_app.config["TESTING"] = True
     flask_app.register_blueprint(data_sandbox_bp)
     return flask_app.test_client()
+
+
+@pytest.fixture()
+def pending_practice_order(app):
+    """Exercise mutation routes against a real, isolated Practice book."""
+    engine = SandboxEngine(db_path=":memory:")
+    app.config["DATA_SANDBOX_ENGINE"] = engine
+    try:
+        placed = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert placed["status"] == "PENDING"
+        yield engine, placed["order_id"]
+    finally:
+        engine.close()
+
+
+@pytest.mark.integration
+class TestOrderInputValidation:
+    @pytest.mark.parametrize(
+        "quantity",
+        [
+            1.9,
+            True,
+            False,
+            "1.9",
+            None,
+            "bad",
+            "",
+            "NaN",
+            "Infinity",
+            0,
+            -1,
+            [],
+            {},
+            float("nan"),
+            float("inf"),
+            -float("inf"),
+        ],
+    )
+    def test_invalid_quantity_leaves_the_book_unchanged(self, client, pending_practice_order, quantity):
+        engine, order_id = pending_practice_order
+        before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        response = client.patch(f"/v1/sandbox/order/{order_id}", json={"quantity": quantity, "price": 110.0})
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+        assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
+
+    @pytest.mark.parametrize(
+        "method,route",
+        [("PATCH", "/order/{order_id}"), ("DELETE", "/order/{order_id}"), ("POST", "/orders/cancel-all")],
+    )
+    @pytest.mark.parametrize(
+        "raw_body", ["[]", "[1]", "null", '"text"', '""', "false", "true", "0", "1", "{not json", " "]
+    )
+    def test_invalid_json_leaves_the_book_unchanged(self, client, pending_practice_order, method, route, raw_body):
+        engine, order_id = pending_practice_order
+        before = (engine.get_orders(), engine.get_positions(), engine.get_capital())
+        writes = engine._conn.total_changes
+
+        response = client.open(
+            "/v1/sandbox" + route.format(order_id=order_id),
+            method=method,
+            data=raw_body,
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+        assert "JSON object" in response.get_json()["message"]
+        assert (engine.get_orders(), engine.get_positions(), engine.get_capital()) == before
+        assert engine._conn.total_changes == writes
+
+    @pytest.mark.parametrize(
+        "method,route",
+        [("PATCH", "/order/{order_id}"), ("DELETE", "/order/{order_id}"), ("POST", "/orders/cancel-all")],
+    )
+    def test_non_json_content_type_leaves_the_book_unchanged(self, client, pending_practice_order, method, route):
+        engine, order_id = pending_practice_order
+        before = engine.get_orders()
+        writes = engine._conn.total_changes
+
+        response = client.open(
+            "/v1/sandbox" + route.format(order_id=order_id),
+            method=method,
+            data='{"quantity": 2}',
+            content_type="text/plain",
+        )
+
+        assert response.status_code == 400
+        assert "JSON object" in response.get_json()["message"]
+        assert engine.get_orders() == before
+        assert engine._conn.total_changes == writes
+
+    @pytest.mark.parametrize("quantity,expected", [(2, 2), (2.0, 2), ("2", 2), (" 2 ", 2), ("+2", 2), ("1_0", 10)])
+    def test_whole_quantities_update_quantity_and_margin(self, client, pending_practice_order, quantity, expected):
+        engine, order_id = pending_practice_order
+
+        response = client.patch(f"/v1/sandbox/order/{order_id}", json={"quantity": quantity, "price": 110.0})
+
+        assert response.status_code == 200, response.get_json()
+        order = engine.get_orders()[0]
+        assert order["quantity"] == expected
+        assert order["price"] == 110.0
+        assert order["order_type"] == "LIMIT"
+        assert engine.get_capital()["used_margin"] == pytest.approx(expected * 110.0)
+
+    def test_omitted_quantity_keeps_existing_quantity(self, client, pending_practice_order):
+        engine, order_id = pending_practice_order
+
+        response = client.patch(f"/v1/sandbox/order/{order_id}", json={"price": 110.0})
+
+        assert response.status_code == 200, response.get_json()
+        order = engine.get_orders()[0]
+        assert order["quantity"] == 5
+        assert order["price"] == 110.0
+        assert order["order_type"] == "LIMIT"
+
+    @pytest.mark.parametrize(
+        "method,route,expected_status",
+        [
+            ("PATCH", "/order/{order_id}", "PENDING"),
+            ("DELETE", "/order/{order_id}", "CANCELLED"),
+            ("POST", "/orders/cancel-all", "CANCELLED"),
+        ],
+    )
+    @pytest.mark.parametrize("raw_body", ["", "{}"])
+    def test_absent_and_empty_object_bodies_still_work(
+        self, client, pending_practice_order, method, route, expected_status, raw_body
+    ):
+        engine, order_id = pending_practice_order
+
+        response = client.open(
+            "/v1/sandbox" + route.format(order_id=order_id),
+            method=method,
+            data=raw_body,
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        assert response.get_json()["status"] == "success"
+        order = engine.get_orders()[0]
+        assert order["status"] == expected_status
+        assert order["quantity"] == 5
+        assert order["order_type"] == "LIMIT"
+
+    @pytest.mark.parametrize("order_type,pricetype", [("LIMIT", "SL"), (" sl ", "limit")])
+    def test_conflicting_order_types_leave_the_book_unchanged(
+        self, client, pending_practice_order, order_type, pricetype
+    ):
+        engine, order_id = pending_practice_order
+        before = engine.get_orders()
+        writes = engine._conn.total_changes
+
+        response = client.patch(
+            f"/v1/sandbox/order/{order_id}",
+            json={"quantity": 2, "order_type": order_type, "pricetype": pricetype, "trigger_price": 99.0},
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+        assert engine.get_orders() == before
+        assert engine._conn.total_changes == writes
+
+    @pytest.mark.parametrize("order_type,pricetype", [(" slm ", "SL-M"), ("SL-M", " slm ")])
+    def test_stop_market_alias_spellings_modify_the_same_order(
+        self, client, pending_practice_order, order_type, pricetype
+    ):
+        engine, order_id = pending_practice_order
+
+        response = client.patch(
+            f"/v1/sandbox/order/{order_id}",
+            json={"order_type": order_type, "pricetype": pricetype, "trigger_price": 99.0},
+        )
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["status"] == "success"
+        order = engine.get_orders()[0]
+        assert order["order_type"] == order["pricetype"] == "SL-M"
+        assert order["status"] == "PENDING"
+        assert order["quantity"] == 5
+        assert order["trigger_price"] == 99.0
+
+    @pytest.mark.parametrize(
+        "aliases",
+        [
+            {"order_type": " sl "},
+            {"pricetype": " sl "},
+            {"order_type": " sl ", "pricetype": "SL"},
+            {"order_type": None, "pricetype": "SL"},
+            {"order_type": "", "pricetype": "SL"},
+        ],
+    )
+    def test_order_type_aliases_are_normalised(self, client, pending_practice_order, aliases):
+        engine, order_id = pending_practice_order
+
+        response = client.patch(f"/v1/sandbox/order/{order_id}", json={**aliases, "trigger_price": 99.0})
+
+        assert response.status_code == 200, response.get_json()
+        order = engine.get_orders()[0]
+        assert order["order_type"] == order["pricetype"] == "SL"
+        assert order["quantity"] == 5
+        assert order["trigger_price"] == 99.0
 
 
 # ---------------------------------------------------------------------------
