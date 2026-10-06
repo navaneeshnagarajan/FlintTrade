@@ -17,7 +17,7 @@ test("About separates observed versions and pins without runtime mutations", asy
   syntheticApi.register({ name: "pure Ollama versions", method: "GET", path: "/ft-api/api/v1/versions/ollama", expectedCalls: 1, handler: () => ({ json: { configured: "v0.35.0", reported: "0.32.0", status: "reported" } }) });
   await page.goto("/e2e/about-versions.fixture.html");
   await expect(page.getByRole("table", { name: "Backend runtimes" })).toContainText("3.12.9");
-  await expect(page.getByRole("table", { name: "Frontend libraries" }).getByRole("row", { name: /^React / })).toContainText("^19.2.8");
+  await expect(page.getByRole("table", { name: "Frontend libraries" }).getByRole("row", { name: /^React / })).toContainText("^19.3.0");
   await expect(page.getByRole("table", { name: "Broker SDKs" })).toContainText("Not installed / unavailable");
   await expect(page.getByText(/kotakneoapi release compatibility baseline/)).toContainText("3.0.7");
   await expect(page.getByText("a".repeat(40), { exact: true })).toBeVisible();
