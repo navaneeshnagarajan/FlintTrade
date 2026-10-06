@@ -216,22 +216,37 @@ def test_runtime_admission_closure_does_not_wait_for_generation_lease() -> None:
 
 
 @pytest.mark.asyncio
-async def test_shutdown_drains_admitted_request_before_closing_dependencies() -> None:
+async def test_shutdown_drains_admitted_request_before_closing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     """An admitted handler retains dependency ownership until it returns."""
     from flinttrade_core.app import _install_runtime_request_tracking
 
     runtime = _runtime_app()
     flask_app = Flask("request-drain")
-    _install_runtime_request_tracking(flask_app)
+    tracker = _install_runtime_request_tracking(flask_app)
     runtime._flask_app = flask_app
     request_started = threading.Event()
     release_request = threading.Event()
+    handler_finished = threading.Event()
+    drain_waiting = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    condition_wait = tracker._condition.wait
+    close_after_handler: list[bool] = []
     response_status: list[int] = []
+
+    def wait_for_request_release(timeout: float | None = None) -> bool:
+        # Observe the real blocking drain, not merely entry to shutdown. A
+        # bypassed drain must never let this test release the active handler.
+        loop.call_soon_threadsafe(drain_waiting.set)
+        return condition_wait(timeout)
+
+    monkeypatch.setattr(tracker._condition, "wait", wait_for_request_release)
+    runtime.client.close.side_effect = lambda: close_after_handler.append(handler_finished.is_set())
 
     @flask_app.get("/blocking")
     def blocking_request() -> tuple[str, int]:
         request_started.set()
         release_request.wait(timeout=2.0)
+        handler_finished.set()
         return "done", 200
 
     def make_request() -> None:
@@ -239,20 +254,28 @@ async def test_shutdown_drains_admitted_request_before_closing_dependencies() ->
         response_status.append(response.status_code)
 
     request_thread = threading.Thread(target=make_request, daemon=True)
+    stop_task = None
     request_thread.start()
-    assert await asyncio.to_thread(request_started.wait, 1.0)
+    try:
+        assert await asyncio.to_thread(request_started.wait, 1.0)
+        stop_task = asyncio.create_task(runtime.stop())
+        await asyncio.wait_for(drain_waiting.wait(), timeout=1.0)
+        runtime.scheduler.stop_all.assert_awaited_once_with()
+        runtime.client.close.assert_not_awaited()
+        assert not stop_task.done()
+        rejected = flask_app.test_client().get("/blocking")
+        assert rejected.status_code == 503
+    finally:
+        release_request.set()
+        try:
+            if stop_task is not None:
+                await asyncio.wait_for(stop_task, timeout=1.0)
+        finally:
+            request_thread.join(timeout=1.0)
 
-    stop_task = asyncio.create_task(runtime.stop())
-    await asyncio.sleep(0.05)
-    runtime.scheduler.stop_all.assert_awaited_once_with()
-    rejected = flask_app.test_client().get("/blocking")
-    assert rejected.status_code == 503
-
-    release_request.set()
-    await asyncio.wait_for(stop_task, timeout=1.0)
-    request_thread.join(timeout=1.0)
-
+    assert not request_thread.is_alive()
     assert response_status == [200]
+    assert close_after_handler == [True]
     assert runtime.scheduler.stop_all.await_count == 2
     runtime.client.close.assert_awaited_once_with()
 
