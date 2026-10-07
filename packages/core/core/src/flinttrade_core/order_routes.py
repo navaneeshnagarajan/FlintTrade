@@ -32,9 +32,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any
 
@@ -47,6 +50,33 @@ from .order_input import json_object_body, normalise_order_type_fields
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
+
+
+@dataclass
+class _LiveWriteProgress:
+    """Request-local invocation evidence, not execution or durable authority.
+
+    A sync wait can time out while the router coroutine still runs. Only its
+    completed failure before the invocation hook proves no adapter invocation.
+    """
+
+    started: bool = False
+    invoked: bool = False
+    failed_before_invoke: bool = False
+
+    def on_adapter_invoke(self) -> None:
+        self.invoked = True
+
+    @property
+    def outcome_unknown(self) -> bool:
+        return self.started and not self.failed_before_invoke
+
+    async def run(self, coroutine: Any) -> Any:
+        try:
+            return await coroutine
+        except BaseException:
+            self.failed_before_invoke = not self.invoked
+            raise
 
 
 def _run_on_client_loop(coro: Any) -> Any:
@@ -66,6 +96,110 @@ def _run_on_client_loop(coro: Any) -> Any:
         return client.run_sync(coro)
     # Test fakes / unconfigured apps: one fresh loop per call is correct.
     return asyncio.run(coro)
+
+
+def _http_broker_error_fields(exc: BaseException, adapter_id: str) -> dict[str, str]:
+    """Detach whitelisted canonical error properties; never stringify an SDK fault."""
+    from flinttrade_core import exceptions as errors  # noqa: PLC0415
+
+    known_types = (
+        errors.BrokerError, errors.OrderError, errors.OrderRejectedByBroker,
+        errors.InsufficientFunds, errors.InvalidPrice, errors.InvalidQuantity, errors.InvalidSymbol,
+        errors.MarketClosed, errors.UnsupportedOrderType, errors.AuthError, errors.CredentialsInvalid,
+        errors.SessionExpired, errors.RateLimitError, errors.NetworkError, errors.BrokerTimeout, errors.BrokerInternal,
+    )
+    if type(exc) not in known_types:
+        return {}
+    properties = object.__getattribute__(exc, "__dict__")
+    if type(properties) is not dict:
+        return {}
+    broker_id = properties.get("broker_id")
+    if type(broker_id) is not str or broker_id != adapter_id:
+        return {}
+    fields = {}
+    code = properties.get("broker_code")
+    message = properties.get("broker_message")
+    if adapter_id == "kotakneo":
+        from flinttrade_gateway.brokers.kotakneo_sdk import _SDK_LOG_FILTER  # noqa: PLC0415
+
+        # Reuse the pinned facade's known-credential redactor on both channels.
+        # A native code-shaped string can itself equal session credential text.
+        if type(code) is str:
+            code = _SDK_LOG_FILTER._redact(code)
+        if type(message) is str:
+            message = _SDK_LOG_FILTER._redact(message)
+    if type(code) is str and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", code, flags=re.ASCII):
+        fields["broker_code"] = code
+    # Only the explicitly separate native reason belongs to this protocol.
+    # Never use exception args, raw bodies or duck-typed properties instead.
+    if type(message) is str:
+        if message and len(message) <= 4096:
+            from .log_stream import redact_identity  # noqa: PLC0415
+
+            redacted = redact_identity(message) or ""
+            fields["broker_message"] = " ".join(redacted.split())[:256]
+    return fields
+
+
+def _live_write_error_status(
+    exc: Exception, *, broker_error_status: int = 500, disconnected_first: bool = False,
+) -> int:
+    """Resolve the existing HTTP class policy, never invocation or retry authority.
+
+    Args:
+        exc: Caught dispatch failure; no exception properties or text are read.
+        broker_error_status: Existing BrokerError/ValueError status (502 only
+            for extended verbs; ordinary writes retain 500).
+        disconnected_first: Preserve placement's disconnected-before-rate
+            precedence, including exceptions inheriting both classes.
+
+    Returns:
+        The pre-invocation status. ``_live_write_error`` still overrides refusal
+        statuses from observed progress when dispatch is uncertain.
+    """
+    from flinttrade_core.exceptions import (  # noqa: PLC0415
+        BrokerError,
+        SafetyBypassError,
+        UnsupportedCapabilityError,
+    )
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
+
+    # Match the real inheritance used by except, not a duck-typed __class__.
+    error_type = type(exc)
+    if issubclass(error_type, SafetyBypassError):
+        return 403
+    disconnected = issubclass(error_type, (BrokerNotFoundError, KeyError))
+    if disconnected_first and disconnected:
+        return 503
+    if issubclass(error_type, AlgoTagLimitError):
+        return 429
+    if disconnected:
+        return 503
+    if issubclass(error_type, (NotImplementedError, UnsupportedCapabilityError)):
+        return 501
+    if issubclass(error_type, (BrokerError, ValueError)):
+        return broker_error_status
+    return 500
+
+
+def _live_write_error(
+    exc: BaseException, *, message: str, http_status: int, progress: _LiveWriteProgress,
+    adapter_id: str, account_id: str, operation: str, item: Mapping[str, Any], fail_message: str,
+) -> tuple[Any, int]:
+    """Preserve origin/reason and explicit uncertainty at existing HTTP catches."""
+    unknown = progress.outcome_unknown
+    affected = {"broker": adapter_id, "account_id": account_id, "operation": operation}
+    for name in ("order_id", "symbol", "exchange", "product", "action", "leg_name"):
+        value = item.get(name)
+        if type(value) is str and value and len(value) <= 256 and value.isprintable():
+            affected[name] = value
+    response = {
+        "status": "error", "message": fail_message if unknown else message,
+        "dispatch_outcome": "unknown_after_dispatch" if unknown else "refused_before_dispatch",
+        "retry_safe": False, "affected_item": affected, **_http_broker_error_fields(exc, adapter_id),
+    }
+    return jsonify(response), (502 if http_status == 502 else 500) if unknown else http_status
 
 
 def _redact_exc(exc: object, account_id: object) -> str:
@@ -202,7 +336,74 @@ def _mode_header_mismatch_response(
     ), 403
 
 
-def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
+_ADVANCED_NUMERIC_FIELDS = (
+    "target_price", "stop_loss_price", "trailing_jump", "iceberg_legs", "price1", "trigger_price1", "quantity1",
+)
+_TRIGGER_FIELDS = ("entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type")
+
+
+def _raw_order_intent(
+    body: Mapping[str, Any], *, adapter_id: str = "", modifying: bool = False,
+) -> dict[str, Any]:
+    """Validate raw presence/domains before selecting signed canonical fields.
+
+    Inactive native aliases may be ignored only after validation. Active aliases
+    without a reviewed canonical representation are refused, never downgraded.
+    """
+    canonical: dict[str, Any] = {}
+    if adapter_id == "deltaexchange":
+        # Match the legacy placement guard before explicit canonical selection.
+        # False/empty aliases are still supplied intent; only None is absent.
+        for name in (
+            "native", "post_only", "client_order_id", "stop_order_type", "stop_price", "trail_amount",
+            "stop_trigger_method", "bracket_stop_loss_limit_price", "bracket_take_profit_limit_price",
+            "bracket_stop_trigger_method", "reduce_only",
+        ):
+            if body.get(name) is not None:
+                raise ValueError("Delta native intent requires a reviewed canonical contract")
+    if "market_protection" in body and body["market_protection"] is not None and type(body["market_protection"]) is not bool:
+        raise ValueError("Canonical market_protection must be Boolean")
+    numeric_aliases = (
+        "tsl_step_size", "trailingJump", "icebergLegs", "targetPrice", "stopLossPrice", "stop_loss_trailing_gap",
+    )
+    for name in (*_ADVANCED_NUMERIC_FIELDS, *numeric_aliases):
+        if name not in body:
+            continue
+        raw = body[name]
+        if type(raw) not in (str, int, float) or type(raw) is str and not raw.strip():
+            raise ValueError("Advanced order controls must be exact numeric values")
+        try:
+            number = Decimal(str(raw))
+        except InvalidOperation as exc:
+            raise ValueError("Advanced order control is malformed") from exc
+        if not number.is_finite() or number < 0:
+            raise ValueError("Advanced order control must be finite and non-negative")
+        if name in {"iceberg_legs", "icebergLegs", "quantity1"} and number != number.to_integral_value():
+            raise ValueError("Advanced order quantity must be whole")
+        if name in numeric_aliases and number != 0:
+            raise ValueError("Active native alias is not represented by the canonical contract")
+        if number != 0 and (modifying or adapter_id == "groww" or adapter_id == "indmoney" and name == "trailing_jump"):
+            raise ValueError("Requested advanced order intent is unsupported")
+        if name in _ADVANCED_NUMERIC_FIELDS:
+            canonical[name] = str(raw)
+    for name in ("is_tsl", "isTSL"):
+        if name in body and (type(body[name]) is not bool or body[name]):
+            raise ValueError("Active or malformed trailing flag is unsupported")
+    for name in _TRIGGER_FIELDS:
+        if name not in body:
+            continue
+        raw = body[name]
+        if raw is not None and (type(raw) is not str or not raw.strip()):
+            raise ValueError("Trigger type must be explicit text")
+        if raw is not None and (modifying or adapter_id == "groww"):
+            raise ValueError("Requested smart trigger intent is unsupported")
+        canonical[name] = raw
+    return canonical
+
+
+def _body_to_order(
+    body: dict[str, Any], *, variety: str | None = None, adapter_id: str = "",
+) -> Any:
     """Build a typed :class:`Order` from a decoded request body for the SafetySystem.
 
     The legacy path forwarded the raw dict; the 5-layer ``SafetySystem.check_order``
@@ -234,6 +435,10 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
     # that do not pass through place admission. Never mutate the caller's body.
     body = normalise_order_type_fields(body)
 
+    if {"market_protection_by_strategy", "market_protection_by_index", "rules"}.intersection(body):
+        raise ValueError("Native percentage/rule intent requires a reviewed canonical contract")
+    advanced = _raw_order_intent(body, adapter_id=adapter_id or str(body.get("broker") or "").strip().lower())
+
     # Quantity is represented as a decimal string but must be a whole number of units —
     # validate up-front so a fat-finger "10.5"/"abc" is a clean 400, not a 500
     # from the int(...) coercion inside SafetySystem.check_order.
@@ -244,29 +449,12 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
     except (TypeError, ValueError) as exc:
         raise ValueError(f"quantity must be a whole number of units, got {quantity!r}") from exc
 
-    extra: dict[str, Any] = {}
+    extra = advanced
     requested_variety = variety if variety is not None else body.get("variety")
     if requested_variety is not None:
         extra["variety"] = str(requested_variety)
     if body.get("validity") is not None:
         extra["validity"] = str(body["validity"])
-    if variety is not None:
-        # Variety-specific pass-throughs (Dhan forever OCO, Upstox GTT trigger
-        # conditions). They live on the Order model, so the SafetyContext
-        # canonical hash covers them.
-        for key in (
-            "price1",
-            "trigger_price1",
-            "quantity1",
-            "target_price",
-            "stop_loss_price",
-            "entry_trigger_type",
-            "stop_loss_trigger_type",
-            "target_trigger_type",
-        ):
-            value = body.get(key)
-            if value is not None:
-                extra[key] = str(value)
 
     return Order(
         symbol=str(body.get("symbol") or ""),
@@ -524,68 +712,70 @@ def _practice_books(sandbox: Any) -> tuple[list[dict[str, Any]], list[dict[str, 
     return _book_rows(positions), _book_rows(orders)
 
 
-def _normalise_exit_positions(raw: Any) -> list[dict[str, Any]]:
-    from flinttrade_core.l2_state import _field, _rows, _text  # noqa: PLC0415
+def _exit_book_rows(raw: Any, *, containers: tuple[str, ...], fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Keep raw aliases intact; malformed books are unavailable, never empty.
 
-    positions: list[dict[str, Any]] = []
-    for row in _rows(raw, "data", "positions", "net", "day"):
-        symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol")).strip().upper()
-        exchange = _text(_field(row, "exchange")).strip().upper()
-        product = _text(_field(row, "product")).strip().upper() or "MIS"
-        qty_raw = _field(row, "net_qty", "netQty", "net_quantity", "quantity", "qty")
-        try:
-            quantity = int(float(qty_raw))
-        except (TypeError, ValueError):
-            continue
-        if not symbol or not exchange:
-            continue
-        positions.append(
-            {
-                "symbol": symbol,
-                "exchange": exchange,
-                "product": product,
-                "net_qty": quantity,
-                "quantity": quantity,
-            }
-        )
-    return positions
+    Native readers may return mappings or typed rows. Materialising typed fields
+    is not permission to pick an alias, coerce a quantity or discard a bad row.
+    """
+    if isinstance(raw, Mapping):
+        present = [name for name in containers if name in raw]
+        if present:
+            if len(present) != 1:
+                raise ValueError("Exit book has ambiguous containers")
+            if (
+                "status" in raw and str(raw["status"]).strip().lower() not in {"success", "ok"}
+                or raw.get("success") is False
+                or any(raw.get(name) not in (None, "", [], {}) for name in ("error", "errors"))
+            ):
+                raise ValueError("Exit book response is not successful")
+            return _exit_book_rows(raw[present[0]], containers=containers, fields=fields)
+        if not any(name in raw for name in ("symbol", "trading_symbol", "tradingsymbol")):
+            raise ValueError("Exit book lacks rows")
+        rows: Any = [raw]
+    elif isinstance(raw, (list, tuple)):
+        rows = raw
+    elif any(hasattr(raw, name) for name in ("symbol", "trading_symbol", "tradingsymbol")):
+        rows = [raw]
+    else:
+        raise ValueError("Exit book is not a row list")
+    result = []
+    for row in rows:
+        if isinstance(row, Mapping):
+            evidence = dict(row)
+        else:
+            evidence = {name: getattr(row, name) for name in fields if hasattr(row, name)}
+        symbols = [evidence[name] for name in ("symbol", "trading_symbol", "tradingsymbol") if name in evidence]
+        if not any(isinstance(value, str) and value.strip() for value in symbols):
+            raise ValueError("Exit row lacks instrument identity")
+        exchange = evidence.get("exchange")
+        if not isinstance(exchange, str) or not exchange.strip():
+            raise ValueError("Exit row lacks exchange identity")
+        result.append(evidence)
+    return result
+
+
+def _normalise_exit_positions(raw: Any) -> list[dict[str, Any]]:
+    return _exit_book_rows(
+        raw,
+        containers=("data", "positions", "net", "day"),
+        fields=(
+            "symbol", "trading_symbol", "tradingsymbol", "exchange", "product",
+            "net_qty", "netQty", "net_quantity", "quantity", "qty", "side", "transaction_type", "action",
+        ),
+    )
 
 
 def _normalise_exit_orders(raw: Any) -> list[dict[str, Any]]:
-    from flinttrade_core.l2_state import _field, _rows, _text  # noqa: PLC0415
-
-    orders: list[dict[str, Any]] = []
-    for row in _rows(raw, "data", "orders", "orderbook", "order_book"):
-        symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol")).strip().upper()
-        exchange = _text(_field(row, "exchange")).strip().upper()
-        product = _text(_field(row, "product")).strip().upper() or "MIS"
-        action = _text(_field(row, "action", "transaction_type")).strip().upper()
-        status = _text(_field(row, "status", "order_status", "orderStatus")).strip().upper()
-        order_id = _text(_field(row, "order_id", "orderid", "orderId")).strip()
-        try:
-            quantity = int(float(_field(row, "quantity", "qty")))
-        except (TypeError, ValueError):
-            continue
-        filled_raw = _field(row, "filled_qty", "filled_quantity", "filledQty", "tradedQty")
-        try:
-            filled = int(float(filled_raw)) if filled_raw not in (None, "") else 0
-        except (TypeError, ValueError):
-            filled = 0
-        if not symbol or not exchange or action not in {"BUY", "SELL"}:
-            continue
-        orders.append(
-            {
-                "symbol": symbol,
-                "exchange": exchange,
-                "product": product,
-                "action": action,
-                "status": status,
-                "order_id": order_id,
-                "quantity": quantity,
-                "filled_qty": filled,
-            }
-        )
-    return orders
+    return _exit_book_rows(
+        raw,
+        containers=("data", "orders", "orderbook", "order_book"),
+        fields=(
+            "symbol", "trading_symbol", "tradingsymbol", "exchange", "product", "action", "transaction_type",
+            "status", "order_status", "orderStatus", "order_id", "orderid", "orderId", "broker_order_id",
+            "quantity", "qty", "filled_qty", "filled_quantity", "filledQty", "tradedQty",
+        ),
+    )
 
 
 async def _fetch_broker_exit_books(
@@ -594,9 +784,8 @@ async def _fetch_broker_exit_books(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
     """Read positions and the broker order book.
 
-    An unreadable order book returns the positions with broker orders
-    ``None``. The cap then uses our own pending exits. An unreadable
-    position book still raises, so the place cannot be classified as an exit.
+    An unreadable order book returns positions with broker orders ``None``;
+    it cannot prove a reduce-only exit. An unreadable position book raises.
     """
     from flinttrade_core.l2_state import _read, _resolve_account_source  # noqa: PLC0415
 
@@ -605,11 +794,8 @@ async def _fetch_broker_exit_books(
     positions = _normalise_exit_positions(positions_raw)
     try:
         orders_raw = await _read(source, "order_book")
-    except Exception:  # noqa: BLE001 - keep the position; cap uses our own exits
-        logger.info(
-            "Broker order book unreadable; reduce-only cap uses our own pending exits | adapter=%s",
-            adapter_id,
-        )
+    except Exception:  # noqa: BLE001 - unavailable orders cannot qualify a reducing place
+        logger.info("Broker order book unreadable; reduce-only proof unavailable | adapter=%s", adapter_id)
         return positions, None
     return positions, _normalise_exit_orders(orders_raw)
 
@@ -617,70 +803,92 @@ async def _fetch_broker_exit_books(
 def _live_exit_books(
     adapter_id: str,
     account_id: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]] | None]:
-    """Return positions, our orders, and broker orders.
+) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]], list[dict[str, Any]] | None]:
+    """Return raw exit evidence, distinguishing unavailable from known empty.
 
-    Broker orders are ``None`` when that book cannot be read. The close
-    can still qualify, capped by our own pending exits. A configured
-    ``REDUCE_ONLY_LIVE_BOOKS`` callable replaces the broker read. A hook
-    or position-book failure returns no position, so the place is not an exit.
+    ``positions is None`` cannot prove either an exit or flatness. Broker orders
+    ``None`` cannot qualify a live reducing place. The configured test/read hook
+    must obey the same row-shape boundary as the native reader.
     """
     hook = current_app.config.get("REDUCE_ONLY_LIVE_BOOKS")
-    if callable(hook):
-        try:
-            positions, our_orders, broker_orders = hook(adapter_id, account_id)
-        except Exception:  # noqa: BLE001 - no books means the place is not an exit
-            logger.info(
-                "Broker books unreadable; place is not a reduce-only exit | adapter=%s",
-                adapter_id,
-            )
-            return [], [], None
-        if broker_orders is None:
-            logger.info(
-                "Broker order book unreadable; reduce-only cap uses our own pending exits | adapter=%s",
-                adapter_id,
-            )
-        return (
-            _book_rows(positions),
-            _book_rows(our_orders),
-            None if broker_orders is None else _book_rows(broker_orders),
-        )
     try:
+        if callable(hook):
+            positions, our_orders, broker_orders = hook(adapter_id, account_id)
+            return (
+                _normalise_exit_positions(positions),
+                _normalise_exit_orders(our_orders),
+                None if broker_orders is None else _normalise_exit_orders(broker_orders),
+            )
         positions, broker_orders = _run_on_client_loop(
             _fetch_broker_exit_books(adapter_id, account_id),
         )
-    except Exception:  # noqa: BLE001 - an unreadable position book is not an exit
-        logger.info(
-            "Broker books unreadable; place is not a reduce-only exit | adapter=%s",
-            adapter_id,
-        )
-        return [], [], None
+    except Exception:  # noqa: BLE001 - unreadable/malformed books cannot prove flatness
+        logger.info("Broker exit evidence unavailable | adapter=%s", adapter_id)
+        return None, [], None
     return positions, [], broker_orders
 
 
-def _position_net(positions: Sequence[Mapping[str, Any]], body: Mapping[str, Any]) -> int:
-    """Signed open quantity for the contract on ``body``, or ``0``."""
+def _exit_position_quantity(row: Mapping[str, Any]) -> int:
+    """Read agreeing signed whole quantities without a flatness fallback."""
+    values = []
+    for name in ("net_qty", "netQty", "net_quantity", "quantity", "qty"):
+        if name not in row:
+            continue
+        raw = row[name]
+        if isinstance(raw, bool) or not isinstance(raw, (str, int, float, Decimal)):
+            raise ValueError("Position quantity is unavailable")
+        try:
+            value = Decimal(str(raw))
+        except InvalidOperation as exc:
+            raise ValueError("Position quantity is malformed") from exc
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("Position quantity is not whole")
+        values.append(int(value))
+    if not values or any(value != values[0] for value in values):
+        raise ValueError("Position quantity aliases are missing or conflicting")
+    for names in (("symbol", "trading_symbol", "tradingsymbol"), ("side", "transaction_type", "action")):
+        aliases = {str(row[name]).strip().upper() for name in names if name in row and row[name] not in (None, "")}
+        if len(aliases) > 1:
+            raise ValueError("Position identity aliases conflict")
+    quantity = values[0]
+    side = next((str(row[name]).strip().upper() for name in ("side", "transaction_type", "action")
+                 if name in row and row[name] not in (None, "")), "")
+    if side == "SELL" and quantity > 0 and not any(name in row for name in ("net_qty", "netQty", "net_quantity")):
+        return -quantity
+    return quantity
+
+
+def _position_net(positions: Sequence[Mapping[str, Any]], body: Mapping[str, Any]) -> int | None:
+    """Signed open quantity, zero when absent, ``None`` on ambiguous evidence."""
     symbol = str(body.get("symbol") or "").strip().upper()
     exchange = str(body.get("exchange") or "").strip().upper()
     product = str(body.get("product") or "MIS").strip().upper() or "MIS"
     for row in positions:
-        row_symbol = str(row.get("symbol") or "").strip().upper()
+        row_symbols = {str(row.get(name) or "").strip().upper() for name in ("symbol", "trading_symbol", "tradingsymbol")}
         row_exchange = str(row.get("exchange") or "").strip().upper()
         row_product = str(row.get("product") or "MIS").strip().upper() or "MIS"
-        if row_symbol != symbol or row_exchange != exchange or row_product != product:
+        if symbol not in row_symbols or row_exchange != exchange or row_product != product:
             continue
-        raw = row.get("net_qty", row.get("quantity"))
         try:
-            return int(float(raw))
-        except (TypeError, ValueError):
-            return 0
+            return _exit_position_quantity(row)
+        except ValueError:
+            return None
     return 0
 
 
 def _placed_order_id(result: Any) -> str:
-    """Broker order id from a router place result."""
+    """One exact ACK identity for an existing reducing hold, or unresolved.
+
+    Scalar first-ID compatibility is not all-child quantity coverage. A native
+    multi-ID ACK stays unresolved here; no per-child allocation is invented.
+    """
+    from flinttrade_gateway.router import placement_acknowledgement_fields  # noqa: PLC0415
+
+    ids = placement_acknowledgement_fields(result).get("order_ids")
+    if ids is not None and len(ids) != 1:
+        return ""
     if isinstance(result, str):
-        return result.strip()
+        return result if result and result.isprintable() and not any(ch.isspace() for ch in result) else ""
     if isinstance(result, Mapping):
         for name in ("orderid", "order_id", "orderId"):
             value = result.get(name)
@@ -707,8 +915,6 @@ def _prepare_live_reduce_only(
     from flinttrade_engine.reduce_only import (  # noqa: PLC0415
         contract_key,
         contract_lock,
-        cover_reserved_exit,
-        pending_exit_quantity,
         reconcile_reserved_exit,
         reserve_exit,
         reserved_exit,
@@ -724,22 +930,15 @@ def _prepare_live_reduce_only(
     )
     with contract_lock(key):
         positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
+        if positions is None:
+            return _laya_place_response(body, mode=_MODE_LIVE, source="operator"), None
         position_net = _position_net(positions, body)
-        reconcile_reserved_exit(
-            key,
-            orders=broker_orders if broker_orders is not None else our_orders,
-            position_net=position_net,
-        )
-        if broker_orders is not None:
-            exit_action = "SELL" if str(body.get("action") or "").strip().upper() == "SELL" else "BUY"
-            covered = pending_exit_quantity(
-                broker_orders,
-                symbol=str(body.get("symbol") or "").strip().upper(),
-                exchange=str(body.get("exchange") or "").strip().upper(),
-                product=str(body.get("product") or "MIS").strip().upper(),
-                exit_action=exit_action,
-            )
-            cover_reserved_exit(key, covered)
+        # Exact ACK coverage validates every supplied identity/quantity/state
+        # alias again. A full book's aggregate pending quantity is not proof
+        # that an invisible local ACK is represented. Unavailable books restore
+        # any previously represented local hold instead of releasing it.
+        if position_net is not None:
+            reconcile_reserved_exit(key, orders=broker_orders, position_net=position_net)
         if _own_exit_pending(body, positions, our_orders, reserved_exit(key)):
             label = _contract_label(body)
             if broker_orders is None:
@@ -754,7 +953,7 @@ def _prepare_live_reduce_only(
             broker_orders=broker_orders,
             extra_pending=reserved_exit(key),
         )
-        if not qualified:
+        if not qualified or position_net is None:
             return block, None
         quantity = _quantity_from_body(body)
         reserve_exit(key, quantity)
@@ -1196,6 +1395,7 @@ def _admit_and_route_live_order(
     ft_action: str,
     body: dict[str, Any],
     lease: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[bool, Any]:
     """Atomically snapshot, check, gate, reserve, and dispatch one live order."""
     from pydantic import ValidationError  # noqa: PLC0415
@@ -1289,15 +1489,30 @@ def _admit_and_route_live_order(
             account_id=account_id,
         )
         reservation = active_lease.reserve(typed_order, admission.positions)
-        result = _run_on_client_loop(
-            router.place_order(
+        progress = progress if progress is not None else _LiveWriteProgress()
+        # Set before queueing: a client-loop wait failure cannot prove that the
+        # task will not subsequently invoke the adapter.
+        progress.started = True
+        try:
+            result = _run_on_client_loop(progress.run(router.place_order(
                 request_ctx,
                 order=typed_order,
                 safety_ctx=safety_ctx,
                 hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
-            )
-        )
-        active_lease.acknowledge(reservation, result)
+                on_adapter_invoke=progress.on_adapter_invoke,
+            )))
+        except BaseException:
+            if progress.failed_before_invoke:
+                active_lease.reconcile([reservation.reservation_id])
+            raise
+        from flinttrade_gateway.router import placement_acknowledgement_fields  # noqa: PLC0415
+
+        ids = placement_acknowledgement_fields(result).get("order_ids")
+        if ids is None or len(ids) == 1:
+            active_lease.acknowledge(reservation, result)
+        # A multi-ID ACK has no verified per-child allocation here. Preserve
+        # the existing aggregate exposure reservation without binding its whole
+        # quantity to the scalar first ID. Receipt/audit compatibility is unchanged.
         return True, result
 
 
@@ -1324,16 +1539,17 @@ def _dispatch_live_order(
 
     from pydantic import ValidationError  # noqa: PLC0415
 
-    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
-    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
-    account_id = account_id or str(body.get("account_id") or "default")
-    if not adapter_id or not account_id:
+    if not adapter_id:
+        # An absent configured target is an internal unavailable sentinel, not
+        # an invalid supplied account. Explicit IDs were validated by ingress.
         return jsonify(
             {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
         ), 503
+    account_id = _validated_order_account(
+        adapter_id, account_id if account_id is not None else body.get("account_id", "default"),
+    )
 
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
@@ -1362,6 +1578,41 @@ def _dispatch_live_order(
                     }
                 ), 501
 
+    if str(adapter_id).strip().lower() == "upstox":
+        # The canonical field is Boolean. No reviewed percentage placement
+        # field exists; neither Boolean coercion nor ignored native aliases may
+        # select an Upstox percentage or change the V2/V3 execution contract.
+        native_fields = {"market_protection_by_strategy", "market_protection_by_index", "rules",
+                         "slice", "is_amo", "transaction_type"}
+        inactive_controls = True
+        for field in (
+            "target_price", "stop_loss_price", "stop_loss_trailing_gap", "trailing_jump", "iceberg_legs",
+            "price1", "trigger_price1", "quantity1",
+        ):
+            value = body.get(field)
+            if value in (None, ""):
+                continue
+            try:
+                number = Decimal(str(value))
+            except InvalidOperation:
+                inactive_controls = False
+                break
+            if isinstance(value, bool) or not number.is_finite() or number != 0:
+                inactive_controls = False
+                break
+        trigger_overrides = any(body.get(field) not in (None, "") for field in (
+            "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+        ))
+        if (
+            body.get("market_protection") is not None or native_fields.intersection(body)
+            or not inactive_controls or trigger_overrides
+        ):
+            return jsonify({
+                "status": "error",
+                "message": "Upstox native protection/aliases are not represented by the approved canonical placement "
+                           "contract. market_protection is Boolean, not an Upstox percentage.",
+            }), 501
+
     request_ctx = RequestContext(
         jti=str(payload.get("jti") or ""),
         actor_type="human",
@@ -1378,7 +1629,58 @@ def _dispatch_live_order(
 
     try:
         body = normalise_order_type_fields(body)
-        typed_order = _body_to_order(body, variety=variety)
+        typed_order = _body_to_order(body, variety=variety, adapter_id=adapter_id)
+        if str(adapter_id).strip().lower() == "dhan" and typed_order.variety.lower() in {"regular", "", "amo", "iceberg"}:
+            from flinttrade_gateway.brokers import dhan_mapping  # noqa: PLC0415
+
+            # The ordinary/AMO/slice builder is also the adapter's defence.
+            # This placeholder validates shape only, never instrument authority.
+            try:
+                dhan_mapping.to_place_order_kwargs(typed_order, "preflight-only")
+            except dhan_mapping.DhanMappingError as exc:
+                raise ValueError("Dhan ordinary placement intent is unsupported or invalid") from exc
+        if str(adapter_id).strip().lower() == "groww" and typed_order.variety.lower() in {"regular", "amo"}:
+            from flinttrade_core.exceptions import OrderError  # noqa: PLC0415
+            from flinttrade_gateway.brokers import groww_mapping  # noqa: PLC0415
+
+            # Preserve the actual builder's presence semantics (False is not
+            # omission), before reads, holds, mint or adapter invocation.
+            try:
+                groww_mapping.to_place_order_payload(typed_order)
+            except OrderError as exc:
+                raise ValueError("Groww ordinary placement intent is unsupported or invalid") from exc
+        if str(adapter_id).strip().lower() == "kotakneo":
+            from flinttrade_gateway.brokers import kotakneo_mapping  # noqa: PLC0415
+
+            # Reuse the adapter's pure shape guard before reads, reducing holds
+            # or one-shot authority. Symbol resolution and MTF eligibility remain
+            # the adapter's responsibility; it still validates defensively.
+            try:
+                kotakneo_mapping.validate_v3_order(typed_order)
+            except kotakneo_mapping.KotakNeoMappingError:
+                return jsonify({
+                    "status": "error", "message": "Kotak Neo placement intent is unsupported or invalid.",
+                }), 501
+        if str(adapter_id).strip().lower() == "deltaexchange":
+            from flinttrade_core.exceptions import BrokerError  # noqa: PLC0415
+            from flinttrade_gateway.brokers import delta_mapping  # noqa: PLC0415
+
+            # The actual adapter's pure builder must refuse before book reads,
+            # reducing holds, margin work or one-shot authority are created.
+            try:
+                delta_mapping.to_place_payload(typed_order)
+            except BrokerError as exc:
+                raise ValueError("Delta placement intent is unsupported or invalid") from exc
+        if str(adapter_id).strip().lower() == "upstox":
+            from flinttrade_gateway.brokers import upstox_mapping  # noqa: PLC0415
+
+            # Pure request validation before admission or one-shot signing.
+            # Instrument identity is still resolved by the adapter; this token
+            # is a non-dispatching placeholder, never broker evidence.
+            if typed_order.variety.lower() == "iceberg":
+                upstox_mapping.to_place_order_v3_params(typed_order, "preflight-only")
+            else:
+                upstox_mapping.to_place_order_params(typed_order, "preflight-only")
     except ValueError as exc:
         logger.warning(
             "Live order rejected by order-model validation | action=%s adapter=%s: %s",
@@ -1417,6 +1719,7 @@ def _dispatch_live_order(
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
     admitted_place = False
+    progress = _LiveWriteProgress()
     result: Any = None
     try:
         admitted, outcome = _admit_and_route_live_order(
@@ -1428,6 +1731,7 @@ def _dispatch_live_order(
             account_id=account_id,
             ft_action=ft_action,
             body=body,
+            progress=progress,
         )
         if not admitted:
             return outcome
@@ -1454,85 +1758,41 @@ def _dispatch_live_order(
                 _persistent_monitor.record(adapter_id, _op, _latency_ms, symbol=_symbol)
         except Exception:  # pragma: no cover - monitoring must never break orders
             logger.debug("order latency record failed", exc_info=True)
-    except SafetyBypassError as exc:
-        logger.warning(
-            "Live order refused by safety gate | action=%s adapter=%s account=%s: %s",
-            ft_action,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
+    except Exception as exc:
+        logger.warning("Live %s failed | adapter=%s account=%s error=%s", ft_action, adapter_id,
+                       safe_account, type(exc).__name__)
+        http_status = _live_write_error_status(exc, disconnected_first=True)
+        message = {
+            403: "Order refused",
+            429: "Order refused by rate guard",
+            503: f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                 "selector to workspace.json brokers.registered and brokers.account_acls, then restart.",
+            501: f"Order placement ({ft_action}) is not yet available for broker '{adapter_id}'.",
+        }.get(http_status, "Order dispatch failed")
+        return _live_write_error(
+            exc, message=message, http_status=http_status, progress=progress,
+            adapter_id=adapter_id, account_id=account_id, operation=ft_action, item=body,
+            fail_message="Order dispatch failed",
         )
-        return jsonify({"status": "error", "message": "Order refused"}), 403
-    except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning(
-            "Live order — broker not connected | action=%s adapter=%s account=%s: %s",
-            ft_action,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify(
-            {
-                "status": "error",
-                "message": (
-                    f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                    "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-                ),
-            }
-        ), 503
-    except AlgoTagLimitError as exc:
-        # The router's algo-tag guard refused the dispatch: the operator's
-        # per-(broker, exchange) per-second algo-order ceiling would be breached.
-        # A throttle refusal, not a safety bypass — map to 429 so callers retry.
-        logger.warning(
-            "Live order refused by algo-tag guard | action=%s adapter=%s account=%s: %s",
-            ft_action,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
-    except (NotImplementedError, UnsupportedCapabilityError) as exc:
-        # Gated-skeleton adapters (e.g. Dhan) raise NotImplementedError for
-        # un-built order paths; an adapter raises UnsupportedCapabilityError for
-        # a capability it does not advertise. Both are an honest "not yet
-        # available", not a server fault — map to 501 with the adapter message.
-        logger.warning(
-            "Live order — adapter capability not available | action=%s adapter=%s account=%s: %s",
-            ft_action,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify(
-            {
-                "status": "error",
-                "message": f"Order placement ({ft_action}) is not yet available for broker '{adapter_id}'.",
-            }
-        ), 501
-    except Exception:
-        logger.exception(
-            "Live order dispatch failed | action=%s adapter=%s account=%s",
-            ft_action,
-            adapter_id,
-            safe_account,
-        )
-        return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
     finally:
-        if reduce_hold is not None and not admitted_place:
+        if reduce_hold is not None and not admitted_place and not progress.outcome_unknown:
             from flinttrade_engine.reduce_only import release_exit  # noqa: PLC0415
 
             release_exit(reduce_hold[0], reduce_hold[1])
-        elif reduce_hold is not None and admitted_place:
+        elif reduce_hold is not None:
             from flinttrade_engine.reduce_only import note_reserved_order  # noqa: PLC0415
 
             note_reserved_order(
                 reduce_hold[0],
-                _placed_order_id(result),
+                _placed_order_id(result) if admitted_place else "",
                 reduce_hold[1],
                 reduce_hold[2],
             )
 
+    from flinttrade_gateway.router import placement_acknowledgement_fields  # noqa: PLC0415
+
+    # Detach native receipt fields before JSON's string coercion discards them.
+    placement_evidence = placement_acknowledgement_fields(result)
     # Audit trail (best-effort — never break the order path).
     try:
         audit = current_app.config.get("AUDIT")
@@ -1544,6 +1804,7 @@ def _dispatch_live_order(
                 actor_id=request_ctx.actor_id,
                 symbol=body.get("symbol"),
                 action=ft_action,
+                **placement_evidence,
             )
     except Exception:  # pragma: no cover — audit must never break the order path
         logger.debug("audit stamp failed for live order", exc_info=True)
@@ -1565,7 +1826,7 @@ def _dispatch_live_order(
     )
     # Return both keys: ``orderid`` (legacy native broker response shape the UI reads)
     # and ``data`` (the routed-path shape) so the frontend works either way.
-    return jsonify({"status": "success", "orderid": result, "data": result}), 200
+    return jsonify({"status": "success", "orderid": result, "data": result, **placement_evidence}), 200
 
 
 def _desktop_notify(title: str, body: str = "") -> None:
@@ -1602,7 +1863,7 @@ def _gated_write_dispatch(
     adapter_id: str,
     account_id: str,
     order_id: str,
-    dispatch: Callable[[Any, Any, Any], Any],
+    dispatch: Callable[[Any, Any, Any, _LiveWriteProgress], Any],
     audit_event: str,
     fail_message: str,
     admission_lease: Any = None,
@@ -1618,11 +1879,9 @@ def _gated_write_dispatch(
     (503/403/503/500) and echoes ``order_id`` on success.
     """
 
-    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
-    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
+    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import gate_order  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
@@ -1646,6 +1905,7 @@ def _gated_write_dispatch(
     )
     safe_account = account_ref(account_id)
     safe_order = log_ref(order_id, kind="order")
+    progress = _LiveWriteProgress()
 
     try:
         safety_ctx = gate_order(
@@ -1660,56 +1920,32 @@ def _gated_write_dispatch(
             if admission_lease is None:
                 raise SafetyBypassError("risk-increasing broker write lacks an order admission lease")
             reservation = admission_lease.reserve(exposure_order, exposure_positions)
-        result = _run_on_client_loop(dispatch(router, request_ctx, safety_ctx))
+        progress.started = True
+        try:
+            result = _run_on_client_loop(progress.run(dispatch(router, request_ctx, safety_ctx, progress)))
+        except BaseException:
+            if reservation is not None and progress.failed_before_invoke:
+                admission_lease.reconcile([reservation.reservation_id])
+            raise
         if reservation is not None:
             acknowledgement = {"orderid": reservation_order_id} if reservation_order_id else result
             admission_lease.acknowledge(reservation, acknowledgement)
-    except SafetyBypassError as exc:
-        logger.warning("Live %s refused by safety gate | order=%s: %s", op, safe_order, exc)
-        return jsonify({"status": "error", "message": "Order refused"}), 403
-    except AlgoTagLimitError as exc:
-        # The router's algo-tag guard refused the dispatch (per-(broker,
-        # exchange) per-second algo-order ceiling). A throttle refusal callers
-        # should retry — 429, mirroring the place path; never a 500.
-        logger.warning("Live %s refused by algo-tag guard | order=%s: %s", op, safe_order, exc)
-        return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
-    except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning(
-            "Live %s — broker not connected | adapter=%s account=%s: %s",
-            op,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
+    except Exception as exc:
+        logger.warning("Live %s failed | adapter=%s account=%s error=%s", op, adapter_id,
+                       safe_account, type(exc).__name__)
+        http_status = _live_write_error_status(exc)
+        message = {
+            403: "Order refused",
+            429: "Order refused by rate guard",
+            503: f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                 "selector to workspace.json brokers.registered and brokers.account_acls, then restart.",
+            501: f"This operation ({op}) is not yet available for broker '{adapter_id}'.",
+        }.get(http_status, fail_message)
+        return _live_write_error(
+            exc, message=message, http_status=http_status, progress=progress,
+            adapter_id=adapter_id, account_id=account_id, operation=op, item={"order_id": order_id},
+            fail_message=fail_message,
         )
-        return jsonify(
-            {
-                "status": "error",
-                "message": (
-                    f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                    "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-                ),
-            }
-        ), 503
-    except (NotImplementedError, UnsupportedCapabilityError) as exc:
-        # Gated-skeleton adapters raise NotImplementedError for un-built write
-        # paths; UnsupportedCapabilityError signals a capability the adapter does
-        # not advertise. Both are an honest "not yet available" — map to 501.
-        logger.warning(
-            "Live %s — adapter capability not available | adapter=%s account=%s: %s",
-            op,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify(
-            {
-                "status": "error",
-                "message": f"This operation ({op}) is not yet available for broker '{adapter_id}'.",
-            }
-        ), 501
-    except Exception:
-        logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, safe_order, adapter_id)
-        return jsonify({"status": "error", "message": fail_message}), 500
 
     _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, order_id)
     logger.info("Live %s dispatched | order=%s adapter=%s account=%s", op, safe_order, adapter_id, safe_account)
@@ -1778,7 +2014,6 @@ def _dispatch_live_modify(
     from flinttrade_core.models import ModifyOrder  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
-    account_id = account_id or str(body.get("account_id") or "default")
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
@@ -1786,7 +2021,27 @@ def _dispatch_live_modify(
         return jsonify(
             {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
         ), 503
+    account_id = _validated_order_account(
+        adapter_id, account_id if account_id is not None else body.get("account_id", "default"),
+    )
     safe_order = log_ref(order_id, kind="order")
+
+    # Refuse native fields that the ordinary replacement cannot represent.
+    if str(adapter_id).strip().lower() == "upstox":
+        from flinttrade_gateway.brokers import upstox_mapping  # noqa: PLC0415
+
+        native_fields = {
+            "market_protection", "market_protection_by_strategy", "market_protection_by_index", "rules",
+            "variety", "slice", "is_amo", "transaction_type", "gtt_order_id", "target_price", "stop_loss_price",
+            "stop_loss_trailing_gap", "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+            "trailing_jump", "iceberg_legs", "price1", "trigger_price1", "quantity1",
+        }
+        if native_fields.intersection(body) or upstox_mapping.is_gtt_order_id(order_id):
+            return jsonify({
+                "status": "error",
+                "message": "Upstox ordinary modification cannot represent these native fields. "
+                           "Use the complete signed forever replacement for GTT rules.",
+            }), 501
 
     # Kotak Neo v3 removed the quick/legacy modify arguments below.  Reject an
     # explicitly supplied field before the request is admitted and signed;
@@ -1851,8 +2106,11 @@ def _dispatch_live_modify(
 
     requested_fields = _requested_modify_fields(body)
     try:
+        _raw_order_intent(body, adapter_id=adapter_id, modifying=True)
         changes = _modify_changes(normalise_order_type_fields(body))
         ModifyOrder(orderid=order_id, **changes)  # validate up-front; no gate consumed on bad input
+        if str(adapter_id).strip().lower() == "upstox":
+            upstox_mapping.to_modify_order_params(order_id, changes)
     except (ValueError, ValidationError) as exc:
         logger.warning("Live modify rejected by order-model validation | order=%s: %s", safe_order, exc)
         return jsonify({"status": "error", "message": "Modify validation failed"}), 400
@@ -1900,8 +2158,9 @@ def _dispatch_live_modify(
             adapter_id=adapter_id,
             account_id=account_id,
             order_id=order_id,
-            dispatch=lambda router, ctx, sctx: router.modify_order(
-                ctx, order=canonical, order_id=order_id, changes=changes, safety_ctx=sctx, hint=hint
+            dispatch=lambda router, ctx, sctx, progress: router.modify_order(
+                ctx, order=canonical, order_id=order_id, changes=changes, safety_ctx=sctx, hint=hint,
+                on_adapter_invoke=progress.on_adapter_invoke,
             ),
             audit_event="ORDER_MODIFIED",
             fail_message="Order modify failed",
@@ -1936,11 +2195,15 @@ def _dispatch_live_cancel(
     """
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
-    account_id = account_id or str(body.get("account_id") or "default")
-    if not adapter_id or not account_id:
+    if not adapter_id:
+        # An absent configured target is an internal unavailable sentinel, not
+        # an invalid supplied account. Explicit IDs were validated by ingress.
         return jsonify(
             {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
         ), 503
+    account_id = _validated_order_account(
+        adapter_id, account_id if account_id is not None else body.get("account_id", "default"),
+    )
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Cancel requires an 'orderid'"}), 400
@@ -2016,13 +2279,14 @@ def _dispatch_live_cancel(
         adapter_id=adapter_id,
         account_id=account_id,
         order_id=order_id,
-        dispatch=lambda router, ctx, sctx: router.cancel_order(
+        dispatch=lambda router, ctx, sctx, progress: router.cancel_order(
             ctx,
             order=canonical,
             order_id=order_id,
             safety_ctx=sctx,
             hint=hint,
             extras=extras or None,
+            on_adapter_invoke=progress.on_adapter_invoke,
         ),
         audit_event="ORDER_CANCELLED",
         fail_message="Order cancel failed",
@@ -2710,25 +2974,24 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
 
 
 def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, int] | None:
-    """Record the server-side reduce-only proof for a square-off.
+    """Record a square-off proof only from available, valid position evidence.
 
-    Exit-all only flattens. When the book can be read, each open contract
-    is classified. A row that is not an exit stops the square-off. An
-    unreadable book still records one reduce-only proof: the broker verb
-    cannot open a position.
+    Known empty/flat positions retain the deliberate ACK-only broker operation.
+    Unavailable or malformed positions cannot establish that zero-quantity proof.
     """
     from flinttrade_engine.reduce_only import classify_reduce_only  # noqa: PLC0415
 
     positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
+    if positions is None:
+        return jsonify({"status": "error", "message": "Position evidence unavailable; no square-off was sent."}), 503
     open_rows = []
-    for row in positions:
-        try:
-            quantity = int(float(row.get("net_qty", row.get("quantity", 0)) or 0))
-        except (TypeError, ValueError):
-            continue
-        if quantity == 0:
-            continue
-        open_rows.append((row, quantity))
+    try:
+        for row in positions:
+            quantity = _exit_position_quantity(row)
+            if quantity != 0:
+                open_rows.append((row, quantity))
+    except ValueError:
+        return jsonify({"status": "error", "message": "Position evidence is ambiguous; no square-off was sent."}), 409
     if not open_rows:
         _record_reduce_only(
             {
@@ -2741,10 +3004,12 @@ def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, 
             _MODE_LIVE,
         )
         return None
+    proven_bodies = []
     for row, quantity in open_rows:
         action = "SELL" if quantity > 0 else "BUY"
         body = {
-            "symbol": str(row.get("symbol") or ""),
+            "symbol": next(str(row[name]) for name in ("symbol", "trading_symbol", "tradingsymbol")
+                           if row.get(name) not in (None, "")),
             "exchange": str(row.get("exchange") or ""),
             "product": str(row.get("product") or "MIS"),
             "action": action,
@@ -2768,6 +3033,8 @@ def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, 
                     "message": "Square-off stopped because a position is not a reduce-only exit.",
                 }
             ), 409
+        proven_bodies.append(body)
+    for body in proven_bodies:
         _record_reduce_only(body, _MODE_LIVE)
     return None
 
@@ -3034,18 +3301,33 @@ _SUPER_ORDER_LEGS = frozenset({"ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"})
 def _configured_execution_target() -> tuple[str, str]:
     """Return the explicitly configured native execution target, or no target."""
     router = current_app.config.get("BROKER_ROUTER")
-    selector = str(getattr(router, "default_selector", None) or "").strip()
-    if selector:
+    selector = getattr(router, "default_selector", None)
+    if type(selector) is str and selector:
         try:
-            from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
+            from .broker_identity import parse_broker_selector  # noqa: PLC0415
 
-            return parse_selector(selector)
+            target = parse_broker_selector(selector)
+            return target.adapter_id, target.account_id
         except ValueError:
             logger.warning(
                 "Ignoring malformed brokers.execution.default selector: %s",
                 log_ref(selector, kind="selector"),
             )
     return "", ""
+
+
+def _validated_order_account(adapter_id: str, value: Any) -> str:
+    """Validate an opaque account before reads, locks or dispatch; never repair it."""
+    from werkzeug.exceptions import BadRequest  # noqa: PLC0415
+
+    from .broker_identity import BrokerSelector, BrokerSelectorValidationError  # noqa: PLC0415
+
+    try:
+        return BrokerSelector(adapter_id or "unspecified", value).account_id
+    except BrokerSelectorValidationError:
+        response = jsonify({"status": "error", "code": "broker_selector_invalid", "message": "Invalid order account selector"})
+        response.status_code = 400
+        raise BadRequest(response=response) from None
 
 
 def _gated_target(params: Any) -> tuple[str, str]:
@@ -3060,11 +3342,10 @@ def _gated_target(params: Any) -> tuple[str, str]:
         ``brokers.execution.default`` selector wins; if no configured router is
         available this falls back to ``("", "")``.
     """
-    if not str(params.get("broker") or "").strip() and not str(params.get("account_id") or "").strip():
+    if "broker" not in params and "account_id" not in params:
         return _configured_execution_target()
     adapter_id = str(params.get("broker") or "").strip().lower()
-    account_id = str(params.get("account_id") or "default").strip() or "default"
-    return adapter_id, account_id
+    return adapter_id, _validated_order_account(adapter_id, params.get("account_id", "default"))
 
 
 def _require_live_payload(*, require_unlock: bool) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
@@ -3153,7 +3434,8 @@ def _gated_verb_write(
     :meth:`BrokerRouter.execute_gated`, so no unhashed mutable field can reach
     the broker. Mirrors :func:`_gated_write_dispatch`'s fail-closed status
     matrix: 503 (router unavailable / broker not connected), 403 (gate or ACL
-    refusal, kill switch), 501 (adapter lacks the verb), 500 (dispatch fault).
+    refusal, kill switch), 501 (adapter lacks the verb), 502 (broker/value fault),
+    500 (other dispatch fault). Observed uncertainty overrides refusal statuses.
 
     Args:
         verb: One of ``flinttrade_engine.safety.GATED_WRITE_VERBS``.
@@ -3172,15 +3454,9 @@ def _gated_verb_write(
         A ``(flask.Response, http_status_code)`` tuple.
     """
 
-    from flinttrade_core.exceptions import (  # noqa: PLC0415
-        BrokerError,
-        SafetyBypassError,
-        UnsupportedCapabilityError,
-    )
-    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
+    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import gate_broker_write  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
     if not adapter_id or not account_id:
@@ -3224,6 +3500,7 @@ def _gated_verb_write(
     safe_account = account_ref(account_id)
 
     canonical: dict[str, Any] = {"_op": verb, **fields}
+    progress = _LiveWriteProgress()
     try:
         safety_ctx = gate_broker_write(
             verb,
@@ -3241,74 +3518,40 @@ def _gated_verb_write(
                 admission_lease.reserve(order, positions)
                 for order, positions in zip(exposure_orders, exposure_positions, strict=True)
             ]
-        result = _run_on_client_loop(
-            router.execute_gated(
+        progress.started = True
+        try:
+            result = _run_on_client_loop(progress.run(router.execute_gated(
                 request_ctx,
                 verb=verb,
                 payload=canonical,
                 safety_ctx=safety_ctx,
                 hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
-            )
-        )
+                on_adapter_invoke=progress.on_adapter_invoke,
+            )))
+        except BaseException:
+            if reservations and progress.failed_before_invoke:
+                admission_lease.reconcile([reservation.reservation_id for reservation in reservations])
+            raise
         for index, reservation in enumerate(reservations):
             broker_order_id = reservation_id_factory(result, index) if reservation_id_factory else ""
             admission_lease.acknowledge(reservation, {"orderid": broker_order_id})
-    except SafetyBypassError as exc:
-        logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, safe_ref, exc)
-        return jsonify({"status": "error", "message": "Request refused"}), 403
-    except AlgoTagLimitError as exc:
-        # Algo-tag guard ceiling breach — a throttle refusal callers should
-        # retry (429), never the generic 500 (audit fix); mirrors the place path.
-        logger.warning("Live %s refused by algo-tag guard | ref=%s: %s", verb, safe_ref, exc)
-        return jsonify({"status": "error", "message": "Request refused by rate guard"}), 429
-    except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning(
-            "Live %s — broker not connected | adapter=%s account=%s: %s",
-            verb,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
+    except Exception as exc:
+        logger.warning("Live %s failed | adapter=%s account=%s error=%s", verb, adapter_id,
+                       safe_account, type(exc).__name__)
+        http_status = _live_write_error_status(exc, broker_error_status=502)
+        message = {
+            403: "Request refused",
+            429: "Request refused by rate guard",
+            503: f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                 "selector to workspace.json brokers.registered and brokers.account_acls, then restart.",
+            501: f"This operation ({verb}) is not yet available for broker '{adapter_id}'.",
+        }.get(http_status, fail_message)
+        return _live_write_error(
+            exc, message=message, http_status=http_status, progress=progress,
+            adapter_id=adapter_id, account_id=account_id, operation=verb,
+            item={"order_id": ref, "leg_name": fields.get("changes", {}).get("leg_name")},
+            fail_message=fail_message,
         )
-        return jsonify(
-            {
-                "status": "error",
-                "message": (
-                    f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
-                    "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
-                ),
-            }
-        ), 503
-    except (NotImplementedError, UnsupportedCapabilityError) as exc:
-        # An adapter without the verb refuses cleanly — an honest "not yet
-        # available" for this broker, not a server fault.
-        logger.warning(
-            "Live %s — adapter capability not available | adapter=%s account=%s: %s",
-            verb,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify(
-            {
-                "status": "error",
-                "message": f"This operation ({verb}) is not yet available for broker '{adapter_id}'.",
-            }
-        ), 501
-    except (BrokerError, ValueError) as exc:
-        # The broker/adapter refused after the FlintTrade gate succeeded. Keep the
-        # detailed exception in logs, but return the route-specific bounded message
-        # so adapter tracebacks, paths, or tokens cannot reach HTTP callers.
-        logger.warning(
-            "Live %s rejected by broker/adapter | adapter=%s account=%s: %s",
-            verb,
-            adapter_id,
-            safe_account,
-            _redact_exc(exc, account_id),
-        )
-        return jsonify({"status": "error", "message": fail_message}), 502
-    except Exception:
-        logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, safe_ref, adapter_id)
-        return jsonify({"status": "error", "message": fail_message}), 500
 
     _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, ref)
     logger.info("Live %s dispatched | ref=%s adapter=%s account=%s", verb, safe_ref, adapter_id, safe_account)
@@ -3381,6 +3624,20 @@ def _forever_contract_error(
             missing = sorted(required - supplied)
             if missing:
                 return f"Upstox GTT modify requires a complete replacement; missing fields {missing}."
+            # Native rule aliases would otherwise be signed but ignored by the
+            # actual legacy builder. Only its complete replacement fields and
+            # canonical identity/classification context are accepted here.
+            allowed = required | {"market_protection_by_strategy", "action", "symbol", "exchange", "product"}
+            if set(values) - allowed:
+                return "Upstox GTT modify contains fields outside the signed replacement contract."
+            from flinttrade_gateway.brokers import upstox_mapping  # noqa: PLC0415
+
+            try:
+                upstox_mapping.to_gtt_modify_params(
+                    "preflight-only", values, market_protection_by_strategy=values.get("market_protection_by_strategy"),
+                )
+            except upstox_mapping.UpstoxMappingError:
+                return "Upstox GTT replacement rules, quantities or native protection are invalid."
     if broker == "dhan":
         upstox_only = {
             "type",
@@ -3686,6 +3943,25 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
         return jsonify(
             {"status": "error", "message": "Order routing unavailable — choose a native execution account"}
         ), 503
+    if adapter_id == "dhan":
+        from flinttrade_gateway.brokers import dhan_mapping  # noqa: PLC0415
+
+        try:
+            # Keep the mapper's reviewed snake/camel price/trailing aliases.
+            # Other active/malformed intent must not disappear in kwargs selection.
+            supported = {"target_price", "targetPrice", "stop_loss_price", "stopLossPrice", "trailing_jump", "trailingJump"}
+            _raw_order_intent({name: value for name, value in changes.items() if name not in supported},
+                              adapter_id="dhan", modifying=True)
+            if changes.get("market_protection") is True or {
+                "market_protection_by_index", "market_protection_by_strategy", "rules", "marketProtection", "mp",
+            }.intersection(changes):
+                raise ValueError("Super protection intent has no reviewed representation")
+            dhan_mapping.to_modify_super_order_kwargs(order_id, changes)
+        except ValueError:
+            return jsonify({
+                "status": "error", "message": "Super order modify validation failed",
+                "dispatch_outcome": "refused_before_dispatch", "retry_safe": False,
+            }), 400
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
@@ -3895,19 +4171,30 @@ def multi_order_place() -> tuple[Any, int]:
 @orders_bp.route("/smart/<order_id>", methods=["DELETE"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def smart_order_cancel(order_id: str) -> tuple[Any, int]:
-    """Cancel a smart order — gated ``cancel_smart_order`` verb (IndMoney-native).
+    """Cancel one smart resource through broker-specific signed addressing.
 
-    Optional ``?segment=`` narrows the cancel (e.g. ``DERIVATIVE``); it travels
-    inside the signed payload. L5 blocks ordinary cancellation because the
-    smart order may be a protective exit.
+    Groww requires explicit CASH/FNO and GTT/OCO resource context. INDstocks
+    retains its optional EQUITY/DERIVATIVE context. L5 still blocks ordinary
+    cancellation because the resource may be a protective exit.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    params = {**request.args.to_dict(), **json_object_body()}
+    body = json_object_body()
+    query = request.args.to_dict()
+    address_fields = ("broker", "account_id", "segment", "smart_order_type", "order_id", "orderid", "smart_order_id")
+    if (
+        any(len(request.args.getlist(name)) > 1 for name in address_fields)
+        or any(name in body and name in query and body[name] != query[name] for name in address_fields)
+    ):
+        return jsonify({"status": "error", "message": "Smart cancellation address fields conflict."}), 400
+    params = {**query, **body}
+    if any(params[name] != order_id for name in ("order_id", "orderid", "smart_order_id") if name in params):
+        return jsonify({"status": "error", "message": "Smart cancellation resource identity conflicts."}), 400
     fields: dict[str, Any] = {"order_id": order_id}
-    if params.get("segment") is not None:
-        fields["segment"] = str(params["segment"])
+    for name in ("segment", "smart_order_type"):
+        if name in params:
+            fields[name] = params[name]
     adapter_id, account_id = _gated_target(params)
     return _gated_verb_write(
         "cancel_smart_order",

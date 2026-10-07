@@ -357,6 +357,50 @@ _EMERGENCY_POSITION_SCOPES = (
 )
 
 
+class IndMoneyPlacementAcknowledgement(str):
+    """Scalar-compatible ID with per-call, detached execution disclosure.
+
+    ``execution_effects`` describes requested/documented semantics, never a
+    broker-observed fill or active protection. ``broker_response`` is the
+    already-unwrapped native acknowledgement. Consumers must carry the metadata
+    separately before JSON/string coercion; adapter-wide last-result fields are
+    not call correlation, durable recovery or permission to replay.
+    A smart child ID identifies a separate resource, not a confirmed fill.
+    """
+
+    __slots__ = ("order_ids", "child_order_id", "execution_effects", "broker_response")
+    order_ids: tuple[str, ...]
+    child_order_id: str | None
+    execution_effects: dict[str, Any]
+    broker_response: dict[str, Any]
+
+    def __new__(
+        cls,
+        order_id: str,
+        execution_effects: dict[str, Any],
+        broker_response: dict[str, Any],
+        child_order_id: str | None = None,
+    ) -> IndMoneyPlacementAcknowledgement:
+        result = super().__new__(cls, order_id)
+        result.order_ids = (order_id,)
+        result.child_order_id = child_order_id
+        result.execution_effects = _strict_read_record(execution_effects)
+        result.broker_response = _strict_read_record(broker_response)
+        return result
+
+    def __getnewargs_ex__(self) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        return (str(self), self.execution_effects, self.broker_response, self.child_order_id), {}
+
+    def evidence_fields(self) -> dict[str, Any]:
+        """Detach additive ACK fields before scalar/JSON coercion loses them."""
+        return _strict_read_record({
+            "order_ids": list(self.order_ids),
+            "child_order_id": self.child_order_id,
+            "execution_effects": self.execution_effects,
+            "broker_response": self.broker_response,
+        })
+
+
 class IndMoneyAdapter(BrokerAdapter):
     """Native IndMoney (INDstocks) adapter.
 
@@ -405,6 +449,9 @@ class IndMoneyAdapter(BrokerAdapter):
         # Child GTT id of the most recent smart placement (the contract returns
         # one id, so the parent is returned and the child is surfaced here).
         self.last_child_order_id: str | None = None
+        # Complete observed attempt outcomes; not durable recovery or family authority.
+        self.last_smart_order_results: list[dict[str, Any]] = []
+        self.last_execution_effects: dict[str, Any] | None = None
 
     # ---------- identity + capabilities ----------
 
@@ -472,6 +519,9 @@ class IndMoneyAdapter(BrokerAdapter):
             return payload
         if isinstance(payload, dict) and str(payload.get("status", "")).lower() == "error":
             raise M.map_error(status, payload)
+        if method == "POST" and path in {"/order", "/smart/order", "/order/modify", "/smart/order/modify"}:
+            data = M.unwrap_write(payload, require_status=True)
+            return payload if raw else data
         return payload if raw else M.unwrap(payload)
 
     async def _fixed_read(
@@ -762,22 +812,15 @@ class IndMoneyAdapter(BrokerAdapter):
         return "NSE", raw.strip()
 
     async def _segment_for_order(self, session: Session, order_id: str) -> str:
-        """Resolve the EQUITY/DERIVATIVE segment for an order id.
-
-        ``DRV-``/``EQ-`` prefixes are decisive; otherwise (``GTT-`` and unknown
-        prefixes) the live order book is consulted. Falls back to EQUITY when
-        the order cannot be found (the broker then rejects with its own error).
-        """
-        seg = M.segment_from_order_id(order_id)
+        """Resolve one resource's segment, refusing absent or ambiguous evidence."""
+        seg = M.resolve_segment(order_id)
         if seg is not None:
             return seg
-        rows = await self._request(session, "GET", "/order-book") or []
-        for row in rows:
-            if isinstance(row, dict) and str(row.get("id", "")) == str(order_id):
-                found = str(row.get("segment", "")).upper()
-                if found in ("EQUITY", "DERIVATIVE"):
-                    return found
-        return "EQUITY"
+        rows = await self.order_book(session)
+        matches = [row for row in rows if row["orderid"] == order_id]
+        if len(matches) != 1:
+            raise BrokerError("IndMoney resource segment evidence is unavailable or ambiguous")
+        return M.to_exchange_segment(matches[0]["exchange"])[1]
 
     # ---------- auth lifecycle ----------
 
@@ -819,21 +862,28 @@ class IndMoneyAdapter(BrokerAdapter):
         variety = str(getattr(order, "variety", "regular")).lower()
         if variety in ("regular", "", "amo"):
             payload = M.to_place_order_payload(order, security_id, algo_id=algo_id)
+            effects = M.indmoney_execution_effects(order)
+            self.last_execution_effects = _strict_read_record(effects)
             resp = await self._request(session, "POST", "/order", json_body=payload)
             self.last_child_order_id = None
             order_id = M.extract_order_id({"data": resp})
             session.extra.setdefault("indmoney_order_families", {})[order_id] = "regular"
-            return order_id
+            return IndMoneyPlacementAcknowledgement(order_id, effects, resp)
         if variety in M.SMART_VARIETIES:
             payload = M.to_smart_order_payload(order, security_id, algo_id=algo_id)
+            effects = M.indmoney_execution_effects(order)
+            self.last_execution_effects = _strict_read_record(effects)
+            self.last_child_order_id = None
+            self.last_smart_order_results = []
             resp = await self._request(session, "POST", "/smart/order", json_body=payload)
+            self.last_smart_order_results = M.from_indmoney_smart_results({"data": resp})
             parent, child = M.extract_smart_order_ids({"data": resp})
             self.last_child_order_id = child
             families = session.extra.setdefault("indmoney_order_families", {})
             families[parent] = "smart"
             if child:
                 families[child] = "smart"
-            return parent
+            return IndMoneyPlacementAcknowledgement(parent, effects, resp, child)
         raise BrokerError(f"IndMoney does not support order variety {variety!r}")
 
     async def modify_order(
@@ -841,6 +891,12 @@ class IndMoneyAdapter(BrokerAdapter):
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         variety = str(changes.get("variety", "")).lower()
+        if variety and variety not in {*M.SMART_VARIETIES, "smart", "regular", "amo"}:
+            raise BrokerError("IndMoney modify variety/family is unsupported")
+        if not variety and not M.is_smart_order_id(order_id):
+            raise BrokerError("IndMoney modify requires explicit regular/smart family evidence (variety)")
+        if M.is_smart_order_id(order_id) and variety in {"regular", "amo"}:
+            raise BrokerError("IndMoney order ID contradicts the requested regular family")
         smart = variety in M.SMART_VARIETIES or variety == "smart" or M.is_smart_order_id(order_id)
         segment = M.resolve_segment(order_id, changes) or await self._segment_for_order(session, order_id)
         if smart:
@@ -1434,22 +1490,26 @@ class IndMoneyAdapter(BrokerAdapter):
 
     async def order_details(self, session: Session, order_id: str, *, segment: str | None = None) -> dict:
         """Full details of a single order (``GET /order`` with a JSON body) — a read."""
-        seg = segment or await self._segment_for_order(session, order_id)
-        data = await self._request(
-            session, "GET", "/order", json_body={"order_id": str(order_id), "segment": seg}
-        )
-        return M.from_indmoney_order(data if isinstance(data, dict) else {})
+        seg = M.resolve_segment(order_id, segment=segment) or await self._segment_for_order(session, order_id)
+        data = await self._fixed_read(session, "/order", json_body=M.to_cancel_payload(order_id, seg))
+        result = M.from_indmoney_order(data)
+        if result["orderid"] != order_id or M.to_exchange_segment(result["exchange"])[1] != seg:
+            raise BrokerReadResponseInvalid from None
+        return result
 
     async def order_trades(self, session: Session, order_id: str) -> list[dict]:
         """Executed trades for one order (``GET /trades/{order_id}``) — a read."""
-        rows = await self._request(session, "GET", f"/trades/{order_id}") or []
-        return [M.from_indmoney_trade(r) for r in rows if isinstance(r, dict)]
+        M.resolve_segment(order_id)  # Validate addressing, without guessing correlation.
+        rows = _strict_rows(await self._fixed_read(session, f"/trades/{order_id}"))
+        return [M.from_indmoney_order_fill(row, order_id=order_id) for row in rows]
 
     async def trade_book_segment(self, session: Session, segment: str) -> list[dict]:
         """Day fills for one segment (``GET /trade-book?segment=``) — a read."""
         seg = str(segment).upper()
-        rows = await self._request(session, "GET", "/trade-book", params={"segment": seg}) or []
-        return [M.from_indmoney_tradebook_row(r) for r in rows if isinstance(r, dict)]
+        if seg not in {"EQUITY", "DERIVATIVE"}:
+            raise M.IndMoneyMappingError("Unsupported trade-book segment")
+        rows = _strict_rows(await self._fixed_read(session, "/trade-book", params={"segment": seg}))
+        return [M.from_indmoney_tradebook_row(row) for row in rows]
 
     async def trade_book(self, session: Session) -> list[Trade]:
         # The endpoint is segment-scoped; the contract wants ALL fills for the
@@ -1637,18 +1697,15 @@ class IndMoneyAdapter(BrokerAdapter):
         return result
 
     async def smart_orders(self, session: Session) -> list[dict]:
-        """Smart (GTT-family) rows from the order book — a read.
+        """Refuse a complete smart-book claim without documented visibility evidence.
 
-        There is no dedicated GTT-list endpoint; smart orders surface in the
-        order book with ``GTT-`` ids and/or populated SL/target leg prices.
+        Ordinary order_book still preserves observed smart rows. Neither those
+        rows nor process-local placement memory proves all smart resources are
+        visible after restart. No dedicated list endpoint is invented.
         """
-        rows = await self.order_book(session)
-        return [
-            r
-            for r in rows  # type: ignore[union-attr]
-            if M.is_smart_order_id(r.get("orderid", ""))
-            or any(M.parse_indian_number(r.get(k, "")) > 0 for k in ("sl_trigger_price", "tgt_trigger_price"))
-        ]
+        raise BrokerError(
+            "IndMoney complete smart-resource visibility is unavailable; use observed order-book evidence"
+        )
 
     # ---------- market data: rest ----------
 

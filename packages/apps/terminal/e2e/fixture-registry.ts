@@ -32,6 +32,8 @@ export interface SyntheticHandlerRegistration {
     minimum: number;
     maximum: number;
   };
+  /** Exact completed GETs; only startup additionally permits one ERR_ABORTED. */
+  readPhase?: "startup" | "required";
   handler: (request: Request) => SyntheticResponse | Promise<SyntheticResponse>;
 }
 
@@ -56,10 +58,29 @@ export interface SyntheticFixtureRegistry {
   dispose(): Promise<void>;
 }
 
+export interface SyntheticPhasedFixtureRegistry extends SyntheticFixtureRegistry {
+  readCounts(path: string): SyntheticReadCounts;
+  retireRead(path: string): Promise<SyntheticReadCounts>;
+}
+
+export interface SyntheticReadCounts {
+  calls: number;
+  completed: number;
+  cancelled: number;
+  pending: number;
+  failed: number;
+}
+
+interface ReadCompletion {
+  outcome: "pending" | "completed" | "cancelled" | "failed";
+  settled: Promise<void>;
+}
+
 interface RegisteredHandler extends Omit<SyntheticHandlerRegistration, "expectedCalls"> {
   minimumCalls: number;
   maximumCalls: number;
   calls: number;
+  reads: ReadCompletion[];
 }
 
 interface RegisteredBenignConsoleError extends BenignConsoleError {
@@ -141,7 +162,7 @@ function removeUnhandledRejectionCapture(): void {
   }
 }
 
-class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
+class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegistry {
   readonly name: string;
 
   private readonly page: Page;
@@ -149,6 +170,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
   private readonly benignConsoleErrors: RegisteredBenignConsoleError[];
   private readonly closePageOnDispose: boolean;
   private readonly handlers = new Map<string, RegisteredHandler>();
+  private readonly retiredReads: RegisteredHandler[] = [];
   private readonly failures: CapturedFailure[] = [];
   private readonly inFlightRouteHandlers = new Set<Promise<void>>();
   private disposalPromise: Promise<void> | undefined;
@@ -193,7 +215,17 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
 
     registered.calls += 1;
-    if (registered.calls > registered.maximumCalls) {
+    if (registered.method === "GET") {
+      const read: ReadCompletion = { outcome: "pending", settled: Promise.resolve() };
+      read.settled = request.response().then(async (response) => {
+        const error = response ? await response.finished() : request.failure();
+        read.outcome = response && error === null ? "completed"
+          : request.failure()?.errorText === "net::ERR_ABORTED" ? "cancelled" : "failed";
+      }).catch(() => { read.outcome = "failed"; });
+      registered.reads.push(read);
+    }
+    const cancelledStartupBudget = registered.readPhase === "startup" ? 1 : 0;
+    if (registered.calls > registered.maximumCalls + cancelledStartupBudget) {
       this.failures.push({
         kind: "handler overuse",
         evidence:
@@ -308,6 +340,12 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
 
     const expectedCalls = registration.expectedCalls ?? 1;
+    if (registration.readPhase !== undefined && (
+      registration.method !== "GET" || typeof expectedCalls !== "number"
+      || !["startup", "required"].includes(registration.readPhase)
+    )) {
+      throw new Error(`[fail-closed registry "${this.name}"] readPhase requires a GET with exact positive expectedCalls`);
+    }
     let minimumCalls: number;
     let maximumCalls: number;
     if (typeof expectedCalls === "number") {
@@ -359,12 +397,44 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       minimumCalls,
       maximumCalls,
       calls: 0,
+      reads: [],
+      readPhase: registration.readPhase,
     });
   }
 
   callCount(method: HttpMethod, path: string): number {
     this.assertActive();
-    return this.handlers.get(methodAndPath(method, path))?.calls ?? 0;
+    return (this.handlers.get(methodAndPath(method, path))?.calls ?? 0)
+      + this.retiredReads.filter((handler) => handler.method === method && handler.path === path)
+        .reduce((total, handler) => total + handler.calls, 0);
+  }
+
+  readCounts(path: string): SyntheticReadCounts {
+    this.assertActive();
+    const active = this.handlers.get(methodAndPath("GET", path));
+    const handlers = [...this.retiredReads.filter((handler) => handler.path === path), ...(active ? [active] : [])];
+    return handlers.reduce<SyntheticReadCounts>((total, handler) => {
+      total.calls += handler.calls;
+      for (const read of handler.reads) total[read.outcome] += 1;
+      return total;
+    }, { calls: 0, completed: 0, cancelled: 0, pending: 0, failed: 0 });
+  }
+
+  async retireRead(path: string): Promise<SyntheticReadCounts> {
+    this.assertActive();
+    const key = methodAndPath("GET", path);
+    const handler = this.handlers.get(key);
+    if (!handler) throw new Error(`[fail-closed registry "${this.name}"] no active GET to retire: ${path}`);
+    await this.waitForInFlightRouteHandlers();
+    await Promise.all(handler.reads.map((read) => read.settled));
+    const error = this.buildAssertionError([handler]);
+    if (error) throw error;
+    const counts = this.readCounts(path);
+    // Keep retired evidence in every later assertion. The endpoint is now
+    // unregistered until its explicitly named next phase is registered.
+    this.handlers.delete(key);
+    this.retiredReads.push(handler);
+    return counts;
   }
 
   assertSatisfied(): void {
@@ -399,6 +469,8 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
     await this.waitForInFlightRouteHandlers();
 
+    await Promise.all([...this.handlers.values(), ...this.retiredReads]
+      .flatMap((handler) => handler.readPhase ? handler.reads.map((read) => read.settled) : []));
     const assertionError = this.buildAssertionError();
     this.disposed = true;
 
@@ -409,6 +481,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       await this.page.evaluate(removeUnhandledRejectionCapture).catch(() => undefined);
     }
     this.handlers.clear();
+    this.retiredReads.length = 0;
     this.failures.length = 0;
 
     if (assertionError) {
@@ -438,9 +511,21 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
   }
 
-  private buildAssertionError(): Error | undefined {
+  private buildAssertionError(handlers = [...this.handlers.values(), ...this.retiredReads]): Error | undefined {
     const evidence = this.failures.map((failure) => failure.evidence);
-    for (const handler of this.handlers.values()) {
+    for (const handler of handlers) {
+      if (handler.readPhase) {
+        const completed = handler.reads.filter((read) => read.outcome === "completed").length;
+        const cancelled = handler.reads.filter((read) => read.outcome === "cancelled").length;
+        const cancelledBudget = handler.readPhase === "startup" ? 1 : 0;
+        if (completed !== handler.minimumCalls || cancelled > cancelledBudget
+          || handler.calls !== completed + cancelled) {
+          evidence.push(`read phase usage mismatch: "${handler.name}" GET ${handler.path}; `
+            + `expected exactly ${handler.minimumCalls} completed and at most ${cancelledBudget} cancelled startup read(s); `
+            + `observed ${handler.calls} calls, ${completed} completed, ${cancelled} cancelled`);
+        }
+        continue;
+      }
       if (handler.calls < handler.minimumCalls || handler.calls > handler.maximumCalls) {
         evidence.push(
           `unused handler or usage mismatch: "${handler.name}" ` +
@@ -550,7 +635,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
 export async function createSyntheticFixtureRegistry(
   page: Page,
   options: SyntheticFixtureRegistryOptions,
-): Promise<SyntheticFixtureRegistry> {
+): Promise<SyntheticPhasedFixtureRegistry> {
   const registry = new FailClosedSyntheticFixtureRegistry(page, options);
   await registry.install();
   return registry;
@@ -728,7 +813,7 @@ export function registerOperatorStatusProbes(
 }
 
 type JourneyFixtures = {
-  syntheticApi: SyntheticFixtureRegistry;
+  syntheticApi: SyntheticPhasedFixtureRegistry;
 };
 
 type JourneyOptions = {

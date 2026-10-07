@@ -18,7 +18,7 @@
       "Dedicated smart-trigger visibility for INDstocks and Kotak GTT API contracts remain unresolved.",
       "INDstocks IOC validation and BSE smart-order exchange inconsistencies remain unresolved.",
       "Groww GTT child_legs full schema/semantics and exact bracket lifecycle parity remain unresolved.",
-      "Kotak immutable runtime SDK migration source could not be retrieved; current v3 documents do not certify every pinned runtime method.",
+      "Kotak immutable pinned placement method/value source was retrieved and reviewed; this partial source evidence does not certify every installed runtime method.",
       "Runtime readiness, cross-book consistency, durable dispatch/restart recovery and live acceptance remain unverified; no operation is enabled by this inventory.",
       "Delta position-bracket modification selector/eligibility is unestablished; the documented edit contract names an order id and its attached bracket parameters."
     ]
@@ -45,7 +45,7 @@
       "historical_activation_is_current_verification": false,
       "source_commit": "9a37488d77dc96442ee2a90ef78462e688cf4856",
       "release_version": "3.0.7",
-      "pinned_public_sdk_inspection": "unverified: immutable migration URL unavailable; current v3 guide and independent mapper reviewed"
+      "pinned_public_sdk_inspection": "partial immutable placement method/value source review; complete installed runtime method parity remains unverified"
     },
     "groww": {
       "package": "growwapi",

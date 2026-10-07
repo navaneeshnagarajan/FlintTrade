@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import unicodedata
+from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -114,6 +115,16 @@ def _response_text(record: dict[str, Any], *keys: str, required: bool = False) -
     return _RESPONSE_MISSING
 
 
+def _response_quantity(record: dict[str, Any], *keys: str) -> str | object:
+    """Keep absent order quantities unknown and validate observed whole units."""
+    value = _response_number(record, *keys)
+    if isinstance(value, str):
+        number = Decimal(value)
+        if number < 0 or number != number.to_integral_value():
+            raise BrokerReadResponseInvalid from None
+    return value
+
+
 def _response_text_or_empty(record: dict[str, Any], *keys: str) -> str:
     value = _response_text(record, *keys)
     return "" if value is _RESPONSE_MISSING else value
@@ -202,6 +213,19 @@ def _present_order_number(record: dict[str, Any], key: str) -> str | None:
     return None if value is _RESPONSE_MISSING else value
 
 
+def _request_quantity(value: Any, field: str = "quantity", *, minimum: int = 1) -> int:
+    """Validate whole units without a lossy intermediate float conversion."""
+    if type(value) not in (int, float, str, Decimal):
+        raise UpstoxMappingError(f"Upstox {field} must be a whole number >= {minimum}")
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise UpstoxMappingError(f"Upstox {field} must be a whole number >= {minimum}") from exc
+    if not number.is_finite() or number < minimum or number != number.to_integral_value():
+        raise UpstoxMappingError(f"Upstox {field} must be a whole number >= {minimum}")
+    return int(number)
+
+
 def _norm_pricetype(pricetype: str) -> str:
     return str(pricetype).upper()
 
@@ -217,15 +241,19 @@ def _validated_core(order: Any, instrument_token: str) -> dict[str, Any]:
     product = str(order.product).upper()
     if product not in PRODUCT_TO_UPSTOX:
         raise UpstoxMappingError(f"Unsupported product {product!r}")
+    quantity = _request_quantity(order.quantity)
+    disclosure = _request_quantity(getattr(order, "disclosed_quantity", 0), "disclosed_quantity", minimum=0)
+    if disclosure > quantity:
+        raise UpstoxMappingError("Upstox disclosed_quantity cannot exceed quantity")
     return {
         "instrument_token": str(instrument_token),
-        "quantity": int(_num(order.quantity, 0)),
+        "quantity": quantity,
         "product": PRODUCT_TO_UPSTOX[product],
         "validity": _validated_validity(getattr(order, "validity", None)),
         "price": _num(getattr(order, "price", 0)),
         "order_type": ORDER_TYPE_TO_UPSTOX[ptype],
         "transaction_type": SIDE_TO_UPSTOX[side],
-        "disclosed_quantity": int(_num(getattr(order, "disclosed_quantity", 0), 0)),
+        "disclosed_quantity": disclosure,
         "trigger_price": _num(getattr(order, "trigger_price", 0)),
     }
 
@@ -254,7 +282,16 @@ def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None 
     return params
 
 
-def to_place_order_v3_params(order: Any, instrument_token: str, *, tag: str | None = None) -> dict[str, Any]:
+def _market_protection(value: Any) -> int:
+    """Retain explicit native percentage intent, never an active-protection claim."""
+    if type(value) is not int or not -1 <= value <= 25:
+        raise UpstoxMappingError("Upstox market_protection must be an exact integer from -1 through 25")
+    return value
+
+
+def to_place_order_v3_params(
+    order: Any, instrument_token: str, *, tag: str | None = None, market_protection: int | None = None,
+) -> dict[str, Any]:
     """Translate an ``iceberg`` (sliced) ``Order`` into ``PlaceOrderV3Request`` kwargs.
 
     The v3 place endpoint slices an over-freeze-quantity order into exchange-
@@ -273,15 +310,27 @@ def to_place_order_v3_params(order: Any, instrument_token: str, *, tag: str | No
             "tag": tag or "",
         }
     )
+    if market_protection is not None:
+        params["market_protection"] = _market_protection(market_protection)
     return params
 
 
-def to_multi_order_params(orders_with_tokens: list[tuple[Any, str]], *, tag: str | None = None) -> list[dict[str, Any]]:
+def to_multi_order_params(
+    orders_with_tokens: list[tuple[Any, str]], *, tag: str | None = None,
+    market_protection_by_index: dict[int, int] | None = None,
+) -> list[dict[str, Any]]:
     """Translate a basket of ``(Order, instrument_token)`` pairs into the Upstox
     ``MultiOrderRequest`` payload list (one dict per order, ``correlation_id``
     assigned positionally so per-order errors map back to the input)."""
     if not orders_with_tokens:
         raise UpstoxMappingError("Multi-order needs at least one order")
+    if len(orders_with_tokens) > 10:
+        raise UpstoxMappingError("Upstox multi-order accepts at most ten input lines")
+    protection = {} if market_protection_by_index is None else market_protection_by_index
+    if type(protection) is not dict or any(
+        type(index) is not int or not 0 <= index < len(orders_with_tokens) for index in protection
+    ):
+        raise UpstoxMappingError("Upstox market_protection_by_index needs valid zero-based input indexes")
     payloads: list[dict[str, Any]] = []
     for i, (order, token) in enumerate(orders_with_tokens):
         variety = str(getattr(order, "variety", "regular")).lower()
@@ -296,6 +345,8 @@ def to_multi_order_params(orders_with_tokens: list[tuple[Any, str]], *, tag: str
                 "correlation_id": str(i + 1),
             }
         )
+        if i in protection:
+            params["market_protection"] = _market_protection(protection[i])
         payloads.append(params)
     return payloads
 
@@ -310,7 +361,7 @@ def to_margin_instrument(order: Any, instrument_token: str) -> dict[str, Any]:
         raise UpstoxMappingError(f"Unsupported action {side!r}")
     return {
         "instrument_key": str(instrument_token),
-        "quantity": int(_num(order.quantity, 0)),
+        "quantity": _request_quantity(order.quantity),
         "product": PRODUCT_TO_UPSTOX[product],
         "transaction_type": SIDE_TO_UPSTOX[side],
         "price": _num(getattr(order, "price", 0)),
@@ -333,13 +384,19 @@ def from_upstox_margin(resp: dict[str, Any]) -> dict[str, Any]:
 def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into Upstox ``ModifyOrderRequest`` kwargs."""
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    # The legacy SDK body uses zero when quantity is omitted. An explicitly
+    # supplied quantity must still be positive; zero is not valid edit intent.
+    quantity = _request_quantity(changes["quantity"]) if "quantity" in changes else 0
+    disclosure = _request_quantity(changes.get("disclosed_quantity", 0), "disclosed_quantity", minimum=0)
+    if quantity and disclosure > quantity:
+        raise UpstoxMappingError("Upstox disclosed_quantity cannot exceed quantity")
     return {
         "order_id": str(order_id),
         "order_type": ORDER_TYPE_TO_UPSTOX.get(ptype, str(changes.get("order_type", "LIMIT"))),
-        "quantity": int(_num(changes.get("quantity", 0), 0)),
+        "quantity": quantity,
         "price": _num(changes.get("price", 0)),
         "trigger_price": _num(changes.get("trigger_price", 0)),
-        "disclosed_quantity": int(_num(changes.get("disclosed_quantity", 0), 0)),
+        "disclosed_quantity": disclosure,
         "validity": _validated_validity(changes.get("validity")),
     }
 
@@ -383,23 +440,43 @@ def _product_from_upstox(code: str, exchange: str, segment: str = "") -> str:
     return "NRML" if is_derivative else "CNC"
 
 
-def extract_order_id(resp: dict[str, Any]) -> str:
-    """Pull the order id from an Upstox place/modify response.
-
-    Upstox returns ``{"status": "success", "data": {"order_ids": ["..."]}}``
-    (and singular ``order_id`` on some endpoints).
-    """
-    if not isinstance(resp, dict):
+def _acknowledged_ids(
+    resp: dict[str, Any], *, plural_field: str, singular_field: str, kind: str,
+) -> list[str]:
+    """Validate every placement acknowledgement ID, never infer execution."""
+    if type(resp) is not dict or any(type(key) is not str for key in resp):
         raise UpstoxMappingError(f"Unexpected Upstox response: {resp!r}")
+    if "status" in resp and resp["status"] != "success":
+        raise UpstoxMappingError("Upstox acknowledgement was not successful")
+    errors = resp.get("errors")
+    if errors is not None and (type(errors) is not list or errors):
+        raise UpstoxMappingError("Upstox acknowledgement contains errors")
     data = resp.get("data", resp)
-    if isinstance(data, dict):
-        ids = data.get("order_ids")
-        if isinstance(ids, list) and ids:
-            return canonical_order_id(ids[0])
-        oid = data.get("order_id")
-        if oid:
-            return canonical_order_id(oid)
-    raise UpstoxMappingError(f"No order id in Upstox response: {resp!r}")
+    if type(data) is not dict:
+        raise UpstoxMappingError("Unexpected Upstox acknowledgement data")
+    raw_ids = data.get(plural_field)
+    if raw_ids is not None:
+        if type(raw_ids) is not list or not raw_ids:
+            raise UpstoxMappingError("Unexpected Upstox acknowledgement order ids")
+        ids = [canonical_order_id(value) for value in raw_ids]
+        if len(ids) != len(set(ids)):
+            raise UpstoxMappingError("Unexpected duplicate Upstox acknowledgement order ids")
+        if data.get(singular_field) is not None and canonical_order_id(data[singular_field]) != ids[0]:
+            raise UpstoxMappingError("Conflicting Upstox acknowledgement order id aliases")
+        return ids
+    if data.get(singular_field) is not None:
+        return [canonical_order_id(data[singular_field])]
+    raise UpstoxMappingError(f"No {kind} id in Upstox response: {resp!r}")
+
+
+def extract_order_ids(resp: dict[str, Any]) -> list[str]:
+    """Return every validated exchange-order placement acknowledgement ID."""
+    return _acknowledged_ids(resp, plural_field="order_ids", singular_field="order_id", kind="order")
+
+
+def extract_order_id(resp: dict[str, Any]) -> str:
+    """Return the first validated acknowledgement ID for legacy callers."""
+    return extract_order_ids(resp)[0]
 
 
 def canonical_order_id(value: Any) -> str:
@@ -420,13 +497,16 @@ def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
     d = _response_record(d)
     instrument_token = _response_text_or_empty(d, "instrument_token")
     exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
-    quantity = _response_number(d, "quantity")
-    filled_quantity = _response_number(d, "filled_quantity")
-    pending_quantity = _response_number(d, "pending_quantity")
-    if pending_quantity is _RESPONSE_MISSING and all(
-        value is not _RESPONSE_MISSING for value in (quantity, filled_quantity)
-    ):
-        pending_quantity = str(max(Decimal(quantity) - Decimal(filled_quantity), Decimal(0)))
+    quantity = _response_quantity(d, "quantity")
+    filled_quantity = _response_quantity(d, "filled_quantity")
+    pending_quantity = _response_quantity(d, "pending_quantity")
+    if isinstance(quantity, str):
+        total = int(Decimal(quantity))
+        known_parts = [int(Decimal(value)) for value in (filled_quantity, pending_quantity) if isinstance(value, str)]
+        if sum(known_parts) > total:
+            raise BrokerReadResponseInvalid from None
+    if pending_quantity is _RESPONSE_MISSING and isinstance(quantity, str) and isinstance(filled_quantity, str):
+        pending_quantity = str(int(Decimal(quantity)) - int(Decimal(filled_quantity)))
     order_type = _response_text_or_empty(d, "order_type")
     product = _response_text_or_empty(d, "product")
     order = {
@@ -445,7 +525,9 @@ def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
         order["pending_quantity"] = pending_quantity
     if instrument_token:
         order["instrument_id"] = instrument_token
-    for field in ("quantity", "filled_quantity", "price", "trigger_price", "average_price"):
+    _put_response_number(order, "quantity", quantity)
+    _put_response_number(order, "filled_quantity", filled_quantity)
+    for field in ("price", "trigger_price", "average_price"):
         value = _present_order_number(d, field)
         if value is not None:
             order[field] = value
@@ -997,7 +1079,22 @@ def _entry_trigger_override(order: Any) -> Any:
     return None
 
 
-def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]]:
+def _gtt_number(value: Any, field: str) -> float:
+    """Validate rule numbers before a bad protective leg can disappear."""
+    if type(value) not in (int, float, str, Decimal):
+        raise UpstoxMappingError(f"Upstox {field} must be finite and non-negative")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise UpstoxMappingError(f"Upstox {field} must be finite and non-negative") from exc
+    if not math.isfinite(number) or number < 0:
+        raise UpstoxMappingError(f"Upstox {field} must be finite and non-negative")
+    return number
+
+
+def _gtt_rules(
+    order: Any, side: str = "BUY", *, market_protection_by_strategy: dict[str, int] | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     """Build the GTT rule list from an ``Order``'s trigger/leg prices.
 
     ``trigger_price`` is the ENTRY rule (mandatory); ``stop_loss_price`` and
@@ -1019,7 +1116,7 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
     Returns:
         ``(gtt_type, rules)`` where ``gtt_type`` is ``SINGLE`` or ``MULTIPLE``.
     """
-    entry = _num(getattr(order, "trigger_price", 0))
+    entry = _gtt_number(getattr(order, "trigger_price", 0), "trigger_price")
     if entry <= 0:
         raise UpstoxMappingError("An Upstox GTT order needs a trigger_price (the ENTRY rule)")
     rules: list[dict[str, Any]] = [
@@ -1029,15 +1126,9 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
             "trigger_price": entry,
         },
     ]
-    stop_loss = _num(getattr(order, "stop_loss_price", 0))
-    target = _num(getattr(order, "target_price", 0))
-    trailing_gap_value = getattr(order, "stop_loss_trailing_gap", 0)
-    try:
-        trailing_gap = float(trailing_gap_value or 0)
-    except (TypeError, ValueError) as exc:
-        raise UpstoxMappingError("Upstox stop_loss_trailing_gap must be numeric") from exc
-    if not math.isfinite(trailing_gap) or trailing_gap < 0:
-        raise UpstoxMappingError("Upstox stop_loss_trailing_gap must be finite and non-negative")
+    stop_loss = _gtt_number(getattr(order, "stop_loss_price", 0), "stop_loss_price")
+    target = _gtt_number(getattr(order, "target_price", 0), "target_price")
+    trailing_gap = _gtt_number(getattr(order, "stop_loss_trailing_gap", 0), "stop_loss_trailing_gap")
     if trailing_gap > 0 and stop_loss <= 0:
         raise UpstoxMappingError("Upstox stop_loss_trailing_gap requires a STOPLOSS rule")
     if stop_loss > 0:
@@ -1065,10 +1156,19 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
                 "trigger_price": target,
             }
         )
+    protection = {} if market_protection_by_strategy is None else market_protection_by_strategy
+    strategies = {rule["strategy"] for rule in rules}
+    if type(protection) is not dict or any(type(strategy) is not str or strategy not in strategies for strategy in protection):
+        raise UpstoxMappingError("Upstox market_protection_by_strategy must address an existing GTT strategy")
+    for rule in rules:
+        if rule["strategy"] in protection:
+            rule["market_protection"] = _market_protection(protection[rule["strategy"]])
     return ("MULTIPLE" if len(rules) > 1 else "SINGLE"), rules
 
 
-def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
+def to_gtt_place_params(
+    order: Any, instrument_token: str, *, market_protection_by_strategy: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """Translate a ``gtt`` ``Order`` into Upstox ``GttPlaceOrderRequest`` kwargs."""
     side = str(order.action).upper()
     if side not in SIDE_TO_UPSTOX:
@@ -1076,10 +1176,10 @@ def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
     product = str(order.product).upper()
     if product not in PRODUCT_TO_UPSTOX:
         raise UpstoxMappingError(f"Unsupported product {product!r}")
-    gtt_type, rules = _gtt_rules(order, side=side)
+    gtt_type, rules = _gtt_rules(order, side=side, market_protection_by_strategy=market_protection_by_strategy)
     return {
         "type": gtt_type,
-        "quantity": int(_num(order.quantity, 0)),
+        "quantity": _request_quantity(order.quantity),
         "product": PRODUCT_TO_UPSTOX[product],
         "rules": rules,
         "instrument_token": str(instrument_token),
@@ -1087,11 +1187,16 @@ def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
     }
 
 
-def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+def to_gtt_modify_params(
+    gtt_order_id: str, changes: dict[str, Any], *, market_protection_by_strategy: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """Translate modify ``changes`` into Upstox ``GttModifyOrderRequest`` kwargs.
 
     A GTT modify is a full rule replacement: quantity plus the trigger prices
     (``trigger_price`` → ENTRY, ``stop_loss_price``/``target_price`` optional).
+    Explicit per-rule protection is supported by the pinned shared SDK model;
+    the web modification table omits it. Server acceptance/effectiveness is
+    unverified, and omission never selects a percentage on the caller's behalf.
     """
     if not gtt_order_id:
         raise UpstoxMappingError("GTT modify needs the gtt_order_id")
@@ -1109,9 +1214,7 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
     missing = sorted(key for key in required if key not in changes or changes[key] in (None, ""))
     if missing:
         raise UpstoxMappingError(f"Upstox GTT modify needs a complete replacement; missing fields {missing}")
-    quantity = _num(changes["quantity"], 0)
-    if not math.isfinite(quantity) or quantity <= 0 or not quantity.is_integer():
-        raise UpstoxMappingError("Upstox GTT modify quantity must be a positive whole number")
+    quantity = _request_quantity(changes["quantity"])
 
     class _Changes:
         trigger_price = changes.get("trigger_price", 0)
@@ -1125,7 +1228,7 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
         stop_loss_trailing_gap = changes.get("stop_loss_trailing_gap")
 
     side = str(changes.get("transaction_type", changes.get("action", "BUY"))).upper()
-    gtt_type, rules = _gtt_rules(_Changes, side=side)
+    gtt_type, rules = _gtt_rules(_Changes, side=side, market_protection_by_strategy=market_protection_by_strategy)
     requested_type = str(changes.get("type", gtt_type)).upper()
     if requested_type != gtt_type:
         raise UpstoxMappingError(
@@ -1133,7 +1236,7 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
         )
     return {
         "type": gtt_type,
-        "quantity": int(quantity),
+        "quantity": quantity,
         "rules": rules,
         "gtt_order_id": str(gtt_order_id),
     }
@@ -1152,29 +1255,29 @@ def is_gtt_order_id(order_id: str) -> bool:
 
 
 def extract_gtt_order_id(resp: dict[str, Any]) -> str:
-    """Pull the GTT order id from a place/modify/cancel GTT response
-    (``data.gtt_order_ids`` per ``GttOrderData``)."""
-    data = resp.get("data", resp) if isinstance(resp, dict) else {}
-    if isinstance(data, dict):
-        ids = data.get("gtt_order_ids")
-        if isinstance(ids, list) and ids:
-            return str(ids[0])
-        gid = data.get("gtt_order_id")
-        if gid:
-            return str(gid)
-    raise UpstoxMappingError(f"No GTT order id in Upstox response: {resp!r}")
+    """Return the first validated GTT resource acknowledgement for compatibility."""
+    return extract_gtt_order_ids(resp)[0]
+
+
+def extract_gtt_order_ids(resp: dict[str, Any]) -> list[str]:
+    """Retain every acknowledged GTT resource ID, not spawned exchange IDs."""
+    return _acknowledged_ids(resp, plural_field="gtt_order_ids", singular_field="gtt_order_id", kind="GTT order")
 
 
 def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
-    """Normalise one Upstox ``GttOrderDetails`` record."""
+    """Keep GTT resource/rule observations distinct from exchange execution."""
     d = _response_record(d)
+    if "data" in d:
+        raise BrokerReadResponseInvalid from None
     raw_rules = d.get("rules", [])
     if type(raw_rules) is not list:
         raise BrokerReadResponseInvalid from None
     rules = [_response_record(rule) for rule in raw_rules]
     normalised_rules: list[dict[str, Any]] = []
+    rules_by_strategy: dict[str, dict[str, Any]] = {}
     for rule in rules:
         normalised_rule = {
+            **deepcopy(rule),
             "strategy": _response_text_or_empty(rule, "strategy"),
             "status": _response_text_or_empty(rule, "status"),
             "trigger_type": _response_text_or_empty(rule, "trigger_type"),
@@ -1184,17 +1287,30 @@ def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
         _put_response_number(normalised_rule, "trigger_price", _response_number(rule, "trigger_price"))
         if rule.get("trailing_gap") not in (None, ""):
             normalised_rule["trailing_gap"] = _response_number(rule, "trailing_gap", required=True)
+        # Preserve the observed native values (including explicit null) without
+        # applying creation eligibility or claiming protection is effective.
+        if "message" in rule:
+            _response_text(rule, "message")
+        if rule.get("market_protection") not in (None, ""):
+            _response_number(rule, "market_protection", required=True)
+        strategy = normalised_rule["strategy"].upper()
+        if strategy in rules_by_strategy:
+            raise BrokerReadResponseInvalid from None
+        rules_by_strategy[strategy] = normalised_rule
         normalised_rules.append(normalised_rule)
-    rules_by_strategy = {rule["strategy"].upper(): rule for rule in normalised_rules}
     entry = rules_by_strategy.get("ENTRY", {})
     stop_loss = rules_by_strategy.get("STOPLOSS", {})
     target = rules_by_strategy.get("TARGET", {})
     instrument_token = _response_text_or_empty(d, "instrument_token")
     raw_exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
     exchange = UPSTOX_TO_EXCHANGE.get(raw_exchange, raw_exchange)
-    quantity = _response_number(d, "quantity")
+    quantity = _response_quantity(d, "quantity")
     status = _response_text(d, "status")
-    entry_status = (entry.get("status", "") if status is _RESPONSE_MISSING else status).upper()
+    entry_status = entry.get("status", "")
+    observed_type = _response_text_or_empty(entry, "order_type") or _response_text_or_empty(d, "order_type")
+    pricetype = UPSTOX_TO_ORDER_TYPE.get(observed_type, observed_type)
+    if not pricetype and entry.get("trigger_type", "").upper() == "IMMEDIATE":
+        pricetype = "LIMIT"
     gtt_order_id = _response_text_or_empty(d, "gtt_order_id")
     product = _response_text_or_empty(d, "product")
     order = {
@@ -1209,14 +1325,17 @@ def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
             exchange,
             raw_exchange,
         ),
-        "pricetype": "LIMIT",
-        "action": entry.get("transaction_type", ""),
-        "status": entry_status,
+        "pricetype": pricetype,
+        "action": entry.get("transaction_type", "") or _response_text_or_empty(d, "transaction_type"),
+        "status": entry_status if status is _RESPONSE_MISSING else status,
         "entry_status": entry_status,
         "rules": normalised_rules,
         "created_at": d.get("created_at", ""),
         "expires_at": d.get("expires_at", ""),
+        "broker_fields": deepcopy(d),
     }
+    if status is not _RESPONSE_MISSING:
+        order["resource_status"] = status
     if quantity is not _RESPONSE_MISSING:
         order["quantity"] = quantity
     if instrument_token:
@@ -1238,28 +1357,94 @@ def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _multi_record(value: Any, field: str) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise UpstoxMappingError(f"Unexpected Upstox multi-order {field}")
+    return value
+
+
+def _multi_count(value: Any) -> int:
+    if type(value) is str and value.isascii() and value.isdecimal():
+        return int(value)
+    if type(value) is not int or value < 0:
+        raise UpstoxMappingError("Unexpected Upstox multi-order count")
+    return value
+
+
 def from_upstox_multi_order(resp: dict[str, Any]) -> dict[str, Any]:
-    """Normalise an Upstox ``MultiOrderResponse`` (per-order ids + errors)."""
-    if not isinstance(resp, dict):
-        raise UpstoxMappingError(f"Unexpected Upstox multi-order response: {resp!r}")
-    rows = resp.get("data", []) if isinstance(resp.get("data"), list) else []
-    errors = resp.get("errors", []) if isinstance(resp.get("errors"), list) else []
-    summary = resp.get("summary", {}) if isinstance(resp.get("summary"), dict) else {}
-    order_results = [
-        {
-            "order_id": str(row.get("order_id") or ""),
-            "correlation_id": str(row.get("correlation_id") or ""),
+    """Preserve complete native batch evidence, not execution or atomicity.
+
+    Summary counts describe input lines, not generated slice children. SDK
+    ``to_dict`` represents absent optional fields with null; null/missing counts
+    remain unknown and cannot become calculated compatibility aliases.
+    """
+    resp = _multi_record(resp, "response")
+    status = resp.get("status")
+    if type(status) is not str or status not in {"success", "partial_success", "error"}:
+        raise UpstoxMappingError("Unexpected Upstox multi-order status")
+    rows = resp.get("data")
+    if rows is not None and type(rows) is not list:
+        raise UpstoxMappingError("Unexpected Upstox multi-order data")
+    ids: list[str] = []
+    for raw in rows or []:
+        row = _multi_record(raw, "child")
+        order_id = canonical_order_id(row.get("order_id"))
+        canonical_order_id(row.get("correlation_id"))
+        if order_id in ids:
+            raise UpstoxMappingError("Unexpected duplicate Upstox multi-order child id")
+        ids.append(order_id)
+    errors = resp.get("errors")
+    if errors is not None and type(errors) is not list:
+        raise UpstoxMappingError("Unexpected Upstox multi-order errors")
+    for raw in errors or []:
+        error = _multi_record(raw, "error")
+        if not error:
+            raise UpstoxMappingError("Unexpected empty Upstox multi-order error")
+        for field in ("order_id", "correlation_id"):
+            if error.get(field) is not None:
+                canonical_order_id(error[field])
+    if (status == "success" and errors) or (status != "success" and not errors):
+        raise UpstoxMappingError("Upstox multi-order errors contradict status")
+    if (status == "error" and ids) or (status != "error" and not ids):
+        raise UpstoxMappingError("Upstox multi-order children contradict status")
+
+    counts: dict[str, int] = {}
+    summary = resp.get("summary")
+    if summary is not None:
+        summary = _multi_record(summary, "summary")
+        counts = {
+            field: _multi_count(summary[field]) for field in ("total", "success", "error", "payload_error")
+            if field in summary and summary[field] is not None
         }
-        for row in rows
-        if isinstance(row, dict) and str(row.get("order_id") or "")
-    ]
-    return {
-        "order_ids": [row["order_id"] for row in order_results],
-        "order_results": order_results,
-        "errors": [e for e in errors if isinstance(e, dict)],
-        "total": int(_num(summary.get("total", len(rows) + len(errors)))),
-        "success": int(_num(summary.get("success", len(rows)))),
-    }
+    if "total" in counts and any(count > counts["total"] for field, count in counts.items() if field != "total"):
+        raise UpstoxMappingError("Upstox multi-order count exceeds total")
+    if status == "success" and (counts.get("error", 0) or counts.get("payload_error", 0)):
+        raise UpstoxMappingError("Upstox multi-order success summary contains errors")
+    if status == "success" and {"total", "success"}.issubset(counts) and counts["total"] != counts["success"]:
+        raise UpstoxMappingError("Upstox multi-order success summary has unresolved input lines")
+    if status == "error" and counts.get("success", 0):
+        raise UpstoxMappingError("Upstox multi-order error summary contains successes")
+    if status != "error" and any(field in counts and counts[field] == 0 for field in ("total", "success")):
+        raise UpstoxMappingError("Upstox multi-order successful status has zero successes")
+    if status == "partial_success" and (counts.get("payload_error", 0) or counts.get("error") == 0):
+        raise UpstoxMappingError("Upstox multi-order partial summary contradicts processing evidence")
+    if counts.get("payload_error", 0):
+        if counts.get("error", 0) or counts.get("success", 0) or ids:
+            raise UpstoxMappingError("Upstox multi-order payload errors preclude processing")
+    elif {"total", "success", "error"}.issubset(counts) and counts["total"] != counts["success"] + counts["error"]:
+        raise UpstoxMappingError("Upstox multi-order summary contradicts total")
+
+    result = deepcopy(resp)
+    for alias in ("order_ids", "order_results", "total", "success"):
+        result.pop(alias, None)
+    if rows is not None:
+        result["order_ids"] = ids
+        result["order_results"] = deepcopy(rows)
+    for alias in ("total", "success"):
+        if alias in counts:
+            result[alias] = counts[alias]
+    result["broker_fields"] = deepcopy(resp)
+    return result
 
 
 def from_upstox_cancel_exit(resp: dict[str, Any]) -> dict[str, Any]:
@@ -1359,7 +1544,7 @@ def to_convert_position_params(req: dict[str, Any]) -> dict[str, Any]:
         "new_product": PRODUCT_TO_UPSTOX[new_product],
         "old_product": PRODUCT_TO_UPSTOX[old_product],
         "transaction_type": SIDE_TO_UPSTOX[side],
-        "quantity": int(_num(req.get("quantity", 0), 0)),
+        "quantity": _request_quantity(req.get("quantity")),
     }
 
 

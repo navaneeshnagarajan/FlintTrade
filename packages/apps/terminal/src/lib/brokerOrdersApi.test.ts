@@ -122,6 +122,25 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("forever orders", () => {
+  it.each([
+    { name: "forever", read: listForeverOrders, path: "forever" },
+    { name: "super", read: listSuperOrders, path: "super" },
+    { name: "conditional", read: listConditionalTriggers, path: "triggers" },
+  ])("retains all readonly $name native observations without defaulting or stripping unknown keys", async ({ read, path }) => {
+    const row = Object.freeze(JSON.parse('{"order_id":"SYNTHETIC-NATIVE","product":"NATIVE","order_type":"TRIGGER_LIMIT","requested_price":null,"filled_quantity":"0","raw_leg":{"active":false,"absent_price":null,"observations":[0,"0",null,false]},"constructor":{"native":true},"__proto__":{"observed":"native JSON key"}}') as Record<string, unknown>);
+    for (const wrapped of [false, true]) {
+      fetchMock().mockResolvedValueOnce(jsonResponse(wrapped ? { status: "success", data: [row] } : [row]));
+      const result = await read({ broker: "indmoney", account_id: "SYNTHETIC-SCHEMA" });
+      expect(JSON.stringify(result)).toBe(JSON.stringify([row]));
+      expect(Object.keys(result[0]!)).toEqual(Object.keys(row));
+      expect(Object.hasOwn(result[0]!, "__proto__")).toBe(true);
+      expect(Object.getPrototypeOf(result[0]!).observed).toBeUndefined();
+      expect(result[0]).not.toHaveProperty("effective_limit_price");
+      expect(lastCall().url).toBe(`/ft-api/api/v1/orders/${path}?broker=indmoney&account_id=SYNTHETIC-SCHEMA`);
+    }
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+  });
+
   it("lists with broker/account query params and unwraps data", async () => {
     fetchMock().mockResolvedValue(
       jsonResponse({ status: "success", data: [{ order_id: "G1", symbol: "RELIANCE" }] }),
@@ -137,13 +156,37 @@ describe("forever orders", () => {
     expect(rows).toStrictEqual([{ order_id: "G1", symbol: "RELIANCE" }]);
   });
 
-  it("pins the selected native target and filters junk rows", async () => {
+  it("pins the selected native target and preserves every valid broker row", async () => {
     fetchMock().mockResolvedValue(
-      jsonResponse({ status: "success", data: [{ order_id: "G1" }, "garbage", null, 42] }),
+      jsonResponse({ status: "success", data: [{ order_id: "G1" }, { order_id: "G2", exchange: "NFO" }] }),
     );
     const rows = await listForeverOrders();
     expect(lastCall().url).toBe("/ft-api/api/v1/orders/forever?broker=upstox&account_id=U1");
-    expect(rows).toStrictEqual([{ order_id: "G1" }]);
+    expect(rows).toStrictEqual([{ order_id: "G1" }, { order_id: "G2", exchange: "NFO" }]);
+  });
+
+  it.each([
+    { status: "success", data: null },
+    { status: "success" },
+    { status: "success", data: { orders: [] } },
+    { status: "success", orders: [] },
+    { status: "success", data: ["garbage", null, 42, []] },
+    { status: "success", data: [{ order_id: "G1" }, "garbage", null, 42] },
+  ])("refuses malformed or partial successful books rather than filtering them: %j", async (body) => {
+    fetchMock().mockResolvedValue(jsonResponse(body));
+    await expect(listForeverOrders()).rejects.toThrow(/malformed|incomplete/i);
+    expect(lastCall().url).toBe("/ft-api/api/v1/orders/forever?broker=upstox&account_id=U1");
+    expect(lastCall().init.method).toBe("GET");
+  });
+
+  it("refuses an invalid JSON success instead of returning verified empty evidence", async () => {
+    fetchMock().mockResolvedValue(new Response("{not-json", { status: 200 }));
+    await expect(listForeverOrders()).rejects.toThrow(/invalid JSON/i);
+  });
+
+  it("accepts a genuinely empty successful book", async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ status: "success", data: [] }));
+    await expect(listForeverOrders()).resolves.toEqual([]);
   });
 
   it("defaults list requests to the active native account in live native-only mode", async () => {

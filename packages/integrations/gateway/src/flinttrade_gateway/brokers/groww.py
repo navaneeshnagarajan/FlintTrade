@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import math
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 from importlib import metadata
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
@@ -64,6 +65,31 @@ def _strict_rows(payload: object, key: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _page_continues(payload: dict[str, Any], *, page: int, page_size: int, count: int) -> bool:
+    """Use page-size termination, respecting explicit non-contradictory metadata."""
+    if count > page_size:
+        raise BrokerReadResponseInvalid from None
+    for name, expected in (("page", page), ("page_size", page_size)):
+        if name in payload and (type(payload[name]) is not int or payload[name] != expected):
+            raise BrokerReadResponseInvalid from None
+    more = payload.get("has_more")
+    if "has_more" in payload and type(more) is not bool:
+        raise BrokerReadResponseInvalid from None
+    if "next_page" in payload:
+        next_page = payload["next_page"]
+        if next_page is not None and (type(next_page) is not int or next_page != page + 1):
+            raise BrokerReadResponseInvalid from None
+        next_more = next_page is not None
+        if "has_more" in payload and more != next_more:
+            raise BrokerReadResponseInvalid from None
+        more = next_more
+    if more is None:
+        more = count == page_size
+    if more and count == 0:
+        raise BrokerReadResponseInvalid from None
+    return more
+
+
 def _lot_record(value: object) -> dict[str, object]:
     if type(value) is not dict or any(type(key) is not str for key in value):
         raise BrokerLotSizeResponseInvalid
@@ -87,11 +113,7 @@ def _strict_lot_http_error(status: int, payload: object) -> BrokerError:
             message = candidate
     elif type(payload) is dict and all(type(key) is str for key in payload):
         nested_value = payload.get("error")
-        nested = (
-            nested_value
-            if type(nested_value) is dict and all(type(key) is str for key in nested_value)
-            else None
-        )
+        nested = nested_value if type(nested_value) is dict and all(type(key) is str for key in nested_value) else None
         for record, field in (
             (payload, "message"),
             (nested, "message"),
@@ -133,10 +155,14 @@ def _balance_snapshot_from_groww(data: object) -> BalanceSnapshot:
     if total is not None and not math.isfinite(total):
         raise BrokerBalanceResponseInvalid
     return BalanceSnapshot(
-        available, BalanceEvidence.DIRECT if available is not None else None,
-        used, BalanceEvidence.DIRECT if used is not None else None,
-        total, BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if total is not None else None,
-        None, None,
+        available,
+        BalanceEvidence.DIRECT if available is not None else None,
+        used,
+        BalanceEvidence.DIRECT if used is not None else None,
+        total,
+        BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if total is not None else None,
+        None,
+        None,
     )
 
 
@@ -167,6 +193,7 @@ def _groww_sdk_headers(key_or_token: str) -> dict[str, str]:
         "x-client-platform-version": _GROWWAPI_VERSION,
         "x-api-version": "1.0",
     }
+
 
 GROWW_CAPABILITIES = Capabilities(
     segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.MCX,
@@ -406,18 +433,19 @@ class GrowwAdapter(BrokerAdapter):
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        variety = str(getattr(order, "variety", "regular") or "regular").lower()
-        if variety in {"", "regular", "amo"}:
-            resp = await self._request(session, "POST", "/v1/order/create", json_body=M.to_place_order_payload(order))
-            order_id = M.extract_order_id(resp)
+        variety = M.order_variety(getattr(order, "variety", None))
+        if variety in {"regular", "amo"}:
+            resp = await self._request(
+                session, "POST", "/v1/order/create", json_body=M.to_place_order_payload(order), raw=True
+            )
+            order_id = M.extract_order_id(resp, expected_family="regular")
             if not order_id:
                 raise BrokerError("Groww order placement did not return an order id", broker_id="groww")
             return order_id
         if variety in {"gtt", "oco"}:
-            payload = M.to_place_order_payload(order)
-            payload["smart_order_type"] = "OCO" if variety == "oco" else "GTT"
-            resp = await self._request(session, "POST", "/v1/order-advance/create", json_body=payload)
-            order_id = M.extract_order_id(resp)
+            payload = M.to_smart_order_payload(order)
+            resp = await self._request(session, "POST", "/v1/order-advance/create", json_body=payload, raw=True)
+            order_id = M.extract_order_id(resp, expected_family=payload["smart_order_type"])
             if not order_id:
                 raise BrokerError("Groww smart order did not return an order id", broker_id="groww")
             return order_id
@@ -427,11 +455,33 @@ class GrowwAdapter(BrokerAdapter):
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        segment = str(changes.get("segment") or M.exchange_segment(changes.get("exchange", "NSE"))[1])
-        if str(changes.get("variety", "")).lower() in {"gtt", "oco", "smart"} or str(order_id).startswith(("gtt_", "oco_")):
-            await self._request(session, "PUT", f"/v1/order-advance/modify/{order_id}", json_body=dict(changes))
+        if type(changes) is not dict:
+            raise BrokerError("Groww modification requires a changes dictionary", broker_id="groww")
+        variety = M.order_variety(changes["variety"], modification=True) if "variety" in changes else None
+        smart_hint = (
+            "current" in changes
+            or "smart_order_type" in changes
+            or variety in {"gtt", "oco", "smart"}
+            or isinstance(order_id, str)
+            and order_id.startswith(("gtt_", "oco_"))
+        )
+        if smart_hint:
+            # A prefix is only a reason to refuse missing context, never family
+            # authority. Required native state must already be signed by callers.
+            body = M.to_smart_modify_payload(order_id, changes)
+            path = M.smart_resource_path(
+                "modify", smart_order_id=order_id, segment=body["segment"], smart_order_type=body["smart_order_type"]
+            )
+            await self._request(session, "PUT", path, json_body=body)
             return
-        await self._request(session, "POST", "/v1/order/modify", json_body=M.to_modify_payload(order_id, changes, segment=segment))
+        segment = (
+            changes.get("segment")
+            if "segment" in changes
+            else (M.exchange_segment(changes["exchange"])[1] if "exchange" in changes else None)
+        )
+        await self._request(
+            session, "POST", "/v1/order/modify", json_body=M.to_modify_payload(order_id, changes, segment=segment)
+        )
 
     async def cancel_order(
         self,
@@ -442,34 +492,68 @@ class GrowwAdapter(BrokerAdapter):
         _router_token: object | None = None,
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        await self._request(session, "POST", "/v1/order/cancel", json_body=M.to_cancel_payload(order_id, segment=segment))
+        await self._request(
+            session, "POST", "/v1/order/cancel", json_body=M.to_cancel_payload(order_id, segment=segment)
+        )
 
     async def cancel_smart_order(
         self,
         session: Session,
         order_id: str,
         *,
-        segment: str = "CASH",
-        smart_order_type: str = "GTT",
+        segment: str | None = None,
+        smart_order_type: str | None = None,
         _router_token: object | None = None,
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        await self._request(
-            session,
-            "POST",
-            f"/v1/order-advance/cancel/{segment}/{smart_order_type}/{order_id}",
+        path = M.smart_resource_path(
+            "cancel",
+            smart_order_id=order_id,
+            segment=segment,
+            smart_order_type=smart_order_type,
         )
+        await self._request(session, "POST", path)
 
     async def order_book(self, session: Session) -> list[Order]:
         out: list[dict[str, Any]] = []
         for segment in ("CASH", "FNO", "COMMODITY"):
-            payload = await self._fixed_read(
-                session,
-                "/v1/order/list",
-                params={"segment": segment, "page": 0, "page_size": 100},
-            )
-            out.extend(self._listed_order(row, segment=segment) for row in _strict_rows(payload, "order_list"))
+            rows = await self._paged_rows(session, "/v1/order/list", "order_list", segment=segment, page_size=100)
+            # Ordinary resource addresses include segment; opaque IDs alone do
+            # not establish a global namespace across these separate books.
+            seen_ids: set[str] = set()
+            for row in rows:
+                order = self._listed_order(row, segment=segment)
+                identifier = order.get("orderid")
+                if type(identifier) is not str or not identifier.strip() or identifier in seen_ids:
+                    raise BrokerReadResponseInvalid from None
+                seen_ids.add(identifier)
+                out.append(order)
         return out  # type: ignore[return-value]
+
+    async def _paged_rows(
+        self,
+        session: Session,
+        path: str,
+        key: str,
+        *,
+        segment: str,
+        page_size: int,
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        previous: list[dict[str, Any]] | None = None
+        # A bounded traversal fails, never returns a truncated verified book.
+        for page in range(1000):
+            payload = await self._fixed_read(
+                session, path, params={"segment": segment, "page": page, "page_size": page_size}
+            )
+            rows = _strict_rows(payload, key)
+            if rows and rows == previous:
+                raise BrokerReadResponseInvalid from None
+            out.extend(rows)
+            if not _page_continues(payload, page=page, page_size=page_size, count=len(rows)):
+                return out
+            previous = deepcopy(rows)
+        raise BrokerReadResponseInvalid from None
 
     @staticmethod
     def _listed_order(row: dict[str, Any], *, segment: str) -> dict[str, Any]:
@@ -490,26 +574,101 @@ class GrowwAdapter(BrokerAdapter):
         return M.from_order(row)
 
     async def order_details(self, session: Session, order_id: str, *, segment: str = "CASH") -> dict:
-        payload = await self._request(session, "GET", f"/v1/order/detail/{order_id}", params={"segment": segment})
-        return M.from_order(payload if isinstance(payload, dict) else {})
+        return await self._order_read(session, order_id, segment=segment, operation="detail")
 
     async def order_status(self, session: Session, order_id: str, *, segment: str = "CASH") -> dict:
-        payload = await self._request(session, "GET", f"/v1/order/status/{order_id}", params={"segment": segment})
-        return M.from_order(payload if isinstance(payload, dict) else {})
+        return await self._order_read(session, order_id, segment=segment, operation="status")
+
+    async def _order_read(self, session: Session, order_id: str, *, segment: str, operation: str) -> dict:
+        order_id, segment = M.ordinary_resource_identity(order_id, segment)
+        payload = await self._fixed_read(session, f"/v1/order/{operation}/{order_id}", params={"segment": segment})
+        if type(payload) is not dict or payload.get("groww_order_id") != order_id:
+            raise BrokerReadResponseInvalid from None
+        if "segment" in payload and payload["segment"] != segment:
+            raise BrokerReadResponseInvalid from None
+        projected = dict(payload)
+        if "exchange" in projected and "segment" not in projected:
+            projected["segment"] = segment  # Explicit address disambiguates NSE/BSE CASH versus FNO.
+        return M.from_order(projected)
+
+    async def smart_order_details(
+        self,
+        session: Session,
+        order_id: str,
+        *,
+        segment: str | None = None,
+        smart_order_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Observe one explicitly addressed smart resource, not a complete book."""
+        path = M.smart_resource_path("get", smart_order_id=order_id, segment=segment, smart_order_type=smart_order_type)
+        payload = await self._fixed_read(session, path)
+        row = M.from_smart_order(payload)
+        self._check_smart_scope(row, segment=segment, family=smart_order_type, order_id=order_id)
+        return {**row, "scope": {"segment": segment, "smart_order_type": smart_order_type, "smart_order_id": order_id}}
+
+    @staticmethod
+    def _check_smart_scope(
+        row: dict[str, Any], *, segment: str | None, family: str | None, order_id: str | None = None
+    ) -> None:
+        if order_id is not None and row["smart_order_id"] != order_id:
+            raise BrokerReadResponseInvalid from None
+        for field, expected in (("segment", segment), ("smart_order_type", family)):
+            if field in row["native"] and row["native"][field] != expected:
+                raise BrokerReadResponseInvalid from None
+
+    async def smart_orders_page(
+        self,
+        session: Session,
+        *,
+        segment: str,
+        smart_order_type: str,
+        status: str,
+        start_date_time: str,
+        end_date_time: str,
+        page: int = 0,
+        page_size: int = 50,
+    ) -> dict[str, Any]:
+        """Read one explicit filter/window/page; even an empty page is not a whole book."""
+        params = M.smart_page_params(
+            segment=segment,
+            smart_order_type=smart_order_type,
+            status=status,
+            start_date_time=start_date_time,
+            end_date_time=end_date_time,
+            page=page,
+            page_size=page_size,
+        )
+        envelope = await self._request(session, "GET", "/v1/order-advance/list", params=params, raw=True)
+        rows = M.from_smart_page(envelope)
+        if len(rows) > page_size:
+            raise BrokerReadResponseInvalid from None
+        for row in rows:
+            self._check_smart_scope(row, segment=segment, family=smart_order_type)
+        pagination = deepcopy({key: value for key, value in envelope["payload"].items() if key != "orders"})
+        return {"orders": rows, "scope": dict(params), "pagination": pagination, "complete": False}
+
+    async def smart_orders(self, session: Session) -> list[dict[str, Any]]:
+        """Refuse an unscoped read rather than invent a complete smart book.
+
+        Args:
+            session: Existing broker session; no transport is called here.
+
+        Raises:
+            UnsupportedCapabilityError: Explicit page scope is required.
+        """
+        raise UnsupportedCapabilityError(
+            "Groww has no unscoped complete smart book; use explicit smart_orders_page scope", broker_id="groww"
+        )
 
     async def order_trades(self, session: Session, order_id: str, *, segment: str = "CASH") -> list[dict]:
         if type(segment) is not str or segment.strip().upper() not in {"CASH", "FNO", "COMMODITY"}:
             raise BrokerReadResponseInvalid from None
         bound_segment = segment.strip().upper()
-        payload = await self._fixed_read(
-            session,
-            f"/v1/order/trades/{order_id}",
-            params={"segment": bound_segment, "page": 0, "page_size": 50},
+        M.ordinary_resource_identity(order_id, bound_segment)
+        rows = await self._paged_rows(
+            session, f"/v1/order/trades/{order_id}", "trade_list", segment=bound_segment, page_size=50
         )
-        return [
-            self._listed_trade(row, segment=bound_segment, order_id=order_id)
-            for row in _strict_rows(payload, "trade_list")
-        ]
+        return [self._listed_trade(row, segment=bound_segment, order_id=order_id) for row in rows]
 
     @staticmethod
     def _listed_trade(row: dict[str, Any], *, segment: str, order_id: str) -> dict[str, Any]:
@@ -527,10 +686,7 @@ class GrowwAdapter(BrokerAdapter):
             if type(returned_segment) is not str or returned_segment.strip().upper() != segment:
                 raise BrokerReadResponseInvalid from None
         returned_exchange = row.get("exchange")
-        if (
-            type(returned_exchange) is not str
-            or returned_exchange.strip().upper() not in allowed_exchanges[segment]
-        ):
+        if type(returned_exchange) is not str or returned_exchange.strip().upper() not in allowed_exchanges[segment]:
             raise BrokerReadResponseInvalid from None
         projected = dict(row)
         projected["segment"] = segment
@@ -539,18 +695,19 @@ class GrowwAdapter(BrokerAdapter):
     async def trade_book(self, session: Session) -> list[Trade]:
         listed_orders: list[tuple[str, dict[str, Any]]] = []
         for segment in ("CASH", "FNO", "COMMODITY"):
-            payload = await self._fixed_read(
-                session,
-                "/v1/order/list",
-                params={"segment": segment, "page": 0, "page_size": 100},
-            )
-            listed_orders.extend((segment, row) for row in _strict_rows(payload, "order_list"))
-        out: list[dict[str, Any]] = []
+            rows = await self._paged_rows(session, "/v1/order/list", "order_list", segment=segment, page_size=100)
+            listed_orders.extend((segment, row) for row in rows)
+        identities: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
         for segment, row in listed_orders:
             order = self._listed_order(row, segment=segment)
             oid = order.get("orderid")
-            if type(oid) is not str or not oid:
+            if type(oid) is not str or not oid.strip() or (segment, oid) in seen:
                 raise BrokerReadResponseInvalid from None
+            seen.add((segment, oid))
+            identities.append((segment, oid))
+        out: list[dict[str, Any]] = []
+        for segment, oid in identities:
             out.extend(await self.order_trades(session, oid, segment=segment))
         return out  # type: ignore[return-value]
 
@@ -656,13 +813,9 @@ class GrowwAdapter(BrokerAdapter):
         # start_date/end_date are the keys the terminal history read and the
         # shared live probe both send (mirroring Upstox/INDmoney fallbacks).
         start = M.normalise_date(
-            req.get("start_time") or req.get("start")
-            or req.get("start_date") or req.get("from_date")
+            req.get("start_time") or req.get("start") or req.get("start_date") or req.get("from_date")
         )
-        end = M.normalise_date(
-            req.get("end_time") or req.get("end")
-            or req.get("end_date") or req.get("to_date")
-        )
+        end = M.normalise_date(req.get("end_time") or req.get("end") or req.get("end_date") or req.get("to_date"))
         interval = str(req.get("interval") or req.get("timeframe") or "1m")
         payload = await self._request(
             session,
@@ -711,7 +864,9 @@ class GrowwAdapter(BrokerAdapter):
             )
         )  # type: ignore[return-value]
 
-    async def greeks(self, session: Session, *, exchange: str, underlying: str, trading_symbol: str, expiry: str) -> dict:
+    async def greeks(
+        self, session: Session, *, exchange: str, underlying: str, trading_symbol: str, expiry: str
+    ) -> dict:
         groww_exchange, _segment = M.exchange_segment(exchange)
         payload = await self._request(
             session,

@@ -117,6 +117,30 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       };
     }
 
+    it.each([
+      { data: [] },
+      { data: [{ ...ROW, order_id: "UNRELATED", status: "CANCELLED" }] },
+      { data: undefined, isSuccess: false, isError: true, error: new Error("Listing unavailable") },
+      { data: undefined, isSuccess: false, isLoading: true },
+      { data: undefined, fetchStatus: "paused" },
+    ])("retains a visible scoped cancellation warning when the row is absent: %j", (query) => {
+      const { rerender } = render(<ForeverOrdersWidget />);
+      acknowledge();
+      rerender(<ForeverOrdersWidget />);
+      state.list = { ...state.list, dataUpdatedAt: 2000, ...query };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent(ROW.order_id);
+      expect(screen.getByText("Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders."))
+        .toBeInTheDocument();
+      expect(state.cancelRequest).not.toHaveBeenCalled();
+      state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED", child_status: "UNKNOWN" }],
+        isSuccess: true, isError: false, isLoading: false, fetchStatus: "idle", dataUpdatedAt: 3000 };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText(/child closed|child filled|child cancelled/i)).not.toBeInTheDocument();
+    });
+
     it.each(["dhan", "upstox"])("reconciles a fresh terminal trigger listing for %s", (broker) => {
       state.target = { broker, account_id: "A" };
       const { rerender } = render(<ForeverOrdersWidget />);
@@ -128,6 +152,31 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       expect(screen.getByText("CANCELLED")).toBeInTheDocument();
       expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
       expect(state.cancelRequest).not.toHaveBeenCalled();
+    });
+
+    it("does not erase the first unresolved cancellation when another trigger is acknowledged", () => {
+      const { rerender } = render(<ForeverOrdersWidget />);
+      acknowledge();
+      rerender(<ForeverOrdersWidget />);
+      state.cancel = { ...state.cancel, submittedAt: 600,
+        variables: { broker: "dhan", account_id: "A", order_id: "TRIGGER-2" } };
+      state.list = { ...state.list, data: [], dataUpdatedAt: 2000 };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent("Cancel pending. This order may still fill.");
+      expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toHaveTextContent("Cancel pending. This order may still fill.");
+      state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 3000 };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.queryByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).not.toBeInTheDocument();
+      expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toBeInTheDocument();
+    });
+
+    it("contradictory trigger identities cannot reconcile a matching cancellation ACK", () => {
+      const { rerender } = render(<ForeverOrdersWidget />);
+      acknowledge();
+      rerender(<ForeverOrdersWidget />);
+      state.list = { ...state.list, data: [{ ...ROW, gtt_order_id: "OTHER-ID", status: "CANCELLED" }], dataUpdatedAt: 2000 };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
     });
 
     it.each(["CANCELLED", "REJECTED", "EXPIRED"])(

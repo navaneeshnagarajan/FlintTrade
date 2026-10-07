@@ -11,7 +11,7 @@ const mockModeState = vi.hoisted(() => ({
 }));
 
 const mockBrokerState = vi.hoisted(() => ({
-  accounts: [] as Array<{ account_id: string; broker: string; source?: string; status?: string; is_primary?: boolean }>,
+  accounts: [] as Array<{ account_id: string; broker: string; source?: string; status?: string; is_primary?: boolean; read_only?: boolean }>,
   activeAccountId: null as string | null,
 }));
 
@@ -2702,6 +2702,284 @@ describe("Native FlintTrade API client (api.ts)", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/v1/sandbox/orders");
   });
 
+  it.each([
+    { field: "orders", read: getOrderbook },
+    { field: "positions", read: getPositionbook },
+    { field: "trades", read: getTradebook },
+    { field: "holdings", read: getHoldings },
+  ])("retains every readonly native $field observation through direct and wrapped books", async ({ field, read }) => {
+    // HTTP JSON can carry unknown native keys, including prototype-like names.
+    // These are observations, never object-merge instructions or schema defaults.
+    const row = Object.freeze(JSON.parse('{"symbol":"SYNTHETIC","order_type":"NATIVE-LMT","quantity":"10","filled_quantity":null,"native_observation":{"price":"73.55","nullable":null,"inactive":false,"values":[0,"0",null,false]},"constructor":{"native":true},"__proto__":{"observed":"native JSON key"}}') as Record<string, unknown>);
+    for (const wrapped of [false, true]) {
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: wrapped ? { [field]: [row] } : [row] }));
+      const result = await read(nativeReadContext("dhan", "SYNTHETIC-SCHEMA"));
+      expect(JSON.stringify(result)).toBe(JSON.stringify([row]));
+      expect(Object.keys(result[0]!)).toEqual(Object.keys(row));
+      expect(Object.hasOwn(result[0]!, "__proto__")).toBe(true);
+      expect(Object.getPrototypeOf(result[0]!).observed).toBeUndefined();
+      expect(result[0]).not.toHaveProperty("requested_price");
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+      `/ft-api/api/v1/native/accounts/dhan/SYNTHETIC-SCHEMA/${field}`,
+      `/ft-api/api/v1/native/accounts/dhan/SYNTHETIC-SCHEMA/${field}`,
+    ]);
+  });
+
+  // ---- Native acknowledgement evidence at the actual placeOrder seam ----
+
+  it("preserves the actual native scalar-data/top-level INDstocks acknowledgement evidence", async () => {
+    mockBrokerState.accounts = [{ account_id: "IND-OFFLINE", broker: "indmoney", source: "native", status: "connected" }];
+    mockBrokerState.activeAccountId = "native:indmoney:IND-OFFLINE";
+    // Pinned by test_indmoney_http_evidence.py at the normal gated HTTP seam.
+    // The backend intentionally keeps BOTH legacy first-ID slots scalar.
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success", orderid: "EQ-OFFLINE", data: "EQ-OFFLINE",
+      order_ids: ["EQ-OFFLINE"], child_order_id: null,
+      execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: ["MARKET_TO_LIMIT"] },
+      broker_response: { order_id: "EQ-OFFLINE", order_status: "INITIATED", extra_info: { observations: ["accepted", null] } },
+    }));
+    const result = await placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" });
+    expect(result).toEqual({
+      orderid: "EQ-OFFLINE", order_ids: ["EQ-OFFLINE"], child_order_id: null,
+      execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: ["MARKET_TO_LIMIT"] },
+      broker_response: { order_id: "EQ-OFFLINE", order_status: "INITIATED", extra_info: { observations: ["accepted", null] } },
+    });
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/ft-api/api/v1/orders/indmoney/place");
+    expect(JSON.parse(String(init.body))).toEqual({
+      symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET",
+      order_type: "MARKET", broker: "indmoney", account_id: "IND-OFFLINE",
+    });
+    expect(init.headers).toMatchObject({ "X-FlintTrade-Mode": "live", "Content-Type": "application/json" });
+  });
+
+  it.each([
+    { name: "Upstox regular/AMO", broker: "upstox", id: "SYNTHETIC-U1", fields: {
+      order_ids: ["SYNTHETIC-U1"], broker_response: { status: "success", data: { order_ids: ["SYNTHETIC-U1"] }, metadata: { latency: 12 } },
+    } },
+    { name: "Upstox sliced children", broker: "upstox", id: "SLICE-1", fields: {
+      order_ids: ["SLICE-1", "SLICE-2"], broker_response: { status: "success", data: { order_ids: ["SLICE-1", "SLICE-2"] }, metadata: { latency: 12, native_items: [{ order_id: "SLICE-2", message: "accepted" }] } },
+    } },
+    { name: "Upstox trigger resources", broker: "upstox", id: "SYNTHETIC-GTT", fields: {
+      gtt_order_ids: ["SYNTHETIC-GTT", "SYNTHETIC-GTT-2"], broker_response: { status: "success", data: { gtt_order_ids: ["SYNTHETIC-GTT", "SYNTHETIC-GTT-2"] } },
+    } },
+    { name: "INDstocks smart parent and independent child", broker: "indmoney", id: "SYNTHETIC-PARENT", fields: {
+      order_ids: ["SYNTHETIC-PARENT"], child_order_id: "SYNTHETIC-CHILD",
+      execution_effects: { requested_type: "TRIGGER", effective_type: "TRIGGER_LIMIT", effective_limit_price: null, trailing_active: false, limitations: [] },
+      broker_response: { order_id: "SYNTHETIC-PARENT", child_order_id: "SYNTHETIC-CHILD", order_status: "CREATED", data: { status: "ACTIVE", nullable: null, inactive: false } },
+    } },
+  ])("preserves actual scalar-envelope $name without treating resource/status evidence as execution", async ({ broker, id, fields }) => {
+    mockBrokerState.accounts = [{ account_id: "SYNTHETIC-ACK", broker, source: "native", status: "connected" }];
+    mockBrokerState.activeAccountId = `native:${broker}:SYNTHETIC-ACK`;
+    // Concrete receipt shapes from the known HTTP bridge, not creation authority
+    // or a new GTT/smart creation entrypoint in the client.
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", orderid: id, data: id, ...fields }));
+    const result = await placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" });
+    expect(result).toEqual({ orderid: id, ...fields });
+    expect(result.orderid).toBe(id);
+    expect(result.order_ids).toEqual("order_ids" in fields ? fields.order_ids : undefined);
+    expect(result.gtt_order_ids).toEqual("gtt_order_ids" in fields ? fields.gtt_order_ids : undefined);
+    expect(result.child_order_id).toEqual("child_order_id" in fields ? fields.child_order_id : undefined);
+    expect(result.broker_response).toEqual(fields.broker_response);
+    if ("gtt_order_ids" in fields) expect(result).not.toHaveProperty("order_ids");
+    if (!("execution_effects" in fields)) expect(result).not.toHaveProperty("execution_effects");
+    expect(result).not.toHaveProperty("orderId");
+    expect(result).not.toHaveProperty("status");
+    expect(result).not.toHaveProperty("data");
+    expect(result).not.toHaveProperty("filled_quantity");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: "missing ID arrays/effects", fields: { broker_response: { status: "ACTIVE" } }, expected: { broker_response: { status: "ACTIVE" } } },
+    { name: "null ID arrays/effects/child/response", fields: { order_ids: null, gtt_order_ids: null, execution_effects: null, child_order_id: null, broker_response: null }, expected: { order_ids: null, gtt_order_ids: null, execution_effects: null, child_order_id: null, broker_response: null } },
+    { name: "empty ID arrays and limitations", fields: { order_ids: [], gtt_order_ids: [], execution_effects: { limitations: [] } }, expected: { order_ids: [], gtt_order_ids: [], execution_effects: { limitations: [] } } },
+    { name: "absent requested/effective types", fields: { execution_effects: { effective_limit_price: null, trailing_active: false } }, expected: { execution_effects: { effective_limit_price: null, trailing_active: false } } },
+    { name: "null requested/effective types", fields: { execution_effects: { requested_type: null, effective_type: null, effective_limit_price: null } }, expected: { execution_effects: { requested_type: null, effective_type: null, effective_limit_price: null } } },
+    { name: "absent effective price", fields: { execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", trailing_active: false, limitations: [] } }, expected: { execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", trailing_active: false, limitations: [] } } },
+    { name: "null effective price", fields: { child_order_id: null, execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: [] } }, expected: { child_order_id: null, execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: [] } } },
+    { name: "observed empty string/zero native values", fields: { child_order_id: "", execution_effects: { requested_type: "", effective_type: "", effective_limit_price: 0 } }, expected: { child_order_id: "", execution_effects: { requested_type: "", effective_type: "", effective_limit_price: 0 } } },
+  ])("retains scalar-envelope $name exactly without manufacturing known observations", async ({ fields, expected }) => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", orderid: "SYNTHETIC-PRESENCE", data: "SYNTHETIC-PRESENCE", ...fields }));
+    const result = await placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" });
+    expect(result).toEqual({ orderid: "SYNTHETIC-PRESENCE", ...expected });
+    expect(Object.keys(result).sort()).toEqual(["orderid", ...Object.keys(expected)].sort());
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("retains exact nested native JSON once and excludes unrelated scalar-envelope fields", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    const nativeJson = '{"status":"ACTIVE","data":{"order_status":"INITIATED","observations":[0,"0",null,false,""]},"constructor":{"native":true},"__proto__":{"observed":"native JSON key"}}';
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success", orderid: "SYNTHETIC-JSON", data: "SYNTHETIC-JSON",
+      broker_response: JSON.parse(nativeJson), account_id: "UNRELATED", latest_result: { filled: true }, future_field: "UNRECOGNISED",
+    }));
+    const result = await placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" });
+    expect(JSON.stringify(result.broker_response)).toBe(nativeJson);
+    expect(Object.keys(result)).toEqual(["orderid", "broker_response"]);
+    if (typeof result.broker_response !== "object" || result.broker_response === null) throw new Error("Native JSON object was discarded");
+    expect(Object.hasOwn(result.broker_response, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(result.broker_response).observed).toBeUndefined();
+    expect(result).not.toHaveProperty("execution_effects");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: "scalar with no known evidence", response: { status: "success", orderid: "LEGACY", data: "LEGACY", future_field: true }, expected: "LEGACY" },
+    { name: "object data with unrelated top-level receipt fields", response: { status: "success", orderid: "OUTER", data: { orderId: "INNER", native_extra: { accepted: true } }, order_ids: ["OUTER"], execution_effects: { requested_type: "MARKET" } }, expected: { orderId: "INNER", native_extra: { accepted: true } } },
+    { name: "scalar data without the known orderid envelope", response: { status: "success", data: "LEGACY", order_ids: ["LEGACY"] }, expected: "LEGACY" },
+    { name: "null data", response: { status: "success", orderid: "LEGACY", data: null, broker_response: null }, expected: { status: "success", orderid: "LEGACY", data: null, broker_response: null } },
+    { name: "empty scalar without evidence", response: { status: "success", orderid: "", data: "" }, expected: "" },
+    { name: "numeric scalar without the string envelope", response: { status: "success", orderid: "LEGACY", data: 0, order_ids: [] }, expected: 0 },
+  ])("does not widen decoding of legacy $name", async ({ response, expected }) => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
+    await expect(placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" })).resolves.toEqual(expected);
+  });
+
+  it("limits the scalar-evidence repair to the public placeOrder seam, not basket responses", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", orderid: "LEGACY-BASKET", data: "LEGACY-BASKET", order_ids: ["LEGACY-BASKET"], broker_response: { status: "ACTIVE" } }));
+    await expect(basketOrder({ strategy: "synthetic-contract", orders: [] })).resolves.toBe("LEGACY-BASKET");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("keeps actual top-level receipts per-call and pinned to the origin across late A/early B and read-only retirement", async () => {
+    const params = { symbol: "RELIANCE", exchange: "NSE", action: "BUY" as const, quantity: 1, product: "MIS" as const, orderType: "MARKET" as const };
+    const pinA: OrderAuthorityPin = Object.freeze({ mode: "live", scopeKey: "live:native:indmoney:IND-OFFLINE", brokerType: "indmoney", accountId: "IND-OFFLINE" });
+    const pinB: OrderAuthorityPin = Object.freeze({ mode: "live", scopeKey: "live:native:upstox:U2", brokerType: "upstox", accountId: "U2" });
+    mockBrokerState.accounts = [
+      { account_id: "IND-OFFLINE", broker: "indmoney", source: "native", status: "connected" },
+      { account_id: "U2", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:indmoney:IND-OFFLINE";
+    let finish!: (response: Response) => void;
+    fetchSpy.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const first = placeOrder(params, pinA);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    mockBrokerState.activeAccountId = "native:upstox:U2";
+    const nativeB = { status: "success", data: { order_ids: ["SYNTHETIC-B"] }, metadata: { values: [null, false, "B"] } };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", orderid: "SYNTHETIC-B", data: "SYNTHETIC-B", order_ids: ["SYNTHETIC-B"], broker_response: nativeB }));
+    const second = await placeOrder(params, pinB);
+    mockBrokerState.accounts = mockBrokerState.accounts.map((account) => ({ ...account, read_only: true }));
+    await expect(placeOrder(params, pinB)).rejects.toThrow(/account authority|not available for live writes/);
+    const nativeA = { order_id: "EQ-LATE-A", order_status: "INITIATED", extra_info: { observations: ["accepted", null] } };
+    finish(jsonResponse({ status: "success", orderid: "EQ-LATE-A", data: "EQ-LATE-A", order_ids: ["EQ-LATE-A"], child_order_id: null,
+      execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: ["MARKET_TO_LIMIT"] }, broker_response: nativeA,
+    }));
+    const firstResult = await first;
+    expect(firstResult).toEqual({ orderid: "EQ-LATE-A", order_ids: ["EQ-LATE-A"], child_order_id: null,
+      execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: ["MARKET_TO_LIMIT"] }, broker_response: nativeA,
+    });
+    expect(second).toEqual({ orderid: "SYNTHETIC-B", order_ids: ["SYNTHETIC-B"], broker_response: nativeB });
+    expect(second).not.toHaveProperty("execution_effects");
+    expect(firstResult.broker_response).not.toBe(nativeA);
+    expect(second.broker_response).not.toBe(nativeB);
+    nativeB.data.order_ids.push("NOT-OBSERVED");
+    nativeA.extra_info.observations.push("NOT-OBSERVED");
+    expect(JSON.stringify(firstResult.broker_response)).toBe('{"order_id":"EQ-LATE-A","order_status":"INITIATED","extra_info":{"observations":["accepted",null]}}');
+    expect(JSON.stringify(second.broker_response)).toBe('{"status":"success","data":{"order_ids":["SYNTHETIC-B"]},"metadata":{"values":[null,false,"B"]}}');
+    mockBrokerState.activeAccountId = "native:indmoney:IND-OFFLINE";
+    await expect(placeOrder(params, pinA)).rejects.toThrow(/account authority|not available for live writes/);
+    expect(mockBrokerState.accounts.every((account) => account.read_only)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual(["/ft-api/api/v1/orders/indmoney/place", "/ft-api/api/v1/orders/upstox/place"]);
+    expect(fetchSpy.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      { ...params, order_type: "MARKET", broker: "indmoney", account_id: "IND-OFFLINE" },
+      { ...params, order_type: "MARKET", broker: "upstox", account_id: "U2" },
+    ]);
+    expect(fetchSpy.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      expect.objectContaining({ "X-FlintTrade-Mode": "live" }), expect.objectContaining({ "X-FlintTrade-Mode": "live" }),
+    ]);
+  });
+
+  it.each([
+    {
+      name: "Upstox regular/AMO acknowledgement",
+      broker: "upstox",
+      evidence: { order_id: "SYNTHETIC-U1", order_ids: ["SYNTHETIC-U1"], broker_response: { order_ids: ["SYNTHETIC-U1"], metadata: { latency: 12 } } },
+    },
+    {
+      name: "Upstox sliced children (ACKs, not fills)",
+      broker: "upstox",
+      evidence: { order_id: "SYNTHETIC-U1", order_ids: ["SYNTHETIC-U1", "SYNTHETIC-U2"], broker_response: { order_ids: ["SYNTHETIC-U1", "SYNTHETIC-U2"], outcomes: [{ accepted: true }, { status: "ACK" }] } },
+    },
+    {
+      name: "Upstox GTT resource IDs (not exchange children)",
+      broker: "upstox",
+      evidence: { order_id: "SYNTHETIC-GTT", gtt_order_ids: ["SYNTHETIC-GTT", "SYNTHETIC-GTT-2"], broker_response: { gtt_order_ids: ["SYNTHETIC-GTT", "SYNTHETIC-GTT-2"] } },
+    },
+    {
+      name: "INDstocks smart parent, distinct child and documented unknown price",
+      broker: "indmoney",
+      evidence: {
+        order_id: "SYNTHETIC-PARENT", order_ids: ["SYNTHETIC-PARENT"], child_order_id: "SYNTHETIC-CHILD",
+        execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: ["MARKET_TO_LIMIT"] },
+        broker_response: { order_id: "SYNTHETIC-PARENT", child_order_id: "SYNTHETIC-CHILD", order_status: "INITIATED", metadata: { native_null: null, inactive: false } },
+      },
+    },
+  ])("preserves all $name fields without projecting or inventing evidence", async ({ broker, evidence }) => {
+    mockBrokerState.accounts = [{ account_id: "SYNTHETIC-ACK", broker, source: "native", status: "connected" }];
+    mockBrokerState.activeAccountId = `native:${broker}:SYNTHETIC-ACK`;
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", orderid: evidence.order_id, data: evidence }));
+    const result = await placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" });
+    expect(result).toEqual(evidence);
+    // These direct reads also exercise the public TypeScript response contract.
+    expect(result.order_ids).toEqual("order_ids" in evidence ? evidence.order_ids : undefined);
+    expect(result.gtt_order_ids).toEqual("gtt_order_ids" in evidence ? evidence.gtt_order_ids : undefined);
+    expect(result.child_order_id).toEqual("child_order_id" in evidence ? evidence.child_order_id : undefined);
+    expect(result.execution_effects).toEqual("execution_effects" in evidence ? evidence.execution_effects : undefined);
+    expect(result.broker_response).toEqual(evidence.broker_response);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`/ft-api/api/v1/orders/${broker}/place`);
+    expect(init.headers).toMatchObject({ "X-FlintTrade-Mode": "live" });
+    expect(JSON.parse(String(init.body))).toMatchObject({ broker, account_id: "SYNTHETIC-ACK", order_type: "MARKET" });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("execution_effects");
+  });
+
+  it.each([
+    { name: "legacy scalar", response: { status: "success", orderid: "SYNTHETIC-SCALAR", data: "SYNTHETIC-SCALAR" }, expected: "SYNTHETIC-SCALAR" },
+    { name: "legacy camel-case ID", response: { status: "success", data: { orderId: "SYNTHETIC-CAMEL" } }, expected: { orderId: "SYNTHETIC-CAMEL" } },
+    { name: "missing evidence", response: { status: "success", data: { order_id: "SYNTHETIC-MISSING" } }, expected: { order_id: "SYNTHETIC-MISSING" } },
+    { name: "observed empty arrays", response: { status: "success", data: { order_id: "SYNTHETIC-EMPTY", order_ids: [], gtt_order_ids: [] } }, expected: { order_id: "SYNTHETIC-EMPTY", order_ids: [], gtt_order_ids: [] } },
+    { name: "observed null child/price", response: { status: "success", data: { order_id: "SYNTHETIC-NULL", child_order_id: null, broker_response: null, execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: [] } } }, expected: { order_id: "SYNTHETIC-NULL", child_order_id: null, broker_response: null, execution_effects: { requested_type: "MARKET", effective_type: "LIMIT", effective_limit_price: null, trailing_active: false, limitations: [] } } },
+    { name: "unwrapped response", response: { order_id: "SYNTHETIC-BARE", order_ids: ["SYNTHETIC-BARE"], broker_response: { order_id: "SYNTHETIC-BARE" } }, expected: { order_id: "SYNTHETIC-BARE", order_ids: ["SYNTHETIC-BARE"], broker_response: { order_id: "SYNTHETIC-BARE" } } },
+  ])("retains $name without missing-to-empty or scalar-to-object coercion", async ({ response, expected }) => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
+    await expect(placeOrder({ symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1, product: "MIS", orderType: "MARKET" })).resolves.toEqual(expected);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("detaches each HTTP receipt and retains A's evidence after a concurrent switch to B", async () => {
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    let finish!: (response: Response) => void;
+    fetchSpy.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const params = { symbol: "RELIANCE", exchange: "NSE", action: "BUY" as const, quantity: 1, product: "MIS" as const, orderType: "MARKET" as const };
+    const first = placeOrder(params);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    mockBrokerState.accounts = [{ account_id: "U2", broker: "upstox", source: "native", status: "connected" }];
+    mockBrokerState.activeAccountId = "native:upstox:U2";
+    const nativeResponse = { order_ids: ["SYNTHETIC-B"], metadata: { observed: [null, false, "B"] } };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { order_id: "SYNTHETIC-B", order_ids: ["SYNTHETIC-B"], broker_response: nativeResponse } }));
+    const second = await placeOrder(params);
+    finish(jsonResponse({ status: "success", data: { order_id: "SYNTHETIC-A", order_ids: ["SYNTHETIC-A", "SYNTHETIC-A2"], broker_response: { order_ids: ["SYNTHETIC-A", "SYNTHETIC-A2"] } } }));
+    const firstResult = await first;
+    expect(firstResult.order_ids).toEqual(["SYNTHETIC-A", "SYNTHETIC-A2"]);
+    expect(second.order_ids).toEqual(["SYNTHETIC-B"]);
+    expect(second.broker_response).toEqual(nativeResponse);
+    expect(second.broker_response).not.toBe(nativeResponse);
+    nativeResponse.order_ids.push("SYNTHETIC-NOT-OBSERVED");
+    expect(second.broker_response).toEqual({ order_ids: ["SYNTHETIC-B"], metadata: { observed: [null, false, "B"] } });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).account_id)).toEqual(["U1", "U2"]);
+  });
+
   // ---- postOrder — mode header ----
 
   it("postOrder attaches X-FlintTrade-Mode header from modeStore", async () => {
@@ -3822,11 +4100,150 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
   // ---- Response unwrapping ----
 
+  it.each([
+    { name: "missing rows", data: {} },
+    { name: "null rows", data: { positions: null } },
+    { name: "text rows", data: { positions: "unreadable" } },
+    { name: "object rows", data: { positions: {} } },
+    { name: "null response", data: null },
+  ])("refuses a malformed captured native position book: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getPositionbook(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/position book.*unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("/native/accounts/upstox/U1/positions");
+  });
+
+  it.each([
+    { name: "direct", data: [] },
+    { name: "wrapped", data: { positions: [] } },
+  ])("preserves a genuinely empty $name captured native position book", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getPositionbook(nativeReadContext("upstox", "U1"))).resolves.toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
 
 
 
 
 
+
+
+
+  it.each([
+    { name: "missing rows", data: {} },
+    { name: "null rows", data: { holdings: null } },
+    { name: "text rows", data: { holdings: "unreadable" } },
+    { name: "object rows", data: { holdings: {} } },
+    { name: "null response", data: null },
+  ])("refuses malformed captured native holdings: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getHoldings(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/holdings.*unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("/native/accounts/upstox/U1/holdings");
+  });
+
+  it.each([
+    { name: "direct", data: [] },
+    { name: "wrapped", data: { holdings: [] } },
+  ])("preserves genuinely empty $name captured native holdings", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getHoldings(nativeReadContext("upstox", "U1"))).resolves.toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: "missing rows", data: {} },
+    { name: "null rows", data: { trades: null } },
+    { name: "text rows", data: { trades: "unreadable" } },
+    { name: "object rows", data: { trades: {} } },
+    { name: "null response", data: null },
+  ])("refuses a malformed captured native trade book: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getTradebook(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/trade book.*unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("/native/accounts/upstox/U1/trades");
+  });
+
+  it.each([
+    { name: "direct", data: [] },
+    { name: "wrapped", data: { trades: [] } },
+  ])("preserves a genuinely empty $name captured native trade book", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getTradebook(nativeReadContext("upstox", "U1"))).resolves.toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: "direct null row", data: [null] },
+    { name: "wrapped null row", data: { orders: [null] } },
+    { name: "direct primitive row", data: ["unreadable"] },
+    { name: "wrapped primitive row", data: { orders: [false] } },
+    { name: "nested array row", data: { orders: [[]] } },
+    { name: "partially malformed rows", data: { orders: [{ symbol: "INFY", quantity: 1 }, null] } },
+  ])("refuses malformed captured native order rows without treating the prefix as complete: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getOrderbook(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/order book.*unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: "direct null row", data: [null] },
+    { name: "wrapped null row", data: { positions: [null] } },
+    { name: "direct primitive row", data: ["unreadable"] },
+    { name: "wrapped primitive row", data: { positions: [false] } },
+    { name: "nested array row", data: { positions: [[]] } },
+    { name: "partially malformed rows", data: { positions: [{ symbol: "INFY", quantity: 1 }, null] } },
+  ])("refuses malformed captured native positions rows without claiming a complete prefix: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getPositionbook(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("/native/accounts/upstox/U1/positions");
+  });
+
+  it.each([
+    { name: "direct null row", data: [null] },
+    { name: "wrapped null row", data: { trades: [null] } },
+    { name: "direct primitive row", data: ["unreadable"] },
+    { name: "wrapped primitive row", data: { trades: [false] } },
+    { name: "nested array row", data: { trades: [[]] } },
+    { name: "partially malformed rows", data: { trades: [{ symbol: "INFY", quantity: 1 }, null] } },
+  ])("refuses malformed captured native trades rows without claiming a complete prefix: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getTradebook(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("/native/accounts/upstox/U1/trades");
+  });
+
+  it.each([
+    { name: "direct null row", data: [null] },
+    { name: "wrapped null row", data: { holdings: [null] } },
+    { name: "direct primitive row", data: ["unreadable"] },
+    { name: "wrapped primitive row", data: { holdings: [false] } },
+    { name: "nested array row", data: { holdings: [[]] } },
+    { name: "partially malformed rows", data: { holdings: [{ symbol: "INFY", quantity: 1 }, null] } },
+  ])("refuses malformed captured native holdings rows without claiming a complete prefix: $name", async ({ data }) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data }));
+
+    await expect(getHoldings(nativeReadContext("upstox", "U1")))
+      .rejects.toThrow(/unavailable|malformed/i);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("/native/accounts/upstox/U1/holdings");
+  });
 
   // ---- Error responses ----
 

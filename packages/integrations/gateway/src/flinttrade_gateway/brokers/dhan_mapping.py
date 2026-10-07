@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_gateway.json_evidence import copy_json_evidence
 
 # Canonical order type -> Dhan order_type.
 ORDER_TYPE_MAP = {
@@ -141,6 +142,14 @@ def _response_rows(value: Any, *, field: str) -> list[dict[str, Any]]:
     return [_response_record(row, field=field) for row in value]
 
 
+def _response_json_copy(value: Any) -> Any:
+    """Detach bounded JSON evidence, retaining the Dhan read-error taxonomy."""
+    try:
+        return copy_json_evidence(value)
+    except ValueError:
+        raise BrokerReadResponseInvalid from None
+
+
 def _response_decimal(value: Any) -> Decimal:
     if type(value) is bool or type(value) not in (int, float, str):
         raise BrokerReadResponseInvalid from None
@@ -252,6 +261,36 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _order_quantity(value: Any, *, field: str, allow_zero: bool = False) -> int:
+    """Require exact request integers, without float or user conversion hooks."""
+    if type(value) is int:
+        quantity = value
+    elif type(value) is str and value and value.isascii() and value.isdigit():
+        try:
+            quantity = int(value)
+        except ValueError:
+            raise DhanMappingError(f"Dhan {field} must be an exact integer quantity") from None
+    else:
+        raise DhanMappingError(f"Dhan {field} must be an exact integer quantity")
+    if quantity < 0 or (quantity == 0 and not allow_zero):
+        requirement = "non-negative" if allow_zero else "positive"
+        raise DhanMappingError(f"Dhan {field} needs a {requirement} quantity")
+    return quantity
+
+
+def _order_price(value: Any, *, field: str, allow_zero: bool = False) -> float:
+    """Validate a supplied economic value rather than inventing a zero."""
+    if type(value) not in (int, float, str):
+        raise DhanMappingError(f"Dhan {field} must be a finite price")
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        raise DhanMappingError(f"Dhan {field} must be a finite price") from None
+    if not math.isfinite(number) or number < 0 or (number == 0 and not allow_zero):
+        raise DhanMappingError(f"Dhan {field} must be a finite {'non-negative' if allow_zero else 'positive'} price")
+    return number
+
+
 def _optional_text(record: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = record.get(key)
@@ -352,7 +391,12 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     """Translate a FlintTrade ``Order`` into ``dhanhq.place_order`` keyword args.
 
     ``security_id`` is resolved by the adapter (Dhan trades by numeric id, not
-    symbol). Raises :class:`DhanMappingError` for unmappable enum values.
+    symbol). Active target, stop-loss or trailing fields are refused: ordinary,
+    AMO and sliced writes cannot consume them, and this builder never changes
+    the order family to Super/BO/CO. Omitted and numeric-zero fields stay valid.
+
+    Raises:
+        DhanMappingError: Unmappable enums/quantities or unconsumed protection.
     """
     side = str(order.action).upper()
     if side not in SIDE_MAP:
@@ -373,16 +417,27 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
         "security_id": str(security_id),
         "exchange_segment": segment,
         "transaction_type": SIDE_MAP[side],
-        "quantity": int(_num(order.quantity, 0)),
+        "quantity": _order_quantity(getattr(order, "quantity", None), field="quantity"),
         "order_type": ORDER_TYPE_MAP[ptype],
         "product_type": PRODUCT_MAP[product],
         "price": _num(getattr(order, "price", 0)),
         "trigger_price": _num(getattr(order, "trigger_price", 0)),
-        "disclosed_quantity": int(_num(getattr(order, "disclosed_quantity", 0), 0)),
+        "disclosed_quantity": _order_quantity(getattr(order, "disclosed_quantity", 0),
+                                              field="disclosed_quantity", allow_zero=True),
         # The SDK defaults validity='DAY', so an IOC order would silently rest as
         # DAY unless we pass it through (orders.md "validity" param).
         "validity": _norm_place_validity(getattr(order, "validity", None)),
     }
+    for field in ("target_price", "stop_loss_price", "trailing_jump"):
+        value = getattr(order, field, 0)
+        if not (type(value) is int or type(value) is float or type(value) is str):
+            raise DhanMappingError(f"Dhan ordinary {field} must be an inactive numeric zero")
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            raise DhanMappingError(f"Dhan ordinary {field} must be an inactive numeric zero") from None
+        if not number.is_finite() or number != 0:
+            raise DhanMappingError(f"Dhan ordinary orders cannot represent {field}; omit it or use zero")
     if tag:
         kwargs["tag"] = tag
     return kwargs
@@ -443,7 +498,7 @@ def _validated_core(order: Any, security_id: str) -> dict[str, Any]:
         "security_id": str(security_id),
         "exchange_segment": segment,
         "transaction_type": SIDE_MAP[side],
-        "quantity": int(_num(order.quantity, 0)),
+        "quantity": _order_quantity(getattr(order, "quantity", None), field="quantity"),
         "order_type": ORDER_TYPE_MAP[ptype],
         "product_type": PRODUCT_MAP[product],
         "price": _num(getattr(order, "price", 0)),
@@ -531,6 +586,11 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
     placing a SINGLE order without the protective leg.
     """
     core = _validated_core(order, security_id)
+    # Forever creation has a narrower schema than ordinary/margin/modify/read.
+    if core["product_type"] not in ("CNC", "MTF"):
+        raise DhanMappingError("Forever creation product must be CNC or MTF")
+    if core["order_type"] not in ("LIMIT", "MARKET"):
+        raise DhanMappingError("Forever creation order type must be LIMIT or MARKET")
     trigger = _num(getattr(order, "trigger_price", 0))
     if trigger <= 0:
         raise DhanMappingError("A GTT (forever) order needs a trigger_price")
@@ -544,16 +604,18 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
         "price": core["price"],
         "trigger_Price": trigger,
         "order_flag": "SINGLE",
-        "disclosed_quantity": int(_num(getattr(order, "disclosed_quantity", 0), 0)),
+        "disclosed_quantity": _order_quantity(getattr(order, "disclosed_quantity", 0),
+                                              field="disclosed_quantity", allow_zero=True),
         "validity": _norm_place_validity(getattr(order, "validity", None)),
         "symbol": str(getattr(order, "symbol", "")),
     }
-    price1 = _num(getattr(order, "price1", None) or 0)
-    trigger1 = _num(getattr(order, "trigger_price1", None) or 0)
-    qty1 = int(_num(getattr(order, "quantity1", None) or 0, 0))
-    if price1 > 0 or trigger1 > 0 or qty1 > 0:
-        if not (price1 > 0 and trigger1 > 0 and qty1 > 0):
+    second_leg = tuple(getattr(order, field, None) for field in ("price1", "trigger_price1", "quantity1"))
+    if any(value is not None for value in second_leg):
+        if any(value is None for value in second_leg):
             raise DhanMappingError("An OCO forever order needs ALL of price1, trigger_price1 and quantity1")
+        price1 = _order_price(second_leg[0], field="price1")
+        trigger1 = _order_price(second_leg[1], field="trigger_price1")
+        qty1 = _order_quantity(second_leg[2], field="quantity1")
         kwargs.update(
             {
                 "order_flag": "OCO",
@@ -629,11 +691,12 @@ def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, 
         "order_id": str(order_id),
         "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
         "leg_name": str(changes.get("leg_name", "ENTRY_LEG")),
-        "quantity": int(_num(changes.get("quantity", 0), 0)),
+        "quantity": _order_quantity(changes.get("quantity"), field="quantity"),
         "price": _num(changes.get("price", 0)),
         "trigger_price": _num(changes.get("trigger_price", 0)),
-        "disclosed_quantity": int(_num(changes.get("disclosed_quantity", 0), 0)),
-        "validity": VALIDITY_MAP.get(str(changes.get("validity", "DAY")).upper(), "DAY"),
+        "disclosed_quantity": _order_quantity(changes.get("disclosed_quantity", 0),
+                                              field="disclosed_quantity", allow_zero=True),
+        "validity": _norm_place_validity(changes.get("validity")),
     }
 
 
@@ -686,10 +749,10 @@ def to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type")))
     if ptype not in ORDER_TYPE_MAP:
         raise DhanMappingError(f"Unsupported forever order type {ptype!r}")
-    quantity = int(_num(changes["quantity"], 0))
+    quantity = _order_quantity(changes["quantity"], field="quantity")
     price = _num(changes["price"], -1)
     trigger_price = _num(changes["trigger_price"], 0)
-    disclosed_quantity = int(_num(changes["disclosed_quantity"], -1))
+    disclosed_quantity = _order_quantity(changes["disclosed_quantity"], field="disclosed_quantity", allow_zero=True)
     validity = str(changes["validity"]).upper()
     if quantity <= 0 or price < 0 or trigger_price <= 0 or disclosed_quantity < 0:
         raise DhanMappingError("Forever modify quantities and prices are invalid")
@@ -714,27 +777,39 @@ def from_dhan_forever_order(d: dict[str, Any]) -> dict[str, Any]:
     seg = _response_text_or_empty(d, "exchangeSegment")
     option_type, expiry, strike_price, underlying = _option_contract_identity(d)
     order_type = _response_text_or_empty(d, "orderType")
+    order_flag = _response_text_or_empty(d, "orderFlag")
+    # Native list rows may put the family in orderType, not an execution type.
+    execution_type = order_type
+    if order_type in FOREVER_ORDER_FLAGS:
+        if order_flag and order_flag != order_type:
+            raise BrokerReadResponseInvalid from None
+        order_flag = order_type
+        execution_type = ""
     product = _response_text_or_empty(d, "productType")
     validity = _response_text(d, "validity")
-    order = {
+    order: dict[str, Any] = {
         "orderid": _response_text_or_empty(d, "orderId"),
         "exchange_order_id": _response_text_or_empty(d, "exchangeOrderId"),
         "correlation_id": _response_text_or_empty(d, "correlationId"),
         "status": _response_text_or_empty(d, "orderStatus"),
-        "order_flag": _response_text_or_empty(d, "orderFlag"),
+        "order_flag": order_flag,
         "symbol": _response_text_or_empty(d, "tradingSymbol"),
         "instrument_id": _response_text_or_empty(d, "securityId"),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
         "action": _response_text_or_empty(d, "transactionType"),
-        "pricetype": DHAN_TO_ORDER_TYPE.get(order_type, order_type),
+        "pricetype": DHAN_TO_ORDER_TYPE.get(execution_type, execution_type),
+        "broker_order_type": order_type,
         "product": DHAN_TO_PRODUCT.get(product, product),
-        "validity": "DAY" if validity is _RESPONSE_MISSING else validity,
+        "broker_product": product,
         "leg_name": _response_text_or_empty(d, "legName"),
         "created_at": _response_text_or_empty(d, "createTime"),
         "option_type": option_type,
         "expiry": expiry,
         "underlying": underlying,
     }
+    _put_present(order, "validity", validity)
+    _put_present(order, "updated_at", _response_text(d, "updateTime"))
+    _put_present(order, "exchange_time", _response_text(d, "exchangeTime"))
     if strike_price is not None:
         order["strike_price"] = strike_price
     for field, source_fields in {
@@ -761,26 +836,73 @@ def from_dhan_forever_order(d: dict[str, Any]) -> dict[str, Any]:
 SUPER_ORDER_LEGS = ("ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG")
 
 
+def _super_response_number(record: dict[str, Any], *keys: str) -> str | object:
+    """Preserve finite observations only after checking every supplied alias.
+
+    Raw Super quantities remain observations, not executable child authority.
+    L2 separately establishes whole-number domains, bounds and independence.
+    """
+    first: str | object = _RESPONSE_MISSING
+    first_number: Decimal | None = None
+    for key in keys:
+        if key not in record:
+            continue
+        value = record[key]
+        if value is None or (type(value) is str and not value.strip()):
+            continue
+        number = _response_decimal(value)
+        if first_number is not None and number != first_number:
+            raise BrokerReadResponseInvalid from None
+        if first is _RESPONSE_MISSING:
+            first, first_number = str(value), number
+    return first
+
+
 def to_modify_super_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``dhanhq.modify_super_order`` kwargs (leg-aware).
 
     The leg name selects which fields Dhan accepts: ENTRY_LEG takes all of them,
     TARGET_LEG takes only ``targetPrice``, STOP_LOSS_LEG takes ``stopLossPrice``
     + ``trailingJump`` — the SDK builds the per-leg payload from these kwargs.
+    ENTRY requires a complete replacement; STOP requires explicit trailing
+    intent because the broker interprets omission/zero as cancelling trailing.
+    Unused SDK parameters receive neutral placeholders, not invented intent.
     """
-    leg = str(changes.get("leg_name", "ENTRY_LEG")).upper()
+    leg = str(changes.get("leg_name", "")).upper()
     if leg not in SUPER_ORDER_LEGS:
         raise DhanMappingError(f"Super order leg_name must be one of {SUPER_ORDER_LEGS}, got {leg!r}")
+    entry = leg == "ENTRY_LEG"
+    if entry and not any(field in changes for field in ("pricetype", "order_type")):
+        raise DhanMappingError("Super ENTRY needs a complete replacement; missing pricetype")
+    if entry and "quantity" not in changes:
+        raise DhanMappingError("Super ENTRY needs a complete replacement; missing quantity")
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    if ptype not in SUPER_ORDER_TYPES:
+        raise DhanMappingError("Super modify order type must be LIMIT or MARKET")
+
+    def edit_price(field: str, alias: str | None = None, *, required: bool, allow_zero: bool = False) -> float:
+        supplied = [changes[key] for key in (field, alias) if key is not None and key in changes]
+        if not supplied:
+            if required:
+                raise DhanMappingError(f"Super {leg} needs explicit {field}")
+            return 0.0
+        numbers = [_order_price(value, field=field, allow_zero=allow_zero) for value in supplied]
+        if any(number != numbers[0] for number in numbers[1:]):
+            raise DhanMappingError(f"Super {field} aliases disagree")
+        return numbers[0]
+
     return {
         "order_id": str(order_id),
-        "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
+        "order_type": ORDER_TYPE_MAP[ptype],
         "leg_name": leg,
-        "quantity": int(_num(changes.get("quantity", 0), 0)),
-        "price": _num(changes.get("price", 0)),
-        "targetPrice": _num(changes.get("target_price", changes.get("targetPrice", 0))),
-        "stopLossPrice": _num(changes.get("stop_loss_price", changes.get("stopLossPrice", 0))),
-        "trailingJump": _num(changes.get("trailing_jump", changes.get("trailingJump", 0))),
+        "quantity": _order_quantity(changes["quantity"], field="quantity") if "quantity" in changes else 0,
+        "price": edit_price("price", required=entry, allow_zero=ptype == "MARKET"),
+        "targetPrice": edit_price("target_price", "targetPrice", required=entry or leg == "TARGET_LEG",
+                                  allow_zero=entry),
+        "stopLossPrice": edit_price("stop_loss_price", "stopLossPrice", required=entry or leg == "STOP_LOSS_LEG",
+                                    allow_zero=entry),
+        "trailingJump": edit_price("trailing_jump", "trailingJump", required=entry or leg == "STOP_LOSS_LEG",
+                                   allow_zero=True),
     }
 
 
@@ -799,8 +921,22 @@ def from_dhan_super_order(d: dict[str, Any]) -> dict[str, Any]:
     else:
         legs = _response_rows(raw_legs, field="super order leg")
     for leg in legs:
-        for field in ("legName", "orderStatus", "orderId", "exchangeOrderId", "transactionType", "orderType"):
+        for aliases in (
+            ("quantity", "qty", "order_quantity"),
+            ("filled_quantity", "filled_qty", "filledQty", "tradedQty"),
+            ("remaining_quantity", "remainingQuantity"),
+            ("total_quantity", "totalQuatity"),
+            ("triggered_quantity", "triggeredQuantity"),
+        ):
+            _super_response_number(leg, *aliases)
+        for field in ("legName", "orderStatus", "orderId", "exchangeOrderId", "parentOrderId",
+                      "transactionType", "orderType"):
             _response_text(leg, field)
+        for field in ("totalQuatity", "remainingQuantity", "triggeredQuantity", "quantity", "filledQty", "tradedQty",
+                      "price", "triggerPrice", "trailingJump", "targetPrice", "stopLossPrice", "averageTradedPrice",
+                      "disclosedQuantity"):
+            _response_number(leg, field)
+    legs = [_response_json_copy(leg) for leg in legs]
     leg_details_valid = (
         len(legs) == 2
         and len(legs) == len(raw_legs)
@@ -826,18 +962,21 @@ def from_dhan_super_order(d: dict[str, Any]) -> dict[str, Any]:
         "expiry": expiry,
         "underlying": underlying,
     }
+    for field, source in (("created_at", "createTime"), ("updated_at", "updateTime"), ("exchange_time", "exchangeTime")):
+        _put_present(order, field, _response_text(d, source))
     if strike_price is not None:
         order["strike_price"] = strike_price
     for field, source_fields in {
-        "quantity": ("quantity",),
+        "quantity": ("quantity", "qty", "order_quantity"),
         "price": ("price",),
         "target_price": ("targetPrice",),
         "stop_loss_price": ("stopLossPrice",),
         "trailing_jump": ("trailingJump",),
-        "filled_quantity": ("filledQty", "tradedQty"),
+        "remaining_quantity": ("remaining_quantity", "remainingQuantity"),
+        "filled_quantity": ("filled_quantity", "filled_qty", "filledQty", "tradedQty"),
         "average_price": ("averageTradedPrice",),
     }.items():
-        _put_present(order, field, _response_number(d, *source_fields))
+        _put_present(order, field, _super_response_number(d, *source_fields))
     return order
 
 
@@ -868,9 +1007,7 @@ def to_convert_position_kwargs(req: dict[str, Any], security_id: str) -> dict[st
     position_type = str(req.get("position_type", "LONG")).upper()
     if position_type not in POSITION_TYPES:
         raise DhanMappingError(f"position_type must be one of {POSITION_TYPES}, got {position_type!r}")
-    qty = int(_num(req.get("quantity", req.get("convert_qty", 0)), 0))
-    if qty <= 0:
-        raise DhanMappingError("convert_position needs a positive quantity")
+    qty = _order_quantity(req.get("quantity", req.get("convert_qty")), field="quantity")
     try:
         segment = to_dhan_segment(str(req.get("exchange", "NSE")))
     except KeyError as exc:
@@ -929,7 +1066,8 @@ def to_conditional_order_leg(order: Any, security_id: str) -> dict[str, Any]:
         "quantity": core["quantity"],
         "validity": str(getattr(order, "validity", "DAY") or "DAY").upper(),
         "price": str(core["price"]),
-        "discQuantity": str(int(_num(getattr(order, "disclosed_quantity", 0), 0))),
+        "discQuantity": str(_order_quantity(getattr(order, "disclosed_quantity", 0),
+                                             field="disclosed_quantity", allow_zero=True)),
         "triggerPrice": str(_num(getattr(order, "trigger_price", 0))),
     }
 

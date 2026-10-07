@@ -36,8 +36,8 @@ const MODE_NOTIFICATIONS: Record<AppMode, { title: string; body: string }> = {
     body: "Orders run against the native sandbox with virtual capital. No real money is at risk.",
   },
   live: {
-    title: "Live trading active",
-    body: "Orders are now routed to your broker with REAL money. Trade carefully.",
+    title: "Live trading mode selected",
+    body: "Live mode is real-money capable. Broker readiness and safety checks still apply.",
   },
 };
 
@@ -79,7 +79,7 @@ export function useNotificationFeed(): void {
       addNotification({
         category: "system",
         title: "Broker gateway connected",
-        body: "Live market data and order routing are available.",
+        body: "Gateway connection restored. Check market-data and broker readiness before trading.",
       });
     } else if (status === "disconnected" || status === "error") {
       addNotification({
@@ -88,7 +88,7 @@ export function useNotificationFeed(): void {
           status === "error"
             ? "Broker gateway error"
             : "Broker gateway disconnected",
-        body: "Live data and order routing are paused until the connection is restored.",
+        body: "Gateway unavailable. Broker orders may still be active; reconnect and reconcile positions and orders.",
         action: { label: "Reconnect", href: "/settings#brokers" },
       });
     }

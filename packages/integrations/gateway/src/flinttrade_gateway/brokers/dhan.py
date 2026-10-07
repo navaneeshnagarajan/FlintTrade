@@ -537,6 +537,21 @@ class DhanAdapter(BrokerAdapter):
             resp = await self._call(client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag))
         else:
             raise BrokerError(f"Dhan does not support order variety {variety!r}")
+        if variety == "iceberg":
+            # The pinned SDK documents dispatch but no per-child result shape.
+            # Keep the established scalar ACK only; never discard additional
+            # outcomes or invent a parent/child schema after a possible write.
+            data = M.unwrap(resp)
+            if (
+                type(data) is not dict
+                or any(type(key) is not str for key in data)
+                or set(data) - {"orderId", "orderStatus"}
+                or type(data.get("orderId")) is not str
+                or not data["orderId"].strip()
+                or ("orderStatus" in data and type(data["orderStatus"]) is not str)
+            ):
+                raise BrokerError("Dhan slice outcome is unverified after dispatch; reconcile before retry")
+            return data["orderId"]
         return M.extract_order_id(resp)
 
     async def modify_order(
@@ -765,7 +780,7 @@ class DhanAdapter(BrokerAdapter):
         """List all resting forever (GTT) orders (``GET /forever/orders``) — a read."""
         resp = await self._call(self._client(session).get_forever)
         rows = self._strict_response_rows(resp)
-        return [M.from_dhan_forever_order(row) for row in rows]
+        return [self._preserve_order_observations(row, M.from_dhan_forever_order(row)) for row in rows]
 
     # ---------- trading: super-order management (router-only writes) ----------
 
@@ -801,7 +816,42 @@ class DhanAdapter(BrokerAdapter):
         """List all super orders with nested leg details (``GET /super/orders``) — a read."""
         resp = await self._call(self._client(session).get_super_order_list)
         rows = self._strict_response_rows(resp)
-        return [M.from_dhan_super_order(row) for row in rows]
+        return [self._preserve_order_observations(row, M.from_dhan_super_order(row)) for row in rows]
+
+    @staticmethod
+    def _preserve_order_observations(source: dict[str, Any], projected: dict[str, Any]) -> dict[str, Any]:
+        """Keep native product/type/validity alongside canonical observations."""
+        for native, canonical in (
+            ("productType", "broker_product"), ("orderType", "broker_order_type"), ("validity", "validity"),
+            ("createTime", "created_at"), ("updateTime", "updated_at"), ("exchangeTime", "exchange_time"),
+        ):
+            value = source.get(native)
+            if value is None:
+                continue
+            if type(value) is not str:
+                raise BrokerReadResponseInvalid
+            if value:
+                projected[canonical] = value
+        for native, canonical in (("remainingQuantity", "remaining_quantity"), ("averageTradedPrice", "average_price")):
+            try:
+                number = _optional_safety_number(source.get(native), field=native)
+            except M.DhanMappingError as exc:
+                raise BrokerReadResponseInvalid from exc
+            if number is not None:
+                projected[canonical] = number
+        return projected
+
+    @staticmethod
+    def _with_resource_observations(source: dict[str, Any], safety_row: dict[str, Any]) -> dict[str, Any]:
+        """Retain evidence on its resource row, never relabel it as child data."""
+        for field in (
+            "broker_product", "broker_order_type", "validity", "created_at", "updated_at", "exchange_time",
+            "remaining_quantity", "target_price", "stop_loss_price", "trailing_jump", "average_price",
+            "order_flag", "legs", "leg_details_valid",
+        ):
+            if field in source:
+                safety_row[field] = source[field]
+        return safety_row
 
     # ---------- trading: conditional triggers (v2.5; router-only writes) ----------
 
@@ -1659,21 +1709,21 @@ class DhanAdapter(BrokerAdapter):
         """
         client = self._client(session)
         regular_source = [
-            self._safety_projection(M.from_dhan_order, row)
+            self._preserve_order_observations(row, self._safety_projection(M.from_dhan_order, row))
             for row in self._strict_safety_source(
                 await self._call(client.get_order_list),
                 family="regular",
             )
         ]
         forever_source = [
-            self._safety_projection(M.from_dhan_forever_order, row)
+            self._preserve_order_observations(row, self._safety_projection(M.from_dhan_forever_order, row))
             for row in self._strict_safety_source(
                 await self._call(client.get_forever),
                 family="forever",
             )
         ]
         super_source = [
-            self._safety_projection(M.from_dhan_super_order, row)
+            self._preserve_order_observations(row, self._safety_projection(M.from_dhan_super_order, row))
             for row in self._strict_safety_source(
                 await self._call(client.get_super_order_list),
                 family="super",
@@ -1688,22 +1738,22 @@ class DhanAdapter(BrokerAdapter):
         ]
 
         regular_rows = [
-            safety_row
+            self._with_resource_observations(row, safety_row)
             for row in regular_source
             if isinstance(row, dict)
             if (safety_row := self._safety_projection(self._regular_safety_row, row)) is not None
         ]
         forever_rows = [
-            safety_row
+            self._with_resource_observations(row, safety_row) if index == 0 else safety_row
             for row in forever_source
             if isinstance(row, dict)
-            for safety_row in self._safety_projection(self._forever_safety_rows, row)
+            for index, safety_row in enumerate(self._safety_projection(self._forever_safety_rows, row))
         ]
         super_rows = [
-            safety_row
+            self._with_resource_observations(row, safety_row) if index == 0 else safety_row
             for row in super_source
             if isinstance(row, dict)
-            for safety_row in self._safety_projection(self._super_safety_rows, row)
+            for index, safety_row in enumerate(self._safety_projection(self._super_safety_rows, row))
         ]
         conditional_rows = [
             safety_row
@@ -1725,7 +1775,7 @@ class DhanAdapter(BrokerAdapter):
     async def order_book(self, session: Session) -> list[Order]:
         resp = await self._call(self._client(session).get_order_list)
         rows = self._strict_response_rows(resp)
-        return [M.from_dhan_order(row) for row in rows]  # type: ignore[misc]
+        return [self._preserve_order_observations(row, M.from_dhan_order(row)) for row in rows]  # type: ignore[misc]
 
     async def get_order_by_id(self, session: Session, order_id: str) -> dict:
         """Fetch one order's current status by Dhan order id (``GET /orders/{id}``)."""

@@ -1,7 +1,12 @@
 // Dev-only. Imported automatically by @reticlehq/vite-plugin, so you do not need to import it.
 // Self-guards on import.meta.env.DEV, so it is a no-op in a production build.
-import { registerCapabilities, registerStore } from "@reticlehq/react";
+import { registerCapabilities, registerStore, tanstackQueryStore } from "@reticlehq/react";
 
+import { getSnapshot, subscribe } from "@/components/NotificationCentre/notificationStore";
+import { queryClient } from "@/providers/QueryProvider";
+import { useAuthStore } from "@/stores/authStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 
 if (import.meta.env.DEV) {
@@ -18,6 +23,32 @@ if (import.meta.env.DEV) {
   // Mode is the tip-verify store: Explore / Practice / Live is what a Tester/Dev flow asserts.
   // Register it before capabilities so `reticle_look { action: "state" }` returns a real key.
   registerStore("mode", useModeStore);
+  registerStore("broker", useBrokerStore);
+  registerStore("connection", useConnectionStore);
+  registerStore("notifications", {
+    getState: () => ({ items: getSnapshot() }),
+    subscribe,
+  });
+  registerStore("queries", {
+    getState: () => tanstackQueryStore(queryClient).getState(),
+    subscribe: (listener: () => void) => {
+      // Authentication rotates the production QueryClient. Follow that live
+      // binding rather than registering the retired, empty pre-login cache.
+      let activeClient = queryClient;
+      let unsubscribeQueries = tanstackQueryStore(activeClient).subscribe(listener);
+      const unsubscribeAuth = useAuthStore.subscribe(() => {
+        if (queryClient === activeClient) return;
+        unsubscribeQueries();
+        activeClient = queryClient;
+        unsubscribeQueries = tanstackQueryStore(activeClient).subscribe(listener);
+        listener();
+      });
+      return () => {
+        unsubscribeAuth();
+        unsubscribeQueries();
+      };
+    },
+  });
 
   registerCapabilities({
     testids: [
@@ -83,6 +114,6 @@ if (import.meta.env.DEV) {
       "live-content",
     ],
     signals: [], // names you pass to reticle.signal()
-    stores: ["mode"],
+    stores: ["mode", "broker", "connection", "notifications", "queries"],
   });
 }

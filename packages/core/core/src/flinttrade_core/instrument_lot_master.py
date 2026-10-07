@@ -15,7 +15,6 @@ import logging
 import os
 import re
 import threading
-import time
 import urllib.request
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -351,25 +350,42 @@ def _seconds_until_next_ist_midnight() -> float:
     return max(60.0, (tomorrow - now).total_seconds())
 
 
-def _refresh_loop() -> None:
-    while True:
-        try:
-            refresh_master_cache_if_due()
-        except Exception:  # noqa: BLE001 - the shipped excerpt remains the fallback
-            logger.warning("Instrument master refresh failed", exc_info=True)
-        time.sleep(_seconds_until_next_ist_midnight())
+class InstrumentMasterRefreshOwner:
+    """Own one application's public-master refresh worker and its stop signal."""
+
+    def __init__(self) -> None:
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, name="instrument-master-refresh", daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                refresh_master_cache_if_due()
+            except Exception:  # noqa: BLE001 - the shipped excerpt remains the fallback
+                logger.warning("Instrument master refresh failed", exc_info=True)
+            if self._stop.wait(_seconds_until_next_ist_midnight()):
+                return
+
+    def start(self) -> None:
+        """Start this owner's worker exactly once."""
+        self.thread.start()
+
+    def stop(self, *, timeout: float) -> bool:
+        """Wake the daily wait and prove the worker has left before release.
+
+        A blocked downloader retains the exact owner until a later retry; a
+        timeout must never claim that worker or its workspace is released.
+        """
+        self._stop.set()
+        if self.thread.ident is not None:
+            self.thread.join(timeout=max(0.0, timeout))
+        return not self.thread.is_alive()
 
 
-_REFRESH_STARTED = False
-
-
-def start_instrument_master_refresh() -> None:
-    """Refresh the master cache on startup and again at each IST midnight.
-
-    Tests skip the thread. A second call does not start another one.
-    """
-    global _REFRESH_STARTED
-    if _REFRESH_STARTED or os.environ.get("PYTEST_CURRENT_TEST"):
-        return
-    _REFRESH_STARTED = True
-    threading.Thread(target=_refresh_loop, name="instrument-master-refresh", daemon=True).start()
+def start_instrument_master_refresh() -> InstrumentMasterRefreshOwner | None:
+    """Start an app-owned public-master worker; ordinary tests leave it inert."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    owner = InstrumentMasterRefreshOwner()
+    owner.start()
+    return owner

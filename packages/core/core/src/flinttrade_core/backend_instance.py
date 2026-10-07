@@ -5,7 +5,6 @@ from __future__ import annotations
 import errno
 import os
 import secrets
-import select
 import struct
 import threading
 from collections.abc import Callable
@@ -19,6 +18,7 @@ from filelock import BaseFileLock, FileLock, Timeout as FileLockTimeout
 
 if os.name == "posix":
     import fcntl
+    import selectors
 
 from .workspace import workspace_dir
 
@@ -37,6 +37,18 @@ class BackendLeaseUnavailable(RuntimeError):
 _PROOF_SEAL = object()
 _ISSUED_PROOFS: WeakSet[BackendLeaseProof] = WeakSet()
 _ISSUED_HANDOFFS: WeakSet[BackendLeaseHandoff] = WeakSet()
+
+
+def _guardian_pipe_readable(descriptor: int, timeout: float) -> bool:
+    """Wait on a POSIX guardian pipe without select's descriptor-number cap.
+
+    DefaultSelector uses epoll/kqueue/poll on the supported POSIX platforms.
+    Windows keeps the same-process file-lock proof and does not use a guardian
+    pipe. Closing this temporary selector never closes the owned pipe itself.
+    """
+    with selectors.DefaultSelector() as readiness:
+        readiness.register(descriptor, selectors.EVENT_READ)
+        return bool(readiness.select(timeout))
 
 
 class BackendLeaseProof:
@@ -125,7 +137,7 @@ def require_backend_lease_proof(proof: object) -> BackendLeaseProof:
         raise BackendLeaseUnavailable
     if proof._guardian_fd is not None:
         try:
-            if select.select([proof._guardian_fd], [], [], 0)[0]:
+            if _guardian_pipe_readable(proof._guardian_fd, 0):
                 proof.revoke()
                 raise BackendLeaseUnavailable
         except (OSError, ValueError):
@@ -203,7 +215,7 @@ class BackendLeaseHandoff:
             self._write_fd = None
             descriptor, self._read_fd = self._read_fd, None
         try:
-            if not select.select([descriptor], [], [], 5)[0]:
+            if not _guardian_pipe_readable(descriptor, 5):
                 raise BackendLeaseUnavailable
             frame = os.read(descriptor, 48)
             expected = struct.pack("!QQ32s", self._owner_pid, os.getpid(), self._nonce)

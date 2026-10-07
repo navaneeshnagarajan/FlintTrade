@@ -12,6 +12,7 @@ import type {
   OHLCVBar,
   OptionChainData,
   PlaceOrderParams,
+  OrderPlacementAcknowledgement,
   ModifyOrderParams,
   OrderStatusParams,
   BasketOrderParams,
@@ -59,6 +60,7 @@ import {
 export { MarketDataAuthorityChangedError } from "@/hooks/useDataScope";
 import {
   assertNativeWriteTargetReadyOrThrow,
+  NATIVE_TARGET_NOT_READY_MESSAGE,
   pickNativeBrokerOrderTarget,
   pickNativeWriteTarget,
 } from "@/services/brokerTargets";
@@ -72,6 +74,7 @@ import {
   type OrderChanges,
 } from "@/lib/brokerOrdersApi";
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
+import { OrderPreflightRefusal } from "./orderPreflightRefusal";
 import { mockDataEngine } from "@/services/mockDataEngine";
 import {
   readNativeAccount,
@@ -2190,6 +2193,22 @@ function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } 
   return { orderId: `SAMPLE-${symbol}-${stamp}` };
 }
 
+// The two known native receipt families reach HTTP with scalar first-ID slots
+// and additive evidence at the TOP level. Select only these observed fields;
+// nested broker JSON is opaque, not another success envelope or write authority.
+const nativePlacementEnvelope = z.object({
+  orderid: z.string(),
+  data: z.string(),
+  order_ids: z.unknown().optional(),
+  gtt_order_ids: z.unknown().optional(),
+  child_order_id: z.unknown().optional(),
+  execution_effects: z.unknown().optional(),
+  broker_response: z.unknown().optional(),
+});
+const NATIVE_PLACEMENT_EVIDENCE_FIELDS = [
+  "order_ids", "gtt_order_ids", "child_order_id", "execution_effects", "broker_response",
+] as const;
+
 const LIVE_PLACE_ENDPOINTS = new Set([
   "place",
   "basket",
@@ -2212,7 +2231,7 @@ async function postOrder<T>(
   const currentModeForExplore = useModeStore.getState().mode;
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
-      throw new Error(
+      throw new OrderPreflightRefusal(
         `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
       );
     }
@@ -2220,18 +2239,18 @@ async function postOrder<T>(
   }
 
   if (!orderLimiter.tryConsume()) {
-    throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
+    throw new OrderPreflightRefusal(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
   }
 
   // Read the current operating mode and auth state to assemble headers.
   const currentMode = useModeStore.getState().mode;
   if (authority?.mode && authority.mode !== currentMode) {
-    throw new Error(
+    throw new OrderPreflightRefusal(
       `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {
-    throw new Error(
+    throw new OrderPreflightRefusal(
       "Order blocked: the displayed account authority no longer matches the current source, scope, account, or connection.",
     );
   }
@@ -2245,7 +2264,7 @@ async function postOrder<T>(
       const message = incident?.failureClass === "laya"
         ? incident.headline
         : (incident?.rectify ?? "Live orders are closed.");
-      throw new Error(message);
+      throw new OrderPreflightRefusal(message);
     }
   }
   const apiKey = useConnectionStore.getState().apiKey;
@@ -2263,7 +2282,16 @@ async function postOrder<T>(
   // account is native but not confirmed connected yet (e.g. the post-reload
   // window before the first account poll), reject rather than let the order fall
   // through to the bare path and be silently retargeted to brokers.execution.default.
-  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  try {
+    assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  } catch (error) {
+    // This guard completed before fetch. Server text/SDK exceptions cannot
+    // acquire this local provenance by matching its message or HTTP status.
+    if (error instanceof Error && error.message === NATIVE_TARGET_NOT_READY_MESSAGE) {
+      throw new OrderPreflightRefusal(error.message);
+    }
+    throw error;
+  }
   const pinnedTarget = isExactOrderAuthorityPin(authority) && authority.mode === "live"
     ? { broker: authority.brokerType, accountId: authority.accountId }
     : undefined;
@@ -2324,6 +2352,15 @@ async function postOrder<T>(
     throw new Error(json.message || `Order API ${ftEndpoint} error`);
   }
   if (LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) noteAdmittedPlace(mode);
+  if (ftEndpoint === "place") {
+    const envelope = nativePlacementEnvelope.safeParse(json);
+    if (envelope.success && NATIVE_PLACEMENT_EVIDENCE_FIELDS.some((field) => Object.hasOwn(envelope.data, field))) {
+      const { data: _legacyScalarId, ...acknowledgement } = envelope.data;
+      return acknowledgement as T;
+    }
+  }
+  // Bare/wrapped objects and scalar receipts without additive evidence retain
+  // their original shape. Never merge unrelated object-data or other endpoints.
   return (json.data ?? json) as T;
 }
 
@@ -2428,7 +2465,7 @@ export const placeOrder = (
   params: PlaceOrderParams,
   authority?: PostOrderAuthorityPin,
   options?: PlaceOrderOptions,
-) => postOrder<{ orderId: string }>("place", params, authority, options);
+) => postOrder<OrderPlacementAcknowledgement>("place", params, authority, options);
 export const cancelAllOrders = () =>
   postOrder<void>("cancel-all");
 export const cancelOrder = (
@@ -3049,13 +3086,45 @@ export const getOrderTrades = (orderId: string) =>
 // post() unwraps json.data, so we receive { orders: [...], statistics: {...} }.
 // We extract the nested array and fall back to the raw value for brokers that
 // return a plain array (future-proofing / broker inconsistency).
+type AccountBookField = "orders" | "trades" | "positions" | "holdings";
+
+const ACCOUNT_BOOK_LABELS: Record<AccountBookField, string> = {
+  orders: "order book",
+  trades: "trade book",
+  positions: "position book",
+  holdings: "holdings",
+};
+
+// Structural book admission only, not broker-native row/coherence proof.
+const accountBookRowsSchema = z.array(z.record(z.string(), z.unknown()));
+const accountBookEnvelopeSchemas = {
+  orders: z.looseObject({ orders: accountBookRowsSchema }),
+  trades: z.looseObject({ trades: accountBookRowsSchema }),
+  positions: z.looseObject({ positions: accountBookRowsSchema }),
+  holdings: z.looseObject({ holdings: accountBookRowsSchema }),
+};
+
+function accountBookRows<T>(
+  raw: T[] | Partial<Record<AccountBookField, T[]>>,
+  field: AccountBookField,
+): T[] {
+  // Validate, then retain the exact observed rows rather than a schema clone
+  // that could strip native keys. No defaults, coercion or partial-row filter.
+  if (accountBookRowsSchema.safeParse(raw).success) return raw as T[];
+  if (accountBookEnvelopeSchemas[field].safeParse(raw).success) {
+    return (raw as Partial<Record<AccountBookField, T[]>>)[field] as T[];
+  }
+  const verb = field === "holdings" ? "are" : "is";
+  const detail = raw === null ? " (null response)" : "";
+  throw new Error(`Broker ${ACCOUNT_BOOK_LABELS[field]} ${verb} unavailable or malformed${detail}.`);
+}
+
 export const getOrderbook = async (
   context: AccountReadContext,
   signal?: AbortSignal,
 ): Promise<Order[]> => {
   const raw = await readAccountSnapshot<Order[] | { orders?: Order[] }>("orderbook", {}, context, signal);
-  if (Array.isArray(raw)) return raw;
-  return Array.isArray(raw.orders) ? raw.orders : [];
+  return accountBookRows(raw, "orders");
 };
 
 export const getTradebook = async (
@@ -3068,8 +3137,7 @@ export const getTradebook = async (
     context,
     signal,
   );
-  if (Array.isArray(raw)) return raw;
-  return Array.isArray(raw.trades) ? raw.trades : [];
+  return accountBookRows(raw, "trades");
 };
 
 export const getPositionbook = async (
@@ -3082,8 +3150,7 @@ export const getPositionbook = async (
     context,
     signal,
   );
-  if (Array.isArray(raw)) return raw;
-  return Array.isArray(raw.positions) ? raw.positions : [];
+  return accountBookRows(raw, "positions");
 };
 
 export const getHoldings = async (
@@ -3096,8 +3163,7 @@ export const getHoldings = async (
     context,
     signal,
   );
-  if (Array.isArray(raw)) return raw;
-  return Array.isArray(raw.holdings) ? raw.holdings : [];
+  return accountBookRows(raw, "holdings");
 };
 
 // --- Utility ---

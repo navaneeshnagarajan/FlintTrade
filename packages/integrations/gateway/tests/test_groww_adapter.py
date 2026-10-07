@@ -304,7 +304,7 @@ async def test_place_order_posts_groww_payload_with_router_token() -> None:
     transport = MockGrowwTransport()
     adapter = _adapter(transport)
     session = await _session(adapter)
-    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC", quantity="3", price="2900")
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC", quantity="3", price="2900", strategy="FlintTest")
     order_id = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert order_id == "GROWWOID1"
     call = transport.calls[0]
@@ -320,7 +320,7 @@ async def test_place_order_posts_groww_payload_with_router_token() -> None:
         "order_type": "LIMIT",
         "transaction_type": "BUY",
         "price": 2900.0,
-        "order_reference_id": "Flint",
+        "order_reference_id": "FlintTest",
     }
 
 
@@ -329,7 +329,7 @@ async def test_modify_cancel_and_smart_cancel_are_gated_and_mapped() -> None:
     transport = MockGrowwTransport()
     adapter = _adapter(transport)
     session = await _session(adapter)
-    await adapter.modify_order(session, "GROWWOID1", {"quantity": 2, "price": 2910}, _router_token=_ROUTER_TOKEN)
+    await adapter.modify_order(session, "GROWWOID1", {"segment": "CASH", "pricetype": "LIMIT", "quantity": 2, "price": 2910}, _router_token=_ROUTER_TOKEN)
     await adapter.cancel_order(session, "GROWWOID1", segment="FNO", _router_token=_ROUTER_TOKEN)
     await adapter.cancel_smart_order(session, "GTT1", segment="CASH", smart_order_type="GTT", _router_token=_ROUTER_TOKEN)
     assert [call["path"] for call in transport.calls] == [
@@ -337,7 +337,7 @@ async def test_modify_cancel_and_smart_cancel_are_gated_and_mapped() -> None:
         "/v1/order/cancel",
         "/v1/order-advance/cancel/CASH/GTT/GTT1",
     ]
-    assert transport.calls[0]["json_body"] == {"groww_order_id": "GROWWOID1", "segment": "CASH", "quantity": 2, "price": 2910.0}
+    assert transport.calls[0]["json_body"] == {"groww_order_id": "GROWWOID1", "segment": "CASH", "order_type": "LIMIT", "quantity": 2, "price": 2910}
     assert transport.calls[1]["json_body"] == {"groww_order_id": "GROWWOID1", "segment": "FNO"}
 
 
@@ -434,6 +434,7 @@ async def test_mcx_commodity_surface_uses_groww_commodity_segment() -> None:
         product="NRML",
         quantity="1",
         price="6200",
+        strategy="FlintTest",
     )
 
     await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)

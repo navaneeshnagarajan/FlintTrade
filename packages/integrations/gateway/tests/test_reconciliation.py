@@ -644,8 +644,13 @@ _ORDER_BOOK_NUMERIC_MAPPING_CASES = [
             "quantity": "requested_qty",
             "filled_quantity": "traded_qty",
             "price": "requested_price",
-            "trigger_price": "sl_trigger_price",
+            # Parent and protective triggers are distinct native observations.
+            "trigger_price": "trigger_price",
             "average_price": "traded_price",
+            "sl_trigger_price": "sl_trigger_price",
+            "sl_limit_price": "sl_limit_price",
+            "tgt_trigger_price": "tgt_trigger_price",
+            "tgt_limit_price": "tgt_limit_price",
         },
         {
             "id": "I1",
@@ -959,6 +964,9 @@ _IND_ORDER = {
     "requested_qty": 75,
     "traded_qty": 75,
     "requested_price": "43.55",
+    # Complete synthetic observation, not inferred from the stop-loss leg or
+    # promised by the documented ordinary response (covered separately).
+    "trigger_price": 0,
     "sl_trigger_price": 0,
     "traded_price": "43.55",
     "security_id": "56998",

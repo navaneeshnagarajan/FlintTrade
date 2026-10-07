@@ -12,10 +12,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Mapping
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable, Mapping
 from urllib.parse import quote_plus
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
     BrokerError,
     BrokerInternal,
@@ -254,10 +257,12 @@ def is_write(method: str) -> bool:
     return method.upper() != "GET"
 
 
-def unwrap(payload: Any, *, status: int, endpoint: str) -> Any:
+def unwrap(payload: Any, *, status: int, endpoint: str, preserve_envelope: bool = False) -> Any:
     """Return ``result`` from a success envelope, or raise a mapped error."""
     if status >= 400 or _failed(payload):
         raise map_error(status, payload, endpoint=endpoint)
+    if preserve_envelope:
+        return deepcopy(payload)
     if isinstance(payload, dict) and "result" in payload:
         return payload["result"]
     return payload
@@ -265,6 +270,45 @@ def unwrap(payload: Any, *, status: int, endpoint: str) -> Any:
 
 def _failed(payload: Any) -> bool:
     return isinstance(payload, dict) and payload.get("success") is False
+
+
+def operation_evidence(payload: Any, *, operation: str) -> dict[str, Any]:
+    """Retain every native outcome separately from dispatcher ACK counts."""
+    result = payload.get("result") if isinstance(payload, Mapping) else None
+    lists = {key: deepcopy(value) for key, value in result.items() if isinstance(value, list)} \
+        if isinstance(result, Mapping) else {}
+    errors = []
+    for source in (payload, result):
+        if isinstance(source, Mapping) and isinstance(source.get("errors"), list):
+            errors.extend(deepcopy(source["errors"]))
+        elif isinstance(source, Mapping) and source.get("errors") not in (None, "", [], {}):
+            errors.append(deepcopy(source["errors"]))
+        if isinstance(source, Mapping) and source.get("error") not in (None, "", [], {}):
+            errors.append(deepcopy(source["error"]))
+    return {
+        "operation": operation, "raw_response": deepcopy(payload),
+        "items": deepcopy(result) if isinstance(result, list) else deepcopy(lists.get("orders", [])),
+        "result_lists": lists, "native_errors": errors,
+        "skipped_products": deepcopy(lists.get("skipped_products", [])), "complete": False,
+    }
+
+
+def require_write_success(payload: Any, *, expected_id: str | None = None) -> dict[str, Any]:
+    """A positive order ACK is not a fill; error IDs never establish an ACK."""
+    if not isinstance(payload, Mapping) or payload.get("success") is not True:
+        raise BrokerError("Delta write acknowledgement is unavailable", broker_id=BROKER_ID)
+    result = payload.get("result")
+    if not isinstance(result, Mapping):
+        raise BrokerError("Delta write acknowledgement has no order result", broker_id=BROKER_ID)
+    for source in (payload, result):
+        if source.get("error") or source.get("errors") or source.get("success") is False:
+            raise map_error(400, source, endpoint="/v2/orders")
+    identifier = _order_id(result.get("id"))
+    if expected_id is not None and identifier != _order_id(expected_id):
+        raise BrokerError("Delta write acknowledgement order id conflicts", broker_id=BROKER_ID)
+    if "product_id" in result:
+        _order_id(result["product_id"])
+    return deepcopy(dict(result))
 
 
 def _error_fields(payload: Any) -> tuple[str, str]:
@@ -321,8 +365,10 @@ def product_symbol(raw: Any) -> str:
 
 def contract_size(raw: Any) -> int:
     """Delta order size is an integer contract count."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        raise InvalidQuantity("Delta order size must be a positive integer contract count", broker_id=BROKER_ID)
     text = str(raw if raw is not None else "").strip()
-    if not text or any(ch in text for ch in ".eE+"):
+    if not text or any(ch not in "0123456789" for ch in text):
         raise InvalidQuantity("Delta order size must be a positive integer contract count", broker_id=BROKER_ID)
     try:
         size = int(text)
@@ -342,11 +388,36 @@ def _side(action: Any) -> str:
     raise BrokerError(f"Delta order side {action!r} is not buy or sell", broker_id=BROKER_ID)
 
 
-def _price_text(raw: Any) -> str:
+def _price_text(raw: Any, *, optional: bool = True) -> str:
+    """Canonical zero defaults mean absent; supplied applicable prices never round."""
+    if optional and (raw is None or raw == ""):
+        return ""
+    if isinstance(raw, bool) or not isinstance(raw, (str, int, float, Decimal)):
+        raise InvalidPrice("Delta price must be a positive finite decimal", broker_id=BROKER_ID)
     text = str(raw if raw is not None else "").strip()
-    if not text or text in {"0", "0.0"}:
+    try:
+        value = Decimal(text)
+    except InvalidOperation as exc:
+        raise InvalidPrice("Delta price must be a positive finite decimal", broker_id=BROKER_ID) from exc
+    if not value.is_finite() or value < 0 or (not optional and value == 0):
+        raise InvalidPrice("Delta price must be a positive finite decimal", broker_id=BROKER_ID)
+    if value == 0:
         return ""
     return text
+
+
+def _request_alias(fields: Mapping[str, Any], names: tuple[str, ...], convert: Callable) -> Any:
+    values = [convert(fields[name]) for name in names if name in fields]
+    if not values:
+        return None
+    comparable = [Decimal(value) if convert is _required_price else value for value in values]
+    if any(value != comparable[0] for value in comparable[1:]):
+        raise BrokerError(f"Delta {'/'.join(names)} aliases conflict", broker_id=BROKER_ID)
+    return values[0]
+
+
+def _required_price(raw: Any) -> str:
+    return _price_text(raw, optional=False)
 
 
 def time_in_force(validity: Any) -> str:
@@ -384,8 +455,32 @@ def option_expiry(raw: Any) -> str:
     raise BrokerError("Delta option expiry must be DD-MM-YYYY, YYYY-MM-DD, or YYMMDD", broker_id=BROKER_ID)
 
 
-def to_place_payload(order: Any, *, reduce_only: bool = False) -> dict[str, Any]:
+def to_place_payload(
+    order: Any, *, reduce_only: bool = False, native: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """Map a FlintTrade order onto CreateOrderRequest. Size is contract count."""
+    if type(reduce_only) is not bool:
+        raise BrokerError("Delta reduce_only must be an explicit boolean", broker_id=BROKER_ID)
+    variety = str(getattr(order, "variety", "regular") or "regular").lower()
+    if variety in {"", "regular"} and any(
+        _price_text(getattr(order, field, None)) for field in ("target_price", "trailing_jump")
+    ):
+        raise BrokerError("Delta canonical protection intent requires the bracket resource", broker_id=BROKER_ID)
+    if native is None:
+        for field in (
+            "native", "post_only", "client_order_id", "stop_order_type", "stop_price", "trail_amount",
+            "stop_trigger_method", "bracket_stop_loss_limit_price", "bracket_take_profit_limit_price",
+            "bracket_stop_trigger_method", "reduce_only",
+        ):
+            if getattr(order, field, None) is not None:
+                raise BrokerError(f"Delta {field} needs explicit native intent, not an unsigned order attribute", broker_id=BROKER_ID)
+    if native is not None:
+        from .delta_order_mapping import to_native_place_payload
+
+        try:
+            return to_native_place_payload(order, native=native, reduce_only=reduce_only)
+        except ValueError as exc:
+            raise BrokerError(str(exc), broker_id=BROKER_ID) from exc
     price_type = str(getattr(order, "pricetype", "MARKET") or "MARKET").upper()
     payload: dict[str, Any] = {
         "product_symbol": product_symbol(getattr(order, "symbol", "")),
@@ -394,7 +489,11 @@ def to_place_payload(order: Any, *, reduce_only: bool = False) -> dict[str, Any]
         "time_in_force": time_in_force(getattr(order, "validity", None)),
     }
     limit_price = _price_text(getattr(order, "price", ""))
-    stop_price = _price_text(getattr(order, "trigger_price", "")) or _price_text(getattr(order, "stop_loss_price", ""))
+    trigger = _price_text(getattr(order, "trigger_price", ""))
+    protection = _price_text(getattr(order, "stop_loss_price", ""))
+    if variety != "bracket" and trigger and protection and Decimal(trigger) != Decimal(protection):
+        raise BrokerError("Delta stop price aliases conflict", broker_id=BROKER_ID)
+    stop_price = trigger or (protection if variety != "bracket" else "")
     if price_type == "MARKET":
         payload["order_type"] = "market_order"
     elif price_type == "LIMIT":
@@ -420,7 +519,6 @@ def to_place_payload(order: Any, *, reduce_only: bool = False) -> dict[str, Any]
     else:
         raise BrokerError(f"Delta does not support price type {price_type!r}", broker_id=BROKER_ID)
 
-    variety = str(getattr(order, "variety", "regular") or "regular").lower()
     if variety in {"", "regular"}:
         pass
     elif variety == "bracket":
@@ -439,53 +537,171 @@ def to_place_payload(order: Any, *, reduce_only: bool = False) -> dict[str, Any]
     else:
         raise BrokerError(f"Delta does not support order variety {variety!r}", broker_id=BROKER_ID)
     if reduce_only:
-        payload["reduce_only"] = "true"
+        payload["reduce_only"] = True
     return payload
 
 
 def to_edit_payload(order_id: str, changes: Mapping[str, Any]) -> dict[str, Any]:
     """Map a modify request. Delta requires the order id and a product identity."""
+    if not isinstance(changes, Mapping):
+        raise BrokerError("Delta order edits must be a mapping", broker_id=BROKER_ID)
+    allowed = {
+        "product_id", "product_symbol", "symbol", "price", "limit_price", "quantity", "size", "trigger_price",
+        "stop_price", "trail_amount", "post_only", "mmp", "action", "exchange", "product", "pricetype", "strategy",
+    }
+    unknown = set(changes) - allowed
+    if unknown:
+        raise BrokerError(f"Unsupported Delta edit fields: {', '.join(sorted(map(str, unknown)))}", broker_id=BROKER_ID)
     payload: dict[str, Any] = {"id": _order_id(order_id)}
-    symbol = changes.get("product_symbol") or changes.get("symbol")
+    symbol = _request_alias(changes, ("product_symbol", "symbol"), product_symbol)
     product_id = changes.get("product_id")
+    if symbol is not None and "product_id" in changes:
+        raise BrokerError("Delta edits require exactly one product identity", broker_id=BROKER_ID)
     if symbol:
-        payload["product_symbol"] = product_symbol(symbol)
+        payload["product_symbol"] = symbol
     elif product_id not in (None, ""):
-        payload["product_id"] = int(product_id)
+        payload["product_id"] = _order_id(product_id)
     else:
         raise BrokerError("Delta order edits require product_symbol or product_id", broker_id=BROKER_ID)
-    if "price" in changes or "limit_price" in changes:
-        payload["limit_price"] = str(changes.get("limit_price", changes.get("price")))
-    if "quantity" in changes or "size" in changes:
-        payload["size"] = contract_size(changes.get("size", changes.get("quantity")))
-    if changes.get("stop_price") or changes.get("trigger_price"):
-        payload["stop_price"] = str(changes.get("stop_price") or changes.get("trigger_price"))
+    for field, names, convert in (
+        ("limit_price", ("limit_price", "price"), _required_price),
+        ("size", ("size", "quantity"), contract_size),
+        ("stop_price", ("stop_price", "trigger_price"), _required_price),
+        ("trail_amount", ("trail_amount",), _required_price),
+    ):
+        value = _request_alias(changes, names, convert)
+        if value is not None:
+            payload[field] = value
+    if "post_only" in changes:
+        if type(changes["post_only"]) is not bool:
+            raise BrokerError("Delta post_only must be a boolean", broker_id=BROKER_ID)
+        payload["post_only"] = changes["post_only"]
+    if "mmp" in changes:
+        if changes["mmp"] not in ("disabled", "mmp1", "mmp2", "mmp3", "mmp4", "mmp5"):
+            raise BrokerError("Delta mmp is invalid", broker_id=BROKER_ID)
+        payload["mmp"] = changes["mmp"]
     return payload
 
 
 def to_cancel_payload(order_id: str, *, product_id: int | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"id": _order_id(order_id)}
     if product_id is not None:
-        payload["product_id"] = int(product_id)
+        payload["product_id"] = _order_id(product_id)
     return payload
 
 
-def _order_id(raw: Any) -> int:
+def validate_create_payload(payload: Mapping[str, Any] | None) -> None:
+    """Validate native order intent before signing; never invent a product tick."""
+    if not isinstance(payload, Mapping):
+        raise BrokerError("Delta create body must be a mapping", broker_id=BROKER_ID)
+    allowed = {
+        "product_id", "product_symbol", "size", "side", "order_type", "time_in_force", "limit_price",
+        "stop_order_type", "stop_price", "trail_amount", "stop_trigger_method", "bracket_stop_trigger_method",
+        "bracket_stop_loss_price", "bracket_stop_loss_limit_price", "bracket_take_profit_price",
+        "bracket_take_profit_limit_price", "bracket_trail_amount", "mmp", "post_only", "reduce_only",
+        "client_order_id", "cancel_orders_accepted",
+    }
+    unknown = set(payload) - allowed
+    if unknown:
+        raise BrokerError(f"Unsupported Delta create fields: {', '.join(sorted(map(str, unknown)))}", broker_id=BROKER_ID)
+    identities = {"product_id", "product_symbol"}.intersection(payload)
+    if len(identities) != 1:
+        raise BrokerError("Delta create requires exactly one product identity", broker_id=BROKER_ID)
+    if "product_id" in identities:
+        _order_id(payload["product_id"])
+    else:
+        product_symbol(payload["product_symbol"])
+    contract_size(payload.get("size"))
+    if payload.get("side") not in ("buy", "sell"):
+        raise BrokerError("Delta native side must be buy or sell", broker_id=BROKER_ID)
+    order_type = payload.get("order_type")
+    if order_type not in ("market_order", "limit_order"):
+        raise BrokerError("Delta native order_type is invalid", broker_id=BROKER_ID)
+    if payload.get("time_in_force", "gtc") not in ("gtc", "ioc"):
+        raise BrokerError("Delta native time_in_force is invalid", broker_id=BROKER_ID)
+    if order_type == "limit_order" and "limit_price" not in payload:
+        raise InvalidPrice("Delta limit orders require limit_price", broker_id=BROKER_ID)
+    for field in ("reduce_only", "post_only", "cancel_orders_accepted"):
+        if field in payload and type(payload[field]) is not bool:
+            raise BrokerError(f"Delta {field} must be a boolean", broker_id=BROKER_ID)
+    if "mmp" in payload and payload["mmp"] not in ("disabled", "mmp1", "mmp2", "mmp3", "mmp4", "mmp5"):
+        raise BrokerError("Delta mmp is invalid", broker_id=BROKER_ID)
+    if "client_order_id" in payload:
+        value = payload["client_order_id"]
+        if not isinstance(value, str) or len(value) > 32:
+            raise BrokerError("Delta client_order_id must be a string of at most 32 characters", broker_id=BROKER_ID)
+    for field in ("stop_trigger_method", "bracket_stop_trigger_method"):
+        if field in payload and payload[field] not in ("mark_price", "last_traded_price", "spot_price"):
+            raise BrokerError(f"Delta {field} is invalid", broker_id=BROKER_ID)
+    if "stop_order_type" in payload:
+        if payload["stop_order_type"] not in ("stop_loss_order", "take_profit_order"):
+            raise BrokerError("Delta stop_order_type is invalid", broker_id=BROKER_ID)
+        if "stop_price" not in payload and "trail_amount" not in payload:
+            raise InvalidPrice("Delta conditional orders require stop_price or trail_amount", broker_id=BROKER_ID)
+    elif {"stop_price", "trail_amount", "stop_trigger_method"}.intersection(payload):
+        raise BrokerError("Delta conditional fields require stop_order_type", broker_id=BROKER_ID)
+    for field in (
+        "limit_price", "stop_price", "trail_amount", "bracket_stop_loss_price", "bracket_take_profit_price",
+        "bracket_trail_amount", "bracket_stop_loss_limit_price", "bracket_take_profit_limit_price",
+    ):
+        if field in payload:
+            _required_price(payload[field])
+
+
+def validate_contract_payload(payload: Mapping[str, Any], *, tick_size: str) -> None:
+    """Apply the companion's exact tick check at the existing mapper boundary."""
+    from .delta_order_mapping import validate_contract_payload as validate
+
     try:
-        return int(str(raw).strip())
+        validate(payload, tick_size=tick_size)
+    except ValueError as exc:
+        raise BrokerError(str(exc), broker_id=BROKER_ID) from exc
+
+
+def to_order_bracket_edit_payload(order_id: str, changes: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain the flat, order-attached bracket schema and existing error taxonomy."""
+    from .delta_order_mapping import to_order_bracket_edit_payload as build
+
+    try:
+        return build(order_id, changes)
+    except ValueError as exc:
+        raise BrokerError(str(exc), broker_id=BROKER_ID) from exc
+
+
+def to_position_bracket_create_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain nested position creation. No position-modification contract is known."""
+    from .delta_order_mapping import to_position_bracket_create_payload as build
+
+    try:
+        return build(request)
+    except ValueError as exc:
+        raise BrokerError(str(exc), broker_id=BROKER_ID) from exc
+
+
+def _order_id(raw: Any) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        raise BrokerError("Delta order/product id must be a positive integer", broker_id=BROKER_ID)
+    text = str(raw)
+    if not text or any(char not in "0123456789" for char in text):
+        raise BrokerError("Delta order/product id must be a positive integer", broker_id=BROKER_ID)
+    try:
+        value = int(text)
     except (TypeError, ValueError) as exc:
         raise BrokerError("Delta order id must be an integer", broker_id=BROKER_ID) from exc
+    if value <= 0:
+        raise BrokerError("Delta order/product id must be a positive integer", broker_id=BROKER_ID)
+    return value
 
 
 def _status(state: Any) -> str:
-    text = str(state or "").strip().lower()
+    if not isinstance(state, str):
+        return "UNKNOWN"
     return {
         "open": "OPEN",
         "pending": "PENDING",
-        "closed": "COMPLETE",
         "cancelled": "CANCELLED",
         "canceled": "CANCELLED",
-    }.get(text, text.upper() or "UNKNOWN")
+    }.get(state, "UNKNOWN")
 
 
 def _price_type(row: Mapping[str, Any]) -> str:
@@ -495,32 +711,70 @@ def _price_type(row: Mapping[str, Any]) -> str:
         return "SL"
     if str(row.get("order_type")) == "market_order":
         return "MARKET"
-    return "LIMIT"
+    return "LIMIT" if row.get("order_type") == "limit_order" else "UNKNOWN"
+
+
+def contract_evidence(raw: Any, *, positive: bool = False, signed: bool = False) -> int:
+    """Read an exact contract count. Signed position evidence is not an order total."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        raise BrokerReadResponseInvalid
+    text = str(raw)
+    digits = text[1:] if signed and text.startswith("-") else text
+    if not digits or any(char not in "0123456789" for char in digits):
+        raise BrokerReadResponseInvalid
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise BrokerReadResponseInvalid from exc
+    if (positive and value <= 0) or (not signed and value < 0):
+        raise BrokerReadResponseInvalid
+    return value
 
 
 def from_order(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalise one Delta order into reconciliation evidence."""
-    size = int(row.get("size") or 0)
-    unfilled = int(row.get("unfilled_size") or 0)
-    return {
+    """Normalise observed counts only; preserve detached native execution evidence."""
+    if not isinstance(row, Mapping):
+        raise BrokerReadResponseInvalid
+    native = deepcopy(dict(row))
+    result = {
         "orderid": str(row.get("id") or ""),
         "symbol": str(row.get("product_symbol") or ""),
         "exchange": "CRYPTO",
         "product": "MARGIN",
         "action": str(row.get("side") or "").upper(),
-        "quantity": str(size),
-        "filled_quantity": str(max(size - unfilled, 0)),
-        "price": str(row.get("limit_price") or "0"),
-        "trigger_price": str(row.get("stop_price") or "0"),
-        "average_price": str(row.get("average_fill_price") or "0"),
         "price_type": _price_type(row),
         "status": _status(row.get("state")),
         "product_id": row.get("product_id"),
+        "raw_status": native.get("state"),
+        "quantity_unit": "contracts",
+        "native": native,
     }
+    size = contract_evidence(row["size"], positive=True) if "size" in row else None
+    unfilled = contract_evidence(row["unfilled_size"]) if "unfilled_size" in row else None
+    if size is not None:
+        result["quantity"] = str(size)
+    if unfilled is not None:
+        result["remaining_quantity"] = str(unfilled)
+    if size is not None and unfilled is not None:
+        if unfilled > size:
+            raise BrokerReadResponseInvalid
+        result["filled_quantity"] = str(size - unfilled)
+        if row.get("state") == "closed" and unfilled == 0:
+            result["status"] = "COMPLETE"
+    result["attempt_state"] = {
+        "OPEN": "WORKING", "CANCELLED": "CANCELLED", "COMPLETE": "FILLED",
+    }.get(result["status"], "UNKNOWN")
+    for field, source in (("price", "limit_price"), ("trigger_price", "stop_price"),
+                          ("average_price", "average_fill_price")):
+        if source in row and row[source] not in (None, ""):
+            result[field] = str(row[source])
+    return result
 
 
 def from_position(row: Mapping[str, Any]) -> dict[str, Any]:
-    size = int(row.get("size") or 0)
+    if not isinstance(row, Mapping):
+        raise BrokerReadResponseInvalid
+    size = contract_evidence(row.get("size"), signed=True)
     return {
         "symbol": str(row.get("product_symbol") or ""),
         "exchange": "CRYPTO",
@@ -530,19 +784,27 @@ def from_position(row: Mapping[str, Any]) -> dict[str, Any]:
         "ltp": str(row.get("mark_price") or "0"),
         "pnl": str(row.get("unrealized_pnl") or "0"),
         "product_id": row.get("product_id"),
+        "quantity_unit": "contracts",
+        "native": deepcopy(dict(row)),
     }
 
 
 def from_fill(row: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(row, Mapping):
+        raise BrokerReadResponseInvalid
+    size = contract_evidence(row.get("size"), positive=True)
     return {
         "orderid": str(row.get("order_id") or ""),
         "symbol": str(row.get("product_symbol") or ""),
         "exchange": "CRYPTO",
         "action": str(row.get("side") or "").upper(),
-        "quantity": str(row.get("size") or "0"),
+        "quantity": str(size),
         "price": str(row.get("price") or "0"),
         "product": str(row.get("fill_type") or ""),
         "timestamp": str(row.get("created_at") or ""),
+        "fill_id": row.get("id"),
+        "quantity_unit": "contracts",
+        "native": deepcopy(dict(row)),
     }
 
 

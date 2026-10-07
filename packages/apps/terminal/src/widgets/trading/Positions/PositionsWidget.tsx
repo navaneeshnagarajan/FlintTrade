@@ -1345,7 +1345,15 @@ function PositionsWidget(props: WidgetProps) {
   return (
     <div
       ref={containerRef}
-      className="h-full flex flex-col overflow-hidden text-xs bg-surface-base"
+      className={cn(
+        "h-full flex flex-col text-xs bg-surface-base",
+        // Leave a pixel beyond the last row: fractional splitter heights and
+        // integer scroll extents otherwise crop its cell border at scroll end.
+        view === "table" ? "overflow-y-auto pb-px" : "overflow-hidden",
+      )}
+      role="region"
+      aria-label="Positions book"
+      tabIndex={0}
       data-tour-target="positions"
     >
       {/* Header */}
@@ -1482,13 +1490,15 @@ function PositionsWidget(props: WidgetProps) {
       ) : null}
 
       {!isExplore && !ordersAvailable && (
-        <div
-          role="alert"
-          data-testid="exit-orders-unavailable"
-          className="px-3 py-2 mx-3 mt-2 bg-warning/10 border border-warning/20 rounded-md text-xs text-warning shrink-0"
-        >
-          Broker orders are unavailable. Reconcile them before another exit.
-          {ordersQueryError instanceof Error && ordersQueryError.message ? ` ${ordersQueryError.message}` : ""}
+        <div className="sticky top-0 z-20 shrink-0 bg-surface-base pt-2">
+          <div
+            role="alert"
+            data-testid="exit-orders-unavailable"
+            className="px-3 py-2 mx-3 bg-warning/10 border border-warning/20 rounded-md text-xs text-warning"
+          >
+            Broker orders are unavailable. Reconcile them before another exit.
+            {ordersQueryError instanceof Error && ordersQueryError.message ? ` ${ordersQueryError.message}` : ""}
+          </div>
         </div>
       )}
 
@@ -1564,7 +1574,10 @@ function PositionsWidget(props: WidgetProps) {
           onRevealRows={revealRows}
         />
       ) : (
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col">
+          {/* The table and tracker share the book's scroller. Their intrinsic
+              height must not collapse to a zero-height nested scroller when a
+              warning consumes most of a compact panel. */}
           {/* Position-status tracker — absorbed from the retired Dashboard
               widget. One segment per broker row, toned by the row's kernel
               mark-to-market (never the raw broker `pnl`, which is wrong for
@@ -1597,7 +1610,7 @@ function PositionsWidget(props: WidgetProps) {
           {isNarrow ? (
             <NarrowBookCards rows={narrowCards} ariaLabel="Positions" />
           ) : (
-          <div className="flex-1 overflow-auto min-h-0">
+          <div className="flex-1">
           <div className="overflow-x-auto min-w-0">
           <Table>
             <TableHeader className="sticky top-0 bg-surface-card z-10">

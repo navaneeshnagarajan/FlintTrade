@@ -691,9 +691,14 @@ class KotakNeoAdapter(BrokerAdapter):
                 broker_id="kotakneo",
             )
         try:
-            M.validate_v3_order(order)
+            product = M.validate_v3_order(order)[2]
         except M.KotakNeoMappingError as exc:
             raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        if product == "MTF":
+            raise UnsupportedCapabilityError(
+                "Kotak Neo MTF placement is documented, but segment/instrument/account eligibility is unverified",
+                broker_id="kotakneo",
+            )
         trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         tag = session.algo_id or None
         try:
@@ -1466,9 +1471,14 @@ class KotakNeoAdapter(BrokerAdapter):
         margin argument and unresolved/non-numeric tokens fail closed.
         """
         try:
-            M.validate_v3_order(order)
+            product = M.validate_v3_order(order)[2]
         except M.KotakNeoMappingError as exc:
             raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        if product == "MTF":
+            raise UnsupportedCapabilityError(
+                "Kotak Neo MTF margin eligibility is unverified by the local policy",
+                broker_id="kotakneo",
+            )
         instrument_token = await self._resolve_token(session, order.symbol, order.exchange)
         try:
             params = M.to_margin_params(order, instrument_token)

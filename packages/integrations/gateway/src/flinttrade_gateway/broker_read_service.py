@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import math
 import threading
 import time
@@ -82,6 +83,7 @@ from flinttrade_core.workspace_migrations import (
 )
 from flinttrade_engine.request_context import RequestContext
 
+from .json_evidence import copy_json_evidence
 from .registry import (
     BrokerRegistry,
     ConnectedRegistrySession,
@@ -1619,6 +1621,112 @@ class BrokerReadOwner:
         finally:
             self._end(grant)
 
+    @classmethod
+    def _order_number_text(cls, raw: dict[str, object], *names: str) -> str | None:
+        """Copy every supplied numeric alias; refuse conflicts, never infer."""
+        values: list[str] = []
+        for name in names:
+            value = raw.get(name)
+            if value is None or (type(value) is str and not value.strip()):
+                continue
+            text = cls._number_text(raw, name)
+            if text is None:
+                raise ValueError
+            values.append(text)
+        if not values:
+            return None
+        if any(Decimal(value) != Decimal(values[0]) for value in values[1:]):
+            raise ValueError
+        return values[0]
+
+    @staticmethod
+    def _order_observation_json(raw: dict[str, object]) -> str:
+        """Detach exact JSON evidence without conversion/deepcopy hooks."""
+        return json.dumps(copy_json_evidence(raw), allow_nan=False, separators=(",", ":"))
+
+    def _native_order_observation_json(self, row: dict[str, object]) -> str | None:
+        if not any(name in row for name in ("gtt_order_id", "resource_status", "entry_status", "rules")):
+            return None
+        # Reuse the same exact-JSON validator as native Dhan leg observations.
+        # Validate before inspecting aliases, so opaque hooks never run here.
+        encoded = self._order_observation_json(row)
+        views = [row]
+        if "broker_fields" in row:
+            views.append(self._record(row["broker_fields"]))
+        rule_observations = []
+        for view in views:
+            self._text_alias(view, "gtt_order_id", "gttOrderId")
+            self._text_alias(view, "resource_status", "resourceStatus")
+            self._text_alias(view, "entry_status", "entryStatus")
+            self._text_alias(view, "status")
+            self._text_alias(view, "type")
+            self._order_number_text(view, "stop_loss_trailing_gap", "stopLossTrailingGap")
+            self._order_number_text(view, "expires_at", "expiresAt")
+            rules = view.get("rules")
+            if type(rules) is not list:
+                raise ValueError
+            strategies: set[str] = set()
+            observed_rules = {}
+            for child in rules:
+                rule = self._record(child)
+                strategy = self._text_alias(rule, "strategy", required=True)
+                if strategy is None:
+                    raise ValueError
+                strategy = strategy.upper()
+                if strategy not in {"ENTRY", "TARGET", "STOPLOSS"} or strategy in strategies:
+                    raise ValueError
+                strategies.add(strategy)
+                values = {}
+                for names in (
+                    ("status", "order_status", "orderStatus"), ("message",), ("trigger_type", "triggerType"),
+                    ("transaction_type", "transactionType", "action"), ("order_id", "orderId"),
+                    ("exchange_order_id", "exchangeOrderId"), ("parent_order_id", "parentOrderId"),
+                ):
+                    text = self._text_alias(rule, *names)
+                    values[names[0]] = text if text is not None and text.strip() else None
+                for names in (
+                    ("trigger_price", "triggerPrice"), ("trailing_gap", "trailingGap"),
+                    ("market_protection", "marketProtection"), ("quantity",),
+                    ("filled_quantity", "filledQty", "tradedQty"), ("remaining_quantity", "remainingQuantity"),
+                    ("triggered_quantity", "triggeredQuantity"),
+                ):
+                    number = self._order_number_text(rule, *names)
+                    values[names[0]] = Decimal(number) if number is not None else None
+                observed_rules[strategy] = values
+                if strategy == "ENTRY" and any(name in view for name in ("entry_status", "entryStatus")):
+                    if self._text_alias(view, "entry_status", "entryStatus") != self._text_alias(
+                        rule, "status", "order_status", "orderStatus",
+                    ):
+                        raise ValueError
+                if strategy == "STOPLOSS" and any(
+                    name in view for name in ("stop_loss_trailing_gap", "stopLossTrailingGap")
+                ):
+                    projected = self._order_number_text(view, "stop_loss_trailing_gap", "stopLossTrailingGap")
+                    native = self._order_number_text(rule, "trailing_gap", "trailingGap")
+                    if (projected is None) != (native is None) or (
+                        projected is not None and native is not None and Decimal(projected) != Decimal(native)
+                    ):
+                        raise ValueError
+            if "ENTRY" not in strategies:
+                raise ValueError
+            self._text_alias(view, "status", "resource_status", "resourceStatus")
+            rule_observations.append(observed_rules)
+        # Normalised and native copies may differ in representation (null vs
+        # empty text, integer vs exact decimal text), never in observed meaning.
+        if len(rule_observations) == 2 and rule_observations[0] != rule_observations[1]:
+            raise ValueError
+        self._text_alias(row, "orderid", "order_id", "gtt_order_id", "gttOrderId")
+        if len(views) == 2:
+            for names in (("gtt_order_id", "gttOrderId"), ("type",)):
+                if self._text_alias(row, *names) != self._text_alias(views[1], *names):
+                    raise ValueError
+            if any(name in row for name in ("resource_status", "resourceStatus")) and (
+                self._text_alias(row, "resource_status", "resourceStatus")
+                != self._text_alias(views[1], "status", "resource_status", "resourceStatus")
+            ):
+                raise ValueError
+        return encoded
+
     def _order_state(self, item: object, family: BrokerOrderFamily) -> OrderStateSnapshot:
         row = self._record(item, OrderStatus, GttTrigger)
         if type(item) is GttTrigger:
@@ -1649,10 +1757,23 @@ class BrokerReadOwner:
                     self._text_alias(leg, "status", "orderStatus"),
                     self._text_alias(leg, "order_id", "orderId"),
                     self._text_alias(leg, "exchange_order_id", "exchangeOrderId"),
-                    self._number_text(leg, "quantity"),
-                    self._number_text(leg, "filled_quantity", "filledQty"),
-                    self._number_text(leg, "price"),
-                    self._number_text(leg, "trigger_price", "triggerPrice"),
+                    self._order_number_text(leg, "quantity"),
+                    self._order_number_text(leg, "filled_quantity", "filledQty", "tradedQty"),
+                    self._order_number_text(leg, "price"),
+                    self._order_number_text(leg, "trigger_price", "triggerPrice"),
+                    total_quantity=self._order_number_text(leg, "total_quantity", "totalQuatity"),
+                    remaining_quantity=self._order_number_text(leg, "remaining_quantity", "remainingQuantity"),
+                    triggered_quantity=self._order_number_text(leg, "triggered_quantity", "triggeredQuantity"),
+                    trailing_jump=self._order_number_text(leg, "trailing_jump", "trailingJump"),
+                    target_price=self._order_number_text(leg, "target_price", "targetPrice"),
+                    stop_loss_price=self._order_number_text(leg, "stop_loss_price", "stopLossPrice"),
+                    average_price=self._order_number_text(leg, "average_price", "averageTradedPrice"),
+                    disclosed_quantity=self._order_number_text(leg, "disclosed_quantity", "disclosedQuantity"),
+                    parent_order_id=self._text_alias(leg, "parent_order_id", "parentOrderId"),
+                    created_at=self._text_alias(leg, "created_at", "createTime"),
+                    updated_at=self._text_alias(leg, "updated_at", "updateTime"),
+                    exchange_time=self._text_alias(leg, "exchange_time", "exchangeTime"),
+                    raw_observation_json=self._order_observation_json(leg),
                 )
             )
         order_flag = self._text(row, "order_flag")
@@ -1677,6 +1798,13 @@ class BrokerReadOwner:
                 )
             )
         legs = tuple(legs_list)
+        # The pinned Upstox resource observes integer epoch times. Preserve
+        # their exact text without guessing units or converting to a date.
+        created_at = (
+            str(row["created_at"])
+            if "gtt_order_id" in row and type(row.get("created_at")) is int
+            else self._text(row, "created_at")
+        )
         return OrderStateSnapshot(
             family, source_family, self._text_alias(row, "orderid", "order_id"),
             self._text(row, "status", required=True), self._text(row, "symbol"), self._text(row, "instrument_id"),
@@ -1688,6 +1816,19 @@ class BrokerReadOwner:
             self._text(row, "underlying"), self._text(row, "safety_order_id"), self._text(row, "broker_order_id"),
             self._text(row, "raw_broker_order_id"), self._text(row, "parent_order_id"), self._text(row, "exchange_order_id"),
             self._text(row, "leg_name"), self._boolean(row, "margin_unfunded"), order_flag, legs,
+            broker_product=self._text(row, "broker_product"),
+            broker_order_type=self._text(row, "broker_order_type"),
+            validity=self._text(row, "validity"),
+            created_at=created_at,
+            updated_at=self._text(row, "updated_at"),
+            exchange_time=self._text(row, "exchange_time"),
+            remaining_quantity=self._order_number_text(row, "remaining_quantity", "remainingQuantity"),
+            target_price=self._order_number_text(row, "target_price", "targetPrice"),
+            stop_loss_price=self._order_number_text(row, "stop_loss_price", "stopLossPrice"),
+            trailing_jump=self._order_number_text(row, "trailing_jump", "trailingJump"),
+            average_price=self._order_number_text(row, "average_price", "averageTradedPrice"),
+            leg_details_valid=self._boolean(row, "leg_details_valid"),
+            raw_observation_json=self._native_order_observation_json(row),
         )
 
     async def _trades(self, facade: _BrokerReadFacade):

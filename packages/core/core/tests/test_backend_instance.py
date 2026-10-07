@@ -479,9 +479,11 @@ def test_guardian_handoff_binds_child_and_revokes_on_parent_release(tmp_path, mo
     os.close(result_write)
     try:
         handoff.publish(child)
-        import select
+        import selectors
 
-        assert select.select([result_read], [], [], 5)[0]
+        with selectors.DefaultSelector() as readiness:
+            readiness.register(result_read, selectors.EVENT_READ)
+            assert readiness.select(5)
         assert os.read(result_read, 4) == b"live"
         if termination == "release":
             lease.release()
@@ -501,9 +503,15 @@ def test_guardian_rejects_substituted_handoff_and_forked_local_proof(tmp_path, m
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     lease = module.acquire_backend_instance_lease()
     local_proof = lease.proof
-    handoff = module.prepare_backend_lease_handoff(lease)
+    # A fork-inherited local proof must refuse without a guardian handshake.
+    # Publishing an unused channel after that child exits is a fixture race,
+    # not evidence that the inherited capability was accepted.
+    handoff = None if tamper == "inherited_local_proof" else module.prepare_backend_lease_handoff(lease)
+    release_read, release_write = os.pipe() if tamper == "owner" else (None, None)
     child = os.fork()
     if child == 0:
+        if release_write is not None:
+            os.close(release_write)
         try:
             if tamper == "nonce":
                 handoff._nonce = b"x" * 32
@@ -515,17 +523,37 @@ def test_guardian_rejects_substituted_handoff_and_forked_local_proof(tmp_path, m
                 else:
                     handoff.claim()
             except module.BackendLeaseUnavailable:
+                if release_read is not None:
+                    import selectors
+
+                    # Owner substitution refuses before reading its channel.
+                    # Retain the child's real pipe endpoint until publication
+                    # completes so this case cannot race an unrelated EPIPE.
+                    with selectors.DefaultSelector() as readiness:
+                        readiness.register(release_read, selectors.EVENT_READ)
+                        assert readiness.select(5)
+                    assert os.read(release_read, 1) == b"1"
                 os._exit(0)
             os._exit(1)
         except BaseException:
             os._exit(2)
+    if release_read is not None:
+        os.close(release_read)
     try:
-        handoff.publish(child + 1 if tamper == "child" else child)
-        with pytest.raises(module.BackendLeaseUnavailable):
-            handoff.publish(child)
+        if handoff is not None:
+            handoff.publish(child + 1 if tamper == "child" else child)
+            with pytest.raises(module.BackendLeaseUnavailable):
+                handoff.publish(child)
+        if release_write is not None:
+            assert os.write(release_write, b"1") == 1
         assert os.waitpid(child, 0)[1] == 0
+        assert module.require_backend_lease_proof(local_proof) is local_proof
     finally:
         lease.release()
+        if release_write is not None:
+            os.close(release_write)
+        with suppress(ChildProcessError):
+            os.waitpid(child, 0)
 
 
 def test_replaced_kernel_lock_revokes_live_guardian_channel(tmp_path, monkeypatch):

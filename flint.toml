@@ -148,4 +148,4 @@ mcx_end = "23:55"
 # Implemented native broker names.
 # Mirrors BROKER_CATALOG in packages/integrations/gateway/src/flinttrade_gateway/adapter.py — keep in sync
 # whenever native adapters change.
-supported = ["Dhan", "Upstox", "Kotak Neo", "IndMoney", "Groww"]
+supported = ["Dhan", "Upstox", "Kotak Neo", "INDmoney", "Groww", "Delta Exchange"]

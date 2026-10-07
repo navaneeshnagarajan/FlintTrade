@@ -7,6 +7,7 @@ import math
 from collections.abc import Collection, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any
 
@@ -1100,6 +1101,41 @@ def _order_record_value(row: Any, fallback: Any, *keys: str) -> Any:
     return _field(fallback, *keys) if fallback is not None else value
 
 
+def _super_quantity_evidence(row: Any) -> dict[str, int | None]:
+    """Validate every consumed Super alias before selecting a scalar or fallback."""
+    evidence: dict[str, int | None] = {}
+    for field_name, aliases in {
+        "quantity": ("quantity", "qty", "order_quantity"),
+        "filled_quantity": ("filled_quantity", "filled_qty", "filledQty", "tradedQty"),
+        "remaining_quantity": ("remaining_quantity", "remainingQuantity"),
+    }.items():
+        numbers: list[int] = []
+        for alias in aliases:
+            value = _field(row, alias)
+            if value is None or (type(value) is str and not value.strip()):
+                continue
+            if type(value) not in (str, int, float):
+                raise PortfolioSafetyStateError("Authoritative super-order quantity evidence is invalid")
+            try:
+                number = Decimal(str(value))
+            except InvalidOperation:
+                raise PortfolioSafetyStateError("Authoritative super-order quantity evidence is invalid") from None
+            if not number.is_finite() or number < 0 or number != number.to_integral_value():
+                raise PortfolioSafetyStateError("Authoritative super-order quantities must be non-negative whole numbers")
+            numbers.append(int(number))
+        if numbers and any(number != numbers[0] for number in numbers[1:]):
+            raise PortfolioSafetyStateError("Authoritative super-order quantity aliases disagree")
+        evidence[field_name] = numbers[0] if numbers else None
+    quantity, filled, remaining = (evidence[key] for key in ("quantity", "filled_quantity", "remaining_quantity"))
+    if quantity is not None and (
+        (filled is not None and filled > quantity)
+        or (remaining is not None and remaining > quantity)
+        or (filled is not None and remaining is not None and filled + remaining > quantity)
+    ):
+        raise PortfolioSafetyStateError("Authoritative super-order quantity is inconsistent")
+    return evidence
+
+
 def _select_super_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, Any]:
     leg_name = _text(changes.get("leg_name") or "ENTRY_LEG").upper()
     if leg_name == "ENTRY_LEG":
@@ -1110,7 +1146,19 @@ def _select_super_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, Any
     matched = [leg for leg in legs if _text(_field(leg, "leg_name", "legName")).upper() == leg_name]
     if len(matched) != 1:
         raise PortfolioSafetyStateError("Authoritative super-order leg is unavailable")
-    return matched[0], parent
+    selected = matched[0]
+    evidence = _super_quantity_evidence(selected)
+    if _field(parent, "leg_details_valid") is not None or _field(selected, "legName") is not None:
+        # Native Super legs share a resource orderId. Their totalQuatity and
+        # triggeredQuantity are separate observations, not evidence of this
+        # leg's confirmed fill or permission to borrow the entry quantity/fill.
+        if _field(parent, "leg_details_valid") is False:
+            raise PortfolioSafetyStateError("Authoritative super-order leg details are incomplete")
+        if evidence["quantity"] is None:
+            raise PortfolioSafetyStateError("Authoritative super-order leg quantity is unavailable")
+        if evidence["filled_quantity"] is None:
+            raise PortfolioSafetyStateError("Authoritative super-order leg filled quantity is unavailable")
+    return selected, parent
 
 
 def _select_forever_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, Any]:
@@ -1605,7 +1653,20 @@ async def classify_modify_intent(
         selected, fallback = _select_forever_leg(matches[0], changes)
     else:
         selected, fallback = matches[0], None
+    super_evidence = None
+    if family == "super" and str(adapter_id).lower() == "dhan":
+        super_evidence = _super_quantity_evidence(selected)
+        if fallback is not None and any(super_evidence[key] is None for key in ("quantity", "filled_quantity")):
+            # Only the legacy canonical shape can get here with missing child
+            # fields; native named legs already require independent evidence.
+            fallback_evidence = _super_quantity_evidence(fallback)
+            for key in ("quantity", "filled_quantity"):
+                if super_evidence[key] is None:
+                    super_evidence[key] = fallback_evidence[key]
+            _super_quantity_evidence(super_evidence)
     current = _normalise_authoritative_order(selected, fallback)
+    if super_evidence is not None:
+        current.update({key: super_evidence[key] for key in ("quantity", "filled_quantity")})
     if current["status"] not in _ACTIVE_ORDER_STATUSES:
         raise PortfolioSafetyStateError("Authoritative order is not active and modifiable")
     if (

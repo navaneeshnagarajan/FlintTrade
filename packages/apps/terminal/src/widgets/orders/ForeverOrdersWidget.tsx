@@ -124,6 +124,17 @@ function dhanModifyPriceType(value: string): string {
   return "";
 }
 
+function ForeverOrdersErrorNotice({ error }: { error: unknown }) {
+  const unsupportedDetail = error instanceof Error && "status" in error && error.status === 501
+    ? error.message : null;
+  return (
+    <>
+      <BrokerOrdersErrorNotice error={error} />
+      {unsupportedDetail && <p role="alert" className="text-xs text-warning break-words">{unsupportedDetail}</p>}
+    </>
+  );
+}
+
 export default function ForeverOrdersWidget() {
   const appMode = useModeStore((s) => s.mode);
   const isLive = appMode === "live";
@@ -180,7 +191,8 @@ export default function ForeverOrdersWidget() {
   const placeMutation = usePlaceForeverOrder();
   const modifyMutation = useModifyForeverOrder();
   const cancelMutation = useCancelForeverOrder();
-  const [cancelAcknowledgement, setCancelAcknowledgement] = useState<CancelAcknowledgement | null>(null);
+  // In-session presentation only, not a durable intent ledger or write authority.
+  const [cancelAcknowledgements, setCancelAcknowledgements] = useState<CancelAcknowledgement[]>([]);
 
   // Mutation variables identify the response's target; a response from another
   // account must never be shown as the selected account's result.
@@ -204,35 +216,44 @@ export default function ForeverOrdersWidget() {
   useEffect(() => {
     const orderId = cancelMutation.variables?.order_id;
     if (!cancelResultMatches || !cancelMutation.isSuccess || orderId === undefined) return;
-    setCancelAcknowledgement((previous) => {
-      if (previous?.scope === presentationScope && previous.orderId === orderId
-        && previous.submittedAt === cancelMutation.submittedAt) return previous;
-      return {
+    setCancelAcknowledgements((previous) => {
+      const existing = previous.find((ack) => ack.scope === presentationScope && ack.orderId === orderId);
+      if (existing && existing.submittedAt === cancelMutation.submittedAt) return previous;
+      const acknowledgement = {
         scope: presentationScope, orderId, submittedAt: cancelMutation.submittedAt,
         receivedAt: Date.now(), listUpdatedAt: listQuery.dataUpdatedAt ?? 0, reconciled: false,
       };
+      return [...previous.filter((ack) => ack !== existing), acknowledgement];
     });
   }, [cancelResultMatches, cancelMutation.isSuccess, cancelMutation.variables?.order_id,
     cancelMutation.submittedAt, presentationScope, listQuery.dataUpdatedAt]);
 
   useEffect(() => {
-    const acknowledgement = cancelAcknowledgement;
-    if (acknowledgement === null || acknowledgement.reconciled
-      || acknowledgement.scope !== presentationScope || !listAvailable || listQuery.isFetching
-      || !(listQuery.dataUpdatedAt > acknowledgement.receivedAt)
-      || !(listQuery.dataUpdatedAt > acknowledgement.listUpdatedAt)) return;
-    const rows = listQuery.data?.filter((row) => extractRowId(row, ORDER_ID_KEYS) === acknowledgement.orderId) ?? [];
-    // Only newer successful evidence for this trigger/account resolves its ACK.
-    // Missing rows and terminal triggers say nothing about spawned children.
-    if (rows.length === 0 || !rows.every((row) => {
-      if ((row.broker !== undefined && String(row.broker).toLowerCase() !== selectedBroker)
-        || (row.account_id !== undefined && row.account_id !== target?.account_id)) return false;
-      const statuses = ["status", "order_status", "orderStatus", "gtt_status"]
-        .filter((key) => row[key] !== undefined);
-      return statuses.length > 0 && statuses.every((key) => !orderStatusIsOpen(String(row[key] ?? "")));
-    })) return;
-    setCancelAcknowledgement({ ...acknowledgement, reconciled: true });
-  }, [cancelAcknowledgement, presentationScope, listAvailable, listQuery.isFetching,
+    if (!listAvailable || listQuery.isFetching) return;
+    setCancelAcknowledgements((previous) => {
+      let changed = false;
+      const next = previous.map((acknowledgement) => {
+        if (acknowledgement.reconciled || acknowledgement.scope !== presentationScope
+          || !(listQuery.dataUpdatedAt > acknowledgement.receivedAt)
+          || !(listQuery.dataUpdatedAt > acknowledgement.listUpdatedAt)) return acknowledgement;
+        const rows = listQuery.data?.filter((row) => extractRowId(row, ORDER_ID_KEYS) === acknowledgement.orderId) ?? [];
+        // Only newer successful evidence for this trigger/account resolves its ACK.
+        // Missing rows and terminal triggers say nothing about spawned children.
+        if (rows.length === 0 || !rows.every((row) => {
+          if ((row.broker !== undefined && String(row.broker).toLowerCase() !== selectedBroker)
+            || (row.account_id !== undefined && row.account_id !== target?.account_id)) return false;
+          const identities = ORDER_ID_KEYS.filter((key) => row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "");
+          if (!identities.every((key) => String(row[key]) === acknowledgement.orderId)) return false;
+          const statuses = ["status", "order_status", "orderStatus", "gtt_status"]
+            .filter((key) => row[key] !== undefined);
+          return statuses.length > 0 && statuses.every((key) => !orderStatusIsOpen(String(row[key] ?? "")));
+        })) return acknowledgement;
+        changed = true;
+        return { ...acknowledgement, reconciled: true };
+      });
+      return changed ? next : previous;
+    });
+  }, [cancelAcknowledgements, presentationScope, listAvailable, listQuery.isFetching,
     listQuery.dataUpdatedAt, listQuery.data, selectedBroker, target?.account_id]);
 
   useEffect(() => {
@@ -437,11 +458,10 @@ export default function ForeverOrdersWidget() {
   function rowActions(row: BrokerOrderRow) {
     const orderId = extractRowId(row, ORDER_ID_KEYS);
     const cancelPending = orderStatusIsCancelPending(rowText(row, ["status", "order_status", "orderStatus", "gtt_status"]))
+      || cancelAcknowledgements.some((ack) => ack.scope === presentationScope && ack.orderId === orderId && !ack.reconciled)
       || (cancelResultMatches && cancelMutation.isSuccess && cancelMutation.variables?.order_id === orderId
-        && !(cancelAcknowledgement?.scope === presentationScope
-          && cancelAcknowledgement.orderId === orderId
-          && cancelAcknowledgement.submittedAt === cancelMutation.submittedAt
-          && cancelAcknowledgement.reconciled));
+        && !cancelAcknowledgements.some((ack) => ack.scope === presentationScope
+          && ack.orderId === orderId && ack.submittedAt === cancelMutation.submittedAt && ack.reconciled));
     return (
       <div className="flex items-center gap-1">
         {cancelPending && <span className="text-xxs text-warning">{CANCEL_PENDING_MESSAGE}</span>}
@@ -749,7 +769,7 @@ export default function ForeverOrdersWidget() {
           )}
         </form>
 
-        {placeResultMatches && placeMutation.isError && <BrokerOrdersErrorNotice error={placeMutation.error} />}
+        {placeResultMatches && placeMutation.isError && <ForeverOrdersErrorNotice error={placeMutation.error} />}
         {placeStatusUnknown && (
           <p role="alert" className="text-xs text-warning">
             GTT placement status unknown. A trigger or order may still execute.
@@ -955,16 +975,23 @@ export default function ForeverOrdersWidget() {
             </Button>
           </form>
         )}
-        {modifyResultMatches && modifyMutation.isError && <BrokerOrdersErrorNotice error={modifyMutation.error} />}
+        {modifyResultMatches && modifyMutation.isError && <ForeverOrdersErrorNotice error={modifyMutation.error} />}
         {modifyStatusUnknown && (
           <p role="alert" className="text-xs text-warning">
             GTT modification status unknown. The trigger or order may still execute.
           </p>
         )}
-        {cancelResultMatches && cancelMutation.isError && <BrokerOrdersErrorNotice error={cancelMutation.error} />}
+        {cancelResultMatches && cancelMutation.isError && <ForeverOrdersErrorNotice error={cancelMutation.error} />}
         {cancelStatusUnknown && (
           <p role="alert" className="text-xs text-warning">Cancel status unknown. This order may still fill.</p>
         )}
+        {isLive && cancelAcknowledgements.filter((ack) => ack.scope === presentationScope && !ack.reconciled
+          && !listQuery.data?.some((row) => extractRowId(row, ORDER_ID_KEYS) === ack.orderId)).map((ack) => (
+            <div key={ack.orderId} role="alert" aria-label={`Cancellation for ${ack.orderId}`} className="text-xs text-warning break-words">
+              <span className="font-mono">#{ack.orderId}: </span>
+              <span>{CANCEL_PENDING_MESSAGE}</span>
+            </div>
+          ))}
 
         {/* Listing */}
         {isLive && target !== null && !listAvailable && (
@@ -972,7 +999,7 @@ export default function ForeverOrdersWidget() {
             Broker GTT orders are unavailable. Reconcile them before another request.
           </p>
         )}
-        {isLive && target !== null && listQuery.isError && <BrokerOrdersErrorNotice error={listQuery.error} />}
+        {isLive && target !== null && listQuery.isError && <ForeverOrdersErrorNotice error={listQuery.error} />}
         {isLive && target !== null && (
           <p className="text-xs text-text-muted">
             Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders.

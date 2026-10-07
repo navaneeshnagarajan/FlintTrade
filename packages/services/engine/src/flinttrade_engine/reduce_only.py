@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 
 _EXIT_OPEN = frozenset({
@@ -496,10 +496,15 @@ def contract_key(
     ``adapter`` is its own slot. Two brokers that both use account ``default``
     do not share a reservation.
     """
+    from flinttrade_core.broker_identity import BrokerSelector  # noqa: PLC0415
+
+    # Account IDs are opaque. Validate before using a lock/store key; never
+    # trim, case-fold or turn a malformed supplied ID into another account.
+    selector = BrokerSelector(str(adapter).strip().lower(), account)
     return (
         _norm(mode),
-        _norm(adapter) or "",
-        _norm(account) or "default",
+        _norm(selector.adapter_id),
+        selector.account_id,
         _norm(symbol),
         _norm(exchange),
         _norm(product) or "MIS",
@@ -513,6 +518,7 @@ class _BoundExit:
     order_id: str
     quantity: int
     position_net: int
+    covered: bool = False
 
 
 _lock_guard = threading.Lock()
@@ -557,11 +563,11 @@ def release_exit(key: ContractKey, quantity: int) -> None:
             _reserved[key] = left
 
 
-def cover_reserved_exit(key: ContractKey, covered: int) -> None:
-    """Drop reserved quantity the broker book already shows as an open exit."""
-    if covered < 1:
-        return
-    release_exit(key, covered)
+def cover_reserved_exit(
+    key: ContractKey, orders: Sequence[Mapping[str, object]], *, position_net: int,
+) -> None:
+    """Cover only exact scoped acknowledged observations, never book totals."""
+    reconcile_reserved_exit(key, orders=orders, position_net=position_net)
 
 
 def note_reserved_order(
@@ -570,10 +576,10 @@ def note_reserved_order(
     quantity: int,
     position_net: int,
 ) -> None:
-    """Remember a successful reduce-only place so a later read can release it.
+    """Remember an ACK or uncertain invocation against its existing local hold.
 
-    An empty ``order_id`` is still recorded. The next read then releases the
-    hold only when the position has moved by the reserved quantity.
+    An empty ID is unresolved, not evidence of non-execution. Position movement
+    and unrelated book totals cannot identify or release any such hold.
     """
     if quantity < 1:
         return
@@ -582,13 +588,58 @@ def note_reserved_order(
         _bound_exits.setdefault(key, []).append(bound)
 
 
-def _order_by_id(orders: Sequence[Mapping[str, object]], order_id: str) -> Mapping[str, object] | None:
-    if not order_id:
+def _bound_exit_observation(
+    key: ContractKey, item: _BoundExit, orders: Sequence[Mapping[str, object]],
+) -> str | None:
+    """Return a coherent exact ACK's lifecycle state, or no coverage proof."""
+    if not item.order_id:
         return None
-    for order in orders:
-        if isinstance(order, Mapping) and _order_id(order) == order_id:
-            return order
-    return None
+    rows = [row for row in orders if isinstance(row, Mapping) and any(
+        type(row.get(name)) is str and row[name] == item.order_id
+        for name in ("order_id", "orderid", "orderId", "broker_order_id")
+    )]
+    if not rows:
+        return None
+    _mode, adapter, account, symbol, exchange, product = key
+    action = "SELL" if item.position_net > 0 else "BUY"
+    observed = None
+    for row in rows:
+        if (
+            not _same_contract(row, symbol, exchange, product)
+            or _row_text(row, "action", "transaction_type") != action
+            or not all(_text_aliases_agree(row, *names) for names in (
+                ("symbol", "trading_symbol", "tradingsymbol"), ("action", "transaction_type"),
+                ("status", "order_status", "orderStatus"),
+            ))
+            or not all(type(row[name]) is str and row[name] == item.order_id for name in (
+                "order_id", "orderid", "orderId", "broker_order_id",
+            ) if name in row)
+            or any(row[name] != account for name in ("account_id", "accountId") if name in row)
+            or any(_norm(row[name]) != adapter for name in ("broker", "broker_id", "adapter_id") if name in row)
+        ):
+            return None
+        total = _quantity_aliases(row, "quantity", "qty")
+        filled = _quantity_aliases(row, "filled_qty", "filled_quantity", "filledQty", "tradedQty", default=0)
+        status = _row_text(row, "status", "order_status", "orderStatus")
+        if total is None or total != item.quantity or filled is None or not 0 <= filled <= total:
+            return None
+        if status in {"COMPLETE", "COMPLETED", "FILLED", "TRADED"} and any(
+            name in row for name in ("filled_qty", "filled_quantity", "filledQty", "tradedQty")
+        ) and filled != total:
+            # An explicit partial/unfilled quantity contradicts full completion.
+            # No terminal coverage proof may come from this inconsistent row.
+            return None
+        # Unknown lifecycle state is still possible exposure, not permission
+        # to transfer a hold. Missing fills on an open row count its full total.
+        if status not in _EXIT_OPEN | _EXIT_CLOSED | {
+            "CANCEL_PENDING", "CANCEL_REQUESTED", "CANCEL PENDING", "PENDING_CANCEL",
+        }:
+            return None
+        current = (status, total, filled)
+        if observed is not None and current != observed:
+            return None
+        observed = current
+    return observed[0] if observed is not None else None
 
 
 def reconcile_reserved_exit(
@@ -597,35 +648,29 @@ def reconcile_reserved_exit(
     orders: Sequence[Mapping[str, object]] | None,
     position_net: int,
 ) -> None:
-    """Release a successful reduce-only hold once its order is finished.
+    """Reconcile existing process-local holds against exact single ACKs only.
 
-    An order that is still open stays reserved until ``cover_reserved_exit``
-    sees it on the book. An order id that has not appeared, and a position
-    that has not moved, stays reserved so a second exit cannot race the fill.
-    A terminal order, or a missing order whose position has already moved by
-    the reserved quantity, is released.
+    A coherent scoped open row represents that exact hold on this read; a
+    coherent terminal row terminates it. If representation disappears or turns
+    malformed, restore the local hold. Missing/unknown IDs and aggregate
+    position movement are never coverage proof. Call under ``contract_lock``;
+    these observations establish neither provider coherence nor restart safety.
     """
     with _lock_guard:
         bound = list(_bound_exits.get(key, ()))
-    if not bound:
-        return
     kept: list[_BoundExit] = []
     for item in bound:
-        row = _order_by_id(orders, item.order_id) if orders is not None and item.order_id else None
-        moved = abs(position_net - item.position_net) >= item.quantity
-        if row is not None and not _order_is_open(row):
+        status = _bound_exit_observation(key, item, orders) if orders is not None else None
+        if status in _EXIT_CLOSED:
+            if not item.covered:
+                release_exit(key, item.quantity)
+            continue
+        covered = status is not None
+        if covered and not item.covered:
             release_exit(key, item.quantity)
-            continue
-        if row is not None and _order_is_open(row):
-            remaining = _remaining_quantity(row)
-            filled = item.quantity - remaining
-            if filled >= 1:
-                release_exit(key, filled)
-            continue
-        if moved:
-            release_exit(key, item.quantity)
-            continue
-        kept.append(item)
+        elif not covered and item.covered:
+            reserve_exit(key, item.quantity)
+        kept.append(replace(item, covered=covered))
     with _lock_guard:
         if kept:
             _bound_exits[key] = kept

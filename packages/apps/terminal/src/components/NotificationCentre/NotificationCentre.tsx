@@ -115,14 +115,14 @@ function NotificationRow({ notification, onRead, onDismiss, onAction }: Notifica
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <span className="text-xs font-semibold text-text-primary truncate">
+          <span className={cn("text-xs leading-5 font-semibold text-text-primary", notification.category === "order" ? "min-w-0 whitespace-normal [overflow-wrap:anywhere]" : "truncate")}>
             {notification.title}
           </span>
           <span className="text-xxs text-text-muted whitespace-nowrap shrink-0">
             {formatRelativeTime(notification.timestamp)}
           </span>
         </div>
-        <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">
+        <p className={`text-xs text-text-secondary mt-0.5 ${notification.category === "order" ? "[overflow-wrap:anywhere]" : "line-clamp-2"}`}>
           {notification.body}
         </p>
         {notification.action && (

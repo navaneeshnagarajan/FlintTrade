@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import csv
 import math
+import re
+from calendar import monthrange
+from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import StringIO
@@ -23,6 +26,7 @@ from flinttrade_core.exceptions import (
     InvalidQuantity,
     InvalidSymbol,
     MarketClosed,
+    OrderError,
     OrderRejectedByBroker,
     RateLimitError,
     SessionExpired,
@@ -30,8 +34,103 @@ from flinttrade_core.exceptions import (
 )
 from flinttrade_gateway.reconciliation import normalise_order_status
 
+from . import groww_smart_mapping as S
+
 BASE_URL = "https://api.groww.in"
 _MISSING = object()
+_DECIMAL_TEXT = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+_REFERENCE_ID = re.compile(r"[A-Za-z0-9-]{8,20}")
+_RESOURCE_ID = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _request_enum(value: Any, choices: set[str] | frozenset[str], field: str) -> str:
+    if not isinstance(value, str) or value not in choices:
+        raise UnsupportedOrderType(f"Groww requires a supported explicit {field}", broker_id="groww")
+    return str(value)
+
+
+def _request_decimal(value: Any, field: str, *, positive: bool = False, wire_number: bool = False) -> int | float | str:
+    if type(value) not in (int, float, str, Decimal):
+        raise InvalidPrice(f"Groww {field} must be a finite decimal", broker_id="groww")
+    text = str(value)
+    if _DECIMAL_TEXT.fullmatch(text) is None:
+        raise InvalidPrice(f"Groww {field} must use decimal grammar", broker_id="groww")
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        raise InvalidPrice(f"Groww {field} must be a finite decimal", broker_id="groww") from None
+    if not number.is_finite() or number < 0 or (positive and number == 0):
+        raise InvalidPrice(
+            f"Groww {field} must be {'positive' if positive else 'non-negative'} and finite", broker_id="groww"
+        )
+    if wire_number:
+        # Ordinary REST decimals are JSON numbers; smart decimals are strings.
+        # Never turn a valid but unrepresentable ordinary decimal into a rounded
+        # request, zero, infinity or an undocumented JSON string field.
+        if type(value) is int:
+            return value
+        converted = float(number)
+        if not math.isfinite(converted) or Decimal(str(converted)) != number:
+            raise InvalidPrice(
+                f"Groww {field} cannot be represented losslessly as an ordinary JSON number", broker_id="groww"
+            )
+        return converted
+    # Smart canonical text is kept verbatim; never round through a binary float.
+    return text if type(value) is Decimal else value
+
+
+def _request_quantity(value: Any) -> int:
+    try:
+        number = Decimal(str(_request_decimal(value, "quantity", positive=True)))
+    except InvalidPrice:
+        raise InvalidQuantity("Groww quantity must be an exact positive integer", broker_id="groww") from None
+    if number != number.to_integral_value():
+        raise InvalidQuantity("Groww quantity must be an exact positive integer", broker_id="groww")
+    return int(number)
+
+
+def _request_symbol(value: Any) -> str:
+    if not isinstance(value, str) or not value or value != value.strip() or not value.isprintable():
+        raise InvalidSymbol("Groww symbol must be a non-blank unpadded printable string", broker_id="groww")
+    return value
+
+
+def _request_reference(value: Any) -> str:
+    if not isinstance(value, str) or _REFERENCE_ID.fullmatch(value) is None or value.count("-") > 2:
+        raise OrderError(
+            "Groww reference requires 8-20 ASCII alphanumeric/hyphen characters and at most two hyphens",
+            broker_id="groww",
+        )
+    return value
+
+
+def ordinary_resource_identity(order_id: Any, segment: Any) -> tuple[str, str]:
+    """Validate an opaque ordinary-order address without coercion or defaults."""
+    if not isinstance(order_id, str) or _RESOURCE_ID.fullmatch(order_id) is None:
+        raise OrderError("Groww order id must be a safe non-empty ASCII identifier", broker_id="groww")
+    return order_id, _request_enum(segment, {"CASH", "FNO", "COMMODITY"}, "segment")
+
+
+def _request_alias(changes: dict[str, Any], names: tuple[str, ...], convert: Any, *, numeric: bool = False) -> Any:
+    values = [convert(changes[name]) for name in names if name in changes]
+    if not values:
+        return _MISSING
+    compared = [Decimal(str(value)) for value in values] if numeric else values
+    if any(value != compared[0] for value in compared[1:]):
+        raise OrderError(f"Groww conflicting aliases for {names[0]}", broker_id="groww")
+    return values[0]
+
+
+def _response_quantity(row: dict[str, Any], name: str) -> int | float | str | object:
+    value = _response_number(row, name, empty_absent=True)
+    if value is _MISSING:
+        return value
+    if type(value) is str and _DECIMAL_TEXT.fullmatch(value) is None:
+        raise BrokerReadResponseInvalid from None
+    number = Decimal(str(value))
+    if number < 0 or number != number.to_integral_value():
+        raise BrokerReadResponseInvalid from None
+    return value
 
 
 def _response_record(value: object) -> dict[str, Any]:
@@ -248,15 +347,9 @@ def _error_fields(payload: Any) -> tuple[str, str]:
         return "", _text(payload)
     nested = payload.get("error") if isinstance(payload.get("error"), dict) else {}
     code = _text(
-        payload.get("error_code")
-        or payload.get("code")
-        or (nested.get("code") if isinstance(nested, dict) else "")
+        payload.get("error_code") or payload.get("code") or (nested.get("code") if isinstance(nested, dict) else "")
     )
-    message = _text(
-        payload.get("message")
-        or (nested.get("message") if isinstance(nested, dict) else "")
-        or payload
-    )
+    message = _text(payload.get("message") or (nested.get("message") if isinstance(nested, dict) else "") or payload)
     return code, message
 
 
@@ -280,8 +373,10 @@ def map_error(status: int, payload: Any, *, endpoint: str | None = None) -> Brok
     message = message or "Groww API error"
     lower = message.lower()
     kwargs = {"broker_code": code or str(status), "broker_id": "groww"}
-    if status in (401, 403) and _is_market_data_endpoint(endpoint) and (
-        "forbidden" in lower or "authentication required" in lower or "access denied" in lower
+    if (
+        status in (401, 403)
+        and _is_market_data_endpoint(endpoint)
+        and ("forbidden" in lower or "authentication required" in lower or "access denied" in lower)
     ):
         return DataError("Groww market-data access is not enabled for this API key", **kwargs)
     if status == 401 or "unauthor" in lower or "expired" in lower or "invalid token" in lower:
@@ -328,16 +423,23 @@ def unwrap_fixed_read(payload: Any) -> Any:
 
 def exchange_segment(exchange: Any) -> tuple[str, str]:
     """Map FlintTrade exchange names to Groww ``(exchange, segment)``."""
-    ex = _upper(exchange) or "NSE"
-    if ex in {"MCX", "MCX_FO", "MCX_COM", "COMMODITY"}:
-        return "MCX", "COMMODITY"
-    if ex in {"NFO", "NSE_FO", "NSE_FNO"}:
-        return "NSE", "FNO"
-    if ex in {"BFO", "BSE_FO", "BSE_FNO"}:
-        return "BSE", "FNO"
-    if ex == "BSE_INDEX":
-        return "BSE", "CASH"
-    return ("BSE", "CASH") if ex == "BSE" else ("NSE", "CASH")
+    pairs = {
+        "NSE": ("NSE", "CASH"),
+        "NSE_INDEX": ("NSE", "CASH"),
+        "BSE": ("BSE", "CASH"),
+        "BSE_INDEX": ("BSE", "CASH"),
+        "NFO": ("NSE", "FNO"),
+        "NSE_FO": ("NSE", "FNO"),
+        "NSE_FNO": ("NSE", "FNO"),
+        "BFO": ("BSE", "FNO"),
+        "BSE_FO": ("BSE", "FNO"),
+        "BSE_FNO": ("BSE", "FNO"),
+        "MCX": ("MCX", "COMMODITY"),
+        "MCX_FO": ("MCX", "COMMODITY"),
+        "MCX_COM": ("MCX", "COMMODITY"),
+        "COMMODITY": ("MCX", "COMMODITY"),
+    }
+    return pairs[_request_enum(exchange, set(pairs), "exchange")]
 
 
 def native_broker_exchange(exchange: Any, segment: Any = "") -> str:
@@ -356,28 +458,68 @@ def order_type(value: Any) -> str:
     mapping = {
         "MARKET": "MARKET",
         "LIMIT": "LIMIT",
-        "SL": "STOP_LOSS_LIMIT",
-        "SL-M": "STOP_LOSS_MARKET",
-        "SLM": "STOP_LOSS_MARKET",
-        "STOP_LOSS_LIMIT": "STOP_LOSS_LIMIT",
-        "STOP_LOSS_MARKET": "STOP_LOSS_MARKET",
+        "SL": "SL",
+        "SL-M": "SL_M",
+        "SLM": "SL_M",
+        "SL_M": "SL_M",
+        "STOP_LOSS_LIMIT": "SL",
+        "STOP_LOSS_MARKET": "SL_M",
     }
-    kind = _upper(value) or "MARKET"
-    if kind not in mapping:
-        raise UnsupportedOrderType(f"Groww does not support order type {kind!r}", broker_id="groww")
+    kind = _request_enum(value, set(mapping), "order_type")
     return mapping[kind]
 
 
 def reverse_order_type(value: Any) -> str:
     return {
+        "SL_M": "SL-M",
+        "SLM": "SL-M",
         "STOP_LOSS_LIMIT": "SL",
         "STOP_LOSS_MARKET": "SL-M",
     }.get(_upper(value), _upper(value) or "MARKET")
 
 
 def product(value: Any) -> str:
-    prod = _upper(value) or "CNC"
-    return {"MIS": "MIS", "CNC": "CNC", "NRML": "NRML", "MARGIN": "NRML"}.get(prod, "CNC")
+    prod = _request_enum(value, {"MIS", "CNC", "NRML", "MARGIN"}, "product")
+    return "NRML" if prod == "MARGIN" else prod
+
+
+def order_variety(value: Any, *, modification: bool = False) -> str:
+    """Validate the native variety without falling back to an ordinary order.
+
+    Args:
+        value: Requested regular, AMO, GTT or OCO variety.
+        modification: Permit the existing smart-modification discriminator.
+
+    Returns:
+        The validated native variety.
+
+    Raises:
+        OrderError: The value is absent, malformed or unsupported.
+    """
+    choices = {"regular", "amo", "gtt", "oco"} | ({"smart"} if modification else set())
+    return _request_enum(value, choices, "variety")
+
+
+def _refuse_unrepresented_intent(order: Any, *, smart: bool = False) -> None:
+    if getattr(order, "market_protection", None) is not None:
+        raise OrderError("Groww explicit market protection is not represented by this schema", broker_id="groww")
+    for field in (
+        "target_price",
+        "stop_loss_price",
+        "trailing_jump",
+        "iceberg_legs",
+        "price1",
+        "trigger_price1",
+        "quantity1",
+    ):
+        value = getattr(order, field, None)
+        if value is not None and Decimal(str(_request_decimal(value, field))) != 0:
+            raise OrderError(
+                "Groww child/bracket/trailing/slicing intent is not represented by this schema", broker_id="groww"
+            )
+    for field in ("target_trigger_type", "stop_loss_trigger_type") + (() if smart else ("entry_trigger_type",)):
+        if getattr(order, field, None) is not None:
+            raise OrderError("Groww child or smart trigger intent is not represented by this schema", broker_id="groww")
 
 
 def reverse_product(value: Any) -> str:
@@ -385,48 +527,268 @@ def reverse_product(value: Any) -> str:
 
 
 def to_place_order_payload(order: Any) -> dict[str, Any]:
-    exchange, segment = exchange_segment(getattr(order, "exchange", "NSE"))
+    _refuse_unrepresented_intent(order)
+    exchange, segment = exchange_segment(getattr(order, "exchange", None))
+    validity = getattr(order, "validity", None)
     payload: dict[str, Any] = {
-        "trading_symbol": _text(getattr(order, "symbol", "")),
-        "quantity": _int(getattr(order, "quantity", 1), 1),
-        "validity": _upper(getattr(order, "validity", None)) or "DAY",
+        "trading_symbol": _request_symbol(getattr(order, "symbol", None)),
+        "quantity": _request_quantity(getattr(order, "quantity", None)),
+        "validity": "DAY" if validity is None else _request_enum(validity, {"DAY", "IOC"}, "validity"),
         "exchange": exchange,
         "segment": segment,
-        "product": product(getattr(order, "product", "CNC")),
-        "order_type": order_type(getattr(order, "pricetype", "MARKET")),
-        "transaction_type": _upper(getattr(order, "action", "BUY")) or "BUY",
+        "product": product(getattr(order, "product", None)),
+        "order_type": order_type(getattr(order, "pricetype", None)),
+        "transaction_type": _request_enum(getattr(order, "action", None), {"BUY", "SELL"}, "transaction_type"),
+        "order_reference_id": _request_reference(getattr(order, "strategy", None)),
     }
-    price = _float(getattr(order, "price", 0))
-    trigger = _float(getattr(order, "trigger_price", 0))
-    if payload["order_type"] == "LIMIT":
+    kind = payload["order_type"]
+    price = _request_decimal(getattr(order, "price", 0), "price", positive=kind in {"LIMIT", "SL"}, wire_number=True)
+    trigger = _request_decimal(
+        getattr(order, "trigger_price", 0), "trigger_price", positive=kind in {"SL", "SL_M"}, wire_number=True
+    )
+    if kind in {"LIMIT", "SL"}:
         payload["price"] = price
-    if payload["order_type"] in {"STOP_LOSS_LIMIT", "STOP_LOSS_MARKET"}:
-        if trigger <= 0:
-            raise InvalidPrice("Groww stop-loss orders require trigger_price", broker_id="groww")
+    if kind in {"SL", "SL_M"}:
         payload["trigger_price"] = trigger
-        if payload["order_type"] == "STOP_LOSS_LIMIT":
-            payload["price"] = price
-    ref = _text(getattr(order, "strategy", ""))[:20]
-    if ref:
-        payload["order_reference_id"] = ref
     return payload
 
 
-def to_modify_payload(order_id: str, changes: dict[str, Any], *, segment: str) -> dict[str, Any]:
-    payload: dict[str, Any] = {"groww_order_id": str(order_id), "segment": segment}
-    if "quantity" in changes:
-        payload["quantity"] = _int(changes["quantity"])
-    if "pricetype" in changes or "order_type" in changes:
-        payload["order_type"] = order_type(changes.get("pricetype") or changes.get("order_type"))
-    if "price" in changes:
-        payload["price"] = _float(changes["price"])
+def to_smart_create_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate an explicit native GTT/OCO body; this supplies no write authority."""
+    if not isinstance(request, Mapping):
+        raise OrderError("Groww smart creation requires explicit native fields", broker_id="groww")
+    family = _request_enum(request.get("smart_order_type"), {"GTT", "OCO"}, "smart_order_type")
+    try:
+        return S.to_gtt_create_payload(request) if family == "GTT" else S.to_oco_create_payload(request)
+    except ValueError as exc:
+        raise OrderError(str(exc), broker_id="groww") from exc
+
+
+def to_smart_order_payload(order: Any) -> dict[str, Any]:
+    """Map representable signed canonical GTT intent, never an ordinary fallback.
+
+    ``entry_trigger_type`` must explicitly be native UP/DOWN. The canonical
+    model has no independent OCO leg types/prices or signed native position
+    snapshot, so OCO creation is refused here until that gate/model contract
+    exists. Explicit native OCO dictionaries remain supported by the pure
+    ``to_smart_create_payload`` seam, not an extra adapter write entrypoint.
+    """
+    if getattr(order, "variety", None) != "gtt":
+        raise OrderError("Groww OCO creation needs a signed native position and leg intent schema", broker_id="groww")
+    _refuse_unrepresented_intent(order, smart=True)
+    exchange, segment = exchange_segment(getattr(order, "exchange", None))
+    kind = order_type(getattr(order, "pricetype", None))
+    nested_order: dict[str, Any] = {
+        "order_type": kind,
+        "transaction_type": _request_enum(getattr(order, "action", None), {"BUY", "SELL"}, "transaction_type"),
+    }
+    price = _request_decimal(getattr(order, "price", 0), "price", positive=kind in {"LIMIT", "SL"})
+    if kind in {"LIMIT", "SL"} or Decimal(str(price)) != 0:
+        nested_order["price"] = str(price)
+    validity = getattr(order, "validity", None)
+    return to_smart_create_payload(
+        {
+            "reference_id": _request_reference(getattr(order, "strategy", None)),
+            "smart_order_type": "GTT",
+            "segment": segment,
+            "trading_symbol": _request_symbol(getattr(order, "symbol", None)),
+            "quantity": _request_quantity(getattr(order, "quantity", None)),
+            "trigger_price": str(
+                _request_decimal(getattr(order, "trigger_price", None), "trigger_price", positive=True)
+            ),
+            "trigger_direction": _request_enum(
+                getattr(order, "entry_trigger_type", None), {"UP", "DOWN"}, "trigger_direction"
+            ),
+            "order": nested_order,
+            "product_type": product(getattr(order, "product", None)),
+            "exchange": exchange,
+            "duration": "DAY" if validity is None else validity,
+        }
+    )
+
+
+def smart_resource_path(
+    operation: str,
+    *,
+    smart_order_id: str,
+    segment: str | None,
+    smart_order_type: str | None,
+) -> str:
+    """Address a smart resource only with explicit native family and segment."""
+    segment = _request_enum(segment, {"CASH", "FNO"}, "segment")
+    smart_order_type = _request_enum(smart_order_type, {"GTT", "OCO"}, "smart_order_type")
+    try:
+        return S.smart_resource_path(
+            operation, smart_order_id=smart_order_id, segment=segment, smart_order_type=smart_order_type
+        )
+    except ValueError as exc:
+        raise OrderError(str(exc), broker_id="groww") from exc
+
+
+def smart_page_params(
+    *,
+    segment: str,
+    smart_order_type: str,
+    status: str,
+    start_date_time: str,
+    end_date_time: str,
+    page: int = 0,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Require explicit family/segment/status/time scope for a single smart page."""
+    segment = _request_enum(segment, {"CASH", "FNO"}, "segment")
+    family = _request_enum(smart_order_type, {"GTT", "OCO"}, "smart_order_type")
+    if not isinstance(status, str) or _RESOURCE_ID.fullmatch(status) is None:
+        raise OrderError("Groww smart page needs an explicit status filter", broker_id="groww")
+    if type(page) is not int or not 0 <= page <= 500 or type(page_size) is not int or not 1 <= page_size <= 50:
+        raise OrderError("Groww smart pagination requires page 0-500 and page_size 1-50", broker_id="groww")
+    timestamps: list[datetime] = []
+    for value in (start_date_time, end_date_time):
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}", value) is None
+        ):
+            raise OrderError("Groww smart page requires explicit ISO second-resolution time bounds", broker_id="groww")
+        try:
+            timestamps.append(datetime.strptime(value, "%Y-%m-%dT%H:%M:%S"))
+        except ValueError as exc:
+            raise OrderError("Groww smart page time bounds are invalid", broker_id="groww") from exc
+    start, end = timestamps
+    try:
+        year = start.year + (start.month == 12)
+        month = start.month % 12 + 1
+        limit = start.replace(year=year, month=month, day=min(start.day, monthrange(year, month)[1]))
+    except ValueError as exc:
+        raise OrderError("Groww smart page time range is invalid", broker_id="groww") from exc
+    if end < start or end > limit:
+        raise OrderError("Groww smart page time range must be ordered and no longer than one month", broker_id="groww")
+    return {
+        "segment": segment,
+        "smart_order_type": family,
+        "status": status,
+        "page": page,
+        "page_size": page_size,
+        "start_date_time": start_date_time,
+        "end_date_time": end_date_time,
+    }
+
+
+def from_smart_order(row: dict[str, Any]) -> dict[str, Any]:
+    """Project smart observations through the actual mapper with typed refusal."""
+    row = _response_record(row)
+    try:
+        return S.from_smart_order(row)
+    except ValueError:
+        raise BrokerReadResponseInvalid from None
+
+
+def from_smart_page(payload: Any) -> list[dict[str, Any]]:
+    """Map every row of one successful page, never manufacture a complete book."""
+    unwrap_fixed_read(payload)
+    try:
+        return S.from_smart_page(payload)
+    except ValueError:
+        raise BrokerReadResponseInvalid from None
+
+
+def to_smart_modify_payload(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Validate current identity and family-specific edits; never fetch or infer state.
+
+    ``current`` is explicit caller evidence and must travel inside the signed
+    request. This checks correspondence, not its freshness or broker eligibility.
+    GTT requires current product and the full immutable-side execution order.
+    OCO partial edits do not require creation-only position fields; supplied
+    position/side constraints are validated by the native mapper.
+    """
+    if type(changes) is not dict or not isinstance(changes.get("current"), Mapping):
+        raise OrderError("Groww smart modification requires explicit current resource context", broker_id="groww")
+    current = dict(changes["current"])
+    if "is_modification_allowed" in current and current["is_modification_allowed"] is not True:
+        raise OrderError("Groww observed smart modification permission is false or malformed", broker_id="groww")
+    family = _request_enum(current.get("smart_order_type"), {"GTT", "OCO"}, "smart_order_type")
+    segment = _request_enum(current.get("segment"), {"CASH", "FNO"}, "segment")
+    smart_resource_path("modify", smart_order_id=order_id, segment=segment, smart_order_type=family)
+    if current.get("smart_order_id") != order_id:
+        raise OrderError("Groww current smart resource id does not match the requested id", broker_id="groww")
+    for field in ("segment", "smart_order_type"):
+        if field in changes and changes[field] != current[field]:
+            raise OrderError(f"Groww {field} context conflicts with current resource", broker_id="groww")
+    if "variety" in changes:
+        _request_enum(changes["variety"], {family.lower(), "smart"}, "variety matching current family")
+    if family == "GTT" and "product_type" not in current:
+        raise OrderError("Groww GTT modification requires current product context", broker_id="groww")
+    edits = {
+        key: value for key, value in changes.items() if key not in {"current", "variety", "segment", "smart_order_type"}
+    }
+    try:
+        return S.to_smart_modify_payload(current, edits)
+    except ValueError as exc:
+        raise OrderError(str(exc), broker_id="groww") from exc
+
+
+def to_modify_payload(order_id: str, changes: dict[str, Any], *, segment: str | None) -> dict[str, Any]:
+    identifier, segment = ordinary_resource_identity(order_id, segment)
+    allowed = {
+        "quantity",
+        "qty",
+        "pricetype",
+        "order_type",
+        "price",
+        "limit_price",
+        "trigger_price",
+        "segment",
+        "exchange",
+        "symbol",
+        "action",
+        "product",
+        "validity",
+        "strategy",
+        "variety",
+        "disclosed_quantity",
+        "amo",
+    }
+    if type(changes) is not dict or set(changes) - allowed:
+        raise OrderError("Groww ordinary modification contains unsupported fields", broker_id="groww")
+    if "segment" in changes and changes["segment"] != segment:
+        raise OrderError("Groww segment context conflicts", broker_id="groww")
+    if "exchange" in changes and exchange_segment(changes["exchange"])[1] != segment:
+        raise OrderError("Groww exchange and segment context conflict", broker_id="groww")
+    for field, choices in {
+        "action": {"BUY", "SELL"},
+        "validity": {"DAY", "IOC"},
+        "variety": {"regular", "amo"},
+    }.items():
+        if field in changes:
+            _request_enum(changes[field], choices, field)
+    if "product" in changes:
+        product(changes["product"])
+    if "symbol" in changes:
+        _request_symbol(changes["symbol"])
+    if "amo" in changes and changes["amo"] is not False:
+        raise OrderError("Groww has no documented ordinary AMO modification field", broker_id="groww")
+    kind = _request_alias(changes, ("pricetype", "order_type"), order_type)
+    if kind is _MISSING:
+        raise OrderError("Groww modification requires explicit order_type", broker_id="groww")
+    payload: dict[str, Any] = {"groww_order_id": identifier, "segment": segment, "order_type": kind}
+    quantity = _request_alias(changes, ("quantity", "qty"), _request_quantity)
+    price = _request_alias(
+        changes,
+        ("price", "limit_price"),
+        lambda value: _request_decimal(value, "price", positive=kind in {"LIMIT", "SL"}, wire_number=True),
+        numeric=True,
+    )
+    _put_present(payload, "quantity", quantity)
+    _put_present(payload, "price", price)
     if "trigger_price" in changes:
-        payload["trigger_price"] = _float(changes["trigger_price"])
+        payload["trigger_price"] = _request_decimal(
+            changes["trigger_price"], "trigger_price", positive=kind in {"SL", "SL_M"}, wire_number=True
+        )
     return payload
 
 
 def to_cancel_payload(order_id: str, *, segment: str) -> dict[str, Any]:
-    return {"groww_order_id": str(order_id), "segment": segment}
+    identifier, segment = ordinary_resource_identity(order_id, segment)
+    return {"groww_order_id": identifier, "segment": segment}
 
 
 def to_margin_payload(order: Any) -> tuple[str, list[dict[str, Any]]]:
@@ -434,31 +796,58 @@ def to_margin_payload(order: Any) -> tuple[str, list[dict[str, Any]]]:
     return payload["segment"], [payload]
 
 
-def extract_order_id(payload: Any) -> str:
-    data = unwrap(payload)
-    if isinstance(data, dict):
-        return _text(data.get("groww_order_id") or data.get("order_id") or data.get("smart_order_id"))
-    return ""
+def extract_order_id(payload: Any, *, expected_family: str | None = None) -> str:
+    """Extract exact acknowledgement identity, never a fill or terminal resource state."""
+    try:
+        data = unwrap_fixed_read(payload) if expected_family is not None else unwrap(payload)
+    except BrokerReadResponseInvalid:
+        raise OrderError("Groww placement acknowledgement envelope is malformed", broker_id="groww") from None
+    if type(data) is not dict:
+        raise OrderError("Groww placement acknowledgement payload is malformed", broker_id="groww")
+    if expected_family in {"GTT", "OCO"}:
+        if "smart_order_type" in data and data["smart_order_type"] != expected_family:
+            raise OrderError("Groww acknowledgement smart family does not match intent", broker_id="groww")
+        names = ("smart_order_id",)
+    else:
+        names = (
+            ("groww_order_id", "order_id", "smart_order_id")
+            if expected_family is None
+            else ("groww_order_id", "order_id")
+        )
+    values = [data[name] for name in names if name in data]
+    if not values:
+        return ""
+    if any(not isinstance(value, str) or _RESOURCE_ID.fullmatch(value) is None for value in values):
+        raise OrderError("Groww acknowledgement has an unsafe or non-string order id", broker_id="groww")
+    if any(value != values[0] for value in values[1:]):
+        raise OrderError("Groww acknowledgement identity aliases conflict", broker_id="groww")
+    return values[0]
 
 
 def from_order(row: dict[str, Any]) -> dict[str, Any]:
     row = _response_record(row)
-    quantity = _response_number(row, "quantity", empty_absent=True)
-    filled_quantity = _response_number(row, "filled_quantity", empty_absent=True)
-    status = _response_text(row, "order_status", "status", required=True)
-    order: dict[str, Any] = {
-        "status": _status(
-            status,
-            quantity=float(quantity) if quantity is not _MISSING else 0.0,
-            filled_quantity=float(filled_quantity) if filled_quantity is not _MISSING else 0.0,
-        )
+    quantity = _response_quantity(row, "quantity")
+    filled_quantity = _response_quantity(row, "filled_quantity")
+    remaining_quantity = _response_quantity(row, "remaining_quantity")
+    counts = {
+        name: int(Decimal(str(value)))
+        for name, value in {"total": quantity, "filled": filled_quantity, "remaining": remaining_quantity}.items()
+        if value is not _MISSING
     }
+    if "total" in counts and counts.get("filled", 0) + counts.get("remaining", 0) > counts["total"]:
+        raise BrokerReadResponseInvalid from None
+    status = _response_text(row, "order_status", "status", required=True)
+    canonical_status = _status(status)
+    if canonical_status == "OPEN" and "total" in counts and 0 < counts.get("filled", 0) < counts["total"]:
+        canonical_status = "PARTIALLY_FILLED"
+    order: dict[str, Any] = {"status": canonical_status, "raw_status": status}
     for field, value in {
         "orderid": _response_text(row, "groww_order_id", "order_id"),
         "symbol": _response_text(row, "trading_symbol"),
-        "exchange": _response_exchange(row, strict_pair=True),
+        "exchange": _response_exchange(row, strict_pair=True) if "exchange" in row or "segment" in row else _MISSING,
         "quantity": quantity,
         "filled_quantity": filled_quantity,
+        "remaining_quantity": remaining_quantity,
         "price": _response_number(row, "price", empty_absent=True),
         "trigger_price": _response_number(row, "trigger_price", empty_absent=True),
         "average_price": _response_number(
@@ -469,6 +858,7 @@ def from_order(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "order_timestamp": _response_text(row, "created_at", "order_date_time"),
         "order_reference_id": _response_text(row, "order_reference_id"),
+        "remark": _response_text(row, "remark"),
     }.items():
         _put_present(order, field, value)
     action = _response_text(row, "transaction_type")
@@ -482,6 +872,7 @@ def from_order(row: dict[str, Any]) -> dict[str, Any]:
             "SL": "SL",
             "SL-M": "SL-M",
             "SLM": "SL-M",
+            "SL_M": "SL-M",
             "STOP_LOSS_LIMIT": "SL",
             "STOP_LOSS_MARKET": "SL-M",
         }.get(order_kind.upper())
@@ -608,9 +999,7 @@ def from_quote(
             "volume": _int(row.get("volume")),
             "bid": _float(row.get("bid_price")),
             "ask": _float(row.get("offer_price") or row.get("ask_price")),
-            "prev_close": _float(
-                row.get("previous_close") or row.get("prev_close") or ohlc.get("close")
-            ),
+            "prev_close": _float(row.get("previous_close") or row.get("prev_close") or ohlc.get("close")),
             "oi": _int(row.get("open_interest") or row.get("oi")),
         }
 

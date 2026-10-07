@@ -23,6 +23,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_core.exceptions import BrokerError
 
 from .kotakneo_sdk import validate_read_envelope
 
@@ -51,9 +52,11 @@ KOTAK_TO_EXCHANGE: dict[str, str] = {}
 for _ft_exchange, _kotak_segment in EXCHANGE_TO_KOTAK.items():
     KOTAK_TO_EXCHANGE.setdefault(_kotak_segment, _ft_exchange)
 
-# FlintTrade product -> NEO product. NEO also exposes INTRADAY/CO/BO/MTF; we map
-# the reverse codes back to the FlintTrade trio.
-PRODUCT_TO_KOTAK = {"MIS": "MIS", "CNC": "CNC", "NRML": "NRML"}
+# Placement-specific canonical codes at SDK pin 9a37488 (settings.py L77-80).
+# Serialisation does not certify any segment/instrument/account eligibility.
+PRODUCT_TO_KOTAK = {"MIS": "MIS", "CNC": "CNC", "NRML": "NRML", "MTF": "MTF"}
+_MODIFY_V3_PRODUCTS = frozenset({"MIS", "CNC", "NRML"})
+# Preserve the legacy reverse aliases and the distinct raw broker_product.
 KOTAK_TO_PRODUCT = {
     "MIS": "MIS",
     "INTRADAY": "MIS",
@@ -838,6 +841,8 @@ def _validated_order_numbers(order: Any, price_type: str) -> tuple[Decimal, Deci
         label="disclosed quantity",
         whole=True,
     )
+    if disclosed > quantity:
+        raise KotakNeoMappingError("Kotak Neo disclosed quantity cannot exceed quantity")
     if price_type in {"LIMIT", "SL"} and price <= 0:
         raise KotakNeoMappingError(f"Kotak Neo {price_type} price must be positive")
     if price_type in {"SL", "SL-M"} and trigger <= 0:
@@ -859,10 +864,11 @@ def _norm(value: Any, default: str = "") -> str:
 
 
 def validate_v3_order(order: Any) -> tuple[str, str, str, str, str, str]:
-    """Validate the regular/AMO order shape supported by the v3 SDK.
+    """Validate the regular/AMO parameter shape supported by the v3 SDK.
 
     This is deliberately callable before symbol/token resolution so an
-    unsupported write cannot cause even a preparatory SDK request.
+    unsupported shape cannot cause even a preparatory SDK request. This is
+    not eligibility: the adapter separately refuses unverified MTF dispatch.
     """
     side = _norm(order.action)
     if side not in SIDE_TO_KOTAK:
@@ -970,14 +976,18 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
             raise KotakNeoMappingError(f"Unsupported action {action!r}")
     if "product" in changes:
         product = _norm(changes["product"])
-        if product not in PRODUCT_TO_KOTAK:
+        if product == "MTF":
+            raise KotakNeoMappingError("Kotak Neo MTF modify eligibility is unverified by the local policy")
+        if product not in _MODIFY_V3_PRODUCTS:
             raise KotakNeoMappingError(f"Unsupported product {product!r}")
     broker_product = _norm(changes.get("broker_product"))
     if broker_product:
         if broker_product not in KOTAK_TO_PRODUCT:
             raise KotakNeoMappingError(f"Unsupported broker product {broker_product!r}")
-        if broker_product not in PRODUCT_TO_KOTAK:
-            variety_name = {"BO": "bracket", "CO": "cover", "MTF": "MTF"}.get(
+        if broker_product == "MTF":
+            raise KotakNeoMappingError("Kotak Neo MTF modify eligibility is unverified by the local policy")
+        if broker_product not in _MODIFY_V3_PRODUCTS:
+            variety_name = {"BO": "bracket", "CO": "cover"}.get(
                 broker_product, broker_product
             )
             raise KotakNeoMappingError(f"Kotak Neo v3 cannot modify {variety_name} orders")
@@ -987,13 +997,19 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
     if "strategy" in changes:
         _canonical_text(changes["strategy"], label="strategy")
 
-    ptype = _norm(changes.get("pricetype", changes.get("order_type", "LIMIT")))
-    if ptype in ORDER_TYPE_TO_KOTAK:
-        mapped_order_type = ORDER_TYPE_TO_KOTAK[ptype]
-    elif ptype in ORDER_TYPE_TO_KOTAK.values():
-        mapped_order_type = ptype
-    else:
-        raise KotakNeoMappingError(f"Unsupported order type {ptype!r}")
+    supplied_types = [changes[name] for name in ("pricetype", "order_type") if name in changes]
+    mapped_types: list[str] = []
+    for value in supplied_types or ["LIMIT"]:
+        ptype = _norm(value)
+        if ptype in ORDER_TYPE_TO_KOTAK:
+            mapped_types.append(ORDER_TYPE_TO_KOTAK[ptype])
+        elif ptype in KOTAK_TO_ORDER_TYPE:
+            mapped_types.append(ptype)
+        else:
+            raise KotakNeoMappingError(f"Unsupported order type {ptype!r}")
+    if len(set(mapped_types)) != 1:
+        raise KotakNeoMappingError("Kotak Neo pricetype and order_type disagree")
+    mapped_order_type = mapped_types[0]
     validity = str(changes.get("validity", "DAY")).upper()
     if validity not in VALIDITY_ALLOWED:
         raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
@@ -1007,6 +1023,8 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
         label="disclosed quantity",
         whole=True,
     )
+    if disclosed > quantity:
+        raise KotakNeoMappingError("Kotak Neo disclosed quantity cannot exceed quantity")
     semantic_type = KOTAK_TO_ORDER_TYPE.get(mapped_order_type, mapped_order_type)
     if semantic_type in {"LIMIT", "SL"} and price <= 0:
         raise KotakNeoMappingError(f"Kotak Neo {semantic_type} price must be positive")
@@ -1067,9 +1085,33 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
     number. When modifying or cancelling, that number must be the exact
     requested order.
     """
-    ensure_ok(resp)
     if not isinstance(resp, dict):
         raise KotakNeoMappingError("Kotak Neo write response is malformed")
+    layers = [resp]
+    inner = resp.get("data")
+    while type(inner) is dict:
+        if any(inner is layer for layer in layers):
+            raise KotakNeoMappingError("Kotak Neo write response is cyclic")
+        layers.append(inner)
+        inner = inner.get("data")
+    for layer in layers:
+        ensure_ok(layer)
+        if any(name in layer for name in ("Error", "Error Message", "error")):
+            raise KotakNeoMappingError("Kotak Neo write response contains error evidence")
+        native_status = layer.get("stCode", 200)
+        http_status = layer.get("status_code", 200)
+        if type(native_status) is not int or native_status != 200 or type(http_status) is not int or http_status != 200:
+            reason = "Kotak Neo write response has no consistent explicit HTTP 200 status"
+            for name in ("errMsg", "emsg", "message"):
+                message = layer.get(name)
+                if type(message) is str and message and len(message) <= 4096:
+                    try:
+                        message.encode("utf-8")
+                    except UnicodeError:
+                        continue
+                    reason += f": {message}"
+                    break
+            raise KotakNeoMappingError(reason)
     status = resp.get("stat")
     status_code = resp.get("stCode")
     order_id = resp.get("nOrdNo")
@@ -1079,7 +1121,7 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
             order_id = data.get("nOrdNo") or data.get("orderId")
     if not isinstance(status, str) or status.strip().lower() != "ok":
         raise KotakNeoMappingError("Kotak Neo write response has no explicit success status")
-    if isinstance(status_code, bool) or not isinstance(status_code, int) or status_code != 200:
+    if type(status_code) is not int or status_code != 200:
         raise KotakNeoMappingError("Kotak Neo write response has no explicit HTTP 200 status")
     if (
         not isinstance(order_id, str)
@@ -1091,6 +1133,11 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
         raise KotakNeoMappingError("Kotak Neo write response has no canonical order id")
     if expected_order_id is not None and order_id != expected_order_id:
         raise KotakNeoMappingError("Kotak Neo write acknowledged a different order id")
+    for layer in layers:
+        for name in ("nOrdNo", "orderId"):
+            alias = layer.get(name)
+            if alias is not None and alias != "" and (type(alias) is not str or alias != order_id):
+                raise KotakNeoMappingError("Kotak Neo write order id aliases disagree")
     return resp
 
 
@@ -1117,6 +1164,21 @@ def _exchange_of(d: dict[str, Any]) -> str:
     return KOTAK_TO_EXCHANGE.get(seg, seg)
 
 
+def kotak_attempt_state(status: object) -> str:
+    """Classify exact order-state tokens, never substrings or position closure."""
+    if type(status) is not str:
+        return "UNKNOWN"
+    return {
+        "COMPLETE": "FILLED",
+        "TRADED": "FILLED",
+        "CANCELLED": "CANCELLED",
+        "REJECTED": "REJECTED",
+        "OPEN": "WORKING",
+        "CANCEL_PENDING": "CANCEL_PENDING",
+        "CANCEL_REQUESTED": "CANCEL_PENDING",
+    }.get(status.strip().upper(), "UNKNOWN")
+
+
 def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a NEO order-report / order-history record.
 
@@ -1125,6 +1187,27 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
     report uses ``ordDtTm``+``dscQty``, so each field falls back across both.
     """
     d = _response_record(d)
+    # Reconcile true aliases only. Order/exchange/fill event times are distinct
+    # observations, sym may omit trdSym's series suffix, and ordSt is not the
+    # envelope's stat success flag.
+    for names in (("vldt", "ordDur"), ("exOrdId", "exchOrdId")):
+        observed = [_response_text(d, name, empty_absent=True) for name in names]
+        populated = [value for value in observed if value is not _MISSING]
+        if len(set(populated)) > 1:
+            raise BrokerReadResponseInvalid from None
+    for name in ("exOrdId", "exchOrdId"):
+        value = _response_text(d, name, empty_absent=True)
+        if value is not _MISSING and value != "NA":
+            _response_identifier(d, name)
+    disclosures: list[Decimal] = []
+    for name in ("dscQty", "dclQty"):
+        number = _response_decimal(d, name, empty_absent=True)
+        if isinstance(number, Decimal):
+            if number < 0 or number != number.to_integral_value():
+                raise BrokerReadResponseInvalid from None
+            disclosures.append(number)
+    if len(set(disclosures)) > 1:
+        raise BrokerReadResponseInvalid from None
     side = _response_text(d, "trnsTp", required=True).upper()
     price_type = _response_text(d, "prcTp", required=True).upper()
     broker_product = _response_text(d, "prod", required=True).upper()
@@ -1134,8 +1217,17 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         canonical_product = KOTAK_TO_PRODUCT[broker_product]
     except KeyError:
         raise BrokerReadResponseInvalid from None
+    quantities: dict[str, Decimal] = {}
+    for name in ("qty", "fldQty"):
+        number = _response_decimal(d, name, empty_absent=True)
+        if isinstance(number, Decimal):
+            if number < 0 or number != number.to_integral_value():
+                raise BrokerReadResponseInvalid from None
+            quantities[name] = number
+    if "qty" in quantities and "fldQty" in quantities and quantities["fldQty"] > quantities["qty"]:
+        raise BrokerReadResponseInvalid from None
     order = {
-        "orderid": _response_text(d, "nOrdNo", required=True),
+        "orderid": _response_identifier(d, "nOrdNo"),
         "status": _response_text(d, "ordSt", "stat", required=True),
         "symbol": _response_text(d, "trdSym", "sym", required=True),
         "exchange": _response_exchange(d, "exSeg"),
@@ -1144,6 +1236,7 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "product": canonical_product,
         "broker_product": broker_product,
     }
+    order["attempt_state"] = kotak_attempt_state(order["status"])
     if broker_product == "BO":
         order["variety"] = "bracket"
     elif broker_product == "CO":
@@ -1189,12 +1282,16 @@ def order_history_rows(resp: Any) -> list[dict[str, Any]]:
     (``Order_history.md``); some gateway builds skip the outer wrapper. Rows are
     the order's state transitions, OMS-newest-first.
     """
-    if not isinstance(resp, dict):
-        return []
-    inner = resp.get("data", resp)
-    if isinstance(inner, dict):
-        inner = inner.get("data", [])
-    return [r for r in inner if isinstance(r, dict)] if isinstance(inner, list) else []
+    try:
+        envelope = validate_read_envelope(resp, operation="order_history")
+    except BrokerError:
+        # The helper's standalone contract is response validation. The actual
+        # facade/adapter validate first and retain typed session/provider errors.
+        raise BrokerReadResponseInvalid from None
+    rows = envelope["data"]
+    if type(rows) is dict:
+        rows = rows["data"]
+    return [_response_record(row) for row in rows]
 
 
 def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:

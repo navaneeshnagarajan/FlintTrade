@@ -3570,14 +3570,6 @@ def create_flask_app(
     except Exception as exc:
         logger.warning("workspace.json override failed (%s)", type(exc).__name__)
 
-    if runtime_ready and not os.environ.get("PYTEST_CURRENT_TEST"):
-        try:
-            from flinttrade_core.instrument_lot_master import start_instrument_master_refresh  # noqa: PLC0415
-
-            start_instrument_master_refresh()
-        except Exception as exc:  # noqa: BLE001 - the shipped excerpt remains usable
-            logger.warning("Instrument master refresh did not start (%s)", type(exc).__name__)
-
     # ------------------------------------------------------------------
     # Static frontend — serve the built React bundle from
     # packages/apps/terminal/dist/ with SPA fallback for client-side routes.
@@ -5463,7 +5455,29 @@ def create_flask_app(
             # Otherwise serve index.html (SPA client-side routing) with the CSP nonce.
             return _serve_index_with_nonce()
 
+    # Acquire the worker only after factory construction can no longer fail,
+    # then publish its exact owner for ordinary stop and startup rollback.
+    if runtime_ready and not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
+            from flinttrade_core.instrument_lot_master import start_instrument_master_refresh  # noqa: PLC0415
+
+            app.config["INSTRUMENT_MASTER_REFRESH_OWNER"] = start_instrument_master_refresh()
+        except Exception as exc:  # noqa: BLE001 - the shipped excerpt remains usable
+            logger.warning("Instrument master refresh did not start (%s)", type(exc).__name__)
+
     return app
+
+
+def _stop_instrument_master_refresh(app: Flask, *, timeout: float) -> bool:
+    """Retain the public-master worker until its exact stop is proved complete."""
+    owner = app.config.get("INSTRUMENT_MASTER_REFRESH_OWNER")
+    if owner is None:
+        return True
+    if not owner.stop(timeout=timeout):
+        return False
+    if app.config.get("INSTRUMENT_MASTER_REFRESH_OWNER") is owner:
+        app.config.pop("INSTRUMENT_MASTER_REFRESH_OWNER", None)
+    return True
 
 
 class _FlaskServerOwner:
@@ -5621,6 +5635,9 @@ def _run_flask_server(app: Flask, port: int = 5100, host: str = "127.0.0.1") -> 
                 port=port,
                 ident="FlintTrade",
                 threads=8,
+                # select() rejects otherwise-valid high descriptor numbers.
+                # Waitress falls back to select where poll is unavailable.
+                asyncore_use_poll=True,
             )
             dispatcher.set_thread_count(8)
         except BaseException:
@@ -6103,6 +6120,7 @@ class FlintTradeApp:
         *,
         require_truthy: bool = False,
         require_live_deadline_for_success: bool = False,
+        resume_incomplete: bool = False,
     ) -> tuple[bool, str | None]:
         """Run or rejoin one synchronous owner cleanup within the deadline."""
         deadline_was_live = deadline.remaining() > 0.0
@@ -6111,6 +6129,7 @@ class FlintTradeApp:
             workers = {}
             self._shutdown_sync_workers = workers
         worker = workers.get(key)
+        rejoining_worker = worker is not None
         if worker is None:
             worker = _RetainedSyncOwnerWorker(
                 operation,
@@ -6134,6 +6153,18 @@ class FlintTradeApp:
         if require_live_deadline_for_success and (not deadline_was_live or deadline.remaining() <= 0.0):
             return False, "TimeoutError"
         if require_truthy and not bool(result):
+            if resume_incomplete and rejoining_worker and deadline.remaining() > 0.0:
+                # The earlier operation has finished, but its bounded False
+                # does not describe this attempt's fresh deadline. Resume the
+                # same owner once, without duplicating an in-flight operation
+                # or recursively retrying a failure from the current attempt.
+                return await self._run_retained_sync_owner(
+                    key,
+                    operation,
+                    deadline,
+                    require_truthy=require_truthy,
+                    require_live_deadline_for_success=require_live_deadline_for_success,
+                )
             return False, "TimeoutError"
         return True, None
 
@@ -6205,6 +6236,13 @@ class FlintTradeApp:
             return stopped
 
         if flask_app is not None:
+            if not await stop_sync(
+                "startup-instrument-master",
+                "instrument master refresh",
+                lambda: _stop_instrument_master_refresh(flask_app, timeout=deadline.remaining()),
+                require_truthy=True,
+            ):
+                return False
             if not _stop_backend_lease_watch(flask_app, timeout=deadline.remaining()):
                 return False
             tracker = flask_app.config.get("RUNTIME_REQUEST_TRACKER")
@@ -6853,6 +6891,7 @@ class FlintTradeApp:
             *,
             require_truthy: bool = False,
             require_live_deadline_for_success: bool = False,
+            resume_incomplete: bool = False,
         ) -> bool:
             stopped, error_type = await self._run_retained_sync_owner(
                 key,
@@ -6860,6 +6899,7 @@ class FlintTradeApp:
                 deadline,
                 require_truthy=require_truthy,
                 require_live_deadline_for_success=require_live_deadline_for_success,
+                resume_incomplete=resume_incomplete,
             )
             if not stopped:
                 errors.append((label, error_type or "RuntimeError"))
@@ -6956,9 +6996,18 @@ class FlintTradeApp:
                 "Flask API listener",
                 lambda: flask_server_owner.stop(timeout=deadline.remaining()),
                 require_truthy=True,
+                resume_incomplete=True,
             )
             if listener_stopped and self._flask_server_owner is flask_server_owner:
                 self._flask_server_owner = None
+
+        if flask_app is not None:
+            await stop_sync(
+                "instrument-master",
+                "instrument master refresh",
+                lambda: _stop_instrument_master_refresh(flask_app, timeout=deadline.remaining()),
+                require_truthy=True,
+            )
 
         strategy_cron_scheduler = getattr(self, "strategy_cron_scheduler", None)
         strategy_cron_stopped = (

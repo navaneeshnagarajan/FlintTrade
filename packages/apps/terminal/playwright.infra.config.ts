@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// The offline runtime runner clears inherited environment variables. Keep the
+// browser diagnostics in explicit CI mode even under that allowlisted runner.
+process.env["CI"] = "true";
+
 /**
  * Network-independent configuration for the fail-closed infrastructure tests.
  * Every HTTP request in the spec is intercepted by the synthetic registry, so

@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Action(StrEnum):
@@ -46,6 +46,8 @@ class Product(StrEnum):
     MIS = "MIS"
     CNC = "CNC"
     NRML = "NRML"
+    # An intention token, not an account/instrument eligibility grant.
+    MTF = "MTF"
 
 
 class OptionType(StrEnum):
@@ -81,7 +83,8 @@ class Order(BaseModel):
     admission_note: str = ""
     variety: str = "regular"
     validity: str | None = None
-    market_protection: bool | None = None
+    # Generic on/off intent, not a broker's percentage or automatic strategy.
+    market_protection: bool | None = Field(default=None, strict=True)
     # Native advanced-order controls participate in the same gate signature.
     target_price: str = "0"
     stop_loss_price: str = "0"
@@ -93,6 +96,14 @@ class Order(BaseModel):
     entry_trigger_type: str | None = None
     stop_loss_trigger_type: str | None = None
     target_trigger_type: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_unrepresented_native_intent(cls, data: Any) -> Any:
+        """Never discard native percentages/rules as ignored canonical extras."""
+        if isinstance(data, dict) and {"market_protection_by_strategy", "market_protection_by_index", "rules"} & data.keys():
+            raise ValueError("Native percentage/rule intent requires a reviewed canonical contract")
+        return data
 
 
 class ModifyOrder(BaseModel):
