@@ -38,6 +38,12 @@ The capability inventory correctly leaves full implementation/readiness unknown.
 
 Official pages rechecked 2026-10-06: [Forever](https://dhanhq.co/docs/v2/forever/), [Super](https://dhanhq.co/docs/v2/super-order/), [Orders](https://dhanhq.co/docs/v2/orders/). SDK pin is verified from `brokers.lock`; installed SDK source was unavailable. Retain the existing Super MARKET refusal and AMO REST workaround; exact SDK compatibility remains a later prerequisite.
 
+## Implementation checkpoint: 2026-10-07
+
+Draft PR #308 publishes a separate `dhan_order_mapping.py` REST-dictionary companion. The current independent test file exercises that companion, not the legacy `dhan_mapping.py` interfaces named in this plan. Tasks 1–3 below remain unfinished at those legacy seams: their quantity coercion, Forever readback and Super trailing/remaining-quantity repairs have not been applied. Companion tests cannot establish completion of those tasks or adapter parity.
+
+Review the real legacy import closure and retain the offline boundaries before attempting those repairs; runtime integration remains blocked.
+
 ## Task 1: Preserve Forever identity and constrain creation
 
 **Files:** M, T. **Interfaces:** keep `to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]`, `to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]`, and `from_dhan_forever_order(d: dict[str, Any]) -> dict[str, Any]`.

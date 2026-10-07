@@ -366,9 +366,22 @@ def test_create_rejects_oco_product_combinations_outside_documented_scope(family
         _create(family, request)
 
 
-@pytest.mark.parametrize("segment", ["CASH", "FNO"])
-@pytest.mark.parametrize("product", ["CNC", "MIS", "NRML"])
-def test_create_gtt_preserves_annexure_product_and_segment_without_eligibility_claim(segment, product):
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("segment", "product"), [("CASH", "MIS"), ("CASH", "NRML"), ("FNO", "CNC"), ("FNO", "MIS")]
+)
+def test_create_gtt_refuses_unverified_product_pairs(segment, product):
+    request = _gtt_request()
+    request.update(segment=segment, product_type=product)
+    original = deepcopy(request)
+    with pytest.raises(ValueError, match="GTT product_type.*unverified"):
+        _create("GTT", request)
+    assert request == original
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("segment", "product"), [("CASH", "CNC"), ("FNO", "NRML")])
+def test_create_gtt_preserves_documented_product_pairs_without_lot_inference(segment, product):
     request = _gtt_request()
     request.update(segment=segment, product_type=product, quantity=51)
     if segment == "FNO":
@@ -504,6 +517,32 @@ def _path(operation, smart_order_id="gtt_fixture_123", segment="CASH", smart_ord
     addresser = getattr(groww_smart_mapping, "smart_resource_path", None)
     assert callable(addresser), "Missing production interface: smart_resource_path"
     return addresser(operation, smart_order_id=smart_order_id, segment=segment, smart_order_type=smart_order_type)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("segment", "product"), [("CASH", "MIS"), ("CASH", "NRML"), ("FNO", "CNC"), ("FNO", "MIS")]
+)
+def test_modify_gtt_refuses_supplied_unverified_product_pairs(segment, product):
+    current = _current("GTT")
+    current.update(segment=segment, product_type=product)
+    original = deepcopy(current)
+    with pytest.raises(ValueError, match="GTT product_type.*unverified"):
+        _modify(current, {"quantity": 12})
+    assert current == original
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("segment", "product"), [("CASH", "CNC"), ("FNO", "NRML")])
+def test_modify_gtt_retains_documented_pair_context_without_emitting_product(segment, product):
+    current = _current("GTT")
+    current.update(segment=segment, product_type=product)
+    assert _modify(current, {"quantity": 12}) == {
+        "smart_order_type": "GTT",
+        "segment": segment,
+        "quantity": 12,
+        "order": {"order_type": "LIMIT", "price": "3990.00", "transaction_type": "BUY"},
+    }
 
 
 def test_modify_resource_allowlists():
@@ -768,12 +807,22 @@ def test_modify_does_not_require_or_emit_create_reference_or_response_metadata(f
     assert "child_legs" not in payload
 
 
-@pytest.mark.parametrize("segment", ["CASH", "FNO"])
-@pytest.mark.parametrize("product", ["CNC", "MIS", "NRML"])
-def test_modify_gtt_does_not_infer_product_eligibility(segment, product):
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("segment", "product", "documented_pair"),
+    [
+        ("CASH", "CNC", True), ("CASH", "MIS", False), ("CASH", "NRML", False),
+        ("FNO", "CNC", False), ("FNO", "MIS", False), ("FNO", "NRML", True),
+    ],
+)
+def test_modify_gtt_applies_documented_pair_policy_without_lot_inference(segment, product, documented_pair):
     current = _current("GTT")
     current.update(segment=segment, product_type=product)
-    assert _modify(current, {"quantity": 51})["segment"] == segment
+    if documented_pair:
+        assert _modify(current, {"quantity": 51})["segment"] == segment
+    else:
+        with pytest.raises(ValueError, match="GTT product_type.*unverified"):
+            _modify(current, {"quantity": 51})
 
 
 @pytest.mark.parametrize("segment", ["CASH", "FNO"])

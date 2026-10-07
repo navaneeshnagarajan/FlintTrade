@@ -40,6 +40,12 @@ Inventory `docs/acceptance/FT-GTT-001-capabilities.json` records missing V3/rule
 
 Official references rechecked 2026-10-06: [V3 placement](https://upstox.com/developer/api-documentation/v3/place-order/), [GTT placement](https://upstox.com/developer/api-documentation/place-gtt-order/), [GTT detail](https://upstox.com/developer/api-documentation/get-gtt-order-details/), [multi-order](https://upstox.com/developer/api-documentation/place-multi-order/). SDK compatibility remains unverified. Below are newly specified mapping interfaces, not existing Order fields or SDK constructors.
 
+## Research checkpoint: 2026-10-07
+
+The pinned 2.30.0 SDK's [modification request](https://github.com/upstox/upstox-python/blob/d88a12ef5738a4c8d71f3b88eb7b79a359277c9d/upstox_client/models/gtt_modify_order_request.py) uses the shared [GttRule](https://github.com/upstox/upstox-python/blob/d88a12ef5738a4c8d71f3b88eb7b79a359277c9d/upstox_client/models/gtt_rule.py). Its [serialiser](https://github.com/upstox/upstox-python/blob/d88a12ef5738a4c8d71f3b88eb7b79a359277c9d/upstox_client/api_client.py) retains explicit, non-null per-rule `market_protection` when [building the modification request](https://github.com/upstox/upstox-python/blob/d88a12ef5738a4c8d71f3b88eb7b79a359277c9d/upstox_client/api/order_controller_v_3_api.py). The [web modification table](https://upstox.com/developer/api-documentation/modify-gtt-order/) omits this field.
+
+Preserve the explicit request value at the standalone dictionary boundary, including omission when absent and the existing exact-integer domain. This is SDK-serialisation evidence only: HTTP acceptance, modification effectiveness and active protection remain unverified. No SDK calls, defaults, percentage selection or readiness promotion follow from this checkpoint. The legacy interfaces named below remain separate integration targets.
+
 ## Task 1: Forward explicit market protection without inventing eligibility
 
 **Files:** M, T. **Interfaces:** extend `to_place_order_v3_params(order: Any, instrument_token: str, *, tag: str | None = None, market_protection: int | None = None) -> dict[str, Any]`; extend `to_multi_order_params(orders_with_tokens: list[tuple[Any, str]], *, tag: str | None = None, market_protection_by_index: dict[int, int] | None = None) -> list[dict[str, Any]]`. Indexes are zero-based.

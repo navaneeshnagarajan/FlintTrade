@@ -1,8 +1,8 @@
 """Pure serialisers for Groww's native GTT and OCO smart-order dictionaries.
 
-These helpers validate wire fields, not account or instrument eligibility. GTT
-product/segment eligibility and OCO leg-role eligibility require independent
-checks before integration. Quantities retain native units; lot, tick and freeze
+These helpers validate wire fields and conservatively restrict GTT request pairs
+to documented CASH/CNC and FNO/NRML. Account/instrument eligibility and OCO
+leg-role eligibility still require independent checks before integration. Quantities retain native units; lot, tick and freeze
 checks are the eventual caller's responsibility. The supplied OCO net position
 is a caller-provided snapshot, not an atomic broker reduce-only guarantee.
 
@@ -110,11 +110,19 @@ def _order(value: Any, field: str, *, triggered: bool) -> dict[str, Any]:
     return result
 
 
+def _validate_gtt_product(segment: str, product: str) -> None:
+    """Restrict request pairs to the official GTT-specific product guidance."""
+    expected_product = "CNC" if segment == "CASH" else "NRML"
+    if product != expected_product:
+        raise ValueError(f"GTT product_type for {segment} is unverified; use documented {expected_product}")
+
+
 def to_gtt_create_payload(request: Mapping[str, Any]) -> dict[str, Any]:
     """Return a fresh native GTT creation payload without establishing eligibility.
 
     Args:
         request: Explicit Groww creation fields, including a nested execution order.
+            GTT product pairs are conservatively limited to CASH/CNC and FNO/NRML.
 
     Returns:
         A separate dictionary retaining decimal text and native quantity units.
@@ -123,6 +131,7 @@ def to_gtt_create_payload(request: Mapping[str, Any]) -> dict[str, Any]:
         ValueError: A required field is absent, unsupported or malformed.
     """
     result = _common(request, "GTT", _GTT_FIELDS)
+    _validate_gtt_product(result["segment"], result["product_type"])
     _price(result["trigger_price"], "trigger_price")
     _enum(result["trigger_direction"], frozenset({"UP", "DOWN"}), "trigger_direction")
     result["order"] = _order(result["order"], "order", triggered=False)
@@ -214,7 +223,7 @@ def _edits(value: Any, field: str, allowed: frozenset[str]) -> dict[str, Any]:
     return result
 
 
-def _modify_gtt(current: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+def _modify_gtt(current: dict[str, Any], changes: dict[str, Any], segment: str) -> dict[str, Any]:
     effective = {**current, **changes}
     for name in ("quantity", "trigger_price", "trigger_direction", "product_type", "duration"):
         if name not in effective:
@@ -231,6 +240,8 @@ def _modify_gtt(current: dict[str, Any], changes: dict[str, Any]) -> dict[str, A
                 "duration": frozenset({"DAY"}),
             }
             _enum(value, choices[name], name)
+    if "product_type" in effective:
+        _validate_gtt_product(segment, effective["product_type"])
     current_order = _mapping(current.get("order"), "current.order")
     side = _enum(current_order.get("transaction_type"), _SIDES, "current.order.transaction_type")
     edits = _edits(changes["order"], "changes.order", frozenset({"order_type", "price"})) if "order" in changes else {}
@@ -305,7 +316,9 @@ def to_smart_modify_payload(current: Mapping[str, Any], changes: Mapping[str, An
     Args:
         current: Native state with explicit id/type/segment. GTT requires its
             current immutable side and enough order fields for a full effective
-            order. OCO exposure/side constraints are optional, but must be a
+            order. Supplied GTT product context must use a documented pair; its
+            absence establishes no eligibility. OCO exposure/side constraints
+            are optional, but must be a
             complete valid pair if supplied. Returned metadata is not emitted.
         changes: Explicit supported edits; unknown and immutable fields fail.
 
@@ -327,7 +340,7 @@ def to_smart_modify_payload(current: Mapping[str, Any], changes: Mapping[str, An
         state.get("smart_order_id"), state.get("segment"), state.get("smart_order_type")
     )
     edits = _edits(changes, "changes", _GTT_EDITS if family == "GTT" else _OCO_EDITS)
-    result = _modify_gtt(state, edits) if family == "GTT" else _modify_oco(state, edits, segment)
+    result = _modify_gtt(state, edits, segment) if family == "GTT" else _modify_oco(state, edits, segment)
     return {"smart_order_type": family, "segment": segment, **result}
 
 

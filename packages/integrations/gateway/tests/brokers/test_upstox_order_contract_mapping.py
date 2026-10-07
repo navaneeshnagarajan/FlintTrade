@@ -5,6 +5,8 @@ from collections import UserDict
 from copy import deepcopy
 from decimal import Decimal
 
+import pytest
+
 from flinttrade_gateway.brokers import upstox_order_mapping as mapping
 
 
@@ -437,13 +439,27 @@ class GttContracts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mapping.gtt_modify_payload("GTT-1", modification(**{key: 1}))
 
-    def test_modify_rejects_per_rule_protection(self):
+    @pytest.mark.unit
+    def test_modify_preserves_explicit_pinned_sdk_rule_protection(self):
         for strategy in ("ENTRY", "TARGET", "STOPLOSS"):
-            rules = [rule(market_protection=-1)] if strategy == "ENTRY" else [
-                rule(), rule(strategy, market_protection=2)]
-            with self.assertRaises(ValueError):
-                mapping.gtt_modify_payload("GTT-1", modification(type="SINGLE" if len(rules) == 1 else "MULTIPLE",
-                                                                 rules=rules))
+            for value in (-1, 0, 1, 25):
+                rules = [rule(market_protection=value)] if strategy == "ENTRY" else [
+                    rule(), rule(strategy, market_protection=value)]
+                changes = modification(type="SINGLE" if len(rules) == 1 else "MULTIPLE", rules=rules)
+                original = deepcopy(changes)
+                self.assertEqual(mapping.gtt_modify_payload("GTT-1", changes),
+                                 {**original, "gtt_order_id": "GTT-1"})
+                self.assertEqual(changes, original)
+
+    @pytest.mark.unit
+    def test_modify_rejects_invalid_pinned_sdk_rule_protection(self):
+        for strategy in ("ENTRY", "TARGET", "STOPLOSS"):
+            for value in (-2, 26, True, 1.0, "1", None, [], float("nan")):
+                rules = [rule(market_protection=value)] if strategy == "ENTRY" else [
+                    rule(), rule(strategy, market_protection=value)]
+                changes = modification(type="SINGLE" if len(rules) == 1 else "MULTIPLE", rules=rules)
+                with self.assertRaises(ValueError):
+                    mapping.gtt_modify_payload("GTT-1", changes)
 
     def test_modify_rejects_invalid_identifier(self):
         for value in (None, "", " \t", True, [], 1):
@@ -612,7 +628,7 @@ class GttContracts(unittest.TestCase):
 
     def test_rejected_requests_leave_nested_inputs_unchanged(self):
         fields = gtt(quantity="02", rules=[rule(market_protection=26)])
-        changes = modification(quantity="02", rules=[rule(market_protection=2)])
+        changes = modification(quantity="02", rules=[rule(market_protection=26)])
         before = deepcopy((fields, changes))
         with self.assertRaises(ValueError):
             mapping.gtt_create_payload(fields)

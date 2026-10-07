@@ -149,7 +149,7 @@ def _gtt_request(fields: Mapping[str, object], *, create: bool) -> dict[str, obj
             or (kind == "SINGLE" and len(rows) != 1) or (kind == "MULTIPLE" and not 2 <= len(rows) <= 3)):
         raise ValueError("invalid GTT rule composition")
     required_rule = {"strategy", "trigger_type", "trigger_price"}
-    optional = {"trailing_gap", "market_protection"} if create else {"trailing_gap"}
+    optional = {"trailing_gap", "market_protection"}
     for row in rows:
         if not required_rule <= row.keys() or row.keys() - (required_rule | optional):
             raise ValueError("missing required or unknown GTT rule fields")
@@ -177,15 +177,19 @@ def gtt_create_payload(fields: Mapping[str, object]) -> dict[str, object]:
 
 
 def gtt_modify_payload(gtt_order_id: str, changes: Mapping[str, object]) -> dict[str, object]:
-    """Require a complete replacement; undocumented protection is rejected.
+    """Require a complete replacement, preserving explicit pinned SDK rule fields.
 
+    The 2.30.0 SDK's shared GttRule serialises market_protection on modification,
+    although the web modification table omits it. Server acceptance and effective
+    protection remain unverified; this helper only preserves requested intent.
     Current OPEN-state quantity/trigger restrictions require separate fresh
     evidence. This helper neither merges existing rules nor infers positions.
 
     Args:
         gtt_order_id: Explicit broker resource identity; not an idempotency token.
         changes: Complete replacement containing type, quantity and every rule.
-            Creation-only fields, including rule market_protection, are refused.
+            Creation-only top-level fields are refused. Optional per-rule
+            market_protection is validated and retained without supplying a default.
 
     Returns:
         Detached replacement payload with the supplied gtt_order_id.
