@@ -84,7 +84,6 @@ import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { LAYA_EXIT_WHILE_DOWN } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
@@ -123,6 +122,10 @@ import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
 import {
   exitAlreadyPendingMessage,
+  exitRequestErrorMessage,
+  orderStatusIsCancelPending,
+  CANCEL_PENDING_MESSAGE,
+  EXECUTION_FIRST_WARNING,
   orderRefusalMessage,
   EXIT_PENDING_TAG,
   UNEXPECTED_POSITION_TAG,
@@ -188,6 +191,8 @@ interface PositionsPanelParams {
 
 /** Position products supported by the convert and square-off verbs. */
 const PRODUCTS = ["MIS", "CNC", "NRML"] as const;
+const EXIT_REQUESTED_WHILE_DOWN = "Exit requested. Exits are allowed while Laya is Down.";
+const EXIT_ALL_ACKNOWLEDGED = "Exit-all requested. Check positions and orders for the outcome.";
 
 interface PositionActionIntent {
   position: PositionRow;
@@ -433,10 +438,10 @@ function SquareOffDialog({
       const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
         category: "order",
-        title: exitWhileDown ? LAYA_EXIT_WHILE_DOWN : "Square-off submitted",
+        title: exitWhileDown ? EXIT_REQUESTED_WHILE_DOWN : "Square-off submitted",
         body: exitWhileDown
-          ? LAYA_EXIT_WHILE_DOWN
-          : `${exitAction} ${exitQty} ${position.symbol} at market.`,
+          ? EXIT_REQUESTED_WHILE_DOWN
+          : `Exit requested: ${exitAction} ${exitQty} ${position.symbol} at market. Check positions and orders for the outcome.`,
       });
       onSquaredOff(mutationIdentity);
       onClose();
@@ -449,7 +454,7 @@ function SquareOffDialog({
         // Surface mode-guard 403s and broker rejections honestly — the backend
         // message tells the operator exactly what blocked the square-off.
         setLayaNotice(null);
-        setErrorMsg(err instanceof Error ? err.message : "Square-off failed.");
+        setErrorMsg(exitRequestErrorMessage(err));
       }
     } finally {
       setIsSubmitting(false);
@@ -482,10 +487,10 @@ function SquareOffDialog({
             This places a {exitAction} market order for {exitQty} {position.symbol} (
             {position.exchange}
             {position.product ? `, ${position.product}` : ""}) to close your{" "}
-            {position.quantity > 0 ? "long" : "short"} position. Fills in a fast market can land far
-            from the last traded price, and the action cannot be undone.
+            {position.quantity > 0 ? "long" : "short"} position.
           </DialogDescription>
         </DialogHeader>
+        <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
         {!product && (
           <p className="text-xs text-loss" role="alert">
             Cannot square off: unrecognised product
@@ -564,7 +569,7 @@ function ExitAllDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [rowFailures, setRowFailures] = useState<ExitAllRowFailure[]>([]);
-  const [squaredOff, setSquaredOff] = useState<string[]>([]);
+  const [submittedExits, setSubmittedExits] = useState<string[]>([]);
   const confirmed = confirmText.trim() === "EXIT";
   const openRows = positions.filter((row) => row.quantity !== 0);
   const positionCount = openRows.length;
@@ -575,7 +580,7 @@ function ExitAllDialog({
         setConfirmText("");
         setErrorMsg(null);
         setRowFailures([]);
-        setSquaredOff([]);
+        setSubmittedExits([]);
       }
       onOpenChange(next);
     },
@@ -593,7 +598,7 @@ function ExitAllDialog({
     setIsSubmitting(true);
     setErrorMsg(null);
     setRowFailures([]);
-    setSquaredOff([]);
+    setSubmittedExits([]);
     try {
       if (practice) {
         const failures: ExitAllRowFailure[] = [];
@@ -642,7 +647,7 @@ function ExitAllDialog({
               notice,
               message: notice
                 ? ""
-                : (err instanceof Error ? err.message : "Square-off failed."),
+                : exitRequestErrorMessage(err),
             });
           }
         }
@@ -652,17 +657,15 @@ function ExitAllDialog({
         ) return;
         if (done.length > 0) onExited(mutationIdentity);
         if (failures.length > 0) {
-          setSquaredOff(done);
+          setSubmittedExits(done);
           setRowFailures(failures);
           return;
         }
         const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
         emitNotification({
           category: "system",
-          title: exitWhileDown ? LAYA_EXIT_WHILE_DOWN : "Exit-all submitted",
-          body: exitWhileDown
-            ? LAYA_EXIT_WHILE_DOWN
-            : "Every open Practice position was squared off at market.",
+          title: exitWhileDown ? EXIT_REQUESTED_WHILE_DOWN : "Exit-all submitted",
+          body: EXIT_ALL_ACKNOWLEDGED,
         });
         close(false);
         return;
@@ -683,14 +686,14 @@ function ExitAllDialog({
       emitNotification({
         category: "system",
         title: "Exit-all submitted",
-        body: "Every open position is being squared off at market.",
+        body: EXIT_ALL_ACKNOWLEDGED,
       });
       onExited(mutationIdentity);
       close(false);
     } catch (err) {
       // Mode-guard 403s ("live mode only", PIN unlock) and broker errors are
       // shown verbatim — never a generic failure.
-      setErrorMsg(err instanceof Error ? err.message : "Exit-all positions failed.");
+      setErrorMsg(exitRequestErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -713,10 +716,11 @@ function ExitAllDialog({
           <DialogTitle>Exit all positions?</DialogTitle>
           <DialogDescription>
             {practice
-              ? `This places an opposite market order for every open Practice position (${positionCount}). A refusal is shown on that row. Fills in a fast market can land far from the last traded price, and the action cannot be undone.`
-              : `This squares off EVERY open position (${positionCount}) in your live broker account at market price. Fills in a fast market can land far from the last traded price, and the action cannot be undone.`}
+              ? `This requests an opposite market order for every open Practice position (${positionCount}). A refusal is shown on that row.`
+              : `This requests a market exit for every open position (${positionCount}) in your live broker account.`}
           </DialogDescription>
         </DialogHeader>
+        <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
         <div className="space-y-1.5">
           <Label htmlFor="exit-all-confirm">Type EXIT (in capitals) to confirm</Label>
           <Input
@@ -727,9 +731,9 @@ function ExitAllDialog({
             autoComplete="off"
           />
         </div>
-        {squaredOff.length > 0 && (
+        {submittedExits.length > 0 && (
           <p className="text-xs text-text-secondary" role="status">
-            Squared off: {squaredOff.join(", ")}.
+            Exit requested: {submittedExits.join(", ")}.
           </p>
         )}
         {rowFailures.map((failure) => (
@@ -800,11 +804,21 @@ function PositionsWidget(props: WidgetProps) {
     enabled: accountReadsEnabled,
     context: accountReadContext,
   });
-  const { data: ordersData } = useOrders({
+  const {
+    data: ordersData,
+    isError: ordersError,
+    error: ordersQueryError,
+    isLoading: ordersLoading,
+    isSuccess: ordersSuccess,
+    fetchStatus: ordersFetchStatus,
+  } = useOrders({
     enabled: accountReadsEnabled && !isExplore,
     context: accountReadContext,
   });
+  // A fallback array is for rendering only. It never proves an empty broker book.
   const orders = ordersData ?? EMPTY_EXIT_ORDERS;
+  const ordersAvailable = accountReadsEnabled && ordersSuccess && !ordersError
+    && !ordersLoading && ordersFetchStatus !== "paused" && ordersData !== undefined;
 
   const { isNarrow, containerRef } = useNarrowLayout<HTMLDivElement>();
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -833,6 +847,18 @@ function PositionsWidget(props: WidgetProps) {
     const keys = new Set<string>();
     for (const row of rows) {
       if (contractHasOpenExit(row, orders)) keys.add(positionContractKey(row));
+    }
+    return keys;
+  }, [orders, rows]);
+
+  const cancelPendingExitKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of rows) {
+      if (row.quantity === 0) continue;
+      const key = positionContractKey(row);
+      if (orders.some((order) => positionContractKey(order) === key
+        && order.action.trim().toUpperCase() === (row.quantity > 0 ? "SELL" : "BUY")
+        && orderStatusIsCancelPending(order.status))) keys.add(key);
     }
     return keys;
   }, [orders, rows]);
@@ -883,11 +909,11 @@ function PositionsWidget(props: WidgetProps) {
     && readIdentity.scopeKey === `live:${brokerAccountKey(activeAccount)}`;
   const canMutateBook = appMode === "live" && queryUi.canRefetch && !isError;
   const practiceBookReady = appMode === "practice" && queryUi.canRefetch && !isError;
-  const canSquareOff = practiceBookReady || (
+  const canSquareOff = ordersAvailable && (practiceBookReady || (
     canMutateBook && exactActiveNativeBook
-  );
+  ));
   const canUseNativePositionVerbs = canMutateBook && exactActiveNativeBook;
-  const canExitAll = practiceBookReady || canUseNativePositionVerbs;
+  const canExitAll = ordersAvailable && (practiceBookReady || canUseNativePositionVerbs);
   const nativeActionGateRef = useRef(canUseNativePositionVerbs);
   const squareOffActionGateRef = useRef(canSquareOff);
   const readIdentityRef = useRef(readIdentity);
@@ -1073,16 +1099,18 @@ function PositionsWidget(props: WidgetProps) {
         triggerPrice: 0,
         strategy: "FlintPositions",
       }, identity, { exit: true });
+      if (!accountAuthorityMatches(identity, getCurrentReadIdentity())) return;
       const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
         category: "order",
-        title: exitWhileDown ? LAYA_EXIT_WHILE_DOWN : "Square-off submitted",
+        title: exitWhileDown ? EXIT_REQUESTED_WHILE_DOWN : "Square-off submitted",
         body: exitWhileDown
-          ? LAYA_EXIT_WHILE_DOWN
-          : `${exitAction} ${exitQty} ${position.symbol} at market.`,
+          ? EXIT_REQUESTED_WHILE_DOWN
+          : `Exit requested: ${exitAction} ${exitQty} ${position.symbol} at market. Check positions and orders for the outcome.`,
       });
       refreshPositions(identity, getCurrentReadIdentity);
     } catch (err) {
+      if (!accountAuthorityMatches(identity, getCurrentReadIdentity())) return;
       const code = err && typeof err === "object" && "body" in err
         && err.body && typeof err.body === "object" && "code" in err.body
         && typeof err.body.code === "string"
@@ -1090,11 +1118,11 @@ function PositionsWidget(props: WidgetProps) {
         : undefined;
       emitNotification({
         category: "alert",
-        title: "Close failed",
+        title: "Exit request update",
         body: orderRefusalMessage(
           code,
           position.symbol,
-          err instanceof Error ? err.message : "Close failed.",
+          exitRequestErrorMessage(err),
         ),
       });
     }
@@ -1181,14 +1209,16 @@ function PositionsWidget(props: WidgetProps) {
         positionKey: key,
         highlighted: highlightedKeys.has(key),
         symbol: row.symbol,
-        detail: `Qty ${row.quantity} · LTP ${fmtPrice(row.ltp)}`,
+        detail: `Qty ${row.quantity} · LTP ${fmtPrice(row.ltp)}${
+          cancelPendingExitKeys.has(positionContractKey(row)) ? ` · ${CANCEL_PENDING_MESSAGE}` : ""
+        }`,
         pnl: fmtPnl(row.mtm),
         pnlPercent: fmtPnlPct(row.pnlPercent),
         pnlPositive: row.mtm >= 0,
         actions: renderRowActions(row),
       };
     }),
-    [highlightedKeys, renderRowActions, rows],
+    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows],
   );
 
   const columns = useMemo<ColumnDef<SortedTableFeatures, PositionRow>[]>(
@@ -1205,6 +1235,9 @@ function PositionsWidget(props: WidgetProps) {
               <span className="font-mono font-medium">{row.original.symbol}</span>
               {exitPending ? (
                 <span className="text-xxs text-warning">{EXIT_PENDING_TAG}</span>
+              ) : null}
+              {cancelPendingExitKeys.has(key) ? (
+                <span className="text-xxs text-warning">{CANCEL_PENDING_MESSAGE}</span>
               ) : null}
               {unexpected ? (
                 <span className="text-xxs text-warning">{UNEXPECTED_POSITION_TAG}</span>
@@ -1284,7 +1317,7 @@ function PositionsWidget(props: WidgetProps) {
         cell: ({ row }) => renderRowActions(row.original),
       },
     ],
-    [pendingExitKeys, renderRowActions, unexpectedKeys],
+    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, unexpectedKeys],
   );
 
   const table = useTable({
@@ -1300,7 +1333,7 @@ function PositionsWidget(props: WidgetProps) {
     : queryUi.isPaused
       ? "Positions unavailable while offline"
       : accountReadsEnabled
-        ? "No open positions"
+        ? (isSuccess && positionsData !== undefined ? "No open positions" : "Positions unavailable")
         : "Connect a broker to load positions";
   const emptyHint =
     queryUi.canRefetch || isExplore
@@ -1312,7 +1345,15 @@ function PositionsWidget(props: WidgetProps) {
   return (
     <div
       ref={containerRef}
-      className="h-full flex flex-col overflow-hidden text-xs bg-surface-base"
+      className={cn(
+        "h-full flex flex-col text-xs bg-surface-base",
+        // Leave a pixel beyond the last row: fractional splitter heights and
+        // integer scroll extents otherwise crop its cell border at scroll end.
+        view === "table" ? "overflow-y-auto pb-px" : "overflow-hidden",
+      )}
+      role="region"
+      aria-label="Positions book"
+      tabIndex={0}
       data-tour-target="positions"
     >
       {/* Header */}
@@ -1448,6 +1489,19 @@ function PositionsWidget(props: WidgetProps) {
         </div>
       ) : null}
 
+      {!isExplore && !ordersAvailable && (
+        <div className="sticky top-0 z-20 shrink-0 bg-surface-base pt-2">
+          <div
+            role="alert"
+            data-testid="exit-orders-unavailable"
+            className="px-3 py-2 mx-3 bg-warning/10 border border-warning/20 rounded-md text-xs text-warning"
+          >
+            Broker orders are unavailable. Reconcile them before another exit.
+            {ordersQueryError instanceof Error && ordersQueryError.message ? ` ${ordersQueryError.message}` : ""}
+          </div>
+        </div>
+      )}
+
       {/* Position-feed failure banner — retained rows remain visible and are
           explicitly frozen. Initial no-data failures never claim figures froze. */}
       {isError && !isExplore && (
@@ -1520,7 +1574,10 @@ function PositionsWidget(props: WidgetProps) {
           onRevealRows={revealRows}
         />
       ) : (
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col">
+          {/* The table and tracker share the book's scroller. Their intrinsic
+              height must not collapse to a zero-height nested scroller when a
+              warning consumes most of a compact panel. */}
           {/* Position-status tracker — absorbed from the retired Dashboard
               widget. One segment per broker row, toned by the row's kernel
               mark-to-market (never the raw broker `pnl`, which is wrong for
@@ -1553,7 +1610,7 @@ function PositionsWidget(props: WidgetProps) {
           {isNarrow ? (
             <NarrowBookCards rows={narrowCards} ariaLabel="Positions" />
           ) : (
-          <div className="flex-1 overflow-auto min-h-0">
+          <div className="flex-1">
           <div className="overflow-x-auto min-w-0">
           <Table>
             <TableHeader className="sticky top-0 bg-surface-card z-10">

@@ -287,7 +287,7 @@ def _portfolio_state() -> SimpleNamespace:
 
 
 @pytest.mark.unit
-def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_stays_reduce_only(
+def test_live_broker_exit_reduces_the_cap_but_an_unreadable_book_refuses_reduce_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from flinttrade_core import order_routes
@@ -329,12 +329,13 @@ def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_stays_reduce_on
     app.config["REDUCE_ONLY_LIVE_BOOKS"] = unreadable
     safety.check_order.reset_mock()
     assert process_laya().status is DecisionStatus.DOWN
+    before = process_laya().decision_log()
     closed = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
     assert closed.status_code == 403
-    assert closed.get_json().get("code") != "laya_denied"
-    assert "L1_ORDER" in closed.get_json()["message"]
-    safety.check_order.assert_called_once()
-    assert process_laya().decision_log()[-1].proof_kind == "reduce_only"
+    assert closed.get_json()["code"] == "laya_denied"
+    safety.check_order.assert_not_called()
+    assert process_laya().decision_log() == before
+    app.config["BROKER_ROUTER"].place_order.assert_not_called()
 
 
 @pytest.mark.unit
@@ -367,9 +368,16 @@ def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refuse
         broker_orders=None,
         live=True,
     )
-    assert within.qualifies is True
-    assert within.pending_exits == 4
-    assert within.cap == 6
+    assert within.qualifies is False
+    assert within.pending_exits == 0
+    assert within.cap == 0
+    readable = classify_reduce_only(
+        symbol="INFY", exchange="NSE", product="MIS", action="SELL", quantity=6,
+        positions=[position], our_orders=[our_exit], broker_orders=[], live=True,
+    )
+    assert readable.qualifies is True
+    assert readable.pending_exits == 4
+    assert readable.cap == 6
     over_cap = classify_reduce_only(
         symbol="INFY",
         exchange="NSE",
@@ -378,7 +386,7 @@ def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refuse
         quantity=7,
         positions=[position],
         our_orders=[our_exit],
-        broker_orders=None,
+        broker_orders=[],
         live=True,
     )
     assert over_cap.qualifies is False

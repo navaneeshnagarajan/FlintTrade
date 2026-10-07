@@ -273,7 +273,7 @@ class MockUpstox:
             "data": {
                 "user_id": "AB1234",
                 "user_name": "N",
-                "email": "n@x.in",
+                "email": "user@example.invalid",
                 "broker": "UPSTOX",
                 "exchanges": ["NSE"],
                 "products": ["D", "I"],
@@ -2710,7 +2710,7 @@ async def test_forever_orders_lists_and_normalises_active_gtts():
             "exchange": "NSE",
             "product": "CNC",
             "quantity": "1",
-            "pricetype": "LIMIT",
+            "pricetype": "",  # No observed execution type or IMMEDIATE ENTRY.
             "price": "2850.0",
             "action": "BUY",
             "status": "PENDING",
@@ -2728,6 +2728,12 @@ async def test_forever_orders_lists_and_normalises_active_gtts():
             ],
             "created_at": "",
             "expires_at": "",
+            "broker_fields": {
+                "gtt_order_id": "GTT-CU100", "type": "SINGLE", "trading_symbol": "RELIANCE",
+                "exchange": "NSE", "product": "D", "quantity": 1,
+                "rules": [{"strategy": "ENTRY", "status": "PENDING", "trigger_price": 2850.0,
+                           "transaction_type": "BUY", "order_id": None}],
+            },
         }
     ]
 

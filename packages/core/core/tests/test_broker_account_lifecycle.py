@@ -1114,7 +1114,7 @@ def test_reconstructed_creator_cleanup_survives_backend_revocation(owner_factory
 @pytest.mark.filterwarnings("ignore:This process.*multi-threaded:DeprecationWarning")
 def test_reconstructed_real_fork_refuses_before_inherited_locks(owner_factory):
     import os
-    import select
+    import selectors
     import signal
 
     if not hasattr(os, "fork"):
@@ -1159,7 +1159,9 @@ def test_reconstructed_real_fork_refuses_before_inherited_locks(owner_factory):
             os._exit(0)
     os.close(write_fd)
     try:
-        assert select.select([read_fd], [], [], 1.0)[0], "child touched inherited locked condition/fence"
+        with selectors.DefaultSelector() as readiness:
+            readiness.register(read_fd, selectors.EVENT_READ)
+            assert readiness.select(1.0), "child touched inherited locked condition/fence"
         assert os.read(read_fd, 100) == b"refused-before-locks"
     finally:
         os.close(read_fd)

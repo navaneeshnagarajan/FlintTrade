@@ -269,6 +269,19 @@ def _error_details(value: dict[str, Any]) -> tuple[str, str]:
         ):
             code = candidate
 
+    transport_status = value.get("status_code")
+    if type(transport_status) is int and transport_status >= 400 and (
+        not code or transport_status >= 500 and code not in {"401", "403", "429", "too_many_requests"}
+    ):
+        native_status = value.get("stCode")
+        # The pin adds HTTP 400 to native completed-order code 1021. Retain
+        # that native reason/code, but never let it override an HTTP 5xx.
+        code = (
+            _error_scalar(native_status)
+            if transport_status == 400 and type(native_status) is int and native_status >= 400
+            else _error_scalar(transport_status)
+        )
+
     error: object | None = None
     for key in ("error", "Error", "Error Message"):
         if key in value:
@@ -297,7 +310,7 @@ def _error_details(value: dict[str, Any]) -> tuple[str, str]:
                 message = _error_scalar(value[key])
                 if message:
                     break
-    return code.lower(), message.lower()
+    return code.lower(), message
 
 
 def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool = False, write: bool = False) -> None:
@@ -313,6 +326,10 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
         if "status" in layer and type(status) is not str:
             raise BrokerReadResponseInvalid from None
         if "stat" in layer and type(stat) is not str:
+            raise BrokerReadResponseInvalid from None
+        if "status_code" in layer and (
+            type(layer["status_code"]) is not int or not 100 <= layer["status_code"] <= 599
+        ):
             raise BrokerReadResponseInvalid from None
         if "status" in layer and "stat" in layer:
             status_success = status.lower() in {"ok", "success"}
@@ -337,6 +354,7 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
             status_code == 1000 and operation == "whatsmyip" and status == "success"
         )
         rejected_layer |= type(error_code) is int and error_code >= 400
+        rejected_layer |= type(layer.get("status_code")) is int and layer["status_code"] >= 400
         rejected_layer |= (
             type(error_code) is str
             and (
@@ -356,25 +374,26 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
     # A provider may wrap one failure in another envelope. Classify every layer
     # before choosing an error so a nested generic/5xx detail cannot hide outer
     # authentication or rate-limit evidence.
-    classified: list[tuple[int, str, str, BrokerError | None]] = []
+    classified: list[tuple[int, str, str, BrokerError | None, str]] = []
     expiry_markers = (
         "expired", "invalid token", "invalid session", "please login", "please log in",
         "complete the 2fa process",
     )
     rate_markers = ("rate limit", "too many requests")
     for layer in layers:
-        code, message = _error_details(layer)
+        code, broker_message = _error_details(layer)
+        message = broker_message.lower()
         status_code = layer.get("stCode")
         if any(marker in message for marker in expiry_markers):
-            classified.append((5, "session", code, None))
+            classified.append((5, "session", code, None, broker_message))
         elif code in {"401", "403"}:
-            classified.append((4, "credentials" if auth else "session", code, None))
+            classified.append((4, "credentials" if auth else "session", code, None, broker_message))
         elif code in {"429", "too_many_requests"} or any(marker in message for marker in rate_markers):
-            classified.append((3, "rate", code, None))
-        elif code.startswith("5") or type(status_code) is int and status_code >= 500:
-            classified.append((2, "internal", code, None))
+            classified.append((3, "rate", code, None, broker_message))
+        elif len(code) == 3 and code.startswith("5") or type(status_code) is int and 500 <= status_code <= 599:
+            classified.append((2, "internal", code, None, broker_message))
         else:
-            classified.append((1, "generic", code, None))
+            classified.append((1 if is_rejected(layer) else 0, "generic", code, None, broker_message))
 
     # Embedded transport exceptions remain canonical, but lower-ranked detail
     # cannot override a stronger envelope classification.
@@ -396,9 +415,9 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
                         canonical_code = _error_scalar(_safe_attribute(canonical, "broker_code"))
                     except BrokerReadResponseInvalid:
                         canonical_code = ""
-                    classified.append((rank, "exception", canonical_code, canonical))
+                    classified.append((rank, "exception", canonical_code, canonical, ""))
 
-    _rank, classification, code, canonical = max(
+    _rank, classification, code, canonical, broker_message = max(
         classified,
         key=lambda evidence: (evidence[0], evidence[1] == "exception"),
     )
@@ -420,7 +439,11 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
     if classification == "internal":
         raise BrokerInternal(reason, broker_id="kotakneo", broker_code=code)
     if write:
-        raise OrderRejectedByBroker(reason, broker_id="kotakneo", broker_code=code or "REJECTED")
+        rejection = OrderRejectedByBroker(reason, broker_id="kotakneo", broker_code=code or "REJECTED")
+        # Preserve bounded broker text separately; exception/log summaries stay
+        # sanitised. Never stringify the response or an embedded SDK exception.
+        rejection.broker_message = _SDK_LOG_FILTER._redact(broker_message)
+        raise rejection
     raise BrokerInternal(reason, broker_id="kotakneo", broker_code=code)
 
 
@@ -631,6 +654,13 @@ class KotakNeoSdkSession:
         if self._closed or self._neo is None:
             raise SessionExpired("Kotak Neo session is closed", broker_id="kotakneo")
         try:
+            if write:
+                # The pin otherwise discards HTTP status when returning JSON.
+                # A 5xx body containing an OMS ACK must remain an unknown
+                # transport failure, not affirmative write evidence.
+                rest = getattr(getattr(self._neo, "api_client", None), "rest_client", None)
+                if rest is not None and hasattr(rest, "raise_on_error"):
+                    rest.raise_on_error = True
             value = getattr(self._neo, method)(*args, **kwargs)
             if read:
                 return validate_read_envelope(value, operation=method)

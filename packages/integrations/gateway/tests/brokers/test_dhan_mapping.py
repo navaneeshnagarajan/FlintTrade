@@ -535,8 +535,12 @@ def test_modify_super_order_kwargs_entry_leg() -> None:
 def test_modify_super_order_kwargs_target_and_sl_legs() -> None:
     target = m.to_modify_super_order_kwargs("SUP1", {"leg_name": "TARGET_LEG", "target_price": 2960})
     assert target["leg_name"] == "TARGET_LEG" and target["targetPrice"] == 2960.0
-    sl = m.to_modify_super_order_kwargs("SUP1", {"leg_name": "STOP_LOSS_LEG", "stop_loss_price": 2860})
+    # Dhan documents omission/zero as cancelling trailing: spell out that intent.
+    sl = m.to_modify_super_order_kwargs("SUP1", {
+        "leg_name": "STOP_LOSS_LEG", "stop_loss_price": 2860, "trailing_jump": 0,
+    })
     assert sl["leg_name"] == "STOP_LOSS_LEG" and sl["stopLossPrice"] == 2860.0
+    assert sl["trailingJump"] == 0.0
 
 
 def test_modify_super_order_invalid_leg_raises() -> None:

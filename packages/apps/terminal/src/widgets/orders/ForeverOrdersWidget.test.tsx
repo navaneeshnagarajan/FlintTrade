@@ -219,7 +219,7 @@ describe("ForeverOrdersWidget", () => {
 
     renderWidget();
 
-    expect(screen.getByText(/connect a writable Dhan or Upstox account/i)).toBeInTheDocument();
+    expect(screen.getByText(/currently implements native GTT management for writable Dhan and Upstox accounts/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -279,7 +279,7 @@ describe("ForeverOrdersWidget", () => {
     expect(body.pricetype).toBe("LIMIT");
     expect(body.validity).toBe("DAY");
     await waitFor(() =>
-      expect(screen.getByText(/forever order accepted/i)).toBeInTheDocument(),
+      expect(screen.getByText(/forever order requested/i)).toBeInTheDocument(),
     );
   });
 

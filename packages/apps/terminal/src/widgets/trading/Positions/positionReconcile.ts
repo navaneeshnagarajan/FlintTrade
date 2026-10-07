@@ -14,7 +14,7 @@ export function exitAlreadyPendingMessage(contract: string): string {
 
 export function exitOrdersUnreadableMessage(contract: string): string {
   const label = contract.trim() || "this contract";
-  return `Not placed. One exit at a time for ${label} until your broker's orders load.`;
+  return `Not placed. Broker orders for ${label} are unavailable. Reconcile them before another exit.`;
 }
 
 export function orderRefusalMessage(code: string | undefined, contract: string, fallback: string): string {
@@ -22,6 +22,29 @@ export function orderRefusalMessage(code: string | undefined, contract: string, 
   if (code === "exit_orders_unreadable") return exitOrdersUnreadableMessage(contract);
   if (code === "gtt_unsupported") return GTT_UNSUPPORTED_MESSAGE;
   return fallback;
+}
+
+/** A lost response, timeout or server failure cannot establish non-execution. */
+export function orderRequestOutcomeIsUnknown(error: unknown): boolean {
+  const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+  return !(typeof status === "number" && status >= 400 && status < 500 && status !== 408);
+}
+
+/** Request failure without a definite refusal leaves execution unresolved. */
+export function exitRequestErrorMessage(error: unknown): string {
+  const details = error instanceof Error ? error.message : "";
+  return orderRequestOutcomeIsUnknown(error)
+    ? `Exit status unknown. An order may still execute.${details ? ` ${details}` : ""}`
+    : (details || "Exit request refused.");
+}
+
+export const CANCEL_PENDING_MESSAGE = "Cancel pending. This order may still fill.";
+export const EXECUTION_FIRST_WARNING = "This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.";
+
+/** Exact known cancellation variants only; unfamiliar states remain unknown. */
+export function orderStatusIsCancelPending(status: string): boolean {
+  return ["CANCEL_PENDING", "CANCEL_REQUESTED", "CANCEL PENDING", "PENDING_CANCEL"]
+    .includes(status.trim().toUpperCase());
 }
 
 export const EXIT_PENDING_TAG = "Exit pending";
@@ -68,7 +91,7 @@ export function orderStatusIsOpen(status: string): boolean {
   const text = status.trim().toUpperCase();
   if (!text) return true;
   if (CLOSED_STATUS.has(text)) return false;
-  return !text.includes("CANCEL") && !text.includes("REJECT") && !text.includes("COMPLETE");
+  return true;
 }
 
 /** True when one of our unfilled orders is already the exit side of this contract. */

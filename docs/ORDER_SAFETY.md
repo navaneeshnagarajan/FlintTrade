@@ -286,35 +286,19 @@ When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down. New orders are paused until it's Ready. You can still close positions.").
 That class closes a new Live place on the shared
 client place path. The server decides reduce-only. A client flag is ignored.
-A close qualifies inside either place route when it is the same contract,
-the opposite side, and the quantity is no more than the open quantity minus
-pending exits. Pending exits are this desk's unfilled opposite orders. On
-Live they also include the broker's open orders on that contract when that
-book can be read. An unreadable broker order book still admits a reduce-only
-close, capped at the open quantity minus this desk's own pending exits. An
-unreadable position book is not classified as a close. Laya records a
-qualifying close with proof kind `reduce_only` and does not deny or clamp
-it. Down and Degraded do not block it. Live still runs
-SafetySystem after that record. A second exit on the same broker account,
-while one of this desk's exits on that contract is still unfilled, is
-HTTP 409 `exit_pending`:
-`"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."`
-Practice uses this code on the Practice book. On Live it is the code when
-the broker order book can be read. The Live hold is for that broker
-account. When the broker order book cannot be read, that refusal is HTTP 409
-`exit_orders_unreadable`: `"Not placed. One exit at a time for <symbol> until your broker's orders load."`
-`message` and `reason` are that same text. The label is the symbol, or `this contract` when the symbol is empty.
+A close qualifies inside either place route when it reduces the same contract without changing its sign. Its opposite-side quantity cannot exceed the open quantity minus pending exits. On Live, available position and broker-order books must establish that bound; this desk’s pending exits also count. Missing, malformed or contradictory books cannot establish a reduce-only close or known flatness. There is no unreadable-book fallback.
+
+Laya records a qualifying close with proof kind `reduce_only` and does not deny or clamp it. Down and Degraded do not block that verified close. Live still runs SafetySystem after the record. A second exit on the same exact broker account and contract, while this desk’s earlier exit remains unfilled, returns HTTP 409 `exit_pending`: `"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."`
+
+Practice uses that code on the Practice book. On Live, readable broker evidence and this desk’s retained reservations determine the refusal. If a retained exit exists but broker orders are unavailable, the response is HTTP 409 `exit_orders_unreadable`: `"Not placed. Broker orders for <symbol> are unavailable. Reconcile them before another exit."` The response’s `message` and `reason` contain the same text. The label is the symbol, or `this contract` when the symbol is empty.
 The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has
 loaded keeps that row, tagged **Unexpected**, and the book shows
 `Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.`
 until dismissed.
 Anything that would flip or add to a position takes the full admit.
-`POST /api/v1/positions/exit-all` uses the same classification as a
-server-side proof before it flattens. `POST /api/v1/orders/cancel-all`
-only cancels. Layer 5 cancels resting orders and then
-flattens; they stay reachable while Laya is Down, and they are not
-cancel-only. A filled reducing close can show "Closed. Exits are allowed
-while Laya is Down."
+`POST /api/v1/positions/exit-all` requires a server-side reducing proof before requesting exits. Unavailable position evidence returns HTTP 503; ambiguous evidence returns HTTP 409. Neither response sends a square-off. An accepted exit-all or reducing place means requested, not filled or flat: check broker positions and orders for the outcome.
+
+`POST /api/v1/orders/cancel-all` requests cancellation only. Cancellation acknowledgement does not establish terminal cancellation or closed exposure. Layer 5 also requests exits after resting-order cancellation; those emergency paths remain reachable while Laya is Down. Only independently confirmed reducing execution may be described as closed.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
 one is registered. The desk polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the watched pid, key, and runtime record the same way an order does, then

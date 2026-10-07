@@ -555,7 +555,10 @@ def test_forever_modify_rejects_upstox_rules_for_dhan(*, backend_lease_factory) 
     router.execute_gated.assert_not_called()
 
 
-def test_upstox_forever_modify_uses_official_gtt_row_for_full_admission(*, backend_lease_factory) -> None:
+@pytest.mark.parametrize("observed_entry_type", ["LIMIT", None], ids=["observed-limit", "unknown-execution-type"])
+def test_upstox_forever_modify_requires_observed_execution_type_for_full_admission(
+    observed_entry_type, *, backend_lease_factory,
+) -> None:
     from flinttrade_gateway.brokers.upstox_mapping import from_upstox_gtt_order
 
     router = _gated_router()
@@ -577,6 +580,7 @@ def test_upstox_forever_modify_uses_official_gtt_row_for_full_admission(*, backe
                             "trigger_price": 100,
                             "transaction_type": "BUY",
                             "order_id": None,
+                            **({"order_type": observed_entry_type} if observed_entry_type is not None else {}),
                         },
                         {
                             "strategy": "STOPLOSS",
@@ -609,9 +613,15 @@ def test_upstox_forever_modify_uses_official_gtt_row_for_full_admission(*, backe
         headers=_live_headers(),
     )
 
-    assert resp.status_code == 200, resp.get_json()
-    safety.check_order.assert_called_once()
-    assert router.execute_gated.await_args.kwargs["payload"]["changes"]["quantity"] == 2
+    if observed_entry_type is None:
+        assert resp.status_code == 409, resp.get_json()
+        assert resp.get_json()["message"] == "Authoritative open order is incomplete"
+        safety.check_order.assert_not_called()
+        router.execute_gated.assert_not_called()
+    else:
+        assert resp.status_code == 200, resp.get_json()
+        safety.check_order.assert_called_once()
+        assert router.execute_gated.await_args.kwargs["payload"]["changes"]["quantity"] == 2
 
 
 def test_dhan_forever_flag_claim_without_authoritative_flag_fails_closed(*, backend_lease_factory) -> None:
@@ -940,7 +950,7 @@ def test_super_modify_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
-    changes = {"leg_name": "TARGET_LEG", "price": "105"}
+    changes = {"leg_name": "TARGET_LEG", "target_price": "105"}
     resp = client.put(
         "/api/v1/orders/super/SUP-1",
         json={"changes": changes, "broker": "dhan"},
@@ -1008,7 +1018,10 @@ def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
             trigger_price=1,
         )
         if reader_name == "forever_orders"
-        else {"quantity": 2}
+        # Keep this a valid complete ENTRY replacement so the intended L1
+        # increase guard, not the new pure request preflight, is exercised.
+        else {"leg_name": "ENTRY_LEG", "quantity": 2, "pricetype": "MARKET", "price": 0,
+              "target_price": 0, "stop_loss_price": 0, "trailing_jump": 0}
     )
     response = app.test_client().put(
         path,
@@ -1038,7 +1051,7 @@ def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
         (
             "/api/v1/orders/super/SUP-1",
             "super_orders",
-            {"leg_name": "TARGET_LEG", "action": "SELL", "quantity": 2},
+            {"leg_name": "TARGET_LEG", "action": "SELL", "quantity": 2, "target_price": "105"},
         ),
     ],
 )
@@ -1080,7 +1093,8 @@ def test_advanced_modify_cannot_spoof_authoritative_buy_as_sell(
             }
         )
     else:
-        current["legs"] = [{"leg_name": "TARGET_LEG", "status": "PENDING", "price": "105"}]
+        current["legs"] = [{"leg_name": "TARGET_LEG", "status": "PENDING", "price": "105",
+                            "quantity": "1", "filled_quantity": "0", "action": "BUY", "pricetype": "LIMIT"}]
     setattr(adapter, reader_name, AsyncMock(return_value=[current]))
 
     response = app.test_client().put(

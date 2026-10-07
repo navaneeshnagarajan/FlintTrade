@@ -13,7 +13,7 @@
  * No demo rows, ever.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Infinity as InfinityIcon, Loader2, RefreshCw, Send, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +48,12 @@ import {
   useSupportedNativeBrokerOrderTarget,
 } from "./OrdersManagerShared";
 import { checkLotMultiple } from "@/lib/orderGuards";
+import {
+  CANCEL_PENDING_MESSAGE,
+  orderRequestOutcomeIsUnknown,
+  orderStatusIsCancelPending,
+  orderStatusIsOpen,
+} from "@/widgets/trading/Positions/positionReconcile";
 
 const SUPPORTED_GTT_BROKERS = ["dhan", "upstox"] as const;
 const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
@@ -69,6 +75,15 @@ const ORDER_ID_KEYS = ["order_id", "orderid", "orderId", "id", "trigger_id", "gt
 
 type DhanForeverFlag = (typeof DHAN_FOREVER_FLAGS)[number];
 type DhanForeverLeg = (typeof DHAN_FOREVER_LEGS)[number];
+
+interface CancelAcknowledgement {
+  scope: string;
+  orderId: string;
+  submittedAt: number;
+  receivedAt: number;
+  listUpdatedAt: number;
+  reconciled: boolean;
+}
 
 function rowText(row: BrokerOrderRow, keys: string[], fallback = ""): string {
   const value = pickField(row, keys);
@@ -109,6 +124,17 @@ function dhanModifyPriceType(value: string): string {
   return "";
 }
 
+function ForeverOrdersErrorNotice({ error }: { error: unknown }) {
+  const unsupportedDetail = error instanceof Error && "status" in error && error.status === 501
+    ? error.message : null;
+  return (
+    <>
+      <BrokerOrdersErrorNotice error={error} />
+      {unsupportedDetail && <p role="alert" className="text-xs text-warning break-words">{unsupportedDetail}</p>}
+    </>
+  );
+}
+
 export default function ForeverOrdersWidget() {
   const appMode = useModeStore((s) => s.mode);
   const isLive = appMode === "live";
@@ -117,6 +143,9 @@ export default function ForeverOrdersWidget() {
   const selectedBroker = target?.broker.toLowerCase() ?? null;
   const isDhan = selectedBroker === "dhan";
   const isUpstox = selectedBroker === "upstox";
+  const presentationScope = `${appMode}:${selectedBroker ?? ""}:${target?.account_id ?? ""}`;
+  const presentationScopeRef = useRef(presentationScope);
+  presentationScopeRef.current = presentationScope;
 
   // --- place form -----------------------------------------------------------
   const [symbol, setSymbol] = useState("");
@@ -139,6 +168,8 @@ export default function ForeverOrdersWidget() {
   const [targetPrice, setTargetPrice] = useState("");
 
   // --- modify panel ---------------------------------------------------------
+  const editorGeneration = useRef(0);
+  const [editorScope, setEditorScope] = useState<string | null>(null);
   const [modifyingId, setModifyingId] = useState<string | null>(null);
   const [modifyingRow, setModifyingRow] = useState<BrokerOrderRow | null>(null);
   const [modPrice, setModPrice] = useState("");
@@ -158,15 +189,94 @@ export default function ForeverOrdersWidget() {
   const [modTargetPrice, setModTargetPrice] = useState("");
   const [modUpstoxEntryStatus, setModUpstoxEntryStatus] = useState("");
 
+  const editorRevision = useRef(0);
+  useLayoutEffect(() => {
+    // Commit field revisions before an asynchronous response can dismiss the
+    // editor. Acknowledgements still belong to the submitted values, not edits
+    // made while that request was pending.
+    editorRevision.current += 1;
+  }, [modPrice, modTriggerPrice, modEntryTriggerType, modQuantity, modDhanFlag,
+    modDhanLeg, modPriceType, modValidity, modDisclosedQuantity, modStopLossEnabled,
+    modStopLossPrice, modStopLossTrailingGap, modTargetEnabled, modTargetPrice,
+    modUpstoxEntryStatus]);
+
   const listQuery = useForeverOrders(target ?? {}, { enabled: isLive && target !== null });
   const placeMutation = usePlaceForeverOrder();
   const modifyMutation = useModifyForeverOrder();
   const cancelMutation = useCancelForeverOrder();
+  // In-session presentation only, not a durable intent ledger or write authority.
+  const [cancelAcknowledgements, setCancelAcknowledgements] = useState<CancelAcknowledgement[]>([]);
+
+  // Mutation variables identify the response's target; a response from another
+  // account must never be shown as the selected account's result.
+  function matchesSelectedTarget(variables: { broker?: string; account_id?: string } | undefined): boolean {
+    return isLive && target !== null && variables !== undefined
+      && variables.broker?.toLowerCase() === selectedBroker
+      && variables.account_id === target.account_id;
+  }
+  const placeResultMatches = matchesSelectedTarget(placeMutation.variables);
+  const modifyResultMatches = matchesSelectedTarget(modifyMutation.variables);
+  const cancelResultMatches = matchesSelectedTarget(cancelMutation.variables);
+  const listAvailable = listQuery.isSuccess && !listQuery.isError
+    && !listQuery.isLoading && listQuery.fetchStatus !== "paused" && listQuery.data !== undefined;
+  const placeStatusUnknown = placeResultMatches && placeMutation.isError
+    && orderRequestOutcomeIsUnknown(placeMutation.error);
+  const modifyStatusUnknown = modifyResultMatches && modifyMutation.isError
+    && orderRequestOutcomeIsUnknown(modifyMutation.error);
+  const cancelStatusUnknown = cancelResultMatches && cancelMutation.isError
+    && orderRequestOutcomeIsUnknown(cancelMutation.error);
 
   useEffect(() => {
+    const orderId = cancelMutation.variables?.order_id;
+    if (!cancelResultMatches || !cancelMutation.isSuccess || orderId === undefined) return;
+    setCancelAcknowledgements((previous) => {
+      const existing = previous.find((ack) => ack.scope === presentationScope && ack.orderId === orderId);
+      if (existing && existing.submittedAt === cancelMutation.submittedAt) return previous;
+      const acknowledgement = {
+        scope: presentationScope, orderId, submittedAt: cancelMutation.submittedAt,
+        receivedAt: Date.now(), listUpdatedAt: listQuery.dataUpdatedAt ?? 0, reconciled: false,
+      };
+      return [...previous.filter((ack) => ack !== existing), acknowledgement];
+    });
+  }, [cancelResultMatches, cancelMutation.isSuccess, cancelMutation.variables?.order_id,
+    cancelMutation.submittedAt, presentationScope, listQuery.dataUpdatedAt]);
+
+  useEffect(() => {
+    if (!listAvailable || listQuery.isFetching) return;
+    setCancelAcknowledgements((previous) => {
+      let changed = false;
+      const next = previous.map((acknowledgement) => {
+        if (acknowledgement.reconciled || acknowledgement.scope !== presentationScope
+          || !(listQuery.dataUpdatedAt > acknowledgement.receivedAt)
+          || !(listQuery.dataUpdatedAt > acknowledgement.listUpdatedAt)) return acknowledgement;
+        const rows = listQuery.data?.filter((row) => extractRowId(row, ORDER_ID_KEYS) === acknowledgement.orderId) ?? [];
+        // Only newer successful evidence for this trigger/account resolves its ACK.
+        // Missing rows and terminal triggers say nothing about spawned children.
+        if (rows.length === 0 || !rows.every((row) => {
+          if ((row.broker !== undefined && String(row.broker).toLowerCase() !== selectedBroker)
+            || (row.account_id !== undefined && row.account_id !== target?.account_id)) return false;
+          const identities = ORDER_ID_KEYS.filter((key) => row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "");
+          if (!identities.every((key) => String(row[key]) === acknowledgement.orderId)) return false;
+          const statuses = ["status", "order_status", "orderStatus", "gtt_status"]
+            .filter((key) => row[key] !== undefined);
+          return statuses.length > 0 && statuses.every((key) => !orderStatusIsOpen(String(row[key] ?? "")));
+        })) return acknowledgement;
+        changed = true;
+        return { ...acknowledgement, reconciled: true };
+      });
+      return changed ? next : previous;
+    });
+  }, [cancelAcknowledgements, presentationScope, listAvailable, listQuery.isFetching,
+    listQuery.dataUpdatedAt, listQuery.data, selectedBroker, target?.account_id]);
+
+  useEffect(() => {
+    // Changing mode or account ends the editing session, even if the user
+    // later returns to the same target before an old request settles.
+    editorGeneration.current += 1;
+    setEditorScope(null);
     setModifyingId(null);
     setModifyingRow(null);
-  }, [target?.account_id, target?.broker]);
+  }, [presentationScope]);
 
   const qty = parseWholeNumber(quantity);
   const trigger = parsePriceValue(triggerPrice);
@@ -204,6 +314,9 @@ export default function ForeverOrdersWidget() {
   const modTarget = parsePriceValue(modTargetPrice);
   const isUpstoxEntryOpen = isUpstox && modUpstoxEntryStatus === "OPEN";
   const canModify =
+    isLive &&
+    editorScope === presentationScope &&
+    !modifyMutation.isPending &&
     target !== null &&
     modifyingId !== null &&
     modTrigger !== null &&
@@ -268,7 +381,9 @@ export default function ForeverOrdersWidget() {
 
   function startModify(row: BrokerOrderRow) {
     const orderId = extractRowId(row, ORDER_ID_KEYS);
-    if (orderId === null) return;
+    if (!isLive || target === null || orderId === null) return;
+    editorGeneration.current += 1;
+    setEditorScope(presentationScope);
     setModifyingId(orderId);
     setModifyingRow(row);
     if (isDhan) {
@@ -309,7 +424,7 @@ export default function ForeverOrdersWidget() {
 
   function handleModify(e: React.FormEvent) {
     e.preventDefault();
-    if (!modifyingId || target === null) return;
+    if (!canModify || !modifyingId || target === null) return;
     const newPrice = parsePriceValue(modPrice);
     const newTrigger = parsePriceValue(modTriggerPrice);
     const newQty = parseWholeNumber(modQuantity);
@@ -349,10 +464,18 @@ export default function ForeverOrdersWidget() {
     } else {
       return;
     }
+    const openingScope = presentationScope;
+    const submittingGeneration = editorGeneration.current;
+    const submittingRevision = editorRevision.current;
     modifyMutation.mutate(
       { ...target, order_id: modifyingId, changes },
       {
         onSuccess: () => {
+          if (presentationScopeRef.current !== openingScope
+            || editorGeneration.current !== submittingGeneration
+            || editorRevision.current !== submittingRevision) return;
+          editorGeneration.current += 1;
+          setEditorScope(null);
           setModifyingId(null);
           setModifyingRow(null);
         },
@@ -362,8 +485,14 @@ export default function ForeverOrdersWidget() {
 
   function rowActions(row: BrokerOrderRow) {
     const orderId = extractRowId(row, ORDER_ID_KEYS);
+    const cancelPending = orderStatusIsCancelPending(rowText(row, ["status", "order_status", "orderStatus", "gtt_status"]))
+      || cancelAcknowledgements.some((ack) => ack.scope === presentationScope && ack.orderId === orderId && !ack.reconciled)
+      || (cancelResultMatches && cancelMutation.isSuccess && cancelMutation.variables?.order_id === orderId
+        && !cancelAcknowledgements.some((ack) => ack.scope === presentationScope
+          && ack.orderId === orderId && ack.submittedAt === cancelMutation.submittedAt && ack.reconciled));
     return (
       <div className="flex items-center gap-1">
+        {cancelPending && <span className="text-xxs text-warning">{CANCEL_PENDING_MESSAGE}</span>}
         <Button
           size="sm"
           variant="ghost"
@@ -376,7 +505,7 @@ export default function ForeverOrdersWidget() {
         <Button
           size="sm"
           variant="ghost"
-          disabled={target === null || orderId === null || cancelMutation.isPending}
+          disabled={target === null || orderId === null || cancelMutation.isPending || cancelPending}
           onClick={() =>
             target !== null &&
             orderId !== null &&
@@ -425,7 +554,13 @@ export default function ForeverOrdersWidget() {
         {!isLive && <LiveModeNotice feature="Forever (GTT) orders" />}
         {isLive && target === null && (
           <p className="text-xs text-warning bg-warning/10 border border-warning/30 rounded px-2.5 py-1.5">
-            Connect a writable Dhan or Upstox account to manage broker-native GTT orders.
+            This screen currently implements native GTT management for writable Dhan and Upstox accounts. Connect one to continue.
+          </p>
+        )}
+
+        {isLive && (
+          <p className="text-xs text-warning bg-warning/10 border border-warning/30 rounded px-2.5 py-1.5">
+            Your broker may execute this GTT while FlintTrade is offline. It could open or reverse a position if your position changes.
           </p>
         )}
 
@@ -662,15 +797,20 @@ export default function ForeverOrdersWidget() {
           )}
         </form>
 
-        {placeMutation.isError && <BrokerOrdersErrorNotice error={placeMutation.error} />}
-        {placeMutation.isSuccess && (
+        {placeResultMatches && placeMutation.isError && <ForeverOrdersErrorNotice error={placeMutation.error} />}
+        {placeStatusUnknown && (
+          <p role="alert" className="text-xs text-warning">
+            GTT placement status unknown. A trigger or order may still execute.
+          </p>
+        )}
+        {placeResultMatches && placeMutation.isSuccess && (
           <p className="text-xs text-profit">
-            Forever order accepted — it rests at the broker until the trigger fires.
+            Forever order requested. Check broker triggers and orders for the outcome.
           </p>
         )}
 
         {/* Modify panel */}
-        {modifyingId !== null && (
+        {isLive && editorScope === presentationScope && modifyingId !== null && (
           <form
             className="flex flex-wrap items-center gap-2 border border-border-default rounded p-2"
             onSubmit={handleModify}
@@ -854,6 +994,8 @@ export default function ForeverOrdersWidget() {
               size="sm"
               variant="ghost"
               onClick={() => {
+                editorGeneration.current += 1;
+                setEditorScope(null);
                 setModifyingId(null);
                 setModifyingRow(null);
               }}
@@ -863,12 +1005,37 @@ export default function ForeverOrdersWidget() {
             </Button>
           </form>
         )}
-        {modifyMutation.isError && <BrokerOrdersErrorNotice error={modifyMutation.error} />}
-        {cancelMutation.isError && <BrokerOrdersErrorNotice error={cancelMutation.error} />}
+        {modifyResultMatches && modifyMutation.isError && <ForeverOrdersErrorNotice error={modifyMutation.error} />}
+        {modifyStatusUnknown && (
+          <p role="alert" className="text-xs text-warning">
+            GTT modification status unknown. The trigger or order may still execute.
+          </p>
+        )}
+        {cancelResultMatches && cancelMutation.isError && <ForeverOrdersErrorNotice error={cancelMutation.error} />}
+        {cancelStatusUnknown && (
+          <p role="alert" className="text-xs text-warning">Cancel status unknown. This order may still fill.</p>
+        )}
+        {isLive && cancelAcknowledgements.filter((ack) => ack.scope === presentationScope && !ack.reconciled
+          && !listQuery.data?.some((row) => extractRowId(row, ORDER_ID_KEYS) === ack.orderId)).map((ack) => (
+            <div key={ack.orderId} role="alert" aria-label={`Cancellation for ${ack.orderId}`} className="text-xs text-warning break-words">
+              <span className="font-mono">#{ack.orderId}: </span>
+              <span>{CANCEL_PENDING_MESSAGE}</span>
+            </div>
+          ))}
 
         {/* Listing */}
-        {listQuery.isError && <BrokerOrdersErrorNotice error={listQuery.error} />}
-        {isLive && target !== null && !listQuery.isError && (
+        {isLive && target !== null && !listAvailable && (
+          <p role="alert" data-testid="forever-orders-unavailable" className="text-xs text-warning">
+            Broker GTT orders are unavailable. Reconcile them before another request.
+          </p>
+        )}
+        {isLive && target !== null && listQuery.isError && <ForeverOrdersErrorNotice error={listQuery.error} />}
+        {isLive && target !== null && (
+          <p className="text-xs text-text-muted">
+            Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders.
+          </p>
+        )}
+        {isLive && target !== null && (
           <BrokerRowsTable
             rows={listQuery.data ?? []}
             ariaLabel="Forever orders"
@@ -897,8 +1064,8 @@ export default function ForeverOrdersWidget() {
                 ]}
             renderActions={rowActions}
             emptyMessage={
-              listQuery.isFetching
-                ? "Loading forever orders…"
+              !listAvailable
+                ? (listQuery.isLoading ? "Loading forever orders…" : "Forever orders unavailable for this broker account.")
                 : "No resting forever orders for this broker account."
             }
           />

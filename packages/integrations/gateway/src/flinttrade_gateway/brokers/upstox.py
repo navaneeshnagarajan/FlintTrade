@@ -36,6 +36,7 @@ import hashlib
 import json
 import logging
 import math
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
@@ -553,6 +554,40 @@ class UpstoxClient:
         ).to_dict()
 
 
+class UpstoxPlacementAcknowledgement(str):
+    """String-compatible first ID with all placement IDs and detached native ACK.
+
+    This is per-call, transient evidence only. Serialising/coercing it as a plain
+    string deliberately retains the legacy ID; integrations must propagate
+    ``order_ids`` separately before discarding the result. It is not a durable
+    ledger, confirmed execution, child terminality or permission to replay.
+    GTT IDs identify trigger resources; they are not spawned exchange-order IDs.
+    """
+
+    __slots__ = ("order_ids", "broker_response", "id_field")
+    order_ids: tuple[str, ...]
+    broker_response: dict[str, Any]
+    id_field: str
+
+    def __new__(
+        cls, order_ids: list[str], broker_response: dict[str, Any], *, id_field: str = "order_ids",
+    ) -> UpstoxPlacementAcknowledgement:
+        if id_field not in {"order_ids", "gtt_order_ids"}:
+            raise ValueError("Unknown Upstox acknowledgement identifier kind")
+        result = super().__new__(cls, order_ids[0])
+        result.order_ids = tuple(order_ids)
+        result.broker_response = deepcopy(broker_response)
+        result.id_field = id_field
+        return result
+
+    def __getnewargs_ex__(self) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        return (list(self.order_ids), self.broker_response), {"id_field": self.id_field}
+
+    def evidence_fields(self) -> dict[str, Any]:
+        """Detach additive ACK evidence before scalar/JSON coercion loses it."""
+        return {self.id_field: list(self.order_ids), "broker_response": deepcopy(self.broker_response)}
+
+
 class UpstoxAdapter(BrokerAdapter):
     """Native Upstox adapter.
 
@@ -878,16 +913,28 @@ class UpstoxAdapter(BrokerAdapter):
         variety = str(getattr(order, "variety", "regular")).lower()
         client = self._client(session)
         if variety in ("regular", "amo", ""):
+            if getattr(order, "market_protection", None) is not None:
+                raise M.UpstoxMappingError("Explicit Upstox market_protection requires the V3 request contract")
             resp = await self._call(client.place_order, M.to_place_order_params(order, token, tag=tag))
-            return M.extract_order_id(resp)
+            return UpstoxPlacementAcknowledgement(M.extract_order_ids(resp), resp)
         if variety == "iceberg":
             # v3 place with slice=true — Upstox slices over-freeze-quantity
             # orders into exchange-defined legs server-side.
-            resp = await self._call(client.place_order_v3, M.to_place_order_v3_params(order, token, tag=tag))
-            return M.extract_order_id(resp)
+            resp = await self._call(
+                client.place_order_v3,
+                M.to_place_order_v3_params(order, token, tag=tag, market_protection=getattr(order, "market_protection", None)),
+            )
+            return UpstoxPlacementAcknowledgement(M.extract_order_ids(resp), resp)
         if variety == "gtt":
-            resp = await self._call(client.place_gtt_order, M.to_gtt_place_params(order, token))
-            return M.extract_gtt_order_id(resp)
+            if getattr(order, "market_protection", None) is not None:
+                raise M.UpstoxMappingError("Upstox GTT protection requires explicit per-strategy values")
+            resp = await self._call(
+                client.place_gtt_order,
+                M.to_gtt_place_params(
+                    order, token, market_protection_by_strategy=getattr(order, "market_protection_by_strategy", None),
+                ),
+            )
+            return UpstoxPlacementAcknowledgement(M.extract_gtt_order_ids(resp), resp, id_field="gtt_order_ids")
         # bracket/cover: refuse through the mapping so the message stays single-sourced.
         M.to_place_order_params(order, token, tag=tag)
         raise BrokerError(f"Upstox does not support order variety {variety!r}")  # pragma: no cover - mapping raises
@@ -898,7 +945,12 @@ class UpstoxAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         client = self._client(session)
         if M.is_gtt_order_id(order_id) or str(changes.get("variety", "")).lower() == "gtt":
-            await self._call(client.modify_gtt_order, M.to_gtt_modify_params(str(order_id), changes))
+            await self._call(
+                client.modify_gtt_order,
+                M.to_gtt_modify_params(
+                    str(order_id), changes, market_protection_by_strategy=changes.get("market_protection_by_strategy"),
+                ),
+            )
             return
         params = M.to_modify_order_params(order_id, changes)
         await self._call(client.modify_order, params)
@@ -920,7 +972,9 @@ class UpstoxAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         await self._call(
             self._client(session).modify_gtt_order,
-            M.to_gtt_modify_params(str(order_id), changes),
+            M.to_gtt_modify_params(
+                str(order_id), changes, market_protection_by_strategy=changes.get("market_protection_by_strategy"),
+            ),
         )
 
     async def cancel_forever(
@@ -944,7 +998,14 @@ class UpstoxAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         tag = session.algo_id or None
         pairs = [(o, await self._resolve_instrument(session, o.symbol, o.exchange)) for o in orders]
-        resp = await self._call(self._client(session).place_multi_order, M.to_multi_order_params(pairs, tag=tag))
+        protection = {
+            index: order.market_protection for index, order in enumerate(orders)
+            if getattr(order, "market_protection", None) is not None
+        }
+        resp = await self._call(
+            self._client(session).place_multi_order,
+            M.to_multi_order_params(pairs, tag=tag, market_protection_by_index=protection),
+        )
         return M.from_upstox_multi_order(resp)
 
     async def cancel_all_orders(
@@ -1506,8 +1567,15 @@ class UpstoxAdapter(BrokerAdapter):
     async def order_details(self, session: Session, order_id: str) -> dict:
         """Latest snapshot of one order (``GET /v2/order/details``) — a read."""
         resp = await self._call(self._client(session).order_details, str(order_id))
-        data = resp.get("data", {}) if isinstance(resp, dict) else {}
-        return M.from_upstox_order(data) if isinstance(data, dict) else {}
+        if type(resp) is not dict or any(type(key) is not str for key in resp):
+            raise BrokerReadResponseInvalid from None
+        if type(resp.get("status")) is not str or not resp["status"]:
+            raise BrokerReadResponseInvalid from None
+        if resp["status"] != "success":
+            raise M.UpstoxMappingError("Upstox read response was not successful")
+        if type(resp.get("data")) is not dict:
+            raise BrokerReadResponseInvalid from None
+        return M.from_upstox_order(resp["data"])
 
     async def order_history(
         self, session: Session, order_id: str | None = None, tag: str | None = None

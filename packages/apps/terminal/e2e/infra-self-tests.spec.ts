@@ -12,6 +12,7 @@ import {
   type BenignConsoleError,
   type HttpMethod,
   type SyntheticFixtureRegistry,
+  type SyntheticPhasedFixtureRegistry,
 } from "./fixture-registry";
 
 const FRONTEND_ORIGIN = "https://synthetic.flinttrade.invalid";
@@ -807,6 +808,127 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     await expect(registry.dispose()).rejects.toThrow(
       /console error allowance overuse.*single browser message.*expected 1.*observed 2/is,
     );
+  });
+});
+
+baseTest.describe("exact completed read phases", () => {
+  const path = "/ft-api/synthetic-book?account_id=SYNTHETIC-A";
+  const completed = { calls: 1, completed: 1, cancelled: 0, pending: 0, failed: 0 };
+
+  async function cancelledRead(page: Page, registry: SyntheticPhasedFixtureRegistry,
+    readPhase: "startup" | "required") {
+    let entered!: () => void;
+    const handlerEntered = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    registry.register({
+      name: "controlled initial book", method: "GET", path, expectedCalls: 1, readPhase,
+      handler: async () => { entered(); await gate; return { json: { rows: [] } }; },
+    });
+    const failed = page.waitForEvent("requestfailed", (request) => request.url() === `${FRONTEND_ORIGIN}${path}`);
+    const outcome = page.evaluate(async (url) => {
+      const controller = new AbortController();
+      const target = window as Window & { __infraCancelRead?: () => void };
+      target.__infraCancelRead = () => controller.abort();
+      try {
+        await fetch(url, { signal: controller.signal });
+        return "completed";
+      } catch (error: unknown) {
+        return error instanceof Error ? error.name : "unknown";
+      }
+    }, `${FRONTEND_ORIGIN}${path}`);
+    try {
+      await handlerEntered;
+      await page.evaluate(() => {
+        const target = window as Window & { __infraCancelRead?: () => void };
+        target.__infraCancelRead?.();
+        delete target.__infraCancelRead;
+      });
+      expect(await outcome).toBe("AbortError");
+      expect((await failed).failure()?.errorText).toBe("net::ERR_ABORTED");
+    } finally {
+      release();
+    }
+  }
+
+  baseTest("startup permits no cancelled GET but still requires one completed book", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "one completed startup", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ name: "startup book", method: "GET", path, expectedCalls: 1, readPhase: "startup", handler: () => ({ json: { rows: [] } }) });
+    await expect(fetchJson(page, "GET", path)).resolves.toEqual({ rows: [] });
+    expect(await registry.retireRead(path)).toEqual(completed);
+    expect(registry.callCount("GET", path)).toBe(1);
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("optional startup cancellation never permits an unused mandatory book", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "missing completed startup", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ name: "mandatory startup book", method: "GET", path, expectedCalls: 1, readPhase: "startup", handler: () => ({ json: { rows: [] } }) });
+    await expect(registry.retireRead(path)).rejects.toThrow(/expected exactly 1 completed.*observed 0 calls, 0 completed/is);
+    await expect(registry.dispose()).rejects.toThrow(/expected exactly 1 completed.*observed 0 calls, 0 completed/is);
+  });
+
+  baseTest("startup rejects two fulfilled books rather than accepting a one-to-two range", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "two completed startup books", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ name: "one startup book", method: "GET", path, expectedCalls: 1, readPhase: "startup", handler: () => ({ json: { rows: [] } }) });
+    await fetchJson(page, "GET", path);
+    await fetchJson(page, "GET", path);
+    await expect(registry.retireRead(path)).rejects.toThrow(/expected exactly 1 completed.*observed 2 calls, 2 completed, 0 cancelled/is);
+    await expect(registry.dispose()).rejects.toThrow(/observed 2 calls, 2 completed, 0 cancelled/is);
+  });
+
+  baseTest("startup accepts exactly one independently aborted GET and its surviving completed book", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "cancelled startup with survivor", frontendOrigin: FRONTEND_ORIGIN });
+    await cancelledRead(page, registry, "startup");
+    await expect(fetchJson(page, "GET", path)).resolves.toEqual({ rows: [] });
+    expect(await registry.retireRead(path)).toEqual({ ...completed, calls: 2, cancelled: 1 });
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("an aborted startup GET cannot stand in for the mandatory completed book", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "cancelled without survivor", frontendOrigin: FRONTEND_ORIGIN });
+    await cancelledRead(page, registry, "startup");
+    await expect(registry.retireRead(path)).rejects.toThrow(/observed 1 calls, 0 completed, 1 cancelled/is);
+    await expect(registry.dispose()).rejects.toThrow(/observed 1 calls, 0 completed, 1 cancelled/is);
+  });
+
+  baseTest("required mutation phase grants no startup cancellation allowance", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "cancelled required book", frontendOrigin: FRONTEND_ORIGIN });
+    await cancelledRead(page, registry, "required");
+    await expect(registry.retireRead(path)).rejects.toThrow(/at most 0 cancelled.*observed 1 calls, 0 completed, 1 cancelled/is);
+    await expect(registry.dispose()).rejects.toThrow(/at most 0 cancelled/is);
+  });
+
+  baseTest("retiring startup preserves its exact baseline across a new required phase", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "startup then mutation", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ name: "initial book", method: "GET", path, expectedCalls: 1, readPhase: "startup", handler: () => ({ json: { phase: "startup" } }) });
+    await expect(fetchJson(page, "GET", path)).resolves.toEqual({ phase: "startup" });
+    const baseline = await registry.retireRead(path);
+    expect(baseline).toEqual(completed);
+    registry.register({ name: "mutation book", method: "GET", path, expectedCalls: 1, readPhase: "required", handler: () => ({ json: { phase: "mutation" } }) });
+    await expect(fetchJson(page, "GET", path)).resolves.toEqual({ phase: "mutation" });
+    expect(await registry.retireRead(path)).toEqual({ ...baseline, calls: baseline.calls + 1, completed: baseline.completed + 1 });
+    expect(registry.callCount("GET", path)).toBe(baseline.calls + 1);
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("a retired read endpoint remains unregistered until its explicit next phase", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "retired read gap", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ name: "initial book", method: "GET", path, expectedCalls: 1, readPhase: "startup", handler: () => ({ json: { rows: [] } }) });
+    await fetchJson(page, "GET", path);
+    expect(await registry.retireRead(path)).toEqual(completed);
+    await expectFetchToFail(page, "GET", path);
+    expect(registry.callCount("GET", path)).toBe(1);
+    await expect(registry.dispose()).rejects.toThrow(/unexpected request.*GET \/ft-api\/synthetic-book/is);
+  });
+
+  baseTest("completed-read phases reject writes and arbitrary call ranges", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "read phase registration guard", frontendOrigin: FRONTEND_ORIGIN });
+    for (const method of ["POST", "PUT", "DELETE", "PATCH"] as const) {
+      expect(() => registry.register({ name: `invalid ${method}`, method, path, expectedCalls: 1, readPhase: "startup", handler: () => ({ json: {} }) })).toThrow(/readPhase requires a GET with exact positive expectedCalls/);
+    }
+    expect(() => registry.register({ name: "invalid range", method: "GET", path, expectedCalls: { minimum: 0, maximum: 2 }, readPhase: "startup", handler: () => ({ json: {} }) })).toThrow(/readPhase requires a GET with exact positive expectedCalls/);
+    expect(() => registry.register({ name: "invalid zero", method: "GET", path, expectedCalls: 0, readPhase: "startup", handler: () => ({ json: {} }) })).toThrow(/positive integer/);
+    await expect(registry.dispose()).resolves.toBeUndefined();
   });
 });
 

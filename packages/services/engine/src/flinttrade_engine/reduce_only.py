@@ -1,19 +1,18 @@
 """Decide whether a place only reduces an open position.
 
-The place pipeline calls this. A client flag is not an input. Live also
-counts the broker order book when that book can be read. When it cannot,
-the cap is the open quantity minus our own pending exits, and the order
-can still qualify. A second exit while one of ours is already unfilled
-is refused by the caller. A readable book uses
-``exit_already_pending_message``. An unreadable broker book uses
-``exit_orders_unreadable_message``.
+The place pipeline calls this. A client flag is not an input. Live requires
+a readable broker order book. Missing or ambiguous quantity evidence refuses
+qualification with a zero cap. These legacy inputs do not establish coherent
+account-wide evidence or restart safety. A second exit while one of ours is
+already unfilled is refused by the caller.
 """
 
 from __future__ import annotations
 
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal, InvalidOperation
 
 _EXIT_OPEN = frozenset({
     "PENDING",
@@ -55,7 +54,7 @@ def exit_orders_unreadable_message(contract: str) -> str:
     """Copy when a further exit must wait because the broker book cannot be read."""
     label = str(contract or "").strip() or "this contract"
     return (
-        f"Not placed. One exit at a time for {label} until your broker's orders load."
+        f"Not placed. Broker orders for {label} are unavailable. Reconcile them before another exit."
     )
 
 
@@ -158,7 +157,7 @@ def _order_is_open(row: Mapping[str, object]) -> bool:
         return False
     if status in _EXIT_OPEN:
         return True
-    return "CANCEL" not in status and "REJECT" not in status and "COMPLETE" not in status
+    return True
 
 
 def _order_id(row: Mapping[str, object]) -> str:
@@ -166,6 +165,160 @@ def _order_id(row: Mapping[str, object]) -> str:
         if name in row and row[name] not in (None, ""):
             return str(row[name]).strip()
     return ""
+
+
+def _quantity_aliases(
+    row: Mapping[str, object], *names: str, default: int | None = None,
+) -> int | None:
+    """Read agreeing whole-number aliases without a malformed-value fallback."""
+    values = []
+    for name in names:
+        if name not in row:
+            continue
+        raw = row[name]
+        value = _whole(raw)
+        if value is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                exact = Decimal(raw.strip())
+            except InvalidOperation:
+                return None
+            # Float parsing must not hide a fractional value or round an integer.
+            if not exact.is_finite() or exact != value:
+                return None
+        values.append(value)
+    if not values:
+        return default
+    if any(value != values[0] for value in values):
+        return None
+    return values[0]
+
+
+def _text_aliases_agree(row: Mapping[str, object], *names: str) -> bool:
+    """Require supplied non-empty aliases to agree after existing normalisation."""
+    values = {_norm(row[name]) for name in names if name in row and row[name] not in (None, "")}
+    return len(values) <= 1
+
+
+def _order_identity_aliases_agree(row: Mapping[str, object], order_id: str) -> bool:
+    """Require every supplied identity alias to name the same case-sensitive ID."""
+    return all(
+        not isinstance(row[name], bool)
+        and isinstance(row[name], (str, int))
+        and str(row[name]).strip() == order_id
+        for name in ("order_id", "orderid", "orderId", "broker_order_id") if name in row
+    )
+
+
+def _could_match_contract(row: Mapping[str, object], symbol: str, exchange: str, product: str) -> bool:
+    """Do not let an earlier symbol alias hide potentially matching evidence."""
+    return (
+        any(_norm(row.get(name)) == symbol for name in ("symbol", "trading_symbol", "tradingsymbol"))
+        and _row_text(row, "exchange") == exchange
+        and (_row_text(row, "product") or "MIS") == product
+    )
+
+
+def _quantity_evidence_is_valid(
+    positions: Sequence[Mapping[str, object]],
+    orders: Sequence[Mapping[str, object]],
+    *,
+    symbol: str,
+    exchange: str,
+    product: str,
+    exit_action: str,
+) -> bool:
+    """Refuse ambiguous matching exposure, exit quantities or order identity.
+
+    Multiple matching position rows have no uniqueness proof in this interface.
+    Copies of an executable exit must agree on their normalised execution
+    evidence, including status. A missing filled field counts the entire total
+    as remaining; it is not evidence that no fills occurred.
+    """
+    matching_positions = [
+        row for row in positions
+        if isinstance(row, Mapping) and _could_match_contract(row, symbol, exchange, product)
+    ]
+    if len(matching_positions) > 1:
+        return False
+    for row in matching_positions:
+        if (
+            not _text_aliases_agree(row, "symbol", "trading_symbol", "tradingsymbol")
+            or not _text_aliases_agree(row, "side", "transaction_type", "action")
+            or _quantity_aliases(row, "net_qty", "netQty", "net_quantity", "quantity", "qty") is None
+        ):
+            return False
+
+    by_id: dict[str, list[Mapping[str, object]]] = {}
+    executable_ids: set[str] = set()
+    for order in orders:
+        if not isinstance(order, Mapping):
+            continue
+        order_id = _order_id(order)
+        order_ids = {
+            str(order[name]).strip()
+            for name in ("order_id", "orderid", "orderId", "broker_order_id")
+            if name in order and order[name] not in (None, "")
+        }
+        order_ids.discard("")
+        for identity in order_ids:
+            by_id.setdefault(identity, []).append(order)
+        if not _could_match_contract(order, symbol, exchange, product):
+            continue
+        if not _text_aliases_agree(order, "symbol", "trading_symbol", "tradingsymbol"):
+            return False
+        # An executable row with no confirmed side may be another exit. Validate
+        # it before excluding confirmed same-direction orders from exit totals.
+        if (
+            _order_is_open(order)
+            or not _text_aliases_agree(order, "status", "order_status", "orderStatus")
+        ) and (
+            not _text_aliases_agree(order, "action", "transaction_type")
+            or _row_text(order, "action", "transaction_type") not in {"BUY", "SELL"}
+        ):
+            return False
+        if not any(_norm(order.get(name)) == exit_action for name in ("action", "transaction_type")):
+            continue
+        if (
+            not _text_aliases_agree(order, "action", "transaction_type")
+            or not _text_aliases_agree(order, "status", "order_status", "orderStatus")
+            or (order_ids and not _order_identity_aliases_agree(order, order_id))
+        ):
+            return False
+        if _order_is_open(order):
+            if not order_id:
+                return False
+            executable_ids.add(order_id)
+
+    for order_id in executable_ids:
+        evidence = None
+        for order in by_id[order_id]:
+            if (
+                not _text_aliases_agree(order, "symbol", "trading_symbol", "tradingsymbol")
+                or not _text_aliases_agree(order, "action", "transaction_type")
+                or not _text_aliases_agree(order, "status", "order_status", "orderStatus")
+            ):
+                return False
+            if not _order_identity_aliases_agree(order, order_id):
+                return False
+            total = _quantity_aliases(order, "quantity", "qty")
+            filled = _quantity_aliases(order, "filled_qty", "filled_quantity", "filledQty", "tradedQty", default=0)
+            if total is None or total < 0 or filled is None or filled < 0 or filled > total:
+                return False
+            current = (
+                _row_text(order, "symbol", "trading_symbol", "tradingsymbol"),
+                _row_text(order, "exchange"),
+                _row_text(order, "product") or "MIS",
+                _row_text(order, "action", "transaction_type"),
+                _row_text(order, "status", "order_status", "orderStatus"),
+                total,
+                filled,
+            )
+            if evidence is not None and current != evidence:
+                return False
+            evidence = current
+    return True
 
 
 def pending_exit_quantity(
@@ -219,9 +372,10 @@ def classify_reduce_only(
     """Return whether this order only reduces one open contract.
 
     ``broker_orders is None`` on a live order means the broker book could
-    not be read. The order can still qualify. The cap then uses our own
-    pending exits only. ``extra_pending`` is in-flight exit quantity
-    reserved by this process and not yet visible on a book.
+    not be read, so qualification is refused with a zero cap. Ambiguous
+    matching evidence also refuses. ``extra_pending`` is non-negative whole
+    in-flight exit quantity reserved by this process and not yet visible on
+    a book; it does not establish durable or account-wide coordination.
     """
     empty = ReduceOnlyDecision(False, 0, 0, 0)
     symbol_n = _norm(symbol)
@@ -231,6 +385,15 @@ def classify_reduce_only(
     if action_n not in {"BUY", "SELL"}:
         return empty
     if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        return empty
+    if isinstance(extra_pending, bool) or not isinstance(extra_pending, int) or extra_pending < 0:
+        return empty
+    if live and broker_orders is None:
+        return empty
+    orders = (*our_orders, *broker_orders) if live and broker_orders is not None else our_orders
+    if not _quantity_evidence_is_valid(
+        positions, orders, symbol=symbol_n, exchange=exchange_n, product=product_n, exit_action=action_n,
+    ):
         return empty
 
     net: int | None = None
@@ -333,10 +496,15 @@ def contract_key(
     ``adapter`` is its own slot. Two brokers that both use account ``default``
     do not share a reservation.
     """
+    from flinttrade_core.broker_identity import BrokerSelector  # noqa: PLC0415
+
+    # Account IDs are opaque. Validate before using a lock/store key; never
+    # trim, case-fold or turn a malformed supplied ID into another account.
+    selector = BrokerSelector(str(adapter).strip().lower(), account)
     return (
         _norm(mode),
-        _norm(adapter) or "",
-        _norm(account) or "default",
+        _norm(selector.adapter_id),
+        selector.account_id,
         _norm(symbol),
         _norm(exchange),
         _norm(product) or "MIS",
@@ -350,6 +518,7 @@ class _BoundExit:
     order_id: str
     quantity: int
     position_net: int
+    covered: bool = False
 
 
 _lock_guard = threading.Lock()
@@ -394,11 +563,11 @@ def release_exit(key: ContractKey, quantity: int) -> None:
             _reserved[key] = left
 
 
-def cover_reserved_exit(key: ContractKey, covered: int) -> None:
-    """Drop reserved quantity the broker book already shows as an open exit."""
-    if covered < 1:
-        return
-    release_exit(key, covered)
+def cover_reserved_exit(
+    key: ContractKey, orders: Sequence[Mapping[str, object]], *, position_net: int,
+) -> None:
+    """Cover only exact scoped acknowledged observations, never book totals."""
+    reconcile_reserved_exit(key, orders=orders, position_net=position_net)
 
 
 def note_reserved_order(
@@ -407,10 +576,10 @@ def note_reserved_order(
     quantity: int,
     position_net: int,
 ) -> None:
-    """Remember a successful reduce-only place so a later read can release it.
+    """Remember an ACK or uncertain invocation against its existing local hold.
 
-    An empty ``order_id`` is still recorded. The next read then releases the
-    hold only when the position has moved by the reserved quantity.
+    An empty ID is unresolved, not evidence of non-execution. Position movement
+    and unrelated book totals cannot identify or release any such hold.
     """
     if quantity < 1:
         return
@@ -419,13 +588,58 @@ def note_reserved_order(
         _bound_exits.setdefault(key, []).append(bound)
 
 
-def _order_by_id(orders: Sequence[Mapping[str, object]], order_id: str) -> Mapping[str, object] | None:
-    if not order_id:
+def _bound_exit_observation(
+    key: ContractKey, item: _BoundExit, orders: Sequence[Mapping[str, object]],
+) -> str | None:
+    """Return a coherent exact ACK's lifecycle state, or no coverage proof."""
+    if not item.order_id:
         return None
-    for order in orders:
-        if isinstance(order, Mapping) and _order_id(order) == order_id:
-            return order
-    return None
+    rows = [row for row in orders if isinstance(row, Mapping) and any(
+        type(row.get(name)) is str and row[name] == item.order_id
+        for name in ("order_id", "orderid", "orderId", "broker_order_id")
+    )]
+    if not rows:
+        return None
+    _mode, adapter, account, symbol, exchange, product = key
+    action = "SELL" if item.position_net > 0 else "BUY"
+    observed = None
+    for row in rows:
+        if (
+            not _same_contract(row, symbol, exchange, product)
+            or _row_text(row, "action", "transaction_type") != action
+            or not all(_text_aliases_agree(row, *names) for names in (
+                ("symbol", "trading_symbol", "tradingsymbol"), ("action", "transaction_type"),
+                ("status", "order_status", "orderStatus"),
+            ))
+            or not all(type(row[name]) is str and row[name] == item.order_id for name in (
+                "order_id", "orderid", "orderId", "broker_order_id",
+            ) if name in row)
+            or any(row[name] != account for name in ("account_id", "accountId") if name in row)
+            or any(_norm(row[name]) != adapter for name in ("broker", "broker_id", "adapter_id") if name in row)
+        ):
+            return None
+        total = _quantity_aliases(row, "quantity", "qty")
+        filled = _quantity_aliases(row, "filled_qty", "filled_quantity", "filledQty", "tradedQty", default=0)
+        status = _row_text(row, "status", "order_status", "orderStatus")
+        if total is None or total != item.quantity or filled is None or not 0 <= filled <= total:
+            return None
+        if status in {"COMPLETE", "COMPLETED", "FILLED", "TRADED"} and any(
+            name in row for name in ("filled_qty", "filled_quantity", "filledQty", "tradedQty")
+        ) and filled != total:
+            # An explicit partial/unfilled quantity contradicts full completion.
+            # No terminal coverage proof may come from this inconsistent row.
+            return None
+        # Unknown lifecycle state is still possible exposure, not permission
+        # to transfer a hold. Missing fills on an open row count its full total.
+        if status not in _EXIT_OPEN | _EXIT_CLOSED | {
+            "CANCEL_PENDING", "CANCEL_REQUESTED", "CANCEL PENDING", "PENDING_CANCEL",
+        }:
+            return None
+        current = (status, total, filled)
+        if observed is not None and current != observed:
+            return None
+        observed = current
+    return observed[0] if observed is not None else None
 
 
 def reconcile_reserved_exit(
@@ -434,35 +648,29 @@ def reconcile_reserved_exit(
     orders: Sequence[Mapping[str, object]] | None,
     position_net: int,
 ) -> None:
-    """Release a successful reduce-only hold once its order is finished.
+    """Reconcile existing process-local holds against exact single ACKs only.
 
-    An order that is still open stays reserved until ``cover_reserved_exit``
-    sees it on the book. An order id that has not appeared, and a position
-    that has not moved, stays reserved so a second exit cannot race the fill.
-    A terminal order, or a missing order whose position has already moved by
-    the reserved quantity, is released.
+    A coherent scoped open row represents that exact hold on this read; a
+    coherent terminal row terminates it. If representation disappears or turns
+    malformed, restore the local hold. Missing/unknown IDs and aggregate
+    position movement are never coverage proof. Call under ``contract_lock``;
+    these observations establish neither provider coherence nor restart safety.
     """
     with _lock_guard:
         bound = list(_bound_exits.get(key, ()))
-    if not bound:
-        return
     kept: list[_BoundExit] = []
     for item in bound:
-        row = _order_by_id(orders, item.order_id) if orders is not None and item.order_id else None
-        moved = abs(position_net - item.position_net) >= item.quantity
-        if row is not None and not _order_is_open(row):
+        status = _bound_exit_observation(key, item, orders) if orders is not None else None
+        if status in _EXIT_CLOSED:
+            if not item.covered:
+                release_exit(key, item.quantity)
+            continue
+        covered = status is not None
+        if covered and not item.covered:
             release_exit(key, item.quantity)
-            continue
-        if row is not None and _order_is_open(row):
-            remaining = _remaining_quantity(row)
-            filled = item.quantity - remaining
-            if filled >= 1:
-                release_exit(key, filled)
-            continue
-        if moved:
-            release_exit(key, item.quantity)
-            continue
-        kept.append(item)
+        elif not covered and item.covered:
+            reserve_exit(key, item.quantity)
+        kept.append(replace(item, covered=covered))
     with _lock_guard:
         if kept:
             _bound_exits[key] = kept

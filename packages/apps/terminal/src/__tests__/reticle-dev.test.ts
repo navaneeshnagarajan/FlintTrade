@@ -11,11 +11,28 @@ import { describe, expect, it } from "vitest";
 const source = fs.readFileSync(path.resolve(import.meta.dirname, "../reticle-dev.ts"), "utf8");
 
 describe("reticle-dev capabilities", () => {
-  it("registers the mode store before declaring capabilities", () => {
-    const storeIdx = source.indexOf('registerStore("mode", useModeStore)');
+  it("registers every declared real store before capabilities", () => {
     const capsIdx = source.indexOf("registerCapabilities(");
-    expect(storeIdx).toBeGreaterThan(-1);
-    expect(capsIdx).toBeGreaterThan(storeIdx);
-    expect(source).toMatch(/stores:\s*\[\s*"mode"\s*\]/);
+    const modeIdx = source.indexOf('registerStore("mode", useModeStore)');
+    expect(modeIdx).toBeGreaterThan(-1);
+    expect(capsIdx).toBeGreaterThan(modeIdx);
+    for (const name of ["mode", "broker", "connection", "notifications", "queries"]) {
+      const storeIdx = source.indexOf(`registerStore("${name}",`);
+      expect(storeIdx, `${name} registration`).toBeGreaterThan(-1);
+      expect(capsIdx, `${name} registration before capabilities`).toBeGreaterThan(storeIdx);
+    }
+    expect(source).toMatch(
+      /stores:\s*\[\s*"mode"\s*,\s*"broker"\s*,\s*"connection"\s*,\s*"notifications"\s*,\s*"queries"\s*\]/,
+    );
+  });
+
+  it("retains notification and rotating query subscriptions without exposing auth state", () => {
+    expect(source).toContain("getState: () => ({ items: getSnapshot() })");
+    expect(source).toContain("getState: () => tanstackQueryStore(queryClient).getState()");
+    expect(source).toContain("tanstackQueryStore(activeClient).subscribe(listener)");
+    expect(source).toContain("useAuthStore.subscribe(");
+    expect(source).toContain("unsubscribeAuth();");
+    expect(source).toContain("unsubscribeQueries();");
+    expect(source).not.toMatch(/registerStore\(\s*"auth"/);
   });
 });

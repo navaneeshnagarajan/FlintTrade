@@ -259,6 +259,8 @@ function queryResult(overrides = {}) {
     isError: false,
     error: null,
     isFetching: false,
+    isSuccess: true,
+    fetchStatus: "idle",
     refetch: vi.fn(),
     dataUpdatedAt: 0,
     ...overrides,
@@ -322,6 +324,7 @@ describe("PositionsWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPlaceOrder.mockReset();
+    mockEmitNotification.mockReset();
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
     mockUseBrokerConnected.mockReturnValue(true);
@@ -329,7 +332,7 @@ describe("PositionsWidget", () => {
     mockBrokerState.activeAccountId = null;
     mockReadState.identity = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
-    mockUseOrders.mockReturnValue({ data: [] });
+    mockUseOrders.mockReturnValue(queryResult({ data: [] }));
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
   });
 
@@ -345,11 +348,12 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("No open positions")).toBeInTheDocument();
   });
 
-  it("shows the empty state when data is undefined", () => {
-    mockUsePositions.mockReturnValue(queryResult({ data: undefined }));
+  it("does not treat an unverified position book as empty", () => {
+    mockUsePositions.mockReturnValue(queryResult({ data: undefined, isSuccess: false }));
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(screen.getByText("No open positions")).toBeInTheDocument();
+    expect(screen.getByText("Positions unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
   });
 
   it("shows pending status before first authoritative success (and no empty or error)", () => {
@@ -494,7 +498,7 @@ describe("PositionsWidget", () => {
     );
     await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Closed. Exits are allowed while Laya is Down.",
+        title: "Exit requested. Exits are allowed while Laya is Down.",
       }),
     ));
   });
@@ -835,6 +839,122 @@ describe("PositionsWidget", () => {
       },
     ];
 
+    it.each([
+      { mode: "live", decisionStatus: "ready" },
+      { mode: "practice", decisionStatus: "ready" },
+      { mode: "practice", decisionStatus: "down" },
+    ] as const)("does not describe acknowledgement as a filled exit in $mode while Laya is $decisionStatus", async ({ mode, decisionStatus }) => {
+      mockModeState.mode = mode;
+      useOperatorSignalStore.setState({ decisionStatus });
+      mockPlaceOrder.mockResolvedValue({ orderId: "ACK-ONLY" });
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed."))
+        .toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+      if (mode === "live") stubFetch();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+      await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "Exit-all requested. Check positions and orders for the outcome.",
+      })));
+      for (const [notification] of mockEmitNotification.mock.calls) {
+        expect(`${notification.title} ${notification.body}`).not.toMatch(/\bCLOSED\b|\bfilled\b|Every open.*squared off/i);
+      }
+    });
+
+    it("shows the exact execution-first warning in square-off confirmation", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed."))
+        .toBeInTheDocument();
+    });
+
+    it.each([
+      { isLoading: true, isSuccess: false, data: undefined },
+      { isError: true, error: new Error("Broker orders unsupported"), isSuccess: false, data: undefined },
+      { isError: true, error: new Error("Broker unavailable"), isSuccess: false, data: [] },
+      { fetchStatus: "paused", data: [] },
+    ])("keeps unavailable orders distinct from empty orders: %j", (ordersState) => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      mockUseOrders.mockReturnValue(queryResult(ordersState));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+      expect(screen.getByTestId("exit-orders-unavailable")).toHaveTextContent(
+        "Broker orders are unavailable. Reconcile them before another exit.",
+      );
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 1 }} />);
+      expect(screen.getByTestId("exit-orders-unavailable")).toBeInTheDocument();
+      const squareOff = screen.queryByRole("button", { name: "Square off RELIANCE" });
+      expect(squareOff === null || (squareOff as HTMLButtonElement).disabled).toBe(true);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+      mockUseOrders.mockReturnValue(queryResult({ data: [] }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 2 }} />);
+      expect(screen.queryByTestId("exit-orders-unavailable")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeEnabled();
+    });
+
+    it("keeps cancel-pending rows visible", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      mockUseOrders.mockReturnValue(queryResult({ data: [{
+        symbol: "RELIANCE", exchange: "NSE", product: "MIS", action: "BUY", status: "CANCEL_PENDING",
+      }] }));
+      render(<PositionsWidget {...defaultProps} />);
+      expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+      expect(screen.getByText("Exit pending")).toBeInTheDocument();
+      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeDisabled();
+    });
+
+    it("keeps cancel-pending warnings visible in narrow cards", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      mockUseOrders.mockReturnValue(queryResult({ data: [{
+        symbol: "RELIANCE", exchange: "NSE", product: "MIS", action: "BUY", status: "CANCEL_PENDING",
+      }] }));
+      withMeasuredContainer(() => render(<PositionsWidget {...defaultProps} />), { width: 390, height: 700 });
+      expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+      expect(screen.getByText(/Cancel pending\. This order may still fill\./)).toBeInTheDocument();
+    });
+
+    it("retains uncertain exit status and transport details", async () => {
+      mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
+      expect(await screen.findByText("Exit status unknown. An order may still execute. Failed to fetch"))
+        .toBeInTheDocument();
+    });
+
+    it.each(["acknowledged", "lost response"])(
+      "does not carry another account's warning or response into the active account: %s", async (outcome) => {
+        let resolve!: (value: unknown) => void;
+        let reject!: (reason: unknown) => void;
+        const response = new Promise((done, failed) => { resolve = done; reject = failed; });
+        mockPlaceOrder.mockReturnValue(response);
+        const held = { symbol: "INFY", exchange: "NSE", product: "MIS", quantity: 10, ltp: 100 };
+        mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+        const { rerender } = render(<PositionsWidget {...defaultProps} />);
+        mockUsePositions.mockReturnValue(queryResult({ data: [{ ...held, quantity: -3 }] }));
+        rerender(<PositionsWidget {...defaultProps} params={{ nonce: 3 }} />);
+        expect(screen.getByTestId("position-flip-toast")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Close INFY" }));
+        expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+        mockBrokerState.accounts = [{ broker: "dhan", account_id: "B", label: "B", source: "native", status: "connected" }];
+        mockBrokerState.activeAccountId = "native:dhan:B";
+        mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+        rerender(<PositionsWidget {...defaultProps} params={{ nonce: 4 }} />);
+        expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+        expect(screen.queryByText("Unexpected")).not.toBeInTheDocument();
+        await act(async () => {
+          if (outcome === "acknowledged") resolve({ orderId: "A-ACK" });
+          else reject(new TypeError("A connection lost"));
+          await response.catch(() => {});
+        });
+        expect(mockEmitNotification).not.toHaveBeenCalled();
+      },
+    );
+
     it("converts a position through the gated convert route", async () => {
       const fetchMock = stubFetch();
       const mockRefetch = vi.fn();
@@ -890,7 +1010,7 @@ describe("PositionsWidget", () => {
       );
 
       expect(
-        await screen.findByText("Live orders are allowed in live mode only — switch mode first"),
+        await screen.findByText(/Live orders are allowed in live mode only — switch mode first/),
       ).toBeInTheDocument();
       // The dialog stays open so the operator can read what blocked it.
       expect(screen.getByText("Convert position")).toBeInTheDocument();
@@ -937,7 +1057,11 @@ describe("PositionsWidget", () => {
 
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ category: "system", title: "Exit-all submitted" }),
+        expect.objectContaining({
+          category: "system",
+          title: "Exit-all submitted",
+          body: "Exit-all requested. Check positions and orders for the outcome.",
+        }),
       );
     });
 
@@ -1043,6 +1167,7 @@ describe("PositionsWidget", () => {
     it("tags a pending exit and refuses a second square-off", () => {
       mockModeState.mode = "practice";
       mockUseOrders.mockReturnValue({
+        ...queryResult(),
         data: [{
           orderId: "E1",
           symbol: "INFY",
@@ -1258,7 +1383,7 @@ describe("PositionsWidget", () => {
         product: "MIS",
         price: 200,
       }), expect.objectContaining({ mode: "practice" }), { exit: true });
-      expect(await screen.findByText("Squared off: INFY.")).toBeInTheDocument();
+      expect(await screen.findByText("Exit requested: INFY.")).toBeInTheDocument();
       expect(screen.getAllByText("TCS").length).toBeGreaterThan(0);
       expect(screen.getByTestId("laya-denied")).toHaveTextContent("Laya denied");
       expect(screen.getByTestId("laya-denied")).toHaveTextContent("Practice book is closed.");
@@ -1278,7 +1403,7 @@ describe("PositionsWidget", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
 
       expect(
-        await screen.findByText("Live orders are allowed in live mode only — switch mode first"),
+        await screen.findByText(/Live orders are allowed in live mode only — switch mode first/),
       ).toBeInTheDocument();
       // The dialog stays open so the operator can read what blocked it.
       expect(screen.getByText("Square off position?")).toBeInTheDocument();

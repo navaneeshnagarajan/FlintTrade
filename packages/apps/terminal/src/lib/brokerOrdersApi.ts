@@ -17,8 +17,9 @@
  * needs it.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import { z } from "zod";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { noteObservedFailure } from "@/stores/operatorSignalStore";
@@ -204,7 +205,16 @@ async function request<T>(
     throw new BrokerOrdersApiError(message);
   }
 
-  const json: unknown = await resp.json().catch(() => null);
+  let json: unknown;
+  try {
+    json = await resp.json();
+  } catch {
+    const failureMessage = resp.ok
+      ? `Broker orders API ${path}: invalid JSON response.`
+      : `Broker orders API ${path}: HTTP ${resp.status}`;
+    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order" });
+    throw new BrokerOrdersApiError(failureMessage, resp.status);
+  }
   const message = extractMessage(json);
   const isErrorBody =
     json !== null &&
@@ -225,12 +235,17 @@ async function request<T>(
   return data as T;
 }
 
+const brokerOrderRowsSchema = z.array(z.record(z.string(), z.unknown()));
+
 function asRows(value: unknown): BrokerOrderRow[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (row): row is BrokerOrderRow =>
-      row !== null && typeof row === "object" && !Array.isArray(row),
-  );
+  if (!brokerOrderRowsSchema.safeParse(value).success) {
+    // Filtering a malformed row would silently certify a partial book.
+    throw new BrokerOrdersApiError("Broker orders listing is malformed or incomplete. Reconcile it before another request.");
+  }
+  // Validation is structural only. Retain the original detached HTTP JSON,
+  // including unknown/native keys and absent/null observations, without a
+  // parsed-object projection, defaults or a filtered successful prefix.
+  return value as BrokerOrderRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -418,10 +433,13 @@ export function useForeverOrders(
   target: BrokerTarget = {},
   options: BrokerOrdersQueryOptions = {},
 ): UseQueryResult<BrokerOrderRow[], Error> {
+  const enabled = options.enabled ?? true;
   return useQuery({
-    queryKey: brokerOrderKeys.forever.list(target),
-    queryFn: () => listForeverOrders(target),
-    enabled: options.enabled ?? true,
+    // A disabled observer must neither resolve a missing account nor expose
+    // another account's cache. skipToken also makes manual refetch inert.
+    queryKey: enabled ? brokerOrderKeys.forever.list(target) : [...brokerOrderKeys.forever.all, "disabled"],
+    queryFn: enabled ? () => listForeverOrders(target) : skipToken,
+    enabled,
     retry: false,
   });
 }
@@ -459,13 +477,16 @@ type Mutation<TVariables> = UseMutationResult<unknown, Error, TVariables>;
 
 function useInvalidating<TVariables>(
   mutationFn: (variables: TVariables) => Promise<unknown>,
-  invalidateKeys: readonly (readonly string[])[],
+  invalidateKeys: readonly (readonly string[])[] | ((variables: TVariables) => readonly (readonly string[])[]),
 ): Mutation<TVariables> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: () => {
-      for (const queryKey of invalidateKeys) {
+    // Capture the invalidation scope before dispatch; a late account-A ACK
+    // must not refetch the currently mounted account-B listing.
+    onMutate: (variables) => typeof invalidateKeys === "function" ? invalidateKeys(variables) : invalidateKeys,
+    onSuccess: (_data, _variables, keys) => {
+      for (const queryKey of keys ?? []) {
         void queryClient.invalidateQueries({ queryKey });
       }
     },
@@ -473,17 +494,17 @@ function useInvalidating<TVariables>(
 }
 
 export function usePlaceForeverOrder(): Mutation<ForeverOrderPlaceParams> {
-  return useInvalidating(placeForeverOrder, [brokerOrderKeys.forever.all]);
+  return useInvalidating(placeForeverOrder, (variables) => [brokerOrderKeys.forever.list(variables)]);
 }
 
 export function useModifyForeverOrder(): Mutation<
   { order_id: string; changes: OrderChanges } & BrokerTarget
 > {
-  return useInvalidating(modifyForeverOrder, [brokerOrderKeys.forever.all]);
+  return useInvalidating(modifyForeverOrder, (variables) => [brokerOrderKeys.forever.list(variables)]);
 }
 
 export function useCancelForeverOrder(): Mutation<{ order_id: string } & BrokerTarget> {
-  return useInvalidating(cancelForeverOrder, [brokerOrderKeys.forever.all]);
+  return useInvalidating(cancelForeverOrder, (variables) => [brokerOrderKeys.forever.list(variables)]);
 }
 
 export function useModifySuperOrder(): Mutation<

@@ -51,6 +51,16 @@ _GatedDispatch = Callable[
 _CANCEL_EXTRA_KEYS = ("variety", "amo", "trading_symbol", "segment")
 
 
+def placement_acknowledgement_fields(result: Any) -> dict[str, Any]:
+    """Retain recognised native ACK evidence, never infer fill or durability."""
+    from .brokers.indmoney import IndMoneyPlacementAcknowledgement  # noqa: PLC0415
+    from .brokers.upstox import UpstoxPlacementAcknowledgement  # noqa: PLC0415
+
+    if isinstance(result, (UpstoxPlacementAcknowledgement, IndMoneyPlacementAcknowledgement)):
+        return result.evidence_fields()
+    return {}
+
+
 def _canonical_json(value: object) -> str:
     """Encode with the exact JSON semantics used by SafetyContext.order_hash_for."""
     if isinstance(value, Mapping):
@@ -378,12 +388,27 @@ async def _dispatch_cancel_smart_order(
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
     fn = _adapter_write(adapter, "cancel_smart_order")
+    order_id = _signed_order_id(p)
+    if adapter.broker_id == "groww":
+        segment = p.get("segment")
+        family = p.get("smart_order_type")
+        if not isinstance(segment, str) or segment not in {"CASH", "FNO"}:
+            raise SafetyBypassError("Groww smart cancellation requires signed CASH or FNO segment")
+        if not isinstance(family, str) or family not in {"GTT", "OCO"}:
+            raise SafetyBypassError("Groww smart cancellation requires signed GTT or OCO family")
+        if not order_id.isascii() or any(not (character.isalnum() or character in "_-") for character in order_id):
+            raise SafetyBypassError("Groww smart cancellation requires an opaque canonical resource id")
+        context = {"segment": segment, "smart_order_type": family}
+    else:
+        if "smart_order_type" in p:
+            raise SafetyBypassError("signed smart_order_type is only supported for Groww cancellation")
+        context = _optional_order_segment(p)
     return await _invoke_adapter(
         fn,
         on_adapter_invoke,
         session,
-        _signed_order_id(p),
-        **_optional_order_segment(p),
+        order_id,
+        **context,
         _router_token=_ROUTER_TOKEN,
     )
 
@@ -815,7 +840,9 @@ class BrokerRouter:
         if attempt_id is None:
             return
         try:
-            self._lifecycle_store.acknowledge(attempt_id, result)
+            evidence = placement_acknowledgement_fields(result)
+            acknowledgement = {"orderid": str(result), **evidence} if evidence else result
+            self._lifecycle_store.acknowledge(attempt_id, acknowledgement)
         except Exception as exc:
             # The adapter already returned. Raising here could encourage a
             # duplicate broker write, so return its acknowledgement and block
@@ -987,6 +1014,7 @@ class BrokerRouter:
         account_id: str | None = None,
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
+        on_adapter_invoke: _AdapterInvokeCallback = None,
     ) -> Any:
         signed_order = _detached_snapshot(order)
         with self._broker_write_lease(False, f"{safety_ctx.adapter_id}:{safety_ctx.account_id}"):
@@ -1015,7 +1043,7 @@ class BrokerRouter:
                         self._invocation_callback(
                             safety_ctx=safety_ctx,
                             attempt_id=attempt_id,
-                            external_callback=None,
+                            external_callback=on_adapter_invoke,
                             emergency=False,
                             invoked=invoked,
                         ),
@@ -1052,6 +1080,7 @@ class BrokerRouter:
         account_id: str | None = None,
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
+        on_adapter_invoke: _AdapterInvokeCallback = None,
     ) -> Any:
         """Modify a live order through the same verify-then-consume gate as place.
 
@@ -1099,7 +1128,7 @@ class BrokerRouter:
                         self._invocation_callback(
                             safety_ctx=safety_ctx,
                             attempt_id=attempt_id,
-                            external_callback=None,
+                            external_callback=on_adapter_invoke,
                             emergency=False,
                             invoked=invoked,
                         ),

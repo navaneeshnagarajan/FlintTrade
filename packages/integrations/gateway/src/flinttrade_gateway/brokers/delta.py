@@ -14,9 +14,11 @@ import asyncio
 import hashlib
 import json
 import time
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Mapping
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_core.models import OHLCV, Candles, OptionChain, Quote
 from flinttrade_gateway.capabilities import (
@@ -41,6 +43,7 @@ Clock = Callable[[], int]
 
 _EMERGENCY_BATCH_LIMIT = 10
 _ORDER_CACHE = "order_products"
+_READ_PAGE_LIMIT = 1000
 
 
 DELTA_CAPABILITIES = Capabilities(
@@ -160,10 +163,11 @@ class DeltaAdapter(BrokerAdapter):
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         payload = M.to_place_payload(order)
-        result = await self.exchange_call(session, "place_order", body=payload, _router_token=_router_token)
-        order_id = _result_id(result)
-        if not order_id:
-            raise BrokerError("Delta order placement did not return an order id", broker_id=self.broker_id)
+        outcome = await self.exchange_call(
+            session, "place_order", body=payload, _router_token=_router_token, _preserve_envelope=True,
+        )
+        result = M.require_write_success(outcome)
+        order_id = str(result["id"])
         product_id = result.get("product_id") if isinstance(result, dict) else None
         if product_id is not None:
             session.extra.setdefault(_ORDER_CACHE, {})[order_id] = int(product_id)
@@ -178,26 +182,31 @@ class DeltaAdapter(BrokerAdapter):
             cached = session.extra.get(_ORDER_CACHE, {}).get(str(order_id))
             if cached is not None:
                 enriched["product_id"] = cached
-        await self.exchange_call(
+        outcome = await self.exchange_call(
             session,
             "edit_order",
             body=M.to_edit_payload(order_id, enriched),
             _router_token=_router_token,
+            _preserve_envelope=True,
         )
+        M.require_write_success(outcome, expected_id=order_id)
 
     async def cancel_order(self, session: Session, order_id: str, *, _router_token: object | None = None) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         product_id = session.extra.get(_ORDER_CACHE, {}).get(str(order_id))
         if product_id is None:
             looked_up = await self.exchange_call(session, "order_by_id", path_params={"order_id": order_id})
-            if isinstance(looked_up, dict) and looked_up.get("product_id") is not None:
-                product_id = int(str(looked_up["product_id"]))
-        await self.exchange_call(
+            if not isinstance(looked_up, Mapping) or M._order_id(looked_up.get("id")) != M._order_id(order_id):
+                raise BrokerError("Delta cancel product lookup conflicts with order id", broker_id=self.broker_id)
+            product_id = M._order_id(looked_up.get("product_id"))
+        outcome = await self.exchange_call(
             session,
             "cancel_order",
             body=M.to_cancel_payload(order_id, product_id=product_id),
             _router_token=_router_token,
+            _preserve_envelope=True,
         )
+        M.require_write_success(outcome, expected_id=order_id)
 
     async def cancel_all_orders(
         self,
@@ -210,10 +219,16 @@ class DeltaAdapter(BrokerAdapter):
         """Native bulk cancel. One broker call, so one consumed safety context is enough."""
         del tag, segment
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        before = [str(row.get("id")) for row in await self._open_order_rows(session) if row.get("id") is not None]
-        await self.exchange_call(session, "cancel_all_orders", _router_token=_router_token)
-        after = [str(row.get("id")) for row in await self._open_order_rows(session) if row.get("id") is not None]
-        return _ack_summary(before=before, after=after)
+        before = await self._open_order_rows(session)
+        outcome = await self.exchange_call(
+            session, "cancel_all_orders", _router_token=_router_token, _preserve_envelope=True,
+        )
+        try:
+            after = await self._open_order_rows(session)
+        except (BrokerError, BrokerReadResponseInvalid) as exc:
+            return _ack_summary(before=before, after=None, outcome=outcome, operation="cancel_all_orders",
+                                readback_error=str(exc))
+        return _ack_summary(before=before, after=after, outcome=outcome, operation="cancel_all_orders")
 
     async def exit_all_positions(
         self,
@@ -229,8 +244,8 @@ class DeltaAdapter(BrokerAdapter):
         user_id = session.extra.get("user_id")
         if not user_id:
             raise BrokerError("Delta close-all requires the user id captured at login", broker_id=self.broker_id)
-        before = [str(row.get("product_symbol") or "") for row in await self._open_position_rows(session)]
-        await self.exchange_call(
+        before = await self._open_position_rows(session)
+        outcome = await self.exchange_call(
             session,
             "close_all_positions",
             body={
@@ -239,9 +254,14 @@ class DeltaAdapter(BrokerAdapter):
                 "user_id": int(user_id),
             },
             _router_token=_router_token,
+            _preserve_envelope=True,
         )
-        after = [str(row.get("product_symbol") or "") for row in await self._open_position_rows(session)]
-        return _ack_summary(before=before, after=after)
+        try:
+            after = await self._open_position_rows(session)
+        except (BrokerError, BrokerReadResponseInvalid) as exc:
+            return _ack_summary(before=before, after=None, outcome=outcome, operation="close_all_positions",
+                                readback_error=str(exc))
+        return _ack_summary(before=before, after=after, outcome=outcome, operation="close_all_positions")
 
     async def place_reducing_order(
         self,
@@ -252,30 +272,44 @@ class DeltaAdapter(BrokerAdapter):
     ) -> str:
         """Place one reduce-only market order after confirming the live position size."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        symbol = M.product_symbol(payload.get("product_symbol") or payload.get("symbol"))
-        expected = int(payload.get("expected_position_size"))
-        size = M.contract_size(payload.get("size") or payload.get("quantity"))
+        symbol = M._request_alias(payload, ("product_symbol", "symbol"), M.product_symbol)
+        if symbol is None:
+            raise BrokerError("Delta reducing order requires symbol", broker_id=self.broker_id)
+        try:
+            expected = M.contract_evidence(payload.get("expected_position_size"), signed=True)
+        except BrokerReadResponseInvalid as exc:
+            raise BrokerError("Delta expected position must be an exact signed contract count", broker_id=self.broker_id) from exc
+        size = M._request_alias(payload, ("size", "quantity"), M.contract_size)
         if size != abs(expected) or expected == 0:
             raise BrokerError("Delta reducing order size must equal the open position", broker_id=self.broker_id)
-        live = await self._position_size(session, symbol)
-        if live != expected:
-            raise BrokerError("Delta position changed before the reducing order", broker_id=self.broker_id)
+        product = payload.get("product")
+        if payload.get("exchange") != "CRYPTO" or not isinstance(product, str) or not product.strip():
+            raise BrokerError("Delta reducing order requires CRYPTO exchange and product identity", broker_id=self.broker_id)
+        tag = payload.get("emergency_tag")
+        if not isinstance(tag, str) or not tag or len(tag) > 32:
+            raise BrokerError("Delta reducing order requires an emergency_tag of at most 32 characters", broker_id=self.broker_id)
+        side = "sell" if expected > 0 else "buy"
+        for field in ("side", "action"):
+            if field in payload and M._side(payload[field]) != side:
+                raise BrokerError("Delta reducing order side conflicts with the position", broker_id=self.broker_id)
+        if "reduce_only" in payload and payload["reduce_only"] is not True:
+            raise BrokerError("Delta reducing order requires native boolean reduce_only", broker_id=self.broker_id)
         body = {
             "product_symbol": symbol,
             "size": size,
-            "side": "sell" if expected > 0 else "buy",
+            "side": side,
             "order_type": "market_order",
-            "reduce_only": "true",
+            "reduce_only": True,
             "time_in_force": "ioc",
+            "client_order_id": tag,
         }
-        tag = str(payload.get("emergency_tag") or "")
-        if tag:
-            body["client_order_id"] = tag
-        result = await self.exchange_call(session, "place_order", body=body, _router_token=_router_token)
-        order_id = _result_id(result)
-        if not order_id:
-            raise BrokerError("Delta reducing order did not return an order id", broker_id=self.broker_id)
-        return order_id
+        live = await self._position_size(session, symbol)
+        if live != expected:
+            raise BrokerError("Delta position changed before the reducing order", broker_id=self.broker_id)
+        outcome = await self.exchange_call(
+            session, "place_order", body=body, _router_token=_router_token, _preserve_envelope=True,
+        )
+        return str(M.require_write_success(outcome)["id"])
 
     async def plan_emergency_reduction(
         self,
@@ -358,9 +392,7 @@ class DeltaAdapter(BrokerAdapter):
         return [M.from_order(row) for row in rows]
 
     async def trade_book(self, session: Session) -> list[dict[str, Any]]:
-        result = await self.exchange_call(session, "fills")
-        rows = result if isinstance(result, list) else []
-        return [M.from_fill(row) for row in rows if isinstance(row, dict)]
+        return [M.from_fill(row) for row in await self._read_rows(session, "fills")]
 
     async def positions(self, session: Session) -> list[dict[str, Any]]:
         return [M.from_position(row) for row in await self._open_position_rows(session)]
@@ -454,12 +486,15 @@ class DeltaAdapter(BrokerAdapter):
 
     async def order_details(self, session: Session, order_id: str) -> dict[str, Any]:
         result = await self.exchange_call(session, "order_by_id", path_params={"order_id": order_id})
-        return M.from_order(result) if isinstance(result, dict) else {}
+        if not isinstance(result, dict):
+            raise BrokerReadResponseInvalid
+        _validate_book_rows([result], operation="order_by_id")
+        if M.contract_evidence(result["id"], positive=True) != M.contract_evidence(order_id, positive=True):
+            raise BrokerReadResponseInvalid
+        return M.from_order(result)
 
     async def order_history(self, session: Session, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        result = await self.exchange_call(session, "order_history")
-        rows = result if isinstance(result, list) else []
-        return [M.from_order(row) for row in rows if isinstance(row, dict)]
+        return [M.from_order(row) for row in await self._read_rows(session, "order_history")]
 
     async def arm_deadman(
         self,
@@ -616,6 +651,7 @@ class DeltaAdapter(BrokerAdapter):
         body: Mapping[str, Any] | None = None,
         path_params: Mapping[str, Any] | None = None,
         _router_token: object | None = None,
+        _preserve_envelope: bool = False,
     ) -> Any:
         """Call one swagger endpoint. Writes refuse unless the router token is present."""
         spec = M.ENDPOINTS.get(name)
@@ -624,6 +660,14 @@ class DeltaAdapter(BrokerAdapter):
         method, template = spec
         if M.is_write(method):
             self._require_router_token(_router_token, _ROUTER_TOKEN)
+        if name == "place_order":
+            M.validate_create_payload(body)
+        elif name == "place_bracket":
+            body = M.to_position_bracket_create_payload(body)
+        elif name == "edit_bracket":
+            if not isinstance(body, Mapping) or "id" not in body:
+                raise BrokerError("Delta order bracket edits require id", broker_id=self.broker_id)
+            body = M.to_order_bracket_edit_payload(body["id"], {key: value for key, value in body.items() if key != "id"})
         path = M.fill_path(template, path_params)
         query_text = M.query_string(query)
         body_text = M.body_string(dict(body) if body is not None else None)
@@ -642,7 +686,7 @@ class DeltaAdapter(BrokerAdapter):
             headers = M.public_headers()
         url = f"{session.extra['rest_base']}{path}{query_text}"
         status, payload = await run_blocking_sdk_call(self._transport(session), method, url, headers, body_text)
-        return M.unwrap(payload, status=status, endpoint=path)
+        return M.unwrap(payload, status=status, endpoint=path, preserve_envelope=_preserve_envelope)
 
     def _transport(self, session: Session) -> Transport:
         transport = session.extra.get("transport")
@@ -651,43 +695,176 @@ class DeltaAdapter(BrokerAdapter):
         return transport
 
     async def _open_order_rows(self, session: Session) -> list[dict[str, Any]]:
-        result = await self.exchange_call(session, "open_orders", query={"state": "open"})
-        return [row for row in result if isinstance(row, dict)] if isinstance(result, list) else []
+        return await self._read_rows(session, "open_orders", query={"states": "open,pending"})
 
     async def _open_position_rows(self, session: Session) -> list[dict[str, Any]]:
-        result = await self.exchange_call(session, "positions")
-        rows = result if isinstance(result, list) else []
-        return [row for row in rows if isinstance(row, dict) and int(row.get("size") or 0) != 0]
+        rows = await self._read_rows(session, "positions")
+        return [row for row in rows if M.contract_evidence(row["size"], signed=True) != 0]
+
+    async def _read_rows(
+        self, session: Session, name: str, *, query: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Exhaust documented cursors or refuse; do not equate traversal with coherence."""
+        paginated = name in {"open_orders", "order_history", "fills"}
+        parameters = dict(query or {})
+        if paginated:
+            parameters["page_size"] = 100
+        rows: list[dict[str, Any]] = []
+        pages: list[dict[str, Any]] = []
+        cursors: set[str] = set()
+        evidence = {"pages": pages, "pagination_exhausted": False}
+        session.extra.setdefault("delta_read_evidence", {})[name] = evidence
+        for _ in range(_READ_PAGE_LIMIT):
+            envelope = await self.exchange_call(session, name, query=parameters, _preserve_envelope=True)
+            if not isinstance(envelope, dict) or envelope.get("success") is not True:
+                raise BrokerReadResponseInvalid
+            pages.append(deepcopy(envelope))
+            page = envelope.get("result")
+            if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+                raise BrokerReadResponseInvalid
+            if envelope.get("error") or envelope.get("errors"):
+                raise BrokerReadResponseInvalid
+            rows.extend(page)
+            if paginated:
+                meta = envelope.get("meta")
+                if not isinstance(meta, dict) or "after" not in meta:
+                    raise BrokerReadResponseInvalid
+                cursor = meta["after"]
+                for field in ("after", "before"):
+                    if field in meta and meta[field] is not None and (
+                        not isinstance(meta[field], str) or not meta[field].strip()
+                    ):
+                        raise BrokerReadResponseInvalid
+                if cursor is not None:
+                    if cursor in cursors:
+                        raise BrokerReadResponseInvalid
+                    cursors.add(cursor)
+                    parameters["after"] = cursor
+                    continue
+                if meta.get("has_more") is True:
+                    raise BrokerReadResponseInvalid
+            elif "meta" in envelope:
+                meta = envelope["meta"]
+                if not isinstance(meta, dict) or meta.get("after") is not None:
+                    # Position pagination has no established contract here.
+                    raise BrokerReadResponseInvalid
+            _validate_book_rows(rows, operation=name)
+            evidence["pagination_exhausted"] = True
+            return rows
+        raise BrokerReadResponseInvalid
 
     async def _position_size(self, session: Session, symbol: str) -> int:
         for row in await self._open_position_rows(session):
             if str(row.get("product_symbol") or "") == symbol:
-                return int(row.get("size") or 0)
+                return M.contract_evidence(row["size"], signed=True)
         return 0
 
 
-def _ack_summary(*, before: list[str], after: list[str]) -> dict[str, Any]:
-    """Return the dispatcher bulk acknowledgement after an authoritative readback."""
-    remaining = [item for item in after if item]
-    still_open = set(remaining)
-    cleared = [item for item in before if item and item not in still_open]
-    return {
-        "errors": [{"order_id": item, "reason": "still_open"} for item in remaining],
-        "total": len(cleared) + len(remaining),
-        "success": len(cleared),
-        "order_ids": cleared,
+def _validate_book_rows(rows: list[dict[str, Any]], *, operation: str) -> None:
+    """Validate each observed identity/count, without conflating fills and order totals."""
+    identities: set[Any] = set()
+    by_product: dict[int, str] = {}
+    by_symbol: dict[str, int] = {}
+    for row in rows:
+        symbol = row.get("product_symbol")
+        if not isinstance(symbol, str) or not symbol or symbol != symbol.strip():
+            raise BrokerReadResponseInvalid
+        if "product_id" in row:
+            product_id = M.contract_evidence(row["product_id"], positive=True)
+            if (product_id in by_product and by_product[product_id] != symbol) or (
+                symbol in by_symbol and by_symbol[symbol] != product_id
+            ):
+                raise BrokerReadResponseInvalid
+            by_product[product_id], by_symbol[symbol] = symbol, product_id
+        if operation == "positions":
+            identity = symbol
+            M.contract_evidence(row.get("size"), signed=True)
+        elif operation == "fills":
+            # Fill IDs are UUID strings; settlement order IDs can also be UUIDs.
+            # Treat native strings as opaque, never repair or numeric-coerce them.
+            identity = _opaque_read_id(row.get("id"))
+            _opaque_read_id(row.get("order_id"))
+            M.from_fill(row)
+        else:
+            identity = M.contract_evidence(row.get("id"), positive=True)
+            M.from_order(row)
+        if identity in identities:
+            raise BrokerReadResponseInvalid
+        identities.add(identity)
+
+
+def _opaque_read_id(raw: Any) -> str:
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+        return str(raw)
+    if isinstance(raw, str) and raw and raw == raw.strip():
+        return raw
+    raise BrokerReadResponseInvalid
+
+
+def _ack_summary(
+    *, before: list[dict[str, Any]], after: list[dict[str, Any]] | None,
+    outcome: Any, operation: str, readback_error: str = "",
+) -> dict[str, Any]:
+    """Count ACKs, not cancellations/fills/closure; missing readback stays unknown."""
+    evidence = M.operation_evidence(outcome, operation=operation)
+    key = "id" if operation == "cancel_all_orders" else "product_symbol"
+    targets = {str(row[key]): row for row in before}
+    remaining = {str(row[key]): row for row in after or []}
+    universe = targets | remaining
+    native_result = outcome.get("result") if isinstance(outcome, Mapping) else None
+    acknowledged = isinstance(outcome, Mapping) and outcome.get("success") is True
+    if isinstance(outcome, Mapping) and "result" in outcome:
+        acknowledged = acknowledged and isinstance(native_result, (Mapping, list))
+    if isinstance(native_result, Mapping) and not set(native_result).intersection({
+        "success", "orders", "errors", "error", "skipped_products",
+    }):
+        acknowledged = False
+    for source in (outcome, native_result):
+        if not isinstance(source, Mapping):
+            continue
+        if "success" in source and source["success"] is not True:
+            acknowledged = False
+        for field in ("errors", "skipped_products", "orders"):
+            if field in source and (not isinstance(source[field], list)
+                                    or any(not isinstance(item, Mapping) for item in source[field])):
+                acknowledged = False
+    failures = evidence["native_errors"] + evidence["skipped_products"]
+    for item in evidence["items"]:
+        if (not isinstance(item, Mapping) or not set(item).intersection({"id", "order_id", "product_id", "product_symbol"})
+                or item.get("success") is False or item.get("error") or item.get("errors")):
+            failures.append(item)
+    errors, ack_ids = [], []
+    identity_fields = ("id", "order_id", "product_id", "product_symbol")
+    unscoped = any(not isinstance(item, Mapping) or not any(
+        field in item and field in row and str(item[field]) == str(row[field])
+        for row in universe.values() for field in identity_fields
+    ) for item in failures)
+    for identity, row in universe.items():
+        matched = [item for item in failures if isinstance(item, Mapping) and any(
+            field in item and field in row and str(item[field]) == str(row[field]) for field in identity_fields
+        )]
+
+        if matched:
+            errors.append({"order_id": identity, "reason": matched[0].get("reason", "native_error")})
+        elif not acknowledged or unscoped or after is None:
+            errors.append({"order_id": identity, "reason": "outcome_unknown"})
+        elif identity in remaining:
+            errors.append({"order_id": identity, "reason": "still_open"})
+        else:
+            ack_ids.append(identity)
+    if not universe and (not acknowledged or failures or after is None):
+        errors.append({"reason": "outcome_unknown"})
+    return evidence | {
+        "errors": errors, "total": len(errors) + len(ack_ids), "success": len(ack_ids),
+        "order_ids": ack_ids if operation == "cancel_all_orders" else [],
+        "acknowledgement_only": True, "readback_available": after is not None,
+        "readback_error": readback_error,
     }
 
 
 def _emergency_exit_tag(symbol: str, size: int) -> str:
     identity = f"{symbol}|{size}".encode()
     return "fte-delta-" + hashlib.sha256(identity).hexdigest()[:16]
-
-
-def _result_id(result: Any) -> str:
-    if isinstance(result, dict) and result.get("id") is not None:
-        return str(result["id"])
-    return ""
 
 
 def _subscription(session: Session, channel: str) -> list[str]:

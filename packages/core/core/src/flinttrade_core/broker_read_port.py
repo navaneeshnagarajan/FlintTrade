@@ -718,6 +718,21 @@ class OrderLegStateSnapshot:
     filled_quantity: str | None
     price: str | None
     trigger_price: str | None
+    # Native observations, not execution authority. Triggered quantity is not
+    # a confirmed fill; total quantity is never inferred from the parent.
+    total_quantity: str | None = None
+    remaining_quantity: str | None = None
+    triggered_quantity: str | None = None
+    trailing_jump: str | None = None
+    target_price: str | None = None
+    stop_loss_price: str | None = None
+    average_price: str | None = None
+    disclosed_quantity: str | None = None
+    parent_order_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    exchange_time: str | None = None
+    raw_observation_json: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.leg_name) is not str or self.leg_name not in {"ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"}:
@@ -730,6 +745,19 @@ class OrderLegStateSnapshot:
             self.filled_quantity,
             self.price,
             self.trigger_price,
+            self.total_quantity,
+            self.remaining_quantity,
+            self.triggered_quantity,
+            self.trailing_jump,
+            self.target_price,
+            self.stop_loss_price,
+            self.average_price,
+            self.disclosed_quantity,
+            self.parent_order_id,
+            self.created_at,
+            self.updated_at,
+            self.exchange_time,
+            self.raw_observation_json,
         ):
             _optional_str(value)
 
@@ -764,6 +792,21 @@ class OrderStateSnapshot:
     margin_unfunded: bool | None
     order_flag: Literal["SINGLE", "OCO"] | None
     legs: tuple[OrderLegStateSnapshot, ...]
+    broker_product: str | None = None
+    broker_order_type: str | None = None
+    validity: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    exchange_time: str | None = None
+    remaining_quantity: str | None = None
+    target_price: str | None = None
+    stop_loss_price: str | None = None
+    trailing_jump: str | None = None
+    average_price: str | None = None
+    leg_details_valid: bool | None = None
+    # Presence-sensitive resource/rule observations, not child execution or
+    # effective protection. Immutable JSON retains native null/blank values.
+    raw_observation_json: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.family) is not BrokerOrderFamily:
@@ -793,10 +836,23 @@ class OrderStateSnapshot:
             self.parent_order_id,
             self.exchange_order_id,
             self.leg_name,
+            self.broker_product,
+            self.broker_order_type,
+            self.validity,
+            self.created_at,
+            self.updated_at,
+            self.exchange_time,
+            self.remaining_quantity,
+            self.target_price,
+            self.stop_loss_price,
+            self.trailing_jump,
+            self.average_price,
+            self.raw_observation_json,
         ):
             _optional_str(value)
         _optional_float(self.strike_price)
         _optional_bool(self.margin_unfunded)
+        _optional_bool(self.leg_details_valid)
         if self.order_flag is not None and (
             type(self.order_flag) is not str or self.order_flag not in {"SINGLE", "OCO"}
         ):

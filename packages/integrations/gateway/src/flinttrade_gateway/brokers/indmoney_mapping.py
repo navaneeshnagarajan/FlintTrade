@@ -34,6 +34,7 @@ from flinttrade_core.exceptions import (
     RateLimitError,
     SessionExpired,
 )
+from flinttrade_gateway.json_evidence import copy_json_evidence
 
 # ---------------------------------------------------------------------------
 # Constants (doc-grounded)
@@ -438,20 +439,27 @@ def is_smart_order_id(order_id: str) -> bool:
     return str(order_id).startswith("GTT-")
 
 
-def resolve_segment(order_id: str, changes: dict[str, Any] | None = None) -> str | None:
-    """Resolve the IndMoney segment for a modify/cancel call.
-
-    Precedence: explicit ``changes['segment']`` → ``changes['exchange']``
-    (canonical, mapped) → order-id prefix → ``None``.
-    """
+def resolve_segment(
+    order_id: str, changes: dict[str, Any] | None = None, *, segment: str | None = None
+) -> str | None:
+    """Reconcile all supplied segment evidence; GTT IDs carry no segment."""
+    _request_identity(order_id, "order_id")
     changes = changes or {}
-    seg = str(changes.get("segment", "")).upper()
-    if seg in ("EQUITY", "DERIVATIVE"):
-        return seg
-    exchange = changes.get("exchange")
-    if exchange:
-        return to_exchange_segment(str(exchange))[1]
-    return segment_from_order_id(order_id)
+    candidates = []
+    for value in ([segment] if segment is not None else []) + (
+        [changes["segment"]] if "segment" in changes else []
+    ):
+        if type(value) is not str or value.upper() not in {"EQUITY", "DERIVATIVE"}:
+            raise IndMoneyMappingError("Invalid IndMoney segment")
+        candidates.append(value.upper())
+    if "exchange" in changes:
+        candidates.append(to_exchange_segment(changes["exchange"])[1])
+    inferred = segment_from_order_id(order_id)
+    if inferred is not None:
+        candidates.append(inferred)
+    if candidates and any(value != candidates[0] for value in candidates):
+        raise IndMoneyMappingError("Conflicting IndMoney segment evidence")
+    return candidates[0] if candidates else None
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +467,113 @@ def resolve_segment(order_id: str, changes: dict[str, Any] | None = None) -> str
 # ---------------------------------------------------------------------------
 
 
+def _request_identity(value: object, field: str) -> str:
+    if (type(value) is not str or not value or not value.isprintable()
+            or any(character.isspace() for character in value)
+            or any(character in value for character in "/?#\\")):
+        raise IndMoneyMappingError(f"{field} must be a canonical nonblank identity")
+    return value
+
+
+def _request_decimal(value: object, field: str) -> Decimal:
+    if type(value) not in (str, int, float, Decimal) or len(str(value)) > 256:
+        raise IndMoneyMappingError(f"{field} must be numeric")
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        raise IndMoneyMappingError(f"Invalid {field}") from None
+    if not number.is_finite() or number.adjusted() > 308:
+        raise IndMoneyMappingError(f"{field} must be bounded and finite")
+    return number
+
+
+def _request_number(value: object, field: str, *, integer: bool = False, zero: bool = False) -> int | float:
+    number = _request_decimal(value, field)
+    if number < 0 or (number == 0 and not zero):
+        label = "limit price" if field == "price" else field
+        raise IndMoneyMappingError(f"{label} must be {'nonnegative' if zero else 'greater than zero'}")
+    if integer and number != number.to_integral_value():
+        raise IndMoneyMappingError(f"{field} must be an exact integer")
+    if number == number.to_integral_value():
+        return int(number)
+    result = float(number)
+    if not math.isfinite(result) or Decimal(str(result)) != number:
+        raise IndMoneyMappingError(f"{field} cannot be represented faithfully on the JSON wire")
+    return result
+
+
+def _number_alias(
+    values: dict[str, Any], *names: str, required: bool = False, integer: bool = False, zero: bool = False
+) -> int | float | None:
+    supplied = [_request_number(values[name], names[0], integer=integer, zero=zero) for name in names if name in values]
+    if not supplied:
+        if required:
+            raise IndMoneyMappingError(f"Missing {names[0]}")
+        return None
+    if any(value != supplied[0] for value in supplied):
+        raise IndMoneyMappingError(f"Conflicting aliases: {', '.join(names)}")
+    return supplied[0]
+
+
+def _order_values(order: Any, *names: str) -> dict[str, Any]:
+    return {name: getattr(order, name) for name in names if hasattr(order, name)}
+
+
+def _put_requested_remarks(payload: dict[str, Any], order: Any) -> None:
+    if hasattr(order, "remarks"):
+        remarks = order.remarks
+        if type(remarks) is not str or len(remarks) > 100:
+            raise IndMoneyMappingError("remarks must be text of at most 100 characters; no silent truncation")
+        payload["remarks"] = remarks
+
+
+def _order_validity(order: Any) -> str:
+    validity = getattr(order, "validity", None)
+    if validity is None:  # Canonical Order uses None for omitted native validity.
+        return "DAY"
+    if type(validity) is not str or validity.upper() not in VALIDITY_MAP:
+        raise IndMoneyMappingError(f"Unsupported validity {validity!r}")
+    return validity.upper()
+
+
+def _trailing_requested(order: Any) -> bool:
+    flag = getattr(order, "is_tsl", False)
+    if type(flag) is not bool:
+        raise IndMoneyMappingError("is_tsl must be boolean")
+    steps = [_request_number(value, name, zero=True) for name, value in
+             _order_values(order, "tsl_step_size", "trailing_jump").items()]
+    return flag or any(step != 0 for step in steps)
+
+
+def indmoney_execution_effects(order: Any) -> dict[str, Any]:
+    """Describe requested/effective semantics, never observed broker execution."""
+    requested = "TRIGGER" if str(getattr(order, "variety", "")).lower() == "trigger" else _norm_pricetype(
+        getattr(order, "pricetype", "MARKET")
+    )
+    limitations = []
+    if requested == "TRIGGER":
+        trigger = _request_number(getattr(order, "trigger_price", None), "trigger_price")
+        price = _optional_order_price(order, "price", "trigger_limit_price")
+        effective, effective_price = "TRIGGER_LIMIT", trigger if price is None else price
+    elif requested in ORDER_TYPE_MAP:
+        effective = "LIMIT"
+        price = _number_alias(_order_values(order, "price", "limit_price"), "price", "limit_price",
+                              required=requested == "LIMIT", zero=requested == "MARKET")
+        effective_price = None if requested == "MARKET" else price
+        if requested == "MARKET":
+            limitations.append("MARKET_TO_LIMIT")
+    else:
+        raise IndMoneyMappingError(f"Unsupported requested type {requested!r}")
+    if _trailing_requested(order):
+        limitations.append("TSL_IGNORED")
+    return {"requested_type": requested, "effective_type": effective, "effective_limit_price": effective_price,
+            "trailing_active": False, "limitations": limitations}
+
+
 def _validated_core(order: Any) -> dict[str, Any]:
     """Shared validation + core fields for every IndMoney order payload."""
+    if _trailing_requested(order):
+        raise IndMoneyMappingError("TSL_IGNORED: active trailing is unsupported")
     side = str(order.action).upper()
     if side not in SIDE_MAP:
         raise IndMoneyMappingError(f"Unsupported action {side!r}")
@@ -468,9 +581,9 @@ def _validated_core(order: Any) -> dict[str, Any]:
     product = str(order.product).upper()
     if product not in PRODUCT_MAP:
         raise IndMoneyMappingError(f"Unsupported product {product!r}")
-    qty = int(_num(order.quantity, 0))
-    if qty <= 0:
-        raise IndMoneyMappingError("qty must be greater than zero")
+    if (segment == "EQUITY" and product == "NRML") or (segment == "DERIVATIVE" and product == "CNC"):
+        raise IndMoneyMappingError("product is incompatible with segment")
+    qty = _number_alias(_order_values(order, "qty", "quantity"), "qty", "quantity", required=True, integer=True)
     return {
         "txn_type": SIDE_MAP[side],
         "exchange": exchange,
@@ -501,124 +614,92 @@ def to_place_order_payload(order: Any, security_id: str, *, algo_id: str | None 
         )
     if ptype not in ORDER_TYPE_MAP:
         raise IndMoneyMappingError(f"Unsupported pricetype {ptype!r}")
-    validity = str(getattr(order, "validity", "DAY") or "DAY").upper()
-    if validity not in VALIDITY_MAP:
-        raise IndMoneyMappingError(f"Unsupported validity {validity!r}")
+    validity = _order_validity(order)
 
     payload.update(
         {
             "order_type": ORDER_TYPE_MAP[ptype],
             "validity": VALIDITY_MAP[validity],
-            "security_id": str(security_id),
+            "security_id": _request_identity(security_id, "security_id"),
             "is_amo": str(getattr(order, "variety", "regular")).lower() == "amo",
-            "algo_id": algo_id or default_algo_id(payload["exchange"]),
+            "algo_id": _request_identity(
+                default_algo_id(payload["exchange"]) if algo_id is None else algo_id, "algo_id"
+            ),
         }
     )
+    price = _number_alias(
+        _order_values(order, "price", "limit_price"), "price", "limit_price",
+        required=ptype == "LIMIT", zero=ptype == "MARKET",
+    )
     if payload["order_type"] == "LIMIT":
-        price = _num(getattr(order, "price", 0))
-        if price <= 0:
-            raise IndMoneyMappingError("A LIMIT order needs a limit price greater than zero")
         payload["limit_price"] = price
+    _put_requested_remarks(payload, order)
     return payload
 
 
+def _optional_order_price(order: Any, *names: str) -> int | float | None:
+    """Treat canonical zero placeholders as absent, but validate every value."""
+    values = _order_values(order, *names)
+    numbers = {name: _request_number(value, name, zero=True) for name, value in values.items()}
+    return _number_alias({name: value for name, value in numbers.items() if value != 0}, *names)
+
+
 def to_smart_order_payload(order: Any, security_id: str, *, algo_id: str | None = None) -> dict[str, Any]:
-    """Translate a smart-variety ``Order`` into a ``POST /smart/order`` JSON body.
+    """Build a smart parent with paired protective legs for either transaction side.
 
-    Varieties:
-        * ``"trigger"`` — a TRIGGER parent; ``trigger_price`` is mandatory and a
-          positive ``price`` becomes ``trigger_limit_price`` (trigger-limit).
-        * ``"gtt"`` / ``"oco"`` — a LIMIT/MARKET parent with stop-loss and/or
-          target GTT legs. ``stop_loss_price`` maps to ``sl_trigger_price`` and
-          ``target_price`` to ``tgt_trigger_price``. Each present leg MUST carry
-          its own explicit limit price (``sl_limit_price`` / ``tgt_limit_price``)
-          satisfying the documented inequalities — SL limit strictly below the SL
-          trigger, target limit strictly above the target trigger
-          (smart-orders.md validations ``MaxSlLimitPrice`` / ``MinTgtLimitPrice``).
-          The limit price is NEVER defaulted to the trigger: equal values violate
-          the strict inequalities and the broker rejects them, and an absent leg
-          limit price is itself a documented rejection — so the mapping fails
-          closed in both cases.
-
-    Raises:
-        IndMoneyMappingError: Missing trigger price on a TRIGGER order, no legs
-            on a GTT/OCO order, a leg present without its (positive) limit price,
-            a leg limit price that breaks the documented inequality, or any
-            unmappable enum value.
+    TRIGGER uses trigger_limit_price, never ordinary limit_price. MARKET/CMP,
+    lot/tick/freeze and BSE smart eligibility need independent runtime evidence;
+    a request's arbitrary price is not a quote or readiness proof.
     """
     payload = _validated_core(order)
     variety = str(getattr(order, "variety", "")).lower()
-    # LIVE-VERIFY: smart-orders.md:97 lists the exchange Enum as "NSE" only, yet the
-    # algo_id row (smart-orders.md:104) documents a distinct BSE algo id
-    # ("9999999999999999"), implying BSE/BFO smart orders ARE accepted. The docs are
-    # internally inconsistent. We keep the permissive BSE/BFO behaviour (consistent
-    # with the algo-id row and with normal orders) until a live BSE smart order
-    # confirms or refutes it; revisit if the broker rejects the BSE exchange enum.
-    payload.update(
-        {
-            "validity": "DAY",  # smart orders are DAY-only (smart-orders doc)
-            "security_id": str(security_id),
-            "algo_id": algo_id or default_algo_id(payload["exchange"]),
-        }
-    )
-
+    if variety not in SMART_VARIETIES:
+        raise IndMoneyMappingError(f"Unsupported smart variety {variety!r}")
+    if _order_validity(order) != "DAY":
+        raise IndMoneyMappingError("Smart validity must be DAY")
+    payload.update({
+        "validity": "DAY", "security_id": _request_identity(security_id, "security_id"),
+        "algo_id": _request_identity(default_algo_id(payload["exchange"]) if algo_id is None else algo_id, "algo_id"),
+    })
+    entry = None
     if variety == "trigger":
-        trigger = _num(getattr(order, "trigger_price", 0))
-        if trigger <= 0:
-            raise IndMoneyMappingError("A TRIGGER smart order needs a trigger_price greater than zero")
-        payload["order_type"] = "TRIGGER"
-        payload["trigger_price"] = trigger
-        limit = _num(getattr(order, "price", 0))
-        if limit > 0:
+        if hasattr(order, "limit_price"):
+            raise IndMoneyMappingError("TRIGGER uses trigger_limit_price, not limit_price")
+        trigger = _request_number(getattr(order, "trigger_price", None), "trigger_price")
+        payload.update({"order_type": "TRIGGER", "trigger_price": trigger})
+        limit = _optional_order_price(order, "price", "trigger_limit_price")
+        if limit is not None:
             payload["trigger_limit_price"] = limit
-        return payload
-
-    ptype = _norm_pricetype(getattr(order, "pricetype", "MARKET"))
-    if ptype not in ORDER_TYPE_MAP:
-        raise IndMoneyMappingError(f"Unsupported pricetype {ptype!r} for a smart order")
-    payload["order_type"] = ORDER_TYPE_MAP[ptype]
-    if payload["order_type"] == "LIMIT":
-        price = _num(getattr(order, "price", 0))
-        if price <= 0:
-            raise IndMoneyMappingError("A LIMIT smart order needs a limit price greater than zero")
-        payload["limit_price"] = price
-
-    sl_trigger = _num(getattr(order, "stop_loss_price", 0))
-    tgt_trigger = _num(getattr(order, "target_price", 0))
-    if sl_trigger <= 0 and tgt_trigger <= 0:
+        entry = trigger if limit is None else limit
+    else:
+        ptype = _norm_pricetype(getattr(order, "pricetype", "MARKET"))
+        if ptype not in ORDER_TYPE_MAP:
+            raise IndMoneyMappingError(f"Unsupported pricetype {ptype!r} for a smart order")
+        payload["order_type"] = ptype
+        price = _number_alias(_order_values(order, "price", "limit_price"), "price", "limit_price",
+                              required=ptype == "LIMIT", zero=ptype == "MARKET")
+        if ptype == "LIMIT":
+            payload["limit_price"] = entry = price
+    legs = {}
+    for prefix, alias in (("sl", "stop_loss_price"), ("tgt", "target_price")):
+        trigger_name, limit_name = f"{prefix}_trigger_price", f"{prefix}_limit_price"
+        trigger = _optional_order_price(order, trigger_name, alias)
+        limit = _optional_order_price(order, limit_name)
+        if (trigger is None) != (limit is None):
+            raise IndMoneyMappingError(f"A protective leg requires both {trigger_name} and {limit_name}")
+        if trigger is None or limit is None:
+            continue
+        below = (payload["txn_type"] == "BUY") == (prefix == "sl")
+        if (below and limit >= trigger) or (not below and limit <= trigger):
+            direction = "less" if below else "greater"
+            raise IndMoneyMappingError(f"{limit_name} must be strictly {direction} than {trigger_name}")
+        if entry is not None and ((below and trigger >= entry) or (not below and trigger <= entry)):
+            raise IndMoneyMappingError(f"{trigger_name} is on the wrong side of entry")
+        legs.update({trigger_name: trigger, limit_name: limit})
+    if variety in {"gtt", "oco"} and not legs:
         raise IndMoneyMappingError("A GTT/OCO smart order needs a stop_loss_price and/or a target_price leg")
-    if sl_trigger > 0:
-        # The broker rejects a stop-loss leg without its limit price, and the
-        # limit must sit strictly below the trigger (MaxSlLimitPrice). Never
-        # default it to the trigger — equal values violate the inequality.
-        sl_limit = _num(getattr(order, "sl_limit_price", 0))
-        if sl_limit <= 0:
-            raise IndMoneyMappingError(
-                "A stop-loss leg needs an explicit sl_limit_price greater than zero "
-                "(the broker rejects an SL leg without its limit price)"
-            )
-        if sl_limit >= sl_trigger:
-            raise IndMoneyMappingError(
-                "sl_limit_price must be strictly less than sl_trigger_price "
-                f"({sl_limit} >= {sl_trigger}) — see MaxSlLimitPrice"
-            )
-        payload["sl_trigger_price"] = sl_trigger
-        payload["sl_limit_price"] = sl_limit
-    if tgt_trigger > 0:
-        # The target limit must sit strictly above its trigger (MinTgtLimitPrice).
-        tgt_limit = _num(getattr(order, "tgt_limit_price", 0))
-        if tgt_limit <= 0:
-            raise IndMoneyMappingError(
-                "A target leg needs an explicit tgt_limit_price greater than zero "
-                "(the broker rejects a target leg without its limit price)"
-            )
-        if tgt_limit <= tgt_trigger:
-            raise IndMoneyMappingError(
-                "tgt_limit_price must be strictly greater than tgt_trigger_price "
-                f"({tgt_limit} <= {tgt_trigger}) — see MinTgtLimitPrice"
-            )
-        payload["tgt_trigger_price"] = tgt_trigger
-        payload["tgt_limit_price"] = tgt_limit
+    payload.update(legs)
+    _put_requested_remarks(payload, order)
     return payload
 
 
@@ -631,67 +712,96 @@ def to_modify_order_payload(order_id: str, changes: dict[str, Any], *, segment: 
         IndMoneyMappingError: Missing/zero qty or limit price, or an
             unresolvable segment.
     """
-    seg = segment or resolve_segment(order_id, changes)
+    seg = resolve_segment(order_id, changes, segment=segment)
     if seg is None:
         raise IndMoneyMappingError(
             f"Cannot infer the IndMoney segment for order {order_id!r} — pass changes['segment']"
         )
-    qty = int(_num(changes.get("qty", changes.get("quantity", 0)), 0))
-    if qty <= 0:
-        raise IndMoneyMappingError("Modify requires qty greater than zero")
-    limit_price = _num(changes.get("limit_price", changes.get("price", 0)))
-    if limit_price <= 0:
-        raise IndMoneyMappingError("Modify requires limit_price greater than zero")
-    return {"order_id": str(order_id), "segment": seg, "qty": qty, "limit_price": limit_price}
+    qty = _number_alias(changes, "qty", "quantity", required=True, integer=True)
+    limit_price = _number_alias(changes, "limit_price", "price", required=True)
+    return {"order_id": _request_identity(order_id, "order_id"), "segment": seg, "qty": qty,
+            "limit_price": limit_price}
 
 
 def to_smart_modify_payload(
-    order_id: str, changes: dict[str, Any], *, segment: str | None = None, algo_id: str | None = None
+    order_id: str, changes: dict[str, Any], *, segment: str | None = None, algo_id: str | None = None,
+    existing_order_type: str | None = None,
 ) -> dict[str, Any]:
-    """Translate modify ``changes`` into a ``POST /smart/order/modify`` JSON body.
+    """Build supplied smart edits, bound to caller-observed immutable type.
 
-    Only the documented optional fields are passed through; ``order_type`` must
-    match the existing order (broker-enforced).
+    Resource context is validation-only. Partial protective edits remain
+    supported; unchanged leg/side/CMP coherence needs fresh broker evidence.
+    Neither an opaque ID nor a requested type establishes existing type.
     """
-    seg = segment or resolve_segment(order_id, changes)
-    if seg is None:
-        raise IndMoneyMappingError(
-            f"Cannot infer the IndMoney segment for smart order {order_id!r} — pass changes['segment']"
-        )
-    exchange = str(changes.get("exchange", "NSE"))
-    payload: dict[str, Any] = {
-        "order_id": str(order_id),
-        "segment": seg,
-        "algo_id": algo_id or str(changes.get("algo_id", "")) or default_algo_id(exchange),
+    allowed = {
+        "order_type", "pricetype", "qty", "quantity", "price", "limit_price", "trigger_price",
+        "trigger_limit_price", "sl_trigger_price", "sl_limit_price", "tgt_trigger_price", "tgt_limit_price",
+        "stop_loss_price", "target_price", "segment", "exchange", "algo_id", "existing_order_type", "variety",
     }
-    if changes.get("order_type") or changes.get("pricetype"):
-        ptype = _norm_pricetype(changes.get("order_type", changes.get("pricetype")))
-        payload["order_type"] = "TRIGGER" if ptype == "TRIGGER" else ORDER_TYPE_MAP.get(ptype, ptype)
-    qty = int(_num(changes.get("qty", changes.get("quantity", 0)), 0))
-    if qty > 0:
-        payload["qty"] = qty
-    for src, dst in (
-        ("limit_price", "limit_price"),
-        ("price", "limit_price"),
-        ("trigger_price", "trigger_price"),
-        ("trigger_limit_price", "trigger_limit_price"),
-        ("sl_trigger_price", "sl_trigger_price"),
-        ("sl_limit_price", "sl_limit_price"),
-        ("tgt_trigger_price", "tgt_trigger_price"),
-        ("tgt_limit_price", "tgt_limit_price"),
+    if type(changes) is not dict or any(key not in allowed for key in changes):
+        raise IndMoneyMappingError("Unsupported smart mutation fields")
+    seg = resolve_segment(order_id, changes, segment=segment)
+    if seg is None:
+        raise IndMoneyMappingError("Smart modify requires explicit segment evidence")
+    current = existing_order_type if existing_order_type is not None else changes.get("existing_order_type")
+    if type(current) is not str or current.upper() not in {"LIMIT", "MARKET", "TRIGGER"}:
+        raise IndMoneyMappingError("Smart modify requires an observed existing_order_type")
+    current = current.upper()
+    if "existing_order_type" in changes and (
+        type(changes["existing_order_type"]) is not str or changes["existing_order_type"].upper() != current
     ):
-        value = _num(changes.get(src, 0))
-        if value > 0 and dst not in payload:
-            payload[dst] = value
+        raise IndMoneyMappingError("Conflicting existing_order_type evidence")
+    requested = [_norm_pricetype(changes[key]) for key in ("order_type", "pricetype") if key in changes]
+    if any(value != current for value in requested):
+        raise IndMoneyMappingError("Requested order_type must match the existing order type")
+    algorithm = algo_id if algo_id is not None else changes.get("algo_id")
+    if algorithm is None:
+        if "exchange" not in changes:
+            raise IndMoneyMappingError("Smart modify requires algo_id or explicit exchange evidence")
+        algorithm = default_algo_id(changes["exchange"])
+    if "algo_id" in changes and changes["algo_id"] != algorithm:
+        raise IndMoneyMappingError("Conflicting algo_id evidence")
+    payload: dict[str, Any] = {
+        "order_id": _request_identity(order_id, "order_id"), "segment": seg,
+        "algo_id": _request_identity(algorithm, "algo_id"),
+    }
+    if requested:
+        payload["order_type"] = current
+    qty = _number_alias(changes, "qty", "quantity", integer=True)
+    if qty is not None:
+        payload["qty"] = qty
+    if current == "TRIGGER":
+        if "limit_price" in changes:
+            raise IndMoneyMappingError("TRIGGER uses trigger_limit_price, not limit_price")
+        payload["trigger_price"] = _number_alias(changes, "trigger_price", required=True)
+        price = _number_alias(changes, "price", "trigger_limit_price")
+        if price is not None:
+            payload["trigger_limit_price"] = price
+    else:
+        if "trigger_price" in changes or "trigger_limit_price" in changes:
+            raise IndMoneyMappingError("Parent trigger fields require an existing TRIGGER")
+        if current == "MARKET" and any(key in changes for key in ("price", "limit_price")):
+            raise IndMoneyMappingError("MARKET price edits are ignored, not supported")
+        price = _number_alias(changes, "price", "limit_price")
+        if price is not None:
+            payload["limit_price"] = price
+    for prefix, alias in (("sl", "stop_loss_price"), ("tgt", "target_price")):
+        trigger = _number_alias(changes, f"{prefix}_trigger_price", alias)
+        limit = _number_alias(changes, f"{prefix}_limit_price")
+        if trigger is not None:
+            payload[f"{prefix}_trigger_price"] = trigger
+        if limit is not None:
+            payload[f"{prefix}_limit_price"] = limit
+    if not set(payload) - {"order_id", "segment", "algo_id"}:
+        raise IndMoneyMappingError("Smart modify requires an explicit edit")
     return payload
 
 
 def to_cancel_payload(order_id: str, segment: str) -> dict[str, Any]:
     """Build the shared cancel body for ``/order/cancel`` and ``/smart/order/cancel``."""
-    seg = str(segment).upper()
-    if seg not in ("EQUITY", "DERIVATIVE"):
-        raise IndMoneyMappingError(f"Invalid IndMoney segment {segment!r}")
-    return {"order_id": str(order_id), "segment": seg}
+    if segment is None:
+        raise IndMoneyMappingError("Cancel requires an explicit segment")
+    return {"order_id": _request_identity(order_id, "order_id"), "segment": resolve_segment(order_id, segment=segment)}
 
 
 def to_margin_params(order: Any, security_id: str) -> dict[str, str]:
@@ -758,7 +868,9 @@ def map_error(status_code: int, payload: Any) -> BrokerError:
     body = payload if isinstance(payload, dict) else {}
     message = str(body.get("message") or payload or f"HTTP {status_code}")
     etype = str(body.get("error_type") or body.get("error_code") or "")
-    kwargs: dict[str, Any] = {"broker_code": etype or str(status_code), "broker_id": "indmoney"}
+    kwargs: dict[str, Any] = {
+        "broker_code": str(body.get("error_code") or etype or status_code), "broker_id": "indmoney",
+    }
 
     if status_code == 429:
         return RateLimitError(message, endpoint="default", **kwargs)
@@ -770,7 +882,7 @@ def map_error(status_code: int, payload: Any) -> BrokerError:
         if "margin" in message.lower() and "exceed" in message.lower():
             return InsufficientFunds(message, **kwargs)
         return OrderRejectedByBroker(message, **kwargs)
-    if etype == "InputException":
+    if etype in ("InputException", "RequestValidationException"):
         return OrderError(message, **kwargs)
     if etype == "DataException":
         return DataError(message, **kwargs)
@@ -785,33 +897,91 @@ def map_error(status_code: int, payload: Any) -> BrokerError:
 
 def extract_order_id(resp: Any) -> str:
     """Pull the order id from a ``POST /order`` response."""
-    data = unwrap(resp)
-    if isinstance(data, dict):
-        oid = data.get("order_id") or data.get("id")
-        if oid:
-            return str(oid)
-    raise IndMoneyMappingError(f"No order id in IndMoney response: {resp}")
+    try:
+        data = _response_record(unwrap_write(resp))
+        oid = _response_alias(data, "order_id", "id", required=True)
+        if not isinstance(oid, str):
+            raise BrokerReadResponseInvalid from None
+        order_status = _response_text(data, "order_status")
+        if data.get("error") is not None or order_status in {"FAILED", "ABORTED", "REJECTED", "ERROR"}:
+            reason = data.get("error") or order_status
+            raise IndMoneyMappingError(f"Order acknowledgement rejected: {reason}")
+        return oid
+    except BrokerReadResponseInvalid:
+        raise IndMoneyMappingError("No valid order id in IndMoney response") from None
+
+
+def unwrap_write(resp: Any, *, require_status: bool = False) -> Any:
+    """Require a successful write envelope, not execution or replay evidence.
+
+    Internal legacy extractor calls may wrap already unwrapped data; actual
+    transport responses must carry the documented explicit success status.
+    """
+    response = _response_record(resp)
+    if require_status or "status" in response:
+        status = response.get("status")
+        if type(status) is not str or status.lower() != "success":
+            reason = response.get("message") or status
+            raise IndMoneyMappingError(f"IndMoney write acknowledgement is not successful: {reason}")
+    if response.get("error") is not None or response.get("error_type") is not None:
+        reason = response.get("message") or response.get("error")
+        raise IndMoneyMappingError(f"IndMoney write acknowledgement contains an error: {reason}")
+    return unwrap(response)
+
+
+def _response_json_copy(value: object) -> Any:
+    """Detach structural evidence while retaining the broker-read error taxonomy."""
+    try:
+        return copy_json_evidence(value)
+    except ValueError:
+        raise BrokerReadResponseInvalid from None
+
+
+def from_indmoney_smart_results(resp: Any) -> list[dict[str, Any]]:
+    """Preserve every smart operation result; acknowledgements are not fills."""
+    data = _response_record(unwrap_write(resp))
+    rows = data.get("order_data", [data] if "order_id" in data else None)
+    if type(rows) is not list or not rows:
+        raise BrokerReadResponseInvalid from None
+    results = []
+    for source in rows:
+        row = _response_record(_response_json_copy(source))
+        parent = _response_alias(row, "order_id", "parent_order_id")
+        error = row.get("error")
+        if error is not None and type(error) not in (str, dict):
+            raise BrokerReadResponseInvalid from None
+        if parent is _MISSING and error is None:
+            raise BrokerReadResponseInvalid from None
+        child = row.get("child_order_details")
+        child = {} if child is None else _response_record(child)
+        child_id = _response_alias(child, "order_id", "child_order_id")
+        parent_status = _response_text(row, "order_status")
+        child_status = _response_text(child, "order_status")
+        results.append({
+            "parent_order_id": None if parent is _MISSING else parent,
+            "parent_status": None if parent_status is _MISSING else parent_status,
+            "child_order_id": None if child_id is _MISSING else child_id,
+            "child_status": None if child_status is _MISSING else child_status,
+            "error": error, "raw": row,
+        })
+    return results
 
 
 def extract_smart_order_ids(resp: Any) -> tuple[str, str | None]:
-    """Pull ``(parent_id, child_id|None)`` from a ``POST /smart/order`` response.
-
-    The smart placement payload nests ids under ``data.order_data[0]`` with the
-    GTT child under ``child_order_details`` (smart-orders doc).
-    """
-    data = unwrap(resp)
-    if isinstance(data, dict):
-        rows = data.get("order_data")
-        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-            parent = rows[0].get("order_id")
-            child = (rows[0].get("child_order_details") or {}).get("order_id")
-            if parent:
-                return str(parent), (str(child) if child else None)
-        # Some placements (e.g. plain trigger orders) may answer with the flat shape.
-        oid = data.get("order_id")
-        if oid:
-            return str(oid), None
-    raise IndMoneyMappingError(f"No order id in IndMoney smart-order response: {resp}")
+    """Extract one acknowledged result only, refusing ambiguous/multi outcomes."""
+    try:
+        results = from_indmoney_smart_results(resp)
+    except BrokerReadResponseInvalid:
+        raise IndMoneyMappingError("No valid order id in IndMoney smart-order response") from None
+    if len(results) != 1:
+        raise IndMoneyMappingError("A single-ID contract cannot represent multiple smart results")
+    result = results[0]
+    if (result["parent_order_id"] is None or result["error"] is not None
+            or result["parent_status"] in {"FAILED", "ABORTED", "REJECTED", "ERROR"}
+            or result["child_status"] in {"FAILED", "ABORTED", "REJECTED", "ERROR"}):
+        reason = result["error"] or result["parent_status"]
+        raise IndMoneyMappingError(f"Smart-order acknowledgement rejected: {reason}")
+    return result["parent_order_id"], result["child_order_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -828,35 +998,93 @@ def _reverse_exchange(d: dict[str, Any]) -> str:
     return EXCHANGE_SEGMENT_REVERSE_MAP.get(seg, seg or pair[0])
 
 
+def _response_identifier(row: dict[str, Any], name: str, *, required: bool = False) -> str | object:
+    value = _response_text(row, name, required=required, empty_absent=True)
+    if value is not _MISSING:
+        try:
+            _request_identity(value, name)
+        except IndMoneyMappingError:
+            raise BrokerReadResponseInvalid from None
+    return value
+
+
+def _response_quantity_text(row: dict[str, Any], name: str) -> str | object:
+    value = _response_number_text(row, name, empty_absent=True)
+    if value is not _MISSING:
+        try:
+            _request_number(value, name, integer=True, zero=True)
+        except IndMoneyMappingError:
+            raise BrokerReadResponseInvalid from None
+    return value
+
+
+def _response_alias(row: dict[str, Any], *names: str, quantity: bool = False, required: bool = False) -> str | object:
+    reader = _response_quantity_text if quantity else _response_identifier
+    values = [reader(row, name) for name in names if name in row]
+    values = [value for value in values if isinstance(value, str)]
+    if not values:
+        if required:
+            raise BrokerReadResponseInvalid from None
+        return _MISSING
+    comparison = [Decimal(value) for value in values] if quantity else values
+    if any(value != comparison[0] for value in comparison):
+        raise BrokerReadResponseInvalid from None
+    return values[0]
+
+
+_INDMONEY_ATTEMPT_STATES = {
+    "SUCCESS": "FILLED", "CANCELLED": "CANCELLED", "PARTIALLY FILLED - CANCELLED": "CANCELLED",
+    "EXPIRED": "EXPIRED", "PARTIALLY FILLED - EXPIRED": "EXPIRED", "PARTIALLY FILLED": "PARTIALLY_FILLED",
+    "INITIATED": "ACKNOWLEDGED", "QUEUED": "SUBMITTING", "PROCESSING": "SUBMITTING",
+    "O-PENDING": "WORKING", "SL-PENDING": "WORKING", "PENDING": "WORKING", "MODIFIED": "WORKING",
+    **dict.fromkeys((
+        "CANCEL_PENDING", "CANCEL_REQUESTED", "CANCEL PENDING", "CANCEL REQUESTED", "CANCEL-PENDING",
+        "CANCEL-REQUESTED", "CANCELLATION_PENDING", "CANCELLATION_REQUESTED", "CANCELLATION PENDING",
+        "CANCELLATION REQUESTED",
+    ), "CANCEL_PENDING"),
+}
+
+
+def indmoney_attempt_state(status: object) -> str:
+    """Classify exact ordinary REST states; never feed codes or substring guesses."""
+    return _INDMONEY_ATTEMPT_STATES.get(status, "UNKNOWN") if type(status) is str else "UNKNOWN"
+
+
 def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
-    """Normalise an IndMoney order-book/order-details record."""
+    """Normalise an order record without manufacturing quantities or fills."""
     d = _response_record(d)
-    security_id = _response_text(d, "security_id")
+    security_id = _response_identifier(d, "security_id")
+    quantity = _response_alias(d, "requested_qty", "quantity", quantity=True)
+    filled = _response_alias(d, "traded_qty", "filled_quantity", quantity=True)
+    if isinstance(quantity, str) and isinstance(filled, str) and Decimal(filled) > Decimal(quantity):
+        raise BrokerReadResponseInvalid from None
+    status = _response_text(d, "status")
+    if status is _MISSING:
+        raise BrokerReadResponseInvalid from None
     order = {
-        "orderid": _response_text(d, "id", required=True),
-        "status": _response_text(d, "status", required=True),
+        "orderid": _response_alias(d, "id", "order_id", "orderid", required=True),
+        "status": status,
         "symbol": _response_text(d, "name", required=True),
         "exchange": _response_exchange(d),
         "action": _response_text(d, "txn_type", required=True),
         "pricetype": _response_text(d, "order_type", required=True),
         "product": _response_product(_response_text(d, "product", required=True)),
     }
+    order["attempt_state"] = (
+        "UNKNOWN" if is_smart_order_id(order["orderid"]) or order["pricetype"] in {"GTT", "OCO", "TRIGGER"}
+        else indmoney_attempt_state(status)
+    )
+    _put_present(order, "quantity", quantity)
+    _put_present(order, "filled_quantity", filled)
     _put_present(order, "instrument_id", security_id)
     _put_present(order, "security_id", security_id)
+    for field in ("sl_trigger_price", "sl_limit_price", "tgt_trigger_price", "tgt_limit_price"):
+        _put_present(order, field, _response_number_text(d, field, empty_absent=True))
+    for field in ("extra_info", "remarks", "created_at", "updated_at", "validity"):
+        _put_present(order, field, _response_text(d, field))
+    _put_present(order, "exchange_order_id", _response_alias(d, "exch_order_id", "exchange_order_id"))
     for field, source_field in {
-        "sl_trigger_price": "sl_trigger_price",
-        "sl_limit_price": "sl_limit_price",
-        "tgt_trigger_price": "tgt_trigger_price",
-        "tgt_limit_price": "tgt_limit_price",
-    }.items():
-        _put_present(order, field, _response_number_text(d, source_field, empty_absent=True))
-    _put_present(order, "extra_info", _response_text(d, "extra_info"))
-    _put_present(order, "exchange_order_id", _response_text(d, "exch_order_id", empty_absent=True))
-    for field, source_field in {
-        "quantity": "requested_qty",
-        "filled_quantity": "traded_qty",
-        "price": "requested_price",
-        "trigger_price": "sl_trigger_price",
+        "price": "requested_price", "trigger_price": "trigger_price", "trigger_limit_price": "trigger_limit_price",
         "average_price": "traded_price",
     }.items():
         _put_present(order, field, _response_number_text(d, source_field, empty_absent=True))
@@ -864,35 +1092,91 @@ def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
 
 
 def from_indmoney_trade(d: dict[str, Any]) -> dict[str, Any]:
-    """Normalise a ``GET /trades/{order_id}`` trade-confirmation record."""
-    return {
-        "orderid": str(d.get("order_id", "")),
-        "symbol": str(d.get("trading_symbol", "")),
-        "exchange": EXCHANGE_SEGMENT_REVERSE_MAP.get(
-            str(d.get("exchange_segment", "")).upper(), str(d.get("exchange_segment", ""))
-        ),
-        "action": str(d.get("transaction_type", "")),
-        "quantity": str(d.get("quantity", 0)),
-        "price": str(d.get("price", 0)),
-        "product": PRODUCT_REVERSE_MAP.get(str(d.get("product_type", "")), str(d.get("product_type", ""))),
-        "timestamp": str(d.get("trade_timestamp", "")),
+    """Preserve the historical populated trade schema without coercing evidence."""
+    d = _response_record(d)
+    result: dict[str, Any] = {
+        "orderid": _response_alias(d, "order_id", "orderid", required=True),
+        "symbol": "", "exchange": "", "action": "", "product": "", "timestamp": "",
     }
+    for target, source in (("symbol", "trading_symbol"), ("action", "transaction_type"),
+                           ("timestamp", "trade_timestamp"), ("trade_id", "trade_id")):
+        _put_present(result, target, _response_text(d, source))
+    exchange = _response_text(d, "exchange_segment")
+    if isinstance(exchange, str):
+        result["exchange"] = EXCHANGE_SEGMENT_REVERSE_MAP.get(exchange.upper(), exchange)
+    product = _response_text(d, "product_type")
+    if isinstance(product, str):
+        result["product"] = PRODUCT_REVERSE_MAP.get(product, product)
+    _put_present(result, "quantity", _response_quantity_text(d, "quantity"))
+    price = _response_number_text(d, "price", empty_absent=True)
+    if isinstance(price, str) and Decimal(price) < 0:
+        raise BrokerReadResponseInvalid from None
+    _put_present(result, "price", price)
+    return result
+
+
+def _from_indmoney_fill(d: dict[str, Any], *, order_id: str | None = None) -> dict[str, Any]:
+    d = _response_record(d)
+    observed_order = _response_alias(d, "order_id", "orderid")
+    if order_id is not None:
+        try:
+            _request_identity(order_id, "order_id")
+        except IndMoneyMappingError:
+            raise BrokerReadResponseInvalid from None
+        if observed_order is not _MISSING and observed_order != order_id:
+            raise BrokerReadResponseInvalid from None
+    fill_id = _response_quantity_text(d, "fill_id")
+    if not isinstance(fill_id, str):
+        raise BrokerReadResponseInvalid from None
+    exchange_id = _response_alias(d, "exch_order_id", "exchange_order_id", required=True)
+    timestamp = _response_text(d, "trade_date", required=True)
+    result = {
+        "orderid": order_id if order_id is not None else ("" if observed_order is _MISSING else observed_order),
+        "fill_id": int(Decimal(fill_id)), "exchange_order_id": exchange_id, "exch_order_id": exchange_id,
+        "timestamp": timestamp, "trade_date": timestamp,
+        "symbol": "", "exchange": "", "action": "", "product": "",
+    }
+    _put_present(result, "quantity", _response_quantity_text(d, "quantity"))
+    price = _response_number_text(d, "price", empty_absent=True)
+    if isinstance(price, str) and Decimal(price) < 0:
+        raise BrokerReadResponseInvalid from None
+    _put_present(result, "price", price)
+    for name in ("trade_serial_no", "scrip_code", "remarks"):
+        _put_present(result, name, _response_text(d, name))
+    if "scrip_code" in result:
+        result["symbol"] = result["scrip_code"]
+    return result
+
+
+def from_indmoney_order_fill(d: dict[str, Any], *, order_id: str) -> dict[str, Any]:
+    """Bind current per-order fills to the requested broker order ID.
+
+    The historical populated trade schema remains supported explicitly; it is
+    never substituted for current fill/exchange identity or trade_date.
+    """
+    d = _response_record(d)
+    if "trade_timestamp" in d and not any(key in d for key in ("fill_id", "exch_order_id", "trade_date")):
+        observed = _response_alias(d, "order_id", "orderid", required=True)
+        if observed != order_id:
+            raise BrokerReadResponseInvalid from None
+        result = from_indmoney_trade(d)
+        quantity = _response_quantity_text(d, "quantity")
+        if quantity is _MISSING:
+            result.pop("quantity", None)
+        else:
+            result["quantity"] = quantity
+        price = _response_number_text(d, "price", empty_absent=True)
+        if price is _MISSING:
+            result.pop("price", None)
+        else:
+            result["price"] = price
+        return result
+    return _from_indmoney_fill(d, order_id=order_id)
 
 
 def from_indmoney_tradebook_row(d: dict[str, Any]) -> dict[str, Any]:
-    """Normalise a ``GET /trade-book`` fill record (segment-level trade book)."""
-    return {
-        "orderid": str(d.get("exch_order_id", "")),
-        "symbol": str(d.get("scrip_code", "")),
-        "exchange": "",
-        "action": "",
-        "quantity": str(d.get("quantity", 0)),
-        "price": str(d.get("price", 0)),
-        "product": "",
-        "timestamp": str(d.get("trade_date", "")),
-        "fill_id": str(d.get("fill_id", "")),
-        "trade_serial_no": str(d.get("trade_serial_no", "")),
-    }
+    """Keep segment-level fill IDs separate from unknown order correlation."""
+    return _from_indmoney_fill(d)
 
 
 def from_indmoney_position(d: dict[str, Any], *, product: str = "") -> dict[str, Any]:

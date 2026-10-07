@@ -27,6 +27,7 @@ import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
 import { useAtomValue } from "jotai";
 import { useModeStore } from "@/stores/modeStore";
+import { brokerAccountKey, findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -58,6 +59,8 @@ import {
   orderRefusalMessage,
 } from "@/widgets/trading/Positions/positionReconcile";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
+import { resolveAccountAuthorityIdentity, resolveDataScope, useDataScope } from "@/hooks/useDataScope";
+import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErrorPresentation";
 import {
   checkLotMultiple,
   checkOrderEntryMode,
@@ -109,6 +112,11 @@ const PRICE_ENABLED = new Set<OrderTypeValue>(["LIMIT", "SL"]);
 const TRIGGER_ENABLED = new Set<OrderTypeValue>(["SL", "SL-M"]);
 
 const DEBOUNCE_MS = 300;
+
+// Documentation describes native behaviour, not a quote or a readiness grant.
+const INDSTOCKS_MARKET_NOTICE = "INDstocks documents MARKET requests converting to LIMIT orders at the broker’s live price. The effective limit price is unknown until the broker reports it. Execution is not guaranteed.";
+const INDSTOCKS_GTT_UNAVAILABLE = "GTT creation is unavailable in this Order Pad. INDstocks currently ignores trailing-stop fields; active trailing requests are refused, not treated as protection.";
+const NATIVE_CLOSE_WHILE_DOWN = "Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.";
 
 function contractToken(value: string | undefined): string {
   return (value ?? "").trim().toUpperCase();
@@ -324,6 +332,7 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
 interface ToastMsg {
   type: "success" | "error";
   text: string;
+  scopeKey: string;
   retryable?: boolean;
 }
 
@@ -348,7 +357,7 @@ function Toast({ msg, onRetry }: ToastProps) {
       }`}
     >
       {ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
-      <span className="flex-1 leading-tight">{msg.text}</span>
+      <span className="flex-1 min-w-0 leading-tight [overflow-wrap:anywhere]">{msg.text}</span>
       {showRetry && (
         <Button
           type="button"
@@ -403,6 +412,28 @@ type PracticeFillResult = {
   price_age_s?: unknown;
 };
 
+const indstocksExecutionDisclosureSchema = z.looseObject({
+  requested_type: z.enum(["MARKET", "LIMIT"]),
+  effective_type: z.literal("LIMIT"),
+  effective_limit_price: z.number().positive().nullable(),
+  trailing_active: z.literal(false),
+  limitations: z.array(z.string()),
+});
+type IndstocksExecutionDisclosure = z.infer<typeof indstocksExecutionDisclosureSchema>;
+const indstocksDisclosureReceiptSchema = z.looseObject({
+  execution_effects: indstocksExecutionDisclosureSchema,
+});
+
+function readIndstocksExecutionDisclosure(result: unknown, requestedType: string): IndstocksExecutionDisclosure | null {
+  const parsed = indstocksDisclosureReceiptSchema.refine(
+    ({ execution_effects }) => execution_effects.requested_type === requestedType,
+  ).safeParse(result);
+  // No missing-price/limitations defaults or coercion. The response transport
+  // and original receipt retain all native evidence; this schema validates
+  // only the documented disclosure fields and preserves unknown extensions.
+  return parsed.success ? parsed.data.execution_effects : null;
+}
+
 function OrderPadWidget(props: WidgetProps) {
   // Optional prefill from a launcher (e.g. a CreateOrder intent or a
   // watchlist row-hover Buy/Sell). Only seeds the initial form; the user
@@ -441,6 +472,13 @@ function OrderPadWidget(props: WidgetProps) {
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
+  // Transient, response-bound disclosure only; never durable trading authority.
+  const [nativeDisclosure, setNativeDisclosure] = useState<{
+    scopeKey: string;
+    orderId: string;
+    effects: IndstocksExecutionDisclosure;
+  } | null>(null);
+  const dataScope = useDataScope();
 
   // Qty vs Fund mode toggle — "qty" = manual quantity, "fund" = enter INR amount and auto-calculate lots
   type InputMode = "qty" | "fund";
@@ -563,6 +601,16 @@ function OrderPadWidget(props: WidgetProps) {
   const discQty = watch("discQty");
   const note = watch("note");
   const appMode = useModeStore((s) => s.mode);
+  const selectedNativeBroker = useBrokerStore((s) => {
+    const selected = findBrokerAccountMatch(s.accounts, s.activeAccountId);
+    return selected?.source === "native" && s.activeAccountId === brokerAccountKey(selected)
+      ? selected.broker
+      : null;
+  });
+  // A disconnected selection may still explain availability. placeOrder keeps
+  // the real native-write guard; this notice never authorises a submission.
+  const discloseIndstocks = appMode === "live" && selectedNativeBroker === "indmoney";
+  const gttUnavailableMessage = discloseIndstocks ? INDSTOCKS_GTT_UNAVAILABLE : "GTT orders aren't supported right now.";
   const { data: openPositions } = usePositions({
     enabled: appMode === "practice" || appMode === "live",
   });
@@ -837,9 +885,18 @@ function OrderPadWidget(props: WidgetProps) {
 
   const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
     clearTimeout(toastTimerRef.current);
-    setToast({ type, text, retryable });
+    setToast({ type, text, retryable, scopeKey: resolveDataScope({
+      ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
+    }) });
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
   }, []);
+
+  useEffect(() => {
+    setNativeDisclosure(null);
+    lastParamsRef.current = null;
+    lastSubmissionModeRef.current = null;
+    lastExitRef.current = false;
+  }, [dataScope]);
 
   useEffect(() => {
     return () => clearTimeout(toastTimerRef.current);
@@ -859,42 +916,85 @@ function OrderPadWidget(props: WidgetProps) {
     authority?: { mode: "practice" | "live" },
     options?: { exit?: boolean },
   ): Promise<boolean> => {
+    const submissionMode = useModeStore.getState().mode;
+    const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
+    const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
+    setNativeDisclosure(null);
     setLoading(true);
     try {
       const result = options?.exit
         ? await placeOrder(params, authority, { exit: true })
         : await placeOrder(params, authority);
-      setAdmission(null);
-      const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
-        (result as { order_id?: string }).order_id ??
-        (result as { orderid?: string }).orderid ?? "";
-      const placedMode = useModeStore.getState().mode;
+      const scopeStillCurrent = submissionScope === resolveDataScope({
+        ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
+      });
+      if (scopeStillCurrent) setAdmission(null);
+      const acknowledged: unknown = result;
+      const orderId = typeof acknowledged === "string"
+        ? acknowledged
+        : (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
+          (result as { order_id?: string }).order_id ??
+          (result as { orderid?: string }).orderid ?? "";
+      const placedMode = submissionMode;
+      const effects = submissionScope.startsWith("live:native:indmoney:")
+        ? readIndstocksExecutionDisclosure(result, params.orderType)
+        : null;
+      if (effects && scopeStillCurrent) setNativeDisclosure({ scopeKey: submissionScope, orderId, effects });
       const exitWhileDown = options?.exit === true
         && useOperatorSignalStore.getState().decisionStatus !== "ready";
       const practiceFill = placedMode === "practice"
         ? visiblePracticeFill(result as PracticeFillResult)
         : "";
+      const nativeAck = `${options?.exit ? "Close" : "Order"} requested${orderId ? ` · ID: ${orderId}` : ""}`;
+      const exitWhileDownText = placedMode === "live" ? NATIVE_CLOSE_WHILE_DOWN : LAYA_EXIT_WHILE_DOWN;
       const successText = exitWhileDown
-        ? LAYA_EXIT_WHILE_DOWN
-        : practiceFill || orderSuccessToast(placedMode, orderId);
-      showToast("success", successText, 3000);
-      // Log to the central Notification Centre (complements the transient toast).
+        ? exitWhileDownText
+        : placedMode === "live" ? nativeAck : practiceFill || orderSuccessToast(placedMode, orderId);
+      if (scopeStillCurrent) showToast("success", successText, 3000);
+      // Keep a late acknowledgement with its originating account in the
+      // central log, never as a new account's fill or query invalidation.
       emitNotification({
         category: "order",
+        accountScopeKey: submissionScope,
+        ...(scopeStillCurrent ? {} : { skipAccountRefresh: true }),
         title: exitWhileDown
-          ? LAYA_EXIT_WHILE_DOWN
-          : orderSuccessNotificationTitle(
-            placedMode,
-            params.action,
-            params.quantity,
-            params.symbol,
-          ),
+          ? exitWhileDownText
+          : placedMode === "live"
+            ? capturedOrderTitle("Order requested", params, params.quantity)
+            : orderSuccessNotificationTitle(
+              placedMode,
+              params.action,
+              params.quantity,
+              params.symbol,
+            ),
         body: exitWhileDown
-          ? LAYA_EXIT_WHILE_DOWN
-          : orderSuccessNotificationBody(placedMode, orderId),
+          ? exitWhileDownText
+          : placedMode === "live"
+            ? `${nativeAck}. Submission acknowledgement is not a fill. Check broker positions and orders.`
+            : orderSuccessNotificationBody(placedMode, orderId),
       });
-      return true;
+      return scopeStillCurrent;
     } catch (err) {
+      const presentation = submissionMode === "live" ? nativeOrderErrorPresentation(err, {
+        broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
+      }) : null;
+      if (submissionScope !== resolveDataScope({ ...useBrokerStore.getState(), mode: useModeStore.getState().mode })) {
+        emitNotification({
+          category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true,
+          title: presentation?.title ?? capturedOrderTitle("Order response", params),
+          body: presentation?.body ?? "Order response unavailable. Reconcile the original account.",
+        });
+        return false;
+      }
+      if (presentation) {
+        setAdmission(null);
+        // Reconciliation guidance and native reason observations are not
+        // broker-health evidence. Do not classify generated "check broker"
+        // copy as a broker outage or change readiness from its wording.
+        showToast("error", presentation.body, 6000, false);
+        emitNotification({ category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true, ...presentation });
+        return false;
+      }
       const notice = layaNoticeFromOrderError(err, {
         suppressDeny: useModeStore.getState().mode === "live" && liveWritesMuted(readOperatorIncident()),
       });
@@ -932,7 +1032,8 @@ function OrderPadWidget(props: WidgetProps) {
       showToast("error", msg, 6000, retryable);
       emitNotification({
         category: "order",
-        title: `Order failed: ${params.action} ${params.symbol}`,
+        ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+        title: capturedOrderTitle("Order failed", params),
         body: msg,
         // A retryable failure (timeout, transient connection) sends the operator
         // back to the trade terminal to re-place; a hard rejection does not.
@@ -1417,7 +1518,7 @@ function OrderPadWidget(props: WidgetProps) {
                       variant="outline"
                       size="sm"
                       disabled
-                      title="GTT orders aren't supported right now."
+                      title={gttUnavailableMessage}
                       aria-label="GTT"
                       className="h-8 text-xs border-border-default text-text-muted cursor-not-allowed opacity-60"
                     >
@@ -1426,7 +1527,7 @@ function OrderPadWidget(props: WidgetProps) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-56 text-xs">
-                  GTT orders aren&apos;t supported right now.
+                  {gttUnavailableMessage}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -1748,6 +1849,24 @@ function OrderPadWidget(props: WidgetProps) {
           </div>
         )}
 
+        {/* Native execution semantics, before either existing Live action. */}
+        {discloseIndstocks && orderType === "MARKET" ? (
+          <p role="note" aria-label="INDstocks execution limitation" aria-live="polite" className="text-xs text-text-secondary break-words">
+            {INDSTOCKS_MARKET_NOTICE}
+          </p>
+        ) : null}
+
+        {nativeDisclosure?.scopeKey === dataScope && discloseIndstocks ? (
+          <div role="status" aria-label="INDstocks submission disclosure" className="rounded border border-border-default bg-surface-card px-3 py-2 text-xs text-text-secondary break-words space-y-1">
+            <p>Submission ID: {nativeDisclosure.orderId || "unknown"}</p>
+            <p>Requested: {nativeDisclosure.effects.requested_type}. Documented execution: {nativeDisclosure.effects.effective_type}.</p>
+            <p>Effective limit price: {nativeDisclosure.effects.effective_limit_price === null
+              ? "unknown"
+              : new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 20 }).format(nativeDisclosure.effects.effective_limit_price)}.</p>
+            <p>Trailing protection: inactive. Submission acknowledgement is not a fill.</p>
+          </div>
+        ) : null}
+
         {/* Submit button */}
         {openQty > 0 && exitSide ? (
           <Button
@@ -1790,7 +1909,7 @@ function OrderPadWidget(props: WidgetProps) {
       </form>
 
       {/* Toast */}
-      <Toast msg={toast} onRetry={handleRetry} />
+      <Toast msg={toast?.scopeKey === dataScope ? toast : null} onRetry={handleRetry} />
 
       {practiceReview ? (
         <PracticeOrderReviewStage

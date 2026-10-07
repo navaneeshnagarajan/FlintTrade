@@ -5,7 +5,7 @@
  * cover each link in isolation; this proves they connect end-to-end.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router";
 
@@ -52,5 +52,39 @@ describe("Notification System — emit → feed → store → UI", () => {
     fireEvent.click(bell);
     expect(await screen.findByText("Order rejected")).toBeInTheDocument();
     expect(screen.getByText("Insufficient margin")).toBeInTheDocument();
+    expect(screen.getByRole("article")).not.toHaveTextContent("Origin:");
+  });
+
+  it("shows each acknowledgement's captured origin when account responses arrive out of order", async () => {
+    render(
+      <MemoryRouter>
+        <Harness />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      emitNotification({
+        category: "order",
+        title: "Order requested for current account",
+        body: "Submission acknowledgement is not a fill.",
+        accountScopeKey: "live:native:dhan:SYNTHETIC-B",
+      });
+      emitNotification({
+        category: "order",
+        title: "Late order acknowledgement",
+        body: "Submission acknowledgement is not a fill.",
+        accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+        skipAccountRefresh: true,
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /2 unread/i }));
+
+    const lateRow = screen.getByRole("article", { name: /Late order acknowledgement/ });
+    expect(within(lateRow).getByText("Origin: live:native:dhan:SYNTHETIC-A")).toBeInTheDocument();
+    expect(lateRow).toHaveAccessibleName(/Origin: live:native:dhan:SYNTHETIC-A/);
+    expect(lateRow).not.toHaveTextContent("SYNTHETIC-B");
+    const currentRow = screen.getByRole("article", { name: /Order requested for current account/ });
+    expect(within(currentRow).getByText("Origin: live:native:dhan:SYNTHETIC-B")).toBeInTheDocument();
   });
 });

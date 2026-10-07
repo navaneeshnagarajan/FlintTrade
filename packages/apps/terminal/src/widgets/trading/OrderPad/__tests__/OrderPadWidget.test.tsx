@@ -617,12 +617,14 @@ describe("OrderPadWidget", () => {
       { mode: "live" },
       { exit: true },
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Closed. Exits are allowed while Laya is Down.",
+    const acknowledgement = await screen.findByRole("alert");
+    expect(acknowledgement).toHaveTextContent(
+      "Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
     );
+    expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
   });
 
-  it("keeps Close as a reduce-only exit when the operator retries it", async () => {
+  it("keeps Close reduce-only on a new explicit request, never offering Retry after a lost response", async () => {
     mockMode.current = "live";
     mockOpenPositions.rows = [{
       symbol: "NIFTY",
@@ -647,7 +649,12 @@ describe("OrderPadWidget", () => {
       { mode: "live" },
       { exit: true },
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Order outcome unknown. An order may still execute.");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    // A new explicit operator action retains the original reducing path; a
+    // connection error no longer supplies a blind duplicate-write shortcut.
+    fireEvent.click(screen.getByTestId("orderpad-close"));
     expect(mockPlaceOrder).toHaveBeenLastCalledWith(
       expect.objectContaining({ action: "SELL", quantity: 4 }),
       { mode: "live" },
@@ -679,13 +686,13 @@ describe("OrderPadWidget", () => {
   it("shows the unreadable-book exit refusal", async () => {
     mockPlaceOrder.mockRejectedValue(new OrderApiError("rejected", 409, {
       code: "exit_orders_unreadable",
-      message: "Not placed. One exit at a time for NIFTY until your broker's orders load.",
+      message: "Not placed. Broker orders for NIFTY are unavailable. Reconcile them before another exit.",
     }));
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     await reviewAndConfirmPractice(/practice buy/i);
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Not placed. One exit at a time for NIFTY until your broker's orders load.",
+      "Not placed. Broker orders for NIFTY are unavailable. Reconcile them before another exit.",
     );
   });
 

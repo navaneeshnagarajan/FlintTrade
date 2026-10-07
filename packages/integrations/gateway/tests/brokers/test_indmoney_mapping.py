@@ -327,7 +327,8 @@ def test_to_modify_order_payload_validation() -> None:
 def test_to_smart_modify_payload_passthrough_fields() -> None:
     payload = m.to_smart_modify_payload(
         "DRV-123",
-        {"order_type": "LIMIT", "qty": 20, "limit_price": 0.35, "sl_trigger_price": 0.15,
+        {"existing_order_type": "LIMIT", "exchange": "NFO", "order_type": "LIMIT", "qty": 20,
+         "limit_price": 0.35, "sl_trigger_price": 0.15,
          "tgt_trigger_price": 41, "sl_limit_price": 0.1, "tgt_limit_price": 42},
     )
     assert payload["order_id"] == "DRV-123" and payload["segment"] == "DERIVATIVE"
@@ -339,7 +340,8 @@ def test_to_smart_modify_payload_passthrough_fields() -> None:
 
 def test_to_smart_modify_payload_trigger_fields() -> None:
     payload = m.to_smart_modify_payload(
-        "EQ-456", {"order_type": "TRIGGER", "qty": 10, "trigger_price": 1530.0, "trigger_limit_price": 1532.0}
+        "EQ-456", {"existing_order_type": "TRIGGER", "exchange": "NSE", "order_type": "TRIGGER", "qty": 10,
+                   "trigger_price": 1530.0, "trigger_limit_price": 1532.0}
     )
     assert payload["order_type"] == "TRIGGER"
     assert payload["trigger_price"] == 1530.0 and payload["trigger_limit_price"] == 1532.0
@@ -504,7 +506,8 @@ def test_from_indmoney_tradebook_row_doc_sample() -> None:
         "trade_serial_no": "17628437030186581215",
         "scrip_code": "99133",
     })
-    assert row["orderid"] == "2400000124991381" and row["fill_id"] == "1020280"
+    assert row["orderid"] == "" and row["exchange_order_id"] == "2400000124991381"
+    assert row["fill_id"] == 1020280  # Native fill identity is not order correlation.
     assert row["quantity"] == "2425" and row["price"] == "1.55"
 
 

@@ -567,7 +567,8 @@ def test_from_upstox_gtt_order_normalises_rules():
     assert out["orderid"] == out["gtt_order_id"] == "GTT-CU1"
     assert out["exchange"] == "NSE" and out["product"] == "CNC"  # equity D -> CNC
     assert out["action"] == "BUY" and out["status"] == "TRIGGERED"
-    assert "filled_quantity" not in out and out["pricetype"] == "LIMIT"
+    # BELOW is a trigger condition, not observed exchange execution type.
+    assert "filled_quantity" not in out and out["pricetype"] == ""
     assert out["trigger_price"] == "7.7" and out["stop_loss_price"] == "7.6"
     assert out["stop_loss_trailing_gap"] == "0.5"
     assert "target_price" not in out
@@ -1020,7 +1021,7 @@ def test_from_upstox_profile():
             "data": {
                 "user_id": "AB1234",
                 "user_name": "N",
-                "email": "n@x.in",
+                "email": "user@example.invalid",
                 "broker": "UPSTOX",
                 "exchanges": ["NSE", "BSE"],
                 "products": ["D", "I"],

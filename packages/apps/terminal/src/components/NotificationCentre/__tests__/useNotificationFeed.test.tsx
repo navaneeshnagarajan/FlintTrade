@@ -36,6 +36,23 @@ describe("useNotificationFeed", () => {
     expect(snap.some((n) => /connected/i.test(n.title) && n.category === "system")).toBe(true);
   });
 
+  it.each(["practice", "live"] as const)(
+    "does not promote gateway connectivity into market-data or broker readiness in %s mode",
+    (mode) => {
+      act(() => useModeStore.setState({ mode }));
+      renderHook(() => useNotificationFeed());
+      act(() => useConnectionStore.setState({ status: "connected", wsConnected: false }));
+
+      const notice = store.getSnapshot().find((n) => n.title === "Broker gateway connected");
+      expect(notice).toMatchObject({
+        category: "system",
+        body: "Gateway connection restored. Check market-data and broker readiness before trading.",
+      });
+      expect(useConnectionStore.getState().wsConnected).toBe(false);
+      expect(notice?.body).not.toMatch(/(?:market data|order routing) are available/i);
+    },
+  );
+
   it("notifies when the broker gateway disconnects after being connected (real mode)", () => {
     act(() => useModeStore.setState({ mode: "live" }));
     renderHook(() => useNotificationFeed());
@@ -43,6 +60,23 @@ describe("useNotificationFeed", () => {
     act(() => useConnectionStore.setState({ status: "disconnected" }));
     expect(store.getSnapshot().some((n) => /disconnected/i.test(n.title))).toBe(true);
   });
+
+  it.each(["disconnected", "error"] as const)(
+    "a gateway %s does not claim existing broker orders stopped executing",
+    (status) => {
+      act(() => useModeStore.setState({ mode: "live" }));
+      renderHook(() => useNotificationFeed());
+      act(() => useConnectionStore.setState({ status: "connected" }));
+      act(() => useConnectionStore.setState({ status }));
+
+      expect(store.getSnapshot()[0]).toMatchObject({
+        category: "system",
+        body: "Gateway unavailable. Broker orders may still be active; reconnect and reconcile positions and orders.",
+        action: { label: "Reconnect", href: "/settings#brokers" },
+      });
+      expect(store.getSnapshot()[0].body).not.toMatch(/routing (?:is|are) paused/i);
+    },
+  );
 
   it("does NOT notify broker gateway transitions in Explore mode", () => {
     // Explore has no broker; ping there returns a demo mock so status can be
@@ -57,6 +91,18 @@ describe("useNotificationFeed", () => {
     renderHook(() => useNotificationFeed());
     act(() => useModeStore.setState({ mode: "live" }));
     expect(store.getSnapshot().some((n) => /live trading/i.test(n.title))).toBe(true);
+  });
+
+  it("selecting Live mode warns about real-money capability without claiming an eligible broker or dispatch", () => {
+    renderHook(() => useNotificationFeed());
+    act(() => useModeStore.setState({ mode: "live" }));
+
+    expect(store.getSnapshot()[0]).toMatchObject({
+      category: "system",
+      title: "Live trading mode selected",
+      body: "Live mode is real-money capable. Broker readiness and safety checks still apply.",
+    });
+    expect(useConnectionStore.getState().status).toBe("disconnected");
   });
 
   it("relays a flinttrade:notify event raised via emitNotification", () => {
@@ -91,6 +137,42 @@ describe("useNotificationFeed", () => {
       href: "/automate",
     });
   });
+
+  it("retains an order acknowledgement's captured account scope in the log", () => {
+    renderHook(() => useNotificationFeed());
+    act(() =>
+      emitNotification({
+        category: "order",
+        title: "Order requested",
+        body: "Submission acknowledgement is not a fill. Check broker positions and orders.",
+        accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+        skipAccountRefresh: true,
+      }),
+    );
+
+    expect(store.getSnapshot()[0]).toMatchObject({
+      accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+    });
+    expect(JSON.parse(localStorage.getItem("flinttrade:notifications") ?? "[]")[0]).toMatchObject({
+      accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+    });
+    expect(store.getSnapshot()[0]).not.toHaveProperty("skipAccountRefresh");
+  });
+
+  it.each([42, { accountId: "SYNTHETIC-A" }, "", "   "])(
+    "ignores malformed account scope %j without dropping the notification",
+    (accountScopeKey) => {
+      renderHook(() => useNotificationFeed());
+      act(() =>
+        window.dispatchEvent(new CustomEvent("flinttrade:notify", {
+          detail: { category: "order", title: "Order requested", body: "Check broker orders.", accountScopeKey },
+        })),
+      );
+
+      expect(store.getSnapshot()[0]).toMatchObject({ title: "Order requested" });
+      expect(store.getSnapshot()[0]).not.toHaveProperty("accountScopeKey");
+    },
+  );
 
   it("drops a malformed action (no string label) from the event bus", () => {
     renderHook(() => useNotificationFeed());

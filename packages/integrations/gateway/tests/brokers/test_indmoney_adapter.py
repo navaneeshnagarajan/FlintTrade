@@ -462,7 +462,8 @@ async def test_modify_normal_order_uses_prefix_segment() -> None:
     transport = FakeTransport()
     adapter = _adapter(transport)
     session = await _session(adapter)
-    await adapter.modify_order(session, "DRV-2049", {"qty": 75, "limit_price": 73}, _router_token=_ROUTER_TOKEN)
+    await adapter.modify_order(session, "DRV-2049", {"variety": "regular", "qty": 75, "limit_price": 73},
+                               _router_token=_ROUTER_TOKEN)
     call = transport.calls[0]
     assert call["path"] == "/order/modify"
     assert call["json"] == {"order_id": "DRV-2049", "segment": "DERIVATIVE", "qty": 75, "limit_price": 73.0}
@@ -474,13 +475,14 @@ async def test_modify_gtt_id_routes_to_smart_modify() -> None:
     adapter = _adapter(transport)
     session = await _session(adapter)
     await adapter.modify_order(
-        session, "GTT-2914581", {"qty": 75, "sl_trigger_price": 0.4, "sl_limit_price": 0.3},
+        session, "GTT-2914581", {"existing_order_type": "LIMIT", "exchange": "NFO", "qty": 75,
+                                "sl_trigger_price": 0.4, "sl_limit_price": 0.3},
         _router_token=_ROUTER_TOKEN,
     )
-    # Segment is not inferable from a GTT- id, so the order book was consulted.
-    assert transport.paths() == ["/order-book", "/smart/order/modify"]
-    payload = transport.calls[1]["json"]
-    assert payload["segment"] == "DERIVATIVE"  # found in the order book
+    # Opaque GTT ID contributes no segment/type; explicit caller context does.
+    assert transport.paths() == ["/smart/order/modify"]
+    payload = transport.calls[0]["json"]
+    assert payload["segment"] == "DERIVATIVE"
     assert payload["sl_trigger_price"] == 0.4 and payload["sl_limit_price"] == 0.3
     assert payload["algo_id"] == "99999"
 
@@ -491,7 +493,8 @@ async def test_modify_smart_variety_routes_parent_to_smart_endpoint() -> None:
     adapter = _adapter(transport)
     session = await _session(adapter)
     await adapter.modify_order(
-        session, "DRV-123", {"variety": "gtt", "qty": 20, "limit_price": 0.35, "order_type": "LIMIT"},
+        session, "DRV-123", {"variety": "gtt", "existing_order_type": "LIMIT", "exchange": "NFO",
+                             "qty": 20, "limit_price": 0.35, "order_type": "LIMIT"},
         _router_token=_ROUTER_TOKEN,
     )
     assert transport.calls[0]["path"] == "/smart/order/modify"
@@ -707,12 +710,15 @@ async def test_holdings_and_funds_and_profile() -> None:
 
 
 @pytest.mark.asyncio
-async def test_smart_orders_filters_gtt_family() -> None:
+async def test_smart_orders_refuses_unproved_complete_visibility() -> None:
     transport = FakeTransport({("GET", "/order-book"): DOC_ORDER_BOOK})
     adapter = _adapter(transport)
     session = await _session(adapter)
-    smart = await adapter.smart_orders(session)
-    assert [r["orderid"] for r in smart] == ["GTT-2914581"]
+    with pytest.raises(BrokerError, match="visibility"):
+        await adapter.smart_orders(session)
+    # Actual observed smart rows remain available in the ordinary read contract.
+    rows = await adapter.order_book(session)
+    assert rows[0]["orderid"] == "GTT-2914581" and rows[0]["pricetype"] == "OCO"
 
 
 # ---------------------------------------------------------------------------

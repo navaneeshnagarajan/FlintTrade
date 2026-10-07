@@ -1193,10 +1193,12 @@ def test_order_history_rows_unwraps_double_nesting():
     assert len(rows) == 2 and rows[0]["ordSt"] == "complete"
 
 
-def test_order_history_rows_tolerates_single_nesting_and_garbage():
+def test_order_history_rows_accepts_single_nesting_but_refuses_failure_and_garbage():
     assert order_history_rows({"stat": "Ok", "data": [_HISTORY_ROW]}) == [_HISTORY_ROW]
-    assert order_history_rows({"Error": "boom"}) == []
-    assert order_history_rows("garbage") == []
+    with pytest.raises(BrokerReadResponseInvalid):
+        order_history_rows({"Error": "boom"})
+    with pytest.raises(BrokerReadResponseInvalid):
+        order_history_rows("garbage")
 
 
 def test_from_kotak_order_history_row_normalises():

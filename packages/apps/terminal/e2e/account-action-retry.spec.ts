@@ -40,6 +40,13 @@ test("broker connection retry retains its action identity after an ambiguous res
     name: "ambiguous then recovered connection", method: "POST", path: "/ft-api/api/v1/native/accounts",
     expectedCalls: 2,
     handler: (request) => {
+      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
+      expect(request.headers()["content-type"]).toBe("application/json");
+      expect(request.headers()["x-api-key"]).toBeUndefined();
+      expect(request.postDataJSON()).toEqual({
+        adapter_id: "dhan", account_id: "FIXTURE-ACCOUNT",
+        credentials: { client_id: "FIXTURE-ACCOUNT", access_token: "SYNTHETIC-NOT-A-CREDENTIAL" },
+      });
       const key = request.headers()["idempotency-key"];
       expect(key).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
       keys.push(key);
@@ -48,12 +55,17 @@ test("broker connection retry retains its action identity after an ambiguous res
         : { json: { status: "success", data: { connected: true, login: "ok" } } };
     },
   });
-  for (const path of ["/ft-api/v1/accounts", "/ft-api/api/v1/native/accounts"]) {
-    syntheticApi.register({
-      name: `post-action refresh ${path}`, method: "GET", path,
-      handler: () => ({ json: { status: "success", data: { accounts: [] } } }),
-    });
-  }
+  // The retired gateway catalogue is not part of native account refresh.
+  // Leaving it unregistered makes a regression back to /v1/accounts fail closed.
+  syntheticApi.register({
+    name: "post-action refresh native accounts", method: "GET", path: "/ft-api/api/v1/native/accounts",
+    expectedCalls: 1,
+    handler: (request) => {
+      expect(request.postData()).toBeNull();
+      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
+      return { json: { status: "success", data: { accounts: [] } } };
+    },
+  });
   registerOperatorStatusProbes(syntheticApi, { includeLlmConfig: false });
   // The Status menu, tutor pill, and chat readiness each read these on the
   // desk. Remounts sit above a single call, so the caps cover that burst.
