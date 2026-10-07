@@ -1,10 +1,12 @@
-"""Independent current-public parameter tests; no SDK or application imports."""
+"""Independent current-public parameter tests; no SDK or runtime imports."""
 
 import unittest
 from collections import UserDict
 from decimal import Decimal, localcontext
 
-import kotakneo_order_mapping as mapping
+import pytest
+
+from flinttrade_gateway.brokers import kotakneo_order_mapping as mapping
 
 
 def order(**changes):
@@ -433,27 +435,27 @@ class KotakParametersTests(unittest.TestCase):
         self.assertEqual(result["order_type"], "SL-M")
 
     def test_modify_amo(self):
-        source = {"quantity": 10, "order_type": "MKT", **{"amo": "YES"}}
+        source = {"quantity": 10, "order_type": "MKT", "amo": "YES"}
         result = mapping.modify_parameters("123", source)
         self.assertEqual(result["amo"], "YES")
 
     def test_modify_regular(self):
-        source = {"quantity": 10, "order_type": "MKT", **{"variety": "regular"}}
+        source = {"quantity": 10, "order_type": "MKT", "variety": "regular"}
         result = mapping.modify_parameters("123", source)
         self.assertEqual(result["amo"], "NO")
 
     def test_modify_amo_variety(self):
-        source = {"quantity": 10, "order_type": "MKT", **{"variety": "amo"}}
+        source = {"quantity": 10, "order_type": "MKT", "variety": "amo"}
         result = mapping.modify_parameters("123", source)
         self.assertEqual(result["amo"], "YES")
 
     def test_modify_equivalent_amo(self):
-        source = {"quantity": 10, "order_type": "MKT", **{"variety": "amo", "amo": "YES"}}
+        source = {"quantity": 10, "order_type": "MKT", "variety": "amo", "amo": "YES"}
         result = mapping.modify_parameters("123", source)
         self.assertEqual(result["amo"], "YES")
 
     def test_modify_ioc(self):
-        source = {"quantity": 10, "order_type": "MKT", **{"validity": "IOC"}}
+        source = {"quantity": 10, "order_type": "MKT", "validity": "IOC"}
         result = mapping.modify_parameters("123", source)
         self.assertEqual(result["validity"], "IOC")
 
@@ -664,6 +666,21 @@ class KotakParametersTests(unittest.TestCase):
 
 
 class KotakObservationTests(unittest.TestCase):
+    @pytest.mark.unit
+    def test_order_rejects_fills_above_total(self):
+        rows = (
+            {"nOrdNo": "1", "qty": 1, "fldQty": 2, "ordSt": "complete"},
+            {"nOrdNo": "1", "qty": "0", "fldQty": "1", "ordSt": "open"},
+            {"nOrdNo": "1", "quantity": "100", "filled_quantity": "101", "ordSt": "cancelled"},
+            {"nOrdNo": "1", "qty": "9007199254740992", "fldQty": "9007199254740993"},
+        )
+        for row in rows:
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(ValueError, "filled_quantity cannot exceed quantity"):
+                    mapping.project_order(row)
+                with self.assertRaisesRegex(ValueError, "filled_quantity cannot exceed quantity"):
+                    mapping.history_rows({"stat": "Ok", "data": [row]})
+
     def test_order_projection(self):
         row = UserDict(
             nOrdNo="001",
@@ -1625,51 +1642,51 @@ class KotakWriteEvidenceTests(unittest.TestCase):
         self.assertEqual(result["execution_state"], "UNKNOWN")
 
     def test_null_stat(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stat": None}}
+        row = {"stat": None, "stCode": 200, "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_bool_stat(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stat": True}}
+        row = {"stat": True, "stCode": 200, "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_numeric_stat(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stat": 200}}
+        row = {"stat": 200, "stCode": 200, "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_string_code(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stCode": "200"}}
+        row = {"stat": "Ok", "stCode": "200", "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_float_code(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stCode": 200.0}}
+        row = {"stat": "Ok", "stCode": 200.0, "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_bool_code(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stCode": True}}
+        row = {"stat": "Ok", "stCode": True, "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_null_code(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stCode": None}}
+        row = {"stat": "Ok", "stCode": None, "nOrdNo": "1"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_string_http_code(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"status_code": "400"}}
+        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", "status_code": "400"}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_float_http_code(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"status_code": 400.0}}
+        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", "status_code": 400.0}
         self.assertIsNone(mapping.project_write_result(row)["accepted"])
 
     def test_backend_overrides_ack(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stCode": 1021}}
+        row = {"stat": "Ok", "stCode": 1021, "nOrdNo": "1"}
         self.assertIs(mapping.project_write_result(row)["accepted"], False)
 
     def test_http_overrides_ack(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"status_code": 400}}
+        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", "status_code": 400}
         self.assertIs(mapping.project_write_result(row)["accepted"], False)
 
     def test_not_ok_overrides_ack(self):
-        row = {"stat": "Ok", "stCode": 200, "nOrdNo": "1", **{"stat": "Not_Ok"}}
+        row = {"stat": "Not_Ok", "stCode": 200, "nOrdNo": "1"}
         self.assertIs(mapping.project_write_result(row)["accepted"], False)
 
     def test_invalid_nordno_blank(self):

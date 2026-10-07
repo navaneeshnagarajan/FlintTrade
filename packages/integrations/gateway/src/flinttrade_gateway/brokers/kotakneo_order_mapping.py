@@ -201,7 +201,7 @@ def _observation_alias(
 ) -> object:
     """Validate true synonyms, returning the first populated value.
 
-    Numeric aliases compare exact normalized values; statuses compare trim/case
+    Numeric aliases compare exact normalised values; statuses compare trim/case
     only, rather than comparing classifications (two UNKNOWNs can conflict).
     """
     values = []
@@ -262,6 +262,10 @@ def project_order(row: Mapping[str, object]) -> dict[str, object]:
         value = _observation_alias(row, names, numeric=True, integral=integral)
         if value is not None:
             result[target] = value
+    quantity = result.get("quantity")
+    filled_quantity = result.get("filled_quantity")
+    if quantity is not None and filled_quantity is not None and Decimal(str(filled_quantity)) > Decimal(str(quantity)):
+        raise ValueError("filled_quantity cannot exceed quantity")
     status = _observation_alias(row, ("ordSt", "stat", "status"), status=True)
     if status is not None:
         result["status"] = status

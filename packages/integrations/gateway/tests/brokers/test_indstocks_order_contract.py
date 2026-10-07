@@ -4,7 +4,7 @@ import unittest
 from decimal import Decimal
 from types import MappingProxyType
 
-import indstocks_order_mapping as mapping
+from flinttrade_gateway.brokers import indstocks_order_mapping as mapping
 
 
 class NormalContracts(unittest.TestCase):
@@ -689,23 +689,23 @@ class NormalContracts(unittest.TestCase):
         )
 
     def test_effects_trailing_flag(self):
-        result = mapping.execution_effects({"pricetype": "MARKET", **{"is_tsl": True}})
+        result = mapping.execution_effects({"pricetype": "MARKET", "is_tsl": True})
         self.assertEqual(result["limitations"], ["MARKET_TO_LIMIT", "TSL_IGNORED"])
         self.assertIs(result["trailing_active"], False)
 
     def test_effects_trailing_step(self):
-        result = mapping.execution_effects({"pricetype": "MARKET", **{"tsl_step_size": 1}})
+        result = mapping.execution_effects({"pricetype": "MARKET", "tsl_step_size": 1})
         self.assertEqual(result["limitations"], ["MARKET_TO_LIMIT", "TSL_IGNORED"])
         self.assertIs(result["trailing_active"], False)
 
     def test_effects_trailing_jump(self):
-        result = mapping.execution_effects({"pricetype": "MARKET", **{"trailing_jump": -1}})
+        result = mapping.execution_effects({"pricetype": "MARKET", "trailing_jump": -1})
         self.assertEqual(result["limitations"], ["MARKET_TO_LIMIT", "TSL_IGNORED"])
         self.assertIs(result["trailing_active"], False)
 
     def test_effects_trailing_all(self):
         result = mapping.execution_effects(
-            {"pricetype": "MARKET", **{"is_tsl": True, "tsl_step_size": 1, "trailing_jump": 1}}
+            {"pricetype": "MARKET", "is_tsl": True, "tsl_step_size": 1, "trailing_jump": 1}
         )
         self.assertEqual(result["limitations"], ["MARKET_TO_LIMIT", "TSL_IGNORED"])
         self.assertIs(result["trailing_active"], False)

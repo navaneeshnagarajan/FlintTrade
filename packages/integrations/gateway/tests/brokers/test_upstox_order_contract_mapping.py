@@ -5,7 +5,7 @@ from collections import UserDict
 from copy import deepcopy
 from decimal import Decimal
 
-import upstox_order_mapping as mapping
+from flinttrade_gateway.brokers import upstox_order_mapping as mapping
 
 
 def order(**changes):

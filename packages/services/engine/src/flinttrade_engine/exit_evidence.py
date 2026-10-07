@@ -354,6 +354,17 @@ def decide_exit(
     retains its arithmetic risk and requires reconciliation even when its cap is
     positive. Definitive terminal failures require changed preconditions and
     continued intent/policy authorisation before market recovery can be advised.
+
+    Args:
+        evidence: Complete scoped snapshot from a separately verified evidence source.
+        explicit_close: Whether the user authorised this continuing close intent.
+        protection_authorised: Whether an authorised policy permits failed-stop recovery.
+        market_supported: Whether market execution is supported for this exact scope.
+        preconditions_changed: Whether the conditions causing a previous failure changed.
+
+    Returns:
+        Conservative outcome, quantity cap and next-action advice. Invalid or
+        uncertain evidence requests reconciliation; no result authorises a write.
     """
     try:
         _validate_snapshot(evidence)

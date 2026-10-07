@@ -5,7 +5,7 @@ import unittest
 from decimal import Decimal
 from types import MappingProxyType
 
-import dhan_order_mapping as mapping
+from flinttrade_gateway.brokers import dhan_order_mapping as mapping
 
 
 def create_fields():

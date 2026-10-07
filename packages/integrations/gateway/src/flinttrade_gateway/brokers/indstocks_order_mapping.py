@@ -158,16 +158,22 @@ def normal_payload(order: Mapping[str, object], *, security_id: str, algo_id: st
     return body
 
 
-def normal_modify(order_id: str, changes: Mapping[str, object], *, segment: str) -> dict[str, object]:
-    """Build a quantity-and-price change without inferring segment from an ID."""
-    changes = _mapping(changes)
-    _known(changes, {"quantity", "qty", "price", "limit_price"})
+def _order_resource_identity(order_id: str, segment: str) -> tuple[str, str]:
+    """Validate explicit addressing consistently across modification and cancellation."""
     order_id = _identity(order_id, "order_id")
     segment = _choice(segment, {"EQUITY", "DERIVATIVE"}, "segment")
     if (order_id.startswith("EQ-") and segment != "EQUITY") or (
         order_id.startswith("DRV-") and segment != "DERIVATIVE"
     ):
         raise ValueError("Order prefix contradicts explicit segment")
+    return order_id, segment
+
+
+def normal_modify(order_id: str, changes: Mapping[str, object], *, segment: str) -> dict[str, object]:
+    """Build a quantity-and-price change without inferring segment from an ID."""
+    changes = _mapping(changes)
+    _known(changes, {"quantity", "qty", "price", "limit_price"})
+    order_id, segment = _order_resource_identity(order_id, segment)
     return {
         "order_id": order_id,
         "segment": segment,
@@ -325,12 +331,7 @@ def smart_payload(order: Mapping[str, object], *, security_id: str, algo_id: str
 
 def cancel_payload(order_id: str, *, segment: str) -> dict[str, object]:
     """Address exactly one resource; infer no GTT segment, role or sibling effect."""
-    order_id = _identity(order_id, "order_id")
-    segment = _choice(segment, {"EQUITY", "DERIVATIVE"}, "segment")
-    if (order_id.startswith("EQ-") and segment != "EQUITY") or (
-        order_id.startswith("DRV-") and segment != "DERIVATIVE"
-    ):
-        raise ValueError("Order prefix contradicts explicit segment")
+    order_id, segment = _order_resource_identity(order_id, segment)
     return {"order_id": order_id, "segment": segment}
 
 

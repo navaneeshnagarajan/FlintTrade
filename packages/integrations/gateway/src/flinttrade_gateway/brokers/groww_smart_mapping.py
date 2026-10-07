@@ -1,4 +1,4 @@
-"""Pure serializers for Groww's native GTT and OCO smart-order dictionaries.
+"""Pure serialisers for Groww's native GTT and OCO smart-order dictionaries.
 
 These helpers validate wire fields, not account or instrument eligibility. GTT
 product/segment eligibility and OCO leg-role eligibility require independent

@@ -270,7 +270,7 @@ def normal_order_payload(fields: Mapping[str, object]) -> dict[str, object]:
     amoTime. Any supplied timing is validated and retained even without true.
     BO offsets retain finite signed numeric values as supplied: product-specific
     requirements and economic eligibility remain external. No optional values,
-    children, slice outcomes, fills or closure evidence are synthesized.
+    children, slice outcomes, fills or closure evidence are synthesised.
     This body may describe a slicing request, but does not select that route.
     """
     result = _request(fields, _NORMAL_REQUIRED, _NORMAL_OPTIONAL)

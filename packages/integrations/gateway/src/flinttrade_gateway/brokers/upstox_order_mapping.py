@@ -76,7 +76,7 @@ def multi_order_payloads(items: Sequence[Mapping[str, object]]) -> list[dict[str
     """Retain one to ten ordered request lines with unique local correlations.
 
     Slice-child counts and actual broker execution ordering are not inferred.
-    Correlations are never generated and do not authorize retries.
+    Correlations are never generated and do not authorise retries.
     """
     if not isinstance(items, Sequence) or isinstance(items, (str, bytes, bytearray)) or not 1 <= len(items) <= 10:
         raise ValueError("multi order requires a sequence of one to ten mappings")
@@ -181,6 +181,17 @@ def gtt_modify_payload(gtt_order_id: str, changes: Mapping[str, object]) -> dict
 
     Current OPEN-state quantity/trigger restrictions require separate fresh
     evidence. This helper neither merges existing rules nor infers positions.
+
+    Args:
+        gtt_order_id: Explicit broker resource identity; not an idempotency token.
+        changes: Complete replacement containing type, quantity and every rule.
+            Creation-only fields, including rule market_protection, are refused.
+
+    Returns:
+        Detached replacement payload with the supplied gtt_order_id.
+
+    Raises:
+        ValueError: The identity, replacement shape or rule fields are invalid.
     """
     identifier = _identifier(gtt_order_id, "gtt_order_id")
     return {**_gtt_request(changes, create=False), "gtt_order_id": identifier}
