@@ -1235,7 +1235,7 @@ requires-dist = [
     { name = "pyrage", marker = "extra == 'migration'", specifier = ">=1.1" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "qrcode", extras = ["svg"], specifier = ">=8.2" },
-    { name = "sentry-sdk", extras = ["flask"], specifier = ">=2.70.0" },
+    { name = "sentry-sdk", extras = ["flask"], specifier = ">=2.71.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "waitress", specifier = ">=3.0" },
     { name = "zstandard", specifier = ">=0.23" },
