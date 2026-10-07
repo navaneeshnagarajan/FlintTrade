@@ -47,8 +47,6 @@ const MODE_NOTIFICATIONS: Record<AppMode, { title: string; body: string }> = {
  * @example emitNotification({ category: "order", title: "Order rejected", body: msg })
  */
 export interface NotificationEventPayload extends CreateNotificationPayload {
-  /** Optional account cache scope for consumers that refresh account data. */
-  accountScopeKey?: string;
   /** The emitter already ran its identity-guarded refresh boundary. */
   skipAccountRefresh?: boolean;
 }
@@ -130,6 +128,9 @@ export function useNotificationFeed(): void {
         category,
         title: detail.title,
         body: detail.body,
+        ...(typeof detail.accountScopeKey === "string" && detail.accountScopeKey.trim()
+          ? { accountScopeKey: detail.accountScopeKey }
+          : {}),
         ...(action ? { action } : {}),
       });
     };

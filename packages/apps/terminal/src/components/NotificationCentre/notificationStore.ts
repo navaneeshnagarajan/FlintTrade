@@ -32,6 +32,7 @@ const notificationSchema = z.object({
   category: z.enum(["alert", "order", "system", "ai"]),
   title: z.string(),
   body: z.string(),
+  accountScopeKey: z.string().optional(),
   timestamp: z.string(),
   read: z.boolean(),
   action: notificationActionSchema.optional(),
@@ -58,6 +59,8 @@ export interface Notification {
   category: NotificationCategory;
   title: string;
   body: string;
+  /** Captured origin scope; never derive a historical notification's account from current selection. */
+  accountScopeKey?: string;
   /** ISO timestamp string. */
   timestamp: string;
   read: boolean;

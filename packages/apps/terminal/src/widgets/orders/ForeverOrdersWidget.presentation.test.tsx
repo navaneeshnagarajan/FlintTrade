@@ -425,3 +425,106 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     expect(screen.queryByTestId("forever-orders-unavailable")).not.toBeInTheDocument();
   });
 });
+
+// These tests isolate editor ownership; mutation hooks remain synthetic.
+describe("ForeverOrdersWidget editor ownership", () => {
+  beforeEach(() => {
+    state.list.data = [
+      { ...ROW, pricetype: "LIMIT" },
+      { ...ROW, pricetype: "LIMIT", order_id: "TRIGGER-2" },
+    ];
+  });
+
+  function editor() {
+    return screen.getByRole("form", { name: "Modify forever order" });
+  }
+
+  function open(index = 0) {
+    fireEvent.click(screen.getAllByRole("button", { name: "Modify" })[index]);
+  }
+
+  function submit() {
+    fireEvent.click(within(editor()).getByRole("button", { name: "Apply" }));
+    const mutate = state.modify.mutate as ReturnType<typeof vi.fn>;
+    expect(mutate).toHaveBeenCalledOnce();
+    return mutate.mock.calls[0][1].onSuccess as () => void;
+  }
+
+  it("closes the submitting editor when its own request succeeds", () => {
+    render(<ForeverOrdersWidget />);
+    open();
+    const success = submit();
+    act(success);
+    expect(screen.queryByRole("form", { name: "Modify forever order" })).not.toBeInTheDocument();
+  });
+
+  it.each([0, 1])("keeps a reopened editor %i intact after an earlier request succeeds", (index) => {
+    const view = render(<ForeverOrdersWidget />);
+    open();
+    const success = submit();
+    state.modify.isPending = true;
+    view.rerender(<ForeverOrdersWidget />);
+    fireEvent.click(within(editor()).getByRole("button", { name: "Close" }));
+    open(index);
+    fireEvent.change(within(editor()).getByLabelText("New trigger price"), { target: { value: "125" } });
+    act(success);
+    expect(editor()).toHaveTextContent(index === 0 ? "#TRIGGER-1" : "#TRIGGER-2");
+    expect(within(editor()).getByLabelText("New trigger price")).toHaveValue("125");
+  });
+
+  it.each([0, 1])("keeps directly replaced editor %i after an earlier request succeeds", (index) => {
+    render(<ForeverOrdersWidget />);
+    open();
+    const success = submit();
+    open(index);
+    act(success);
+    expect(editor()).toHaveTextContent(index === 0 ? "#TRIGGER-1" : "#TRIGGER-2");
+  });
+
+  it("keeps edits made after submitting the current draft", () => {
+    const view = render(<ForeverOrdersWidget />);
+    open();
+    const success = submit();
+    state.modify.isPending = true;
+    view.rerender(<ForeverOrdersWidget />);
+    fireEvent.change(within(editor()).getByLabelText("New trigger price"), { target: { value: "125" } });
+    act(success);
+    expect(within(editor()).getByLabelText("New trigger price")).toHaveValue("125");
+  });
+
+  it("refuses direct form submission while a modification is pending", () => {
+    const view = render(<ForeverOrdersWidget />);
+    open();
+    submit();
+    state.modify.isPending = true;
+    view.rerender(<ForeverOrdersWidget />);
+    fireEvent.submit(editor());
+    expect(state.modify.mutate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["practice", "explore"])("dismisses the Live draft on transition to %s", (mode) => {
+    const view = render(<ForeverOrdersWidget />);
+    open();
+    state.mode = mode;
+    view.rerender(<ForeverOrdersWidget />);
+    expect(screen.queryByRole("form", { name: "Modify forever order" })).not.toBeInTheDocument();
+    expect(state.modify.mutate).not.toHaveBeenCalled();
+    state.mode = "live";
+    view.rerender(<ForeverOrdersWidget />);
+    expect(screen.queryByRole("form", { name: "Modify forever order" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a new draft after switching away from and back to the request account", () => {
+    const view = render(<ForeverOrdersWidget />);
+    open();
+    const success = submit();
+    state.target = { broker: "dhan", account_id: "B" };
+    view.rerender(<ForeverOrdersWidget />);
+    expect(screen.queryByRole("form", { name: "Modify forever order" })).not.toBeInTheDocument();
+    state.target = { broker: "dhan", account_id: "A" };
+    view.rerender(<ForeverOrdersWidget />);
+    open();
+    act(success);
+    expect(editor()).toHaveTextContent("#TRIGGER-1");
+  });
+});

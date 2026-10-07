@@ -138,6 +138,42 @@ describe("useNotificationFeed", () => {
     });
   });
 
+  it("retains an order acknowledgement's captured account scope in the log", () => {
+    renderHook(() => useNotificationFeed());
+    act(() =>
+      emitNotification({
+        category: "order",
+        title: "Order requested",
+        body: "Submission acknowledgement is not a fill. Check broker positions and orders.",
+        accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+        skipAccountRefresh: true,
+      }),
+    );
+
+    expect(store.getSnapshot()[0]).toMatchObject({
+      accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+    });
+    expect(JSON.parse(localStorage.getItem("flinttrade:notifications") ?? "[]")[0]).toMatchObject({
+      accountScopeKey: "live:native:dhan:SYNTHETIC-A",
+    });
+    expect(store.getSnapshot()[0]).not.toHaveProperty("skipAccountRefresh");
+  });
+
+  it.each([42, { accountId: "SYNTHETIC-A" }, "", "   "])(
+    "ignores malformed account scope %j without dropping the notification",
+    (accountScopeKey) => {
+      renderHook(() => useNotificationFeed());
+      act(() =>
+        window.dispatchEvent(new CustomEvent("flinttrade:notify", {
+          detail: { category: "order", title: "Order requested", body: "Check broker orders.", accountScopeKey },
+        })),
+      );
+
+      expect(store.getSnapshot()[0]).toMatchObject({ title: "Order requested" });
+      expect(store.getSnapshot()[0]).not.toHaveProperty("accountScopeKey");
+    },
+  );
+
   it("drops a malformed action (no string label) from the event bus", () => {
     renderHook(() => useNotificationFeed());
     act(() =>

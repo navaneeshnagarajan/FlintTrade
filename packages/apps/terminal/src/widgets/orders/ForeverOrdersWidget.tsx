@@ -13,7 +13,7 @@
  * No demo rows, ever.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Infinity as InfinityIcon, Loader2, RefreshCw, Send, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -168,6 +168,8 @@ export default function ForeverOrdersWidget() {
   const [targetPrice, setTargetPrice] = useState("");
 
   // --- modify panel ---------------------------------------------------------
+  const editorGeneration = useRef(0);
+  const [editorScope, setEditorScope] = useState<string | null>(null);
   const [modifyingId, setModifyingId] = useState<string | null>(null);
   const [modifyingRow, setModifyingRow] = useState<BrokerOrderRow | null>(null);
   const [modPrice, setModPrice] = useState("");
@@ -186,6 +188,17 @@ export default function ForeverOrdersWidget() {
   const [modTargetEnabled, setModTargetEnabled] = useState(false);
   const [modTargetPrice, setModTargetPrice] = useState("");
   const [modUpstoxEntryStatus, setModUpstoxEntryStatus] = useState("");
+
+  const editorRevision = useRef(0);
+  useLayoutEffect(() => {
+    // Commit field revisions before an asynchronous response can dismiss the
+    // editor. Acknowledgements still belong to the submitted values, not edits
+    // made while that request was pending.
+    editorRevision.current += 1;
+  }, [modPrice, modTriggerPrice, modEntryTriggerType, modQuantity, modDhanFlag,
+    modDhanLeg, modPriceType, modValidity, modDisclosedQuantity, modStopLossEnabled,
+    modStopLossPrice, modStopLossTrailingGap, modTargetEnabled, modTargetPrice,
+    modUpstoxEntryStatus]);
 
   const listQuery = useForeverOrders(target ?? {}, { enabled: isLive && target !== null });
   const placeMutation = usePlaceForeverOrder();
@@ -257,9 +270,13 @@ export default function ForeverOrdersWidget() {
     listQuery.dataUpdatedAt, listQuery.data, selectedBroker, target?.account_id]);
 
   useEffect(() => {
+    // Changing mode or account ends the editing session, even if the user
+    // later returns to the same target before an old request settles.
+    editorGeneration.current += 1;
+    setEditorScope(null);
     setModifyingId(null);
     setModifyingRow(null);
-  }, [target?.account_id, target?.broker]);
+  }, [presentationScope]);
 
   const qty = parseWholeNumber(quantity);
   const trigger = parsePriceValue(triggerPrice);
@@ -297,6 +314,9 @@ export default function ForeverOrdersWidget() {
   const modTarget = parsePriceValue(modTargetPrice);
   const isUpstoxEntryOpen = isUpstox && modUpstoxEntryStatus === "OPEN";
   const canModify =
+    isLive &&
+    editorScope === presentationScope &&
+    !modifyMutation.isPending &&
     target !== null &&
     modifyingId !== null &&
     modTrigger !== null &&
@@ -361,7 +381,9 @@ export default function ForeverOrdersWidget() {
 
   function startModify(row: BrokerOrderRow) {
     const orderId = extractRowId(row, ORDER_ID_KEYS);
-    if (orderId === null) return;
+    if (!isLive || target === null || orderId === null) return;
+    editorGeneration.current += 1;
+    setEditorScope(presentationScope);
     setModifyingId(orderId);
     setModifyingRow(row);
     if (isDhan) {
@@ -402,7 +424,7 @@ export default function ForeverOrdersWidget() {
 
   function handleModify(e: React.FormEvent) {
     e.preventDefault();
-    if (!modifyingId || target === null) return;
+    if (!canModify || !modifyingId || target === null) return;
     const newPrice = parsePriceValue(modPrice);
     const newTrigger = parsePriceValue(modTriggerPrice);
     const newQty = parseWholeNumber(modQuantity);
@@ -443,11 +465,17 @@ export default function ForeverOrdersWidget() {
       return;
     }
     const openingScope = presentationScope;
+    const submittingGeneration = editorGeneration.current;
+    const submittingRevision = editorRevision.current;
     modifyMutation.mutate(
       { ...target, order_id: modifyingId, changes },
       {
         onSuccess: () => {
-          if (presentationScopeRef.current !== openingScope) return;
+          if (presentationScopeRef.current !== openingScope
+            || editorGeneration.current !== submittingGeneration
+            || editorRevision.current !== submittingRevision) return;
+          editorGeneration.current += 1;
+          setEditorScope(null);
           setModifyingId(null);
           setModifyingRow(null);
         },
@@ -782,7 +810,7 @@ export default function ForeverOrdersWidget() {
         )}
 
         {/* Modify panel */}
-        {modifyingId !== null && (
+        {isLive && editorScope === presentationScope && modifyingId !== null && (
           <form
             className="flex flex-wrap items-center gap-2 border border-border-default rounded p-2"
             onSubmit={handleModify}
@@ -966,6 +994,8 @@ export default function ForeverOrdersWidget() {
               size="sm"
               variant="ghost"
               onClick={() => {
+                editorGeneration.current += 1;
+                setEditorScope(null);
                 setModifyingId(null);
                 setModifyingRow(null);
               }}

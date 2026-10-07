@@ -97,7 +97,7 @@ function NotificationRow({ notification, onRead, onDismiss, onAction }: Notifica
       }`}
       onClick={handleClick}
       role="article"
-      aria-label={`${notification.title}: ${notification.body}${notification.read ? " (read)" : " (unread)"}`}
+      aria-label={`${notification.title}: ${notification.body}${notification.accountScopeKey ? ` Origin: ${notification.accountScopeKey}.` : ""}${notification.read ? " (read)" : " (unread)"}`}
     >
       {/* Unread dot */}
       {!notification.read && (
@@ -125,6 +125,11 @@ function NotificationRow({ notification, onRead, onDismiss, onAction }: Notifica
         <p className={`text-xs text-text-secondary mt-0.5 ${notification.category === "order" ? "[overflow-wrap:anywhere]" : "line-clamp-2"}`}>
           {notification.body}
         </p>
+        {notification.accountScopeKey && (
+          <p className="text-xs text-text-secondary mt-0.5 [overflow-wrap:anywhere]">
+            Origin: {notification.accountScopeKey}
+          </p>
+        )}
         {notification.action && (
           <Button
             variant="outline"
