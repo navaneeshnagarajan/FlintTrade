@@ -19,6 +19,7 @@ interface StartupRecovery {
 export interface StartupRecoveryControllerOptions {
   bootstrap: BootstrapController;
   heartbeatIntervalMs?: number;
+  recoveredBackend?(): { attempt: number; launchToken: string } | null;
   recovery: StartupRecovery;
   state: BootstrapState;
 }
@@ -44,6 +45,13 @@ export function createStartupRecoveryController(options: StartupRecoveryControll
   let current: Promise<BootstrapResult> | null = null;
   let shutdownSettlement: Promise<void> | null = null;
   let shuttingDown = false;
+  let recoveredBackend: BootstrapResult["recoveredBackend"];
+  const bootstrapResult = async (operation: Promise<BootstrapResult>): Promise<BootstrapResult> => {
+    const result = await operation;
+    return result.ok && recoveredBackend
+      ? { ...result, backendDisposition: "adopt-recovered", recoveredBackend }
+      : result;
+  };
 
   const shutdownResult = (): BootstrapResult => ({
     error: "Source update recovery is shutting down.",
@@ -100,6 +108,10 @@ export function createStartupRecoveryController(options: StartupRecoveryControll
         let outcome: Awaited<ReturnType<StartupRecovery["recover"]>>;
         try {
           outcome = await options.recovery.recover(abort.signal);
+          // A completed journal can report an outcome without booting. Capture
+          // the runtime's exact generation, never infer process life from status.
+          const backend = options.recoveredBackend?.();
+          recoveredBackend = backend ? { attempt: backend.attempt, launchToken: backend.launchToken } : undefined;
         } finally {
           clearInterval(heartbeat);
         }
@@ -125,7 +137,7 @@ export function createStartupRecoveryController(options: StartupRecoveryControll
         return { cancelled: true, error: "Source update recovery was cancelled.", ok: false };
       }
       stage = "bootstrap";
-      return options.bootstrap.start();
+      return bootstrapResult(options.bootstrap.start());
     })();
     current = running;
     const clear = (): void => {
@@ -150,7 +162,7 @@ export function createStartupRecoveryController(options: StartupRecoveryControll
     },
     retry(): Promise<BootstrapResult> {
       if (shuttingDown) return Promise.resolve(shutdownResult());
-      if (stage === "bootstrap") return options.bootstrap.retry();
+      if (stage === "bootstrap") return bootstrapResult(options.bootstrap.retry());
       if (stage === "recovery-failed") return runRecovery(true);
       if (stage === "idle") return runRecovery(false);
       return current ?? Promise.resolve({ error: "Source update recovery is already running.", ok: false });
@@ -179,7 +191,7 @@ export function createStartupRecoveryController(options: StartupRecoveryControll
     },
     start(): Promise<BootstrapResult> {
       if (shuttingDown) return Promise.resolve(shutdownResult());
-      if (stage === "bootstrap") return options.bootstrap.start();
+      if (stage === "bootstrap") return bootstrapResult(options.bootstrap.start());
       if (stage === "recovery-failed") {
         return Promise.resolve({ error: RECOVERY_FAILURE, ok: false });
       }

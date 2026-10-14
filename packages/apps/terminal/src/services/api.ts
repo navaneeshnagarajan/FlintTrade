@@ -278,38 +278,66 @@ function toPositiveFiniteNumber(value: unknown): number | null {
   return parsed !== null && parsed > 0 ? parsed : null;
 }
 
+const fundsNumberSchema = z.union([
+  z.number(),
+  z.string().trim().min(1).transform(Number),
+]).pipe(z.number().finite());
+
+const fundsBooleanSchema = z.boolean();
+
+const practiceFundsEnvelopeSchema = z.looseObject({
+  funds: z.looseObject({
+    available_balance: fundsNumberSchema,
+    used_margin: fundsNumberSchema,
+    current_balance: fundsNumberSchema,
+  }),
+});
+
+function fundsObservation(row: Record<string, unknown>, keys: string[]): number | undefined {
+  let observation: number | undefined;
+  for (const key of keys) {
+    if (row[key] === undefined) continue;
+    const parsed = fundsNumberSchema.safeParse(row[key]);
+    if (!parsed.success) throw new Error("Account funds are unavailable or malformed.");
+    observation ??= parsed.data;
+  }
+  return observation;
+}
+
 function normaliseFundsShape(value: unknown): Funds {
-  const row = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  const availableCash = toNumber(
-    row.availableCash ?? row.availablecash ?? row.available_balance ?? row.available ?? row.cash,
-  );
-  const usedMargin = toNumber(
-    row.usedMargin ?? row.utiliseddebits ?? row.usedmargin ?? row.used_margin
-      ?? row.utilized_margin ?? row.utilised_margin,
-  );
-  const estimatedRaw = row.estimatedCharges ?? row.estimated_charges;
-  const estimatedCharges = estimatedRaw === undefined || estimatedRaw === null
-    ? undefined
-    : toNumber(estimatedRaw);
-  const ledgerBalance = optionalFinite(row.ledgerBalance ?? row.ledger_balance);
+  if (!isRecord(value)) throw new Error("Account funds are unavailable or malformed.");
+  const row = value;
+  const availableCash = fundsObservation(row, [
+    "availableCash", "availablecash", "available_balance", "available", "cash",
+  ]);
+  const usedMargin = fundsObservation(row, [
+    "usedMargin", "utiliseddebits", "usedmargin", "used_margin", "utilized_margin", "utilised_margin",
+  ]);
+  if (availableCash === undefined || usedMargin === undefined) {
+    throw new Error("Account funds are unavailable or malformed.");
+  }
+  // Preserve the supported omitted-total shape, but never derive from missing
+  // or malformed inputs, nor replace a supplied malformed total with a sum.
+  const totalBalance = fundsObservation(row, [
+    "totalBalance", "totalbalance", "total_balance", "total", "net",
+  ]) ?? (availableCash + usedMargin);
+  if (!Number.isFinite(totalBalance)) throw new Error("Account funds are unavailable or malformed.");
+  const estimatedCharges = fundsObservation(row, ["estimatedCharges", "estimated_charges"]);
+  const ledgerBalance = fundsObservation(row, ["ledgerBalance", "ledger_balance"]);
+  for (const key of ["futuresMtmInLedger", "futures_mtm_in_ledger"]) {
+    if (row[key] !== undefined && !fundsBooleanSchema.safeParse(row[key]).success) {
+      throw new Error("Account funds are unavailable or malformed.");
+    }
+  }
   const futuresFlag = row.futuresMtmInLedger ?? row.futures_mtm_in_ledger;
   return {
     availableCash,
     usedMargin,
-    totalBalance: toNumber(
-      row.totalBalance ?? row.totalbalance ?? row.total_balance ?? row.total ?? row.net
-        ?? (availableCash + usedMargin),
-    ),
+    totalBalance,
     ...(ledgerBalance !== undefined ? { ledgerBalance } : {}),
     ...(typeof futuresFlag === "boolean" ? { futuresMtmInLedger: futuresFlag } : {}),
     ...(estimatedCharges !== undefined ? { estimatedCharges } : {}),
   };
-}
-
-function optionalFinite(value: unknown): number | undefined {
-  if (value == null || value === "") return undefined;
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1849,16 +1877,33 @@ function normalisePracticeTrade(value: unknown): Trade | undefined {
   };
 }
 
+function normalisePracticeBook<T>(
+  payload: unknown,
+  field: "orders" | "trades" | "positions",
+  normalise: (row: unknown) => T | undefined,
+): T[] {
+  // Admit the whole producer collection before any normaliser can drop rows.
+  const parsed = accountBookRowsSchema.safeParse(isRecord(payload) ? payload[field] : undefined);
+  if (!parsed.success) {
+    throw new Error(`Practice ${ACCOUNT_BOOK_LABELS[field]} is unavailable or malformed.`);
+  }
+  return parsed.data.map((row) => {
+    const normalised = normalise(row);
+    if (normalised === undefined) {
+      throw new Error(`Practice ${ACCOUNT_BOOK_LABELS[field]} is unavailable or malformed.`);
+    }
+    return normalised;
+  });
+}
+
 async function getPracticeOrders(signal?: AbortSignal): Promise<Order[]> {
-  const payload = await getFtV1<{ orders?: unknown[] }>("sandbox/orders", signal);
-  return (payload.orders ?? []).map(normalisePracticeOrder).filter((order): order is Order => order !== undefined);
+  const payload = await getFtV1<unknown>("sandbox/orders", signal);
+  return normalisePracticeBook(payload, "orders", normalisePracticeOrder);
 }
 
 async function getPracticeTrades(signal?: AbortSignal): Promise<Trade[]> {
-  const payload = await getFtV1<{ trades?: unknown[] }>("sandbox/trades", signal);
-  return (payload.trades ?? [])
-    .map(normalisePracticeTrade)
-    .filter((trade): trade is Trade => trade !== undefined);
+  const payload = await getFtV1<unknown>("sandbox/trades", signal);
+  return normalisePracticeBook(payload, "trades", normalisePracticeTrade);
 }
 
 /** Read account data from the same sandbox that executes Practice orders. */
@@ -1873,8 +1918,10 @@ async function readPracticeAccountData<T>(
   if (!kind || !NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) return undefined;
 
   if (endpoint === "funds") {
-    const payload = await getFtV1<{ funds?: unknown }>("sandbox/funds", signal);
-    const row = isRecord(payload.funds) ? payload.funds : {};
+    const payload = await getFtV1<unknown>("sandbox/funds", signal);
+    const parsed = practiceFundsEnvelopeSchema.safeParse(payload);
+    if (!parsed.success) throw new Error("Practice funds are unavailable or malformed.");
+    const row = parsed.data.funds;
     // Practice get_funds: available_balance is after margin, current_balance
     // is the untouched ledger, and ledger_balance has option premium and
     // equity notional applied. futures_mtm_in_ledger is false.
@@ -1893,10 +1940,8 @@ async function readPracticeAccountData<T>(
     return capital as T;
   }
   if (endpoint === "positionbook") {
-    const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions", signal);
-    const positions = (payload.positions ?? [])
-      .map(normalisePracticePosition)
-      .filter((position): position is Position => position !== undefined);
+    const payload = await getFtV1<unknown>("sandbox/positions", signal);
+    const positions = normalisePracticeBook(payload, "positions", normalisePracticePosition);
     return { positions } as T;
   }
   if (endpoint === "orderbook") {

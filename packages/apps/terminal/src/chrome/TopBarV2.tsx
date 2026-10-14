@@ -32,7 +32,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import {
-  Menu,
   Search,
   Maximize2,
   Minimize2,
@@ -48,10 +47,8 @@ import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
-import { useSidebarStore } from "@/stores/sidebarStore";
 import { useSkillStore } from "@/stores/skillStore";
 import { DeskStatusCluster } from "@/chrome/DeskStatusCluster";
-import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { brokerSessionDarkened } from "@/lib/operatorIncident";
@@ -75,26 +72,6 @@ import { useChromeCollapse } from "./useChromeCollapse";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { TOGGLE_AI_TUTOR_EVENT } from "@/lib/aiTutorEvents";
-
-const NAV_DRAWER_MAX_WIDTH = 767;
-
-function useNavDrawerViewport(): boolean {
-  const query = `(max-width: ${NAV_DRAWER_MAX_WIDTH}px)`;
-  const [matches, setMatches] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia(query);
-    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches);
-    setMatches(media.matches);
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, [query]);
-  return matches;
-}
 
 /** Shared look for every icon-and-label control on the bar. */
 const barButton =
@@ -396,9 +373,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
   const { collapseOverflow } = useChromeCollapse();
-  const navDrawer = useNavDrawerViewport();
-  const mobileNavOpen = useSidebarStore((s) => s.mobileOpen);
-  const setMobileNavOpen = useSidebarStore((s) => s.setMobileOpen);
   const {
     showToolRibbon,
     setToolsExpanded,
@@ -462,20 +436,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
       data-testid="topbar-v2"
     >
       {/* ── Brand (and the navigation drawer toggle on narrow screens) ─────── */}
-      {navDrawer ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 shrink-0 p-0 text-text-secondary hover:text-text-primary"
-          onClick={() => setMobileNavOpen(!mobileNavOpen)}
-          aria-label="Open navigation"
-          aria-expanded={mobileNavOpen}
-          data-testid="nav-drawer-btn"
-        >
-          <Menu className="h-4 w-4" aria-hidden="true" />
-        </Button>
-      ) : null}
       <Link
         to="/home"
         aria-label="FlintTrade home"
@@ -592,8 +552,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
       <TopBarMoreSheet open={moreOpen && collapseOverflow} onClose={() => setMoreOpen(false)}>
         <MoreRow>
-          <span className="w-20 shrink-0 text-xs text-text-muted">Workspace</span>
-          <WorkspaceSwitcher />
+          <span className="w-20 shrink-0 text-xs text-text-muted">Layouts</span>
+          <span className="text-xs text-text-secondary">Use this app’s layout toolbar</span>
         </MoreRow>
         {hasBrokerAccounts ? (
           <MoreRow>

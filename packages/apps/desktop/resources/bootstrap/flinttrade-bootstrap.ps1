@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Candidate,
     [Parameter(Mandatory = $true)][string]$Uv,
     [Parameter(Mandatory = $true)][string]$Node,
-    [Parameter(Mandatory = $true)][string]$CorepackJs,
+    [Parameter(Mandatory = $true)][string]$Pnpm,
     [Parameter(Mandatory = $true)][string]$ToolsRoot,
     [Parameter(Mandatory = $true)][string]$PnpmVersion
 )
@@ -153,7 +153,7 @@ function Assert-ManagedPythonTree {
 }
 
 function Get-ValidatedUvVenvConfiguration {
-    param([string[]]$Lines, [string]$ErrorMessage)
+    param([string[]]$Lines, [string]$ErrorMessage, [string[]]$AllowedUvVersions = @("0.11.16", "0.13.0"), [switch]$ExactManagedVersion)
 
     $values = New-Object 'System.Collections.Generic.Dictionary[string,string]' `
         ([StringComparer]::Ordinal)
@@ -188,9 +188,10 @@ function Get-ValidatedUvVenvConfiguration {
     if (
         $values.Count -ne 4 -or
         -not $values.ContainsKey("home") -or -not $values["home"] -or
-        -not $values.ContainsKey("uv") -or $values["uv"] -cne "0.11.16" -or
+        -not $values.ContainsKey("uv") -or $values["uv"] -cnotin $AllowedUvVersions -or
         -not $values.ContainsKey("version_info") -or
-        $values["version_info"] -notmatch '^3\.12\.[0-9]+$' -or
+        ($values["version_info"] -cne "3.14.8" -and
+            ($ExactManagedVersion -or $values["version_info"] -cnotmatch '^3\.12\.[0-9]+$')) -or
         -not $values.ContainsKey("relocatable") -or $values["relocatable"] -cne "true"
     ) {
         throw $ErrorMessage
@@ -406,8 +407,8 @@ function Remove-OrphanedVirtualEnvironmentBackups {
     }
 }
 
-if ($PnpmVersion -ne "10.34.5") {
-    throw "Bootstrap entrypoint requires pnpm 10.34.5."
+if ($PnpmVersion -ne "12.11.2") {
+    throw "Bootstrap entrypoint requires pnpm 12.11.2."
 }
 
 @("package.json", "pyproject.toml", "uv.lock", "pnpm-lock.yaml", "packages/apps/terminal/package.json") |
@@ -417,8 +418,8 @@ if ($PnpmVersion -ne "10.34.5") {
         }
     }
 Assert-OrdinaryManagedToolsPath $ToolsRoot
-if (-not (Test-Path -LiteralPath $CorepackJs -PathType Leaf)) {
-    throw "Verified Corepack JavaScript is missing."
+if (-not (Test-Path -LiteralPath $Pnpm -PathType Leaf)) {
+    throw "Verified pnpm executable is missing."
 }
 
 $managedPythonRootPath = Join-Path $ToolsRoot "python"
@@ -469,7 +470,7 @@ if ($null -ne $virtualEnvironment) {
     }
     $virtualEnvironmentConfigValues = Get-ValidatedUvVenvConfiguration `
         $virtualEnvironmentConfigLines `
-        "Refusing existing .venv because it is not a uv-managed relocatable Python 3.12 environment."
+        "Refusing existing .venv: expected relocatable managed Python 3.14.8 or supported legacy Python 3.12 for explicit rebuild."
     $pythonHome = Get-CanonicalExistingDirectory $virtualEnvironmentConfigValues["home"]
     $managedPythonRoot = Get-CanonicalExistingDirectory $managedPythonRootPath
     $managedPythonPrefix = "$($managedPythonRoot.TrimEnd([IO.Path]::DirectorySeparatorChar))$([IO.Path]::DirectorySeparatorChar)"
@@ -490,9 +491,8 @@ if ($null -ne $virtualEnvironment) {
 Assert-ManagedPythonTree $managedPythonRootPath
 Remove-OrphanedVirtualEnvironmentBackups $Candidate $managedPythonRootPath
 
-$env:COREPACK_DEFAULT_TO_LATEST = "0"
-$env:COREPACK_HOME = Join-Path $ToolsRoot "corepack"
-$env:PATH = "$(Split-Path -Parent $Node)$([IO.Path]::PathSeparator)$env:PATH"
+$env:npm_config_pm_on_fail = "error"
+$env:PATH = "$(Split-Path -Parent $Node)$([IO.Path]::PathSeparator)$(Split-Path -Parent $Pnpm)$([IO.Path]::PathSeparator)$env:PATH"
 
 $stagingVirtualEnvironmentPath = Join-Path `
     $Candidate `
@@ -524,21 +524,21 @@ try {
     $env:UV_NO_EDITABLE = "1"
     $env:UV_PROJECT = $Candidate
     $env:UV_PROJECT_ENVIRONMENT = $stagingVirtualEnvironmentPath
-    $env:UV_PYTHON = "3.12"
+    $env:UV_PYTHON = "3.14.8"
     $env:UV_PYTHON_INSTALL_DIR = $managedPythonRootPath
     $env:UV_WORKING_DIR = $Candidate
 
     Invoke-Checked $Uv @("--version")
     Invoke-Checked $Node @("--version")
-    Invoke-Checked $Node @($CorepackJs, "--version")
+    Invoke-Checked $Pnpm @("--version")
 
     Push-Location -LiteralPath $Candidate
     $candidateLocationPushed = $true
-    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-python`t48`tInstalling managed Python 3.12"
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-python`t48`tInstalling managed Python 3.14.8 (explicit staged rebuild)"
     Invoke-Checked $Uv @(
         "python",
         "install",
-        "3.12",
+        "3.14.8",
         "--no-bin",
         "--no-registry",
         "--no-config",
@@ -550,7 +550,7 @@ try {
         "venv",
         "--relocatable",
         "--python",
-        "3.12",
+        "3.14.8",
         $stagingVirtualEnvironmentPath,
         "--no-project",
         "--no-config",
@@ -564,6 +564,8 @@ try {
         "--all-packages",
         "--no-install-package",
         "flinttrade-ticks",
+        "--no-build-package",
+        "growwapi",
         "--no-config",
         "--managed-python",
         "--directory",
@@ -613,7 +615,8 @@ try {
     }
     $stagedVirtualEnvironmentConfigValues = Get-ValidatedUvVenvConfiguration `
         $stagedVirtualEnvironmentConfigLines `
-        "Refusing staged .venv because it is not a uv-managed relocatable Python 3.12 environment."
+        "Refusing staged .venv because it is not a uv-managed relocatable Python 3.14.8 environment." `
+        @("0.13.0") -ExactManagedVersion
     $stagedPythonHome = Get-CanonicalExistingDirectory `
         $stagedVirtualEnvironmentConfigValues["home"]
     $currentManagedPythonRoot = Get-CanonicalExistingDirectory $managedPythonRootPath
@@ -647,14 +650,14 @@ try {
     }
     $env:UV_PROJECT_ENVIRONMENT = $virtualEnvironmentPath
 
-    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 10.34.5 dependencies"
-    $resolvedPnpmVersion = (& $Node $CorepackJs pnpm --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $resolvedPnpmVersion -ne "10.34.5") {
-        throw "Corepack did not resolve the repository-pinned pnpm 10.34.5."
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 12.11.2 dependencies"
+    $resolvedPnpmVersion = (& $Pnpm --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $resolvedPnpmVersion -cne $PnpmVersion) {
+        throw "Verified pnpm did not report the repository-pinned pnpm 12.11.2."
     }
-    Invoke-Checked $Node @($CorepackJs, "pnpm", "install", "--frozen-lockfile")
+    Invoke-Checked $Pnpm @("install", "--frozen-lockfile")
     Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tbuilding-terminal`t84`tBuilding the terminal for production"
-    Invoke-Checked $Node @($CorepackJs, "pnpm", "--filter", "@flinttrade/terminal", "build")
+    Invoke-Checked $Pnpm @("--filter", "@flinttrade/terminal", "build")
     $bootstrapCompleted = $true
 }
 finally {

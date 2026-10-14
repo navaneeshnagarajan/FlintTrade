@@ -120,7 +120,7 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 
 # Install dependencies — SC-07: hash-verified install only
-"$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock" -q
+"$VENV_DIR/bin/pip" install --require-hashes --only-binary=growwapi -r "$INSTALL_DIR/requirements.lock" -q
 
 ok "Python dependencies installed"
 
@@ -128,7 +128,7 @@ ok "Python dependencies installed"
 # pins for broker SDKs such as Kotak Neo. Sync the workspace when uv is available,
 # then unconditionally repair and attest the runtime interpreter below.
 if command -v uv >/dev/null 2>&1; then
-    (cd "$INSTALL_DIR" && uv sync --frozen --all-packages --no-dev)
+    (cd "$INSTALL_DIR" && uv sync --frozen --all-packages --no-dev --no-build-package growwapi)
     ok "Repo .venv synced with broker SDK pins"
 else
     warn "uv not found; using the target virtualenv's pip for exact broker SDK pins."

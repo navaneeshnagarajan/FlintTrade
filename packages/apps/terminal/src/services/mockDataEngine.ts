@@ -5,6 +5,8 @@
  * No network calls — fully self-contained. Safe to use with no broker.
  */
 
+import { isPublicDemoBuild } from "@/lib/demoSession";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -170,7 +172,7 @@ export class MockDataEngine {
     this.opens = new Map(Object.entries(BASE_PRICES));
     // Seed volumes in a realistic range per instrument
     this.volumes = new Map(
-      Object.keys(BASE_PRICES).map((sym) => [sym, Math.floor(Math.random() * 500_000) + 100_000])
+      Object.keys(BASE_PRICES).map((sym) => [sym, Math.floor(symbolSeed(sym) * 500_000) + 100_000])
     );
   }
 
@@ -180,6 +182,7 @@ export class MockDataEngine {
 
   /** Start generating ticks every `intervalMs` milliseconds (default 1 000 ms). */
   start(intervalMs = 1000): void {
+    if (isPublicDemoBuild()) { this.listeners.forEach(cb => cb(this.getSnapshot())); return; }
     if (this.intervalId !== null) return; // already running
     this.intervalId = setInterval(() => {
       this._step();

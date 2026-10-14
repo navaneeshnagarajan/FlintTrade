@@ -7,9 +7,9 @@ This breaks the pre-existing circular import chain between
 package directly first (before any test module runs), we prime ``sys.modules``
 so later imports resolve against a fully-loaded package.
 
-Also rebinds the ``AuthState`` singleton at session-scope to a tmp DuckDB so
+Also rebinds the ``AuthState`` singleton per test to temporary SQLite so
 that engine tests that mint or decode FlintTrade JWTs (e.g. test_mode_guard)
-never touch the developer's real ``~/.flinttrade/auth_state.duckdb`` and
+never touch the developer's real ``~/.flinttrade/auth_state.sqlite`` and
 never collide with a backend instance that may already hold the file lock.
 Mirrors the autouse fixture in ``packages/core/core/tests/conftest.py``.
 """
@@ -75,20 +75,19 @@ def _laya_starts_down() -> None:
 
 @pytest.fixture(autouse=True)
 def _isolated_auth_state(tmp_path_factory):
-    """Point AuthState at a per-test DuckDB so JWT revocation state is fresh.
+    """Point AuthState at per-test SQLite so JWT revocation state is fresh.
 
     Engine tests that decode JWTs go through
     :func:`flinttrade_core.auth_routes.decode_token`, which consults
     :func:`flinttrade_core.auth_state.get_auth_state` to check the JTI
     revocation blocklist. Without isolation, that touches
-    ``~/.flinttrade/auth_state.duckdb`` — mutating real state and
-    potentially racing the backend's DuckDB lock. Rebinding the
-    singleton to a tmp DuckDB makes engine JWT tests hermetic.
+    ``~/.flinttrade/auth_state.sqlite`` — mutating real authority.
+    Rebinding the singleton to temporary SQLite keeps these tests isolated.
     """
     from flinttrade_core import auth_state as auth_state_mod
 
     auth_state_mod.reset_singleton_for_tests()
     db_dir = tmp_path_factory.mktemp("engine_auth_state")
-    auth_state_mod.get_auth_state(db_path=db_dir / "auth_state.duckdb")
+    auth_state_mod.get_auth_state(db_path=db_dir / "auth_state.sqlite")
     yield
     auth_state_mod.reset_singleton_for_tests()

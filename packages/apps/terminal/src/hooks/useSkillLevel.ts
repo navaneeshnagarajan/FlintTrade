@@ -1,9 +1,7 @@
-import { useSkillStore } from "@/stores/skillStore";
-import type { SkillLevel, Domain } from "@/types/skill";
+import type { Domain, SkillLevel } from "@/types/skill";
 
-/** Returns effective skill level for the given domain (or global if no domain). */
-export function useSkillLevel(domain?: Domain): SkillLevel {
-  const getEffective = useSkillStore((s) => s.getEffectiveLevel);
-  const globalLevel = useSkillStore((s) => s.globalLevel);
-  return domain ? getEffective(domain) : globalLevel;
+/** Compatibility for existing presentations. Experience no longer restricts
+ * discovery. This value confers NO account, broker or execution authority. */
+export function useSkillLevel(_domain?: Domain): SkillLevel {
+  return "advanced";
 }

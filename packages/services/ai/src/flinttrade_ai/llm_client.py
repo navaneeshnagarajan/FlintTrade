@@ -17,6 +17,7 @@ import logging
 import os
 import secrets
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Generator
 from urllib.parse import urlsplit, urlunsplit
@@ -30,6 +31,7 @@ from flinttrade_core.llm_provider_profiles import (
 )
 
 logger = logging.getLogger("flinttrade.ai.llm")
+_LEARNING_SEND: ContextVar[Any] = ContextVar("flinttrade_learning_send", default=None)
 _LMSTUDIO_RETIRED_ERROR = (
     "LM Studio is retired; use managed Ollama or a Custom OpenAI-compatible host"
 )
@@ -43,10 +45,11 @@ def _reject_retired_provider(provider: str) -> None:
 class _ProviderHTTPClient:
     """Keep managed Ollama proxy-free while preserving provider proxy behaviour."""
 
-    def __init__(self, *, timeout: float) -> None:
+    def __init__(self, *, timeout: float, transport: httpx.BaseTransport | None = None) -> None:
         self._timeout = httpx.Timeout(timeout)
+        self._transport = transport
         self._default: httpx.Client | None = None
-        self._managed_ollama = httpx.Client(timeout=self._timeout, trust_env=False)
+        self._managed_ollama = httpx.Client(timeout=self._timeout, trust_env=False, transport=transport)
 
     @property
     def timeout(self) -> httpx.Timeout:
@@ -54,7 +57,7 @@ class _ProviderHTTPClient:
 
     def _default_client(self) -> httpx.Client:
         if self._default is None:
-            self._default = httpx.Client(timeout=self._timeout)
+            self._default = httpx.Client(timeout=self._timeout, transport=self._transport)
         return self._default
 
     def post(
@@ -65,6 +68,13 @@ class _ProviderHTTPClient:
         **kwargs: Any,
     ) -> httpx.Response:
         client = self._managed_ollama if managed_ollama else self._default_client()
+        learning = _LEARNING_SEND.get()
+        if learning is not None:
+            binding, purpose, records = learning
+            payload = kwargs.pop("json")
+            headers = {**kwargs.pop("headers", {}), "Content-Type": "application/json"}
+            return binding.dispatch(purpose=purpose, records=records, endpoint=str(url), payload=payload,
+                                    send=lambda wire: client.post(url, content=wire, headers=headers, **kwargs))
         return client.post(url, **kwargs)
 
     def stream(
@@ -152,6 +162,7 @@ class LLMResponse:
     finish_reason: str = ""
     reasoning: str = ""  # chain-of-thought from reasoning models, if surfaced
     error: str = ""
+    context_receipts: tuple[dict[str, Any], ...] = ()
 
     @property
     def success(self) -> bool:
@@ -455,6 +466,9 @@ class LLMClient:
         fallback_config: LLMConfig | None = None,
         *,
         timeout_seconds: float = 120.0,
+        learning_binding: Any | None = None,
+        http_transport: httpx.BaseTransport | None = None,
+        knowledge_registry: Any | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -464,7 +478,9 @@ class LLMClient:
         _reject_retired_provider(self.config.provider)
         if self.fallback_config is not None:
             _reject_retired_provider(self.fallback_config.provider)
-        self._http = _ProviderHTTPClient(timeout=timeout_seconds)
+        self._http = _ProviderHTTPClient(timeout=timeout_seconds, transport=http_transport)
+        self.learning_binding = learning_binding
+        self.knowledge_registry = knowledge_registry
 
     def _current_config(self) -> LLMConfig:
         if self._dynamic_config:
@@ -492,6 +508,8 @@ class LLMClient:
         max_tokens: int | None = None,
         model: str | None = None,
         response_format: dict[str, Any] | None = None,
+        *,
+        selected_skills: tuple[str, ...] = (),
     ) -> LLMResponse:
         """Send a chat completion request. Falls back to secondary on failure.
 
@@ -505,8 +523,21 @@ class LLMClient:
                 straight to the provider for constrained decoding. Ignored by the
                 Anthropic path.
         """
+        receipts: tuple[dict[str, Any], ...] = ()
+        if selected_skills:
+            if self.knowledge_registry is None:
+                raise ValueError("selected knowledge registry unavailable")
+            body, receipt = self.knowledge_registry.context(list(selected_skills))
+            messages = [LLMMessage(message.role, message.content) for message in messages]
+            system = next((message for message in messages if message.role == "system"), None)
+            if system is None:
+                messages.insert(0, LLMMessage("system", body))
+            else:
+                system.content += "\n\n" + body
+            receipts = (receipt,)
         config = self._current_config()
         resp = self._chat_with_config(config, messages, temperature, max_tokens, model, response_format)
+        resp.context_receipts = receipts
         if resp.success:
             return resp
 
@@ -516,12 +547,28 @@ class LLMClient:
                 _bounded_log_label(config.provider),
                 _bounded_log_label(self.fallback_config.provider),
             )
-            return self._chat_with_config(
+            fallback = self._chat_with_config(
                 self.fallback_config, messages, temperature, max_tokens, model,
                 response_format,
             )
+            fallback.context_receipts = receipts
+            return fallback
 
         return resp
+
+    def learning_chat(self, messages: list[LLMMessage], *, purpose: str, records: tuple[Any, ...],
+                      max_tokens: int | None = None) -> LLMResponse:
+        """Learning-only entrypoint: require consent at HTTP send, without retries/fallbacks."""
+        from flinttrade_ai.learning_dispatch import LearningBinding
+        from flinttrade_core.learning_consent import PURPOSES, LearningRefused
+
+        if not isinstance(self.learning_binding, LearningBinding) or not records or purpose not in PURPOSES:
+            raise LearningRefused("explicit dataset/provider/purpose learning binding required")
+        token = _LEARNING_SEND.set((self.learning_binding, purpose, records))
+        try:
+            return self._chat_with_config(self._current_config(), messages, None, max_tokens, None)
+        finally:
+            _LEARNING_SEND.reset(token)
 
     def _chat_with_config(
         self,
@@ -641,6 +688,7 @@ class LLMClient:
             # retry once with the larger reasoning budget.
             if (
                 allow_reasoning_retry
+                and _LEARNING_SEND.get() is None
                 and not content.strip()
                 and finish_reason == "length"
                 and (reasoning or reasoning_tokens)

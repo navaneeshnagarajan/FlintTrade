@@ -3,6 +3,7 @@ import { cancelAllOrders, exitAllPositions } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 
 interface GlobalKeyHandlers {
+  tradingHotkeysEnabled?: boolean;
   onEscape?: () => void;
   onCommandPalette?: () => void;
   /** Fired when `?` is pressed with no input focused — opens the shortcuts dialog. */
@@ -49,6 +50,7 @@ function reportTradingActionFailure(title: string, err: unknown): void {
  *   F1-F8        -- Reserved for widget focus (future)
  */
 export default function useGlobalKeys({
+  tradingHotkeysEnabled = true,
   onEscape,
   onCommandPalette,
   onShowShortcuts,
@@ -103,6 +105,8 @@ export default function useGlobalKeys({
         return;
       }
 
+      if (!tradingHotkeysEnabled) return;
+
       // X / Shift+X -- Exit all positions (confirmation required).
       // The /trade banner advertises plain X, so both variants behave the same.
       if ((e.key === "x" || e.key === "X") && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -149,5 +153,5 @@ export default function useGlobalKeys({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onEscape, onCommandPalette, onShowShortcuts, onGoHome, onGoTrade]);
+  }, [tradingHotkeysEnabled, onEscape, onCommandPalette, onShowShortcuts, onGoHome, onGoTrade]);
 }

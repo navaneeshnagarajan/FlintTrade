@@ -32,7 +32,8 @@ own count. The empty note and a note over 4,000 characters after stripping
 are decided in code before any model call.
 
 ``--tune`` is refused unless ``--split dev``. Tuning does not edit
-``laya_policy.toml``. Test is scored once. ``--stub`` is not a model score.
+``laya_policy.toml``. CLI files are unsealed exploratory evaluations.
+Protected final scoring belongs to core EvaluationStore. ``--stub`` is not a model score.
 """
 
 from __future__ import annotations
@@ -312,6 +313,8 @@ def run_benchmark(
     test_scored_once: bool = False,
 ) -> BenchmarkReport:
     """Score ``cases`` through :func:`evaluate_free_text`."""
+    if test_scored_once:
+        raise BenchmarkCaseError("A report flag cannot attest sealed access; use core EvaluationStore")
     if repeats < 1:
         raise BenchmarkCaseError("repeats must be at least 1")
     _validate_case_ids(cases)
@@ -462,7 +465,7 @@ def main(argv: list[str] | None = None) -> int:
             file_sha256_hex=digest,
             stub=args.stub,
             tune_note=tune_note,
-            test_scored_once=args.split == "test",
+            test_scored_once=False,  # CLI files are exploratory, never sealed qualification evidence.
         )
         drills = () if args.skip_drills else run_fail_closed_drills()
     except BenchmarkCaseError as exc:

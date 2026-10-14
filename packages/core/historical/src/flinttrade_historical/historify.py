@@ -225,6 +225,10 @@ class HistorifyDownloader:
         self._downloader = _AsyncDownloader(client)
         self._queue = _JobQueue(queue_db_path or _queue_db_path())
 
+    def close(self) -> None:
+        """Release this downloader's queue; its historical pipeline is borrowed."""
+        self._queue.close()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------

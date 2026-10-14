@@ -11,6 +11,7 @@ import { render, screen, act } from "@testing-library/react";
 
 let connectionStatus = "disconnected";
 let tradingMode = "live";
+let pathname = "/terminal";
 let brokerAccounts: Array<{ status: string; source: "gateway" | "native" }> = [];
 
 const brokerMocks = vi.hoisted(() => ({
@@ -48,7 +49,7 @@ vi.mock("zustand/react/shallow", () => ({
 const mockNavigate = vi.fn();
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
-  useLocation: () => ({ pathname: "/trade" }),
+  useLocation: () => ({ pathname }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,7 @@ describe("NoConnectionOverlay", () => {
     vi.useFakeTimers();
     connectionStatus = "disconnected";
     tradingMode = "live";
+    pathname = "/terminal";
     brokerAccounts = [];
     brokerMocks.useBrokerAccounts.mockClear();
   });
@@ -92,6 +94,48 @@ describe("NoConnectionOverlay", () => {
       vi.advanceTimersByTime(5100);
     });
     expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument();
+  });
+
+  it.each(["/testing", "/testing/", "/testing/results"])(
+    "keeps %s usable without changing disconnected Live selection",
+    (path) => {
+      pathname = path;
+      render(<NoConnectionOverlay />);
+      act(() => { vi.advanceTimersByTime(5100); });
+
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(tradingMode).toBe("live");
+      expect(brokerAccounts).toEqual([]);
+    },
+  );
+
+  it.each(["/terminal", "/terminal/orders", "/testing-other"])(
+    "retains the disconnection gate on %s",
+    (path) => {
+      pathname = path;
+      render(<NoConnectionOverlay />);
+      act(() => { vi.advanceTimersByTime(5100); });
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    },
+  );
+
+  it("retires the Terminal modal in Testing and gates disconnected Live on return", () => {
+    const view = render(<NoConnectionOverlay />);
+    act(() => { vi.advanceTimersByTime(5100); });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    pathname = "/testing";
+    view.rerender(<NoConnectionOverlay />);
+    act(() => { vi.advanceTimersByTime(5100); });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    pathname = "/terminal";
+    view.rerender(<NoConnectionOverlay />);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(5100); });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(tradingMode).toBe("live");
+    expect(brokerAccounts).toEqual([]);
   });
 
   it("cannot be dismissed while Live mode remains disconnected", () => {

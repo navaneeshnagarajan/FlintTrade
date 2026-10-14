@@ -109,9 +109,16 @@ def route_stack(backend_lease_factory):
     app.config["BROKER_ROUTER"] = router
     app.config["NATIVE_ADAPTERS"] = {"dhan": source}
     app.config["REGISTRY"] = SimpleNamespace(get_session_for=lambda broker, account: session_for(None, broker, account))
-    yield app, source, sdk, router
-    router.revoke_and_drain(timeout=0.0)
-    reset_reduce_only_for_tests()
+    try:
+        yield app, source, sdk, router
+    finally:
+        from time import monotonic
+        from flinttrade_core.desktop import _DesktopShutdownRecoveryOwner
+        try:
+            router.revoke_and_drain(timeout=0.0)
+        finally:
+            _DesktopShutdownRecoveryOwner(app).release(deadline=monotonic() + 10)
+            reset_reduce_only_for_tests()
 
 
 def _place(app, quantity: int = 6):

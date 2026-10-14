@@ -122,6 +122,16 @@ def test_recursive_registry_prunes_all_sensitive_families_before_walk(tmp_path, 
         "webhook_secrets.db",
         "auth.db",
         "auth.db-journal",
+        "auth_state.sqlite",
+        "auth_state.sqlite-wal",
+        "auth_state.sqlite-shm",
+        "auth_state.sqlite-journal",
+        ".auth_state.sqlite.authority",
+        ".webhook_secrets.db.authority",
+        ".auth_state.sqlite.migration.json",
+        ".auth_state.sqlite.migration.json.tmp",
+        ".migration-" + "a" * 32 + "/source.duckdb",
+        "data/bhavcopy/equity/.migration-" + "b" * 32 + "/staged.sqlite",
         "totp_auth.duckdb",
         "totp_auth.duckdb.wal",
         "totp_install_key",
@@ -165,7 +175,7 @@ def test_recursive_registry_prunes_all_sensitive_families_before_walk(tmp_path, 
     original_scandir = os.scandir
 
     def refuse_secret_traversal(path):
-        if Path(path).name in {"secrets", "service-connections-state"}:
+        if Path(path).name in {"secrets", "service-connections-state", ".migration-" + "a" * 32, ".migration-" + "b" * 32}:
             pytest.fail("collector traversed a complete secret namespace")
         return original_scandir(path)
 

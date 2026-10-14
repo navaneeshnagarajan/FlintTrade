@@ -1,0 +1,1419 @@
+{
+  "cases": [
+    {
+      "task": {
+        "request_id": "2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+        "mode": "fixed",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "prompt": "Explain the risk procedure, do not place an order.",
+        "classification": "public",
+        "context_refs": [
+          "skill:risk_management"
+        ],
+        "purpose": "assistant",
+        "deadline_ms": 2000,
+        "max_output_tokens": 256,
+        "required_hard_controls": [
+          "output_tokens"
+        ]
+      },
+      "post": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "ad2516d1-26df-4a7d-8997-6c0612a4e8ef",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "46ae0ba6-b957-4b8d-8a69-e4d7db702415",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 50,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output": "Inert normal-core answer",
+        "output_digest": "a29dbf5df364e12cdf624fea240e9c7219ca1fa586218c7be2a1b9c7ea7840cf",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      },
+      "get": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "ad2516d1-26df-4a7d-8997-6c0612a4e8ef",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "46ae0ba6-b957-4b8d-8a69-e4d7db702415",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 50,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output_digest": "a29dbf5df364e12cdf624fea240e9c7219ca1fa586218c7be2a1b9c7ea7840cf",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "2bd6737d-d767-46ef-a14e-b12fc8ced7cf",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      }
+    },
+    {
+      "task": {
+        "request_id": "4fb3ef94-c633-4376-9ad6-774cf31794b4",
+        "mode": "fixed",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "prompt": "Explain the risk procedure, do not place an order.",
+        "classification": "public",
+        "context_refs": [
+          "skill:risk_management"
+        ],
+        "purpose": "assistant",
+        "deadline_ms": 2000,
+        "max_output_tokens": 256,
+        "required_hard_controls": [
+          "output_tokens"
+        ]
+      },
+      "post": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "2122b076-f72a-4ab9-9452-a18a391a7302",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "4fb3ef94-c633-4376-9ad6-774cf31794b4",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:4fb3ef94-c633-4376-9ad6-774cf31794b4",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "f3052a69-44ab-43d5-9db9-439b3cd4c321",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 51,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output": "Quotes \" and \\ and /\n\r\t\b\f\u0000\u001f",
+        "output_digest": "ebfe9e6be899d8d81ea4dab76d0ef35948f8d15dbd74ec3656557c6a6cf5fc0a",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "4fb3ef94-c633-4376-9ad6-774cf31794b4",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      },
+      "get": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "2122b076-f72a-4ab9-9452-a18a391a7302",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "4fb3ef94-c633-4376-9ad6-774cf31794b4",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:4fb3ef94-c633-4376-9ad6-774cf31794b4",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "f3052a69-44ab-43d5-9db9-439b3cd4c321",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 51,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output_digest": "ebfe9e6be899d8d81ea4dab76d0ef35948f8d15dbd74ec3656557c6a6cf5fc0a",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "4fb3ef94-c633-4376-9ad6-774cf31794b4",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      }
+    },
+    {
+      "task": {
+        "request_id": "77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+        "mode": "fixed",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "prompt": "Explain the risk procedure, do not place an order.",
+        "classification": "public",
+        "context_refs": [
+          "skill:risk_management"
+        ],
+        "purpose": "assistant",
+        "deadline_ms": 2000,
+        "max_output_tokens": 256,
+        "required_hard_controls": [
+          "output_tokens"
+        ]
+      },
+      "post": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "0451597f-dc5b-4f5e-beed-3d579bb64d7b",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "a748f5e2-46fb-4293-ab60-604315911a66",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 51,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output": "\u0928\u092e\u0938\u094d\u0924\u0947 \u4e2d\u6587 \ud83d\udea6\u2028\u2029\u007f\u0080",
+        "output_digest": "84e28baf42ff4b18a012a77b9a736abafd61e90a51caba7db05cb19f84bc6cee",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      },
+      "get": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "0451597f-dc5b-4f5e-beed-3d579bb64d7b",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "a748f5e2-46fb-4293-ab60-604315911a66",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 51,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output_digest": "84e28baf42ff4b18a012a77b9a736abafd61e90a51caba7db05cb19f84bc6cee",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "77853ee7-916e-4e6c-be7b-a3d3d21496e2",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      }
+    },
+    {
+      "task": {
+        "request_id": "6187b846-d980-45df-b479-5d75e661d836",
+        "mode": "fixed",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "prompt": "Explain the risk procedure, do not place an order.",
+        "classification": "public",
+        "context_refs": [
+          "skill:risk_management"
+        ],
+        "purpose": "assistant",
+        "deadline_ms": 2000,
+        "max_output_tokens": 256,
+        "required_hard_controls": [
+          "output_tokens"
+        ]
+      },
+      "post": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "c4206e82-9878-4cbb-88df-4c49a1196986",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "6187b846-d980-45df-b479-5d75e661d836",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:6187b846-d980-45df-b479-5d75e661d836",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "1d76ecca-a2ef-4cfb-a245-592897200049",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 63,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output": "",
+        "output_digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "6187b846-d980-45df-b479-5d75e661d836",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      },
+      "get": {
+        "accounting": "settled",
+        "attempts": [
+          {
+            "attempt_id": "c4206e82-9878-4cbb-88df-4c49a1196986",
+            "budget_revision": 1,
+            "charged": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 0,
+              "credits_micros": 0,
+              "currency_micros": 2,
+              "input_tokens": 12,
+              "output_tokens": 5,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "connection": {
+              "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+              "provider_id": "llm:openrouter"
+            },
+            "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+            "created_at": "2026-10-10T00:00:00+00:00",
+            "evidence": "",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "request_id": "6187b846-d980-45df-b479-5d75e661d836",
+            "reservation": {
+              "bytes": 0,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 1000,
+              "input_tokens": 8192,
+              "output_tokens": 256,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "run_id": "advisory:6187b846-d980-45df-b479-5d75e661d836",
+            "state": "SETTLED",
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "markup_basis_points": 0,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "price_dimension": "currency_micros",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:openrouter",
+              "rounding": "ceil_per_dimension_then_total",
+              "source": "synthetic-tariff",
+              "source_kind": "operator",
+              "tax_basis_points": 0
+            },
+            "tariff_digest": "49cdc80eb2d222cc7d8c1151d0f98d25567b962e519954e32800113b1b1fa9e3",
+            "updated_at": "2026-10-10T00:00:00+00:00"
+          }
+        ],
+        "code": "ok",
+        "context": [
+          {
+            "body_digest": "aa486bfed5c65789201b889cf5806ffe8e532cd337e49f649041490dd2cb4539",
+            "receipt": "1d76ecca-a2ef-4cfb-a245-592897200049",
+            "reference": "skill:risk_management",
+            "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+          }
+        ],
+        "controls": {
+          "hard": [
+            "output_tokens"
+          ],
+          "observational": [
+            "currency_micros",
+            "deadline"
+          ]
+        },
+        "downstream": "approved-upstream",
+        "effective_effort": {
+          "reasoning": {
+            "effort": "medium"
+          }
+        },
+        "entitlement_evidence": "synthetic-entitlement-v1",
+        "latency_ms": 63,
+        "mode": "fixed",
+        "outcome": "completed",
+        "output_digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "policy_revision": 1,
+        "provider_request_id": "synthetic-inert",
+        "qualification": "synthetic-contract-evidence-v1",
+        "request_id": "6187b846-d980-45df-b479-5d75e661d836",
+        "resolved_model": "test-model-v1",
+        "selection": {
+          "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+          "connection_revision": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "connections": [
+      {
+        "auth_mode": "api_key",
+        "connection_id": "2d79c53a-d628-4c65-ac9f-8985b390f254",
+        "created_at": "2026-10-10T16:49:21.663795Z",
+        "credential_configured": true,
+        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "label": "Synthetic R25",
+        "model": "test-model-v1",
+        "provider_id": "llm:openrouter",
+        "schema_version": 1,
+        "updated_at": "2026-10-10T16:49:21.663795Z"
+      }
+    ]
+  },
+  "etag": "\"1e04172b363ae39e65ece3aeb25d9f2f1caba344f92047e372477c3fc290b505\"",
+  "catalogue": {
+    "scope": null,
+    "skills": [
+      {
+        "category": "execution",
+        "default": true,
+        "description": "Pre-deployment validation, paper trading thresholds, kill switch testing, go-live checklist, and incident response for live algo trading",
+        "enabled": true,
+        "name": "algo_deployment_checklist",
+        "origin": "stock",
+        "package_hash": "f5de805ea8feefa8861ccc97c2e3d029fd88b9bea6faa933ab506f11fe92d428",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:b32900e3296d8acd575262e9b44a94bd2822b12002803b045fd6bf0f707cf1c5"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Run the selected FlintTrade strategy on provenance-bound history; interpret failures and evidence honestly",
+        "enabled": true,
+        "name": "backtest_guide",
+        "origin": "stock",
+        "package_hash": "bb5b877b6bd4b382f581b5b2bac39553293c3e7ff912decd209eb6fa20ac0e5c",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:598caffbb51a51742ecc593861ece7e5d217bbb2f8e4974af8e70f98abd3c029"
+      },
+      {
+        "category": "execution",
+        "default": true,
+        "description": "Using bracket and cover orders for automatic SL and target, margin benefits, trailing SL, and when to use BO vs manual SL",
+        "enabled": true,
+        "name": "bracket_order_strategies",
+        "origin": "stock",
+        "package_hash": "62348ff0f795fe5bc8abd00ceb0258908c3013454491bff65587ead64f0f4fc8",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:3ca5fa2535febe79c3b6de0c3075008a3b98f972172ce736d383404b32611a61"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "15 key candlestick patterns with confirmation rules, reliability statistics, volume integration, and IST-specific considerations",
+        "enabled": true,
+        "name": "candlestick_patterns",
+        "origin": "stock",
+        "package_hash": "af385b5c3d11fe51de9f11c44a1d650af77db18b66e24be66f0f9165b745050b",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:b7b7c379e8e4c6b792b4b7f8d49a54827f64e1a4f9b5f27072fe92181dddc815"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Daily and weekly loss limits, max drawdown policy, recovery strategies with position size reduction tables, and when to switch to paper trading",
+        "enabled": true,
+        "name": "drawdown_management",
+        "origin": "stock",
+        "package_hash": "fb1cf3e55ca3900b04a0bd7f10624cf54a70ed1c97a0580b8fc038046079a636",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:637ab3e9d60a9782ac749f51f8235a2b02fcb49c896a8b7b9a899ff92df6a55a"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Pre-earnings straddle timing, post-earnings IV crush fade, earnings calendar patterns, and sector earnings clusters for Indian listed companies",
+        "enabled": true,
+        "name": "earnings_options_strategy",
+        "origin": "stock",
+        "package_hash": "1204e2053047cf35685db6c0f66f8831b9f46dea1d0c8cfd9025fbcc9c276166",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:38ffd1c4120750ed5b60c73f270a022c3226b7ea39c0981e8eed0a1be203a4b6"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Thursday expiry dynamics, 0DTE option strategies, gamma risk, time decay acceleration, pin risk, and rolling positions",
+        "enabled": true,
+        "name": "expiry_day_trading",
+        "origin": "stock",
+        "package_hash": "45f4e1831390b8987b2411ed04a2fbfc370c6e5a15c747d65327dfeb2e534383",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:c98d899c98204b904b773821badff28a8edfa56f04cdcf2c39e9fc87a4ca2d98"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "How to interpret FII/DII cash market and derivatives data for market direction",
+        "enabled": true,
+        "name": "fii_dii_analysis",
+        "origin": "stock",
+        "package_hash": "87e24f1e8ac1d81fd8629c2452806b8ed9e5d149aace2c3e5bbc62f6f16ddb84",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:132bdecc7a1148748ef80c40086d03be8932b98f6f828dbf4772e39bbf53ebdf"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "How delta changes with moneyness, gamma scalping, theta farming strategies, vega trading around events, and practical rho considerations for Indian options",
+        "enabled": true,
+        "name": "greeks_practical_guide",
+        "origin": "stock",
+        "package_hash": "97922f7e92560aab42f5750f9e1bb64eb8eee7683a86c4d52e8d8973541dcc7b",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:5b92be2ab8f15398599c667d1beb06c6ca3624be45301ea248363ea8e849a0e8"
+      },
+      {
+        "category": "data",
+        "default": true,
+        "description": "RBI policy, GDP/CPI/IIP interpretation, monsoon impact, election cycles, FPI flows, and rupee correlation with Indian equity-market data",
+        "enabled": true,
+        "name": "india_macro_indicators",
+        "origin": "stock",
+        "package_hash": "5342ff66f0d737ff012b798e70ca5fdbaf0e5d033056975fbbe7b4640b44dcc5",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:15808a6a874bccda99cba6ba11f154a51828a35ddf7432a98b38885332f68b6b"
+      },
+      {
+        "category": "data",
+        "default": true,
+        "description": "NSE/BSE/MCX/CDS trading hours, pre-market, post-market, holidays, and IST timezone",
+        "enabled": true,
+        "name": "indian_market_hours",
+        "origin": "stock",
+        "package_hash": "2513f9517f5ac2a22a2155c619f2e0894aac63fd12b39472c6f2febf01aed871",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:31fbcd994a361dfa00cd5408ceafd886006ec077d3a63ae5b41589583d90ddee"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "US market SGX Nifty overnight impact, crude oil sector correlations, dollar index and IT sector, gold and jewellery stocks, bond yields and banking",
+        "enabled": true,
+        "name": "intermarket_analysis",
+        "origin": "stock",
+        "package_hash": "b4765a2a7de75866641dc255d228dbff1f3bcf8da7fba6f42cd278bbe6f92c55",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:078df0eecf1285af286287d812bf58da757af634cfdb4b8a8afee672d5c6fefa"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Iron condor entry criteria, strike selection, adjustment rules, max loss management, and partial profit taking for Nifty/BankNifty",
+        "enabled": true,
+        "name": "iron_condor_management",
+        "origin": "stock",
+        "package_hash": "cef43f3bbaee00f9b940c655daba0c0049dd68378f60373fe30e1f3af8f693fb",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:e85796a4a9bcd713b238900d8dae8159a4ea135e31a7168f656d91e257c42d8d"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Reading and trading option chains \u2014 OI, PCR, max pain, IV skew interpretation",
+        "enabled": true,
+        "name": "option_chain_analysis",
+        "origin": "stock",
+        "package_hash": "b6ce9d6b0d1756bb79c15a6b7cd19d3ae604443cb5413d985ccb50019e5358ba",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:e2cfed4dbb2f786a9133bb9ddebe8fc10c5a62a7416debe80060b8de32f3c222"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Delta, gamma, theta, vega explained with practical trading implications for Indian F&O",
+        "enabled": true,
+        "name": "options_greeks",
+        "origin": "stock",
+        "package_hash": "9ea3a1818a788171eacdd31596a0e5fbd23361e413b1a9c87d2c93cf9196f78b",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:53a38e99283db36d22c6d42a7c5e55df6c2de3af96c570e7108893b8487ba37d"
+      },
+      {
+        "category": "execution",
+        "default": true,
+        "description": "SPAN margin rules, hedge benefits for spreads vs naked positions, calendar spread margin, converting naked to spread for margin reduction, and MIS vs NRML margin",
+        "enabled": true,
+        "name": "options_margin_optimization",
+        "origin": "stock",
+        "package_hash": "cea0dd6aaaf8fb9f33dc226b60376b0365a37a33bcd097cce5ed1093101a839a",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:adc67a5703ed1fc0ad581b45b6a176799822a7a1398ddfd19dd33815d491fd1c"
+      },
+      {
+        "category": "safety",
+        "default": true,
+        "description": "Local order-safety controls, audit trails, and operator checks",
+        "enabled": true,
+        "name": "order_safety",
+        "origin": "stock",
+        "package_hash": "5fe51b5bd849fbe0921e93d7111cd442392195cc63fe190ef07114eb34a072d3",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:057e72a7cd0b5d5d34e4db991cec69c7bd123f5dff9b8929f9621cbd914abc71"
+      },
+      {
+        "category": "execution",
+        "default": true,
+        "description": "When to use each order type \u2014 MARKET, LIMIT, SL, SL-M, IOC, GTC, AMO, bracket, cover",
+        "enabled": true,
+        "name": "order_types_guide",
+        "origin": "stock",
+        "package_hash": "b0c105920f089c9a200c0310faf9a600e921e0a8957b309b4d32edd39772a3dc",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:39d5f8b136f5821f151b86ea1bd00bc16b25a1657b367b24a817e4f5fb91fb58"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Protective puts, collar strategy, VIX-based hedging, tail risk hedging, hedging cost analysis, and when hedging is not worth the premium cost",
+        "enabled": true,
+        "name": "portfolio_hedging",
+        "origin": "stock",
+        "package_hash": "63596d6bddcddca5b46eeddc1f644ee7a2f475033d3037e5cf9074470b8b86b9",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:fc162cb85fd8f1626ed1ed0314c1570cdde1586dc1ae21240b2e5eaab6fe25ab"
+      },
+      {
+        "category": "execution",
+        "default": true,
+        "description": "Managing open positions \u2014 trailing stops, scaling, time exits, gap risk, overnight rules, hedging",
+        "enabled": true,
+        "name": "position_management",
+        "origin": "stock",
+        "package_hash": "456380305f56746036ad69bb1da0a697d14e08d5df522af7cccbf01eaf27c5b1",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:06b218169fe356c6c977b66e8090d50b31fb077940ade85c1be59162cfd009c2"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Position sizing, stop-loss placement, and portfolio risk-limit modelling for Indian F&O workflows",
+        "enabled": true,
+        "name": "risk_management",
+        "origin": "stock",
+        "package_hash": "619d90156257cf51d48a0fd179276c069088fdbb7cc7defe1f0c9cc76948dc60",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Calculating risk of ruin \u2014 Kelly criterion, optimal f, position sizing, drawdown recovery, variance drag",
+        "enabled": true,
+        "name": "risk_of_ruin",
+        "origin": "stock",
+        "package_hash": "a573096913377185d72cb7e4fbf697a7f23f3c8d6231af1f2cdd59ed52eab227",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:c8ea6bc6b3b2088f940e0479c44d5ece7a1ba79d7c58325892761fc07655f23f"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Tick scalping, order flow reading, 1-min chart patterns, and scalper risk management for Indian intraday trading",
+        "enabled": true,
+        "name": "scalping_techniques",
+        "origin": "stock",
+        "package_hash": "9a291dc086a1f0e4d0ddab649fef7a5843ccfc204c1136a5e80174c80c41ce95",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:0f99c05ee8d2e6f6688daf1eab629f7d93d68d6b15da339466c91579d0d9bbfc"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Identifying and trading sector rotation \u2014 relative strength, momentum scoring, intermarket analysis",
+        "enabled": true,
+        "name": "sector_rotation",
+        "origin": "stock",
+        "package_hash": "14fed659fa3f27e64ac76a99f1c5782095581f80706ed12802d435f37a63a5d1",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:617f244599a1a218684dee6cccf5ff062d1f4452cbfe64e6d6dd8367a1d6ba85"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "MTM straddle and strangle modelling patterns for Indian F&O expiry workflows",
+        "enabled": true,
+        "name": "straddle_strategies",
+        "origin": "stock",
+        "package_hash": "53f91a897cbaf69a9cf6c7669ffb87d1ef4cceba285be8de760c43f15a0211b8",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:9318c4ef3a2383da198de5d7fb8b5af4d11b26ba20807935e32064a388e1790e"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Identifying and classifying support and resistance levels using swing highs/lows, round numbers, moving averages, and VWAP \u2014 with breakout and false breakout rules",
+        "enabled": true,
+        "name": "support_resistance",
+        "origin": "stock",
+        "package_hash": "a68efbae9e3fb3f225e6acfd86891b707be404fed1cbfaf87a8cdb219ee5ddc9",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:a5c0fecfcf121730dbdf55a73fb41083f37e078a215c68beb816cdf2dbc1bda5"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Practical usage guide for RSI, MACD, Bollinger Bands, VWAP, and supertrend",
+        "enabled": true,
+        "name": "technical_indicators",
+        "origin": "stock",
+        "package_hash": "a2199371036b57d34daab5ccab36dcd3972a63ba886eb4b276a111a107bde818",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:0d22e389c8914201cfe43d5e05e6c4457ce8d1201daf61793eb1bf1d07815ee6"
+      },
+      {
+        "category": "analysis",
+        "default": true,
+        "description": "Common cognitive biases, revenge-trade prevention, journal review process, sizing discipline, and pause criteria for market workflows",
+        "enabled": true,
+        "name": "trading_psychology",
+        "origin": "stock",
+        "package_hash": "a42bdad41b55028328ce7b9edd8dad565d6c7b70ae34b35ebdb398eb84bc0591",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:394a87e830048cf78605713563bfd083940caf01d8167b927b2c8fe4d1572604"
+      },
+      {
+        "category": "strategy",
+        "default": true,
+        "description": "Volatility analysis \u2014 VIX interpretation, IV percentile diagnostics, straddle timing concepts, vol crush, calendar spreads",
+        "enabled": true,
+        "name": "volatility_analysis",
+        "origin": "stock",
+        "package_hash": "35e69d6daaf7ff771e2f14c913d57b7901a8e8a4a9664957a12d1e57d47775c6",
+        "run_pinned": false,
+        "state": "default",
+        "unavailable_reason": null,
+        "validated": true,
+        "version_id": "stock:5d80835652d1331470b94a43f6a5d125a3251c740d7a81267160056d54eb3199"
+      }
+    ]
+  },
+  "procedure": {
+    "body": "## Procedure: risk_management\n# Risk Management for F&O Workflows\n\n## Position Sizing\n\n### Percent Risk Model\nModel a fixed percentage of capital per simulated position. A conservative study band is 1\u20132% per position.\n\n```\nQuantity = (Account Capital \u00d7 Risk%) / (Entry Price \u2212 Stop Loss Price)\n```\n\nExample: \u20b910L account, 1% risk, entry at \u20b9500, SL at \u20b9480.\nQuantity = (1,000,000 \u00d7 0.01) / (500 \u2212 480) = 10,000/20 = 500 shares.\n\n### For Options\nOptions can go to zero. Treat full premium paid as the maximum loss.\nExample cap model: keep option premium exposure at or below 1% of simulated capital.\n```\nMax options premium = Account Capital \u00d7 0.01\n```\n\n### Lot-Based Sizing (F&O)\nNIFTY 65 \u00b7 BANKNIFTY 30 \u00b7 SENSEX 20 (Oct expiry)\nLot-based simulations should use whole lots and round down when a model produces a fractional lot.\n\n## Stop-Loss Placement\n\n### Technical SL\n- Below the last swing low (long) / above last swing high (short)\n- Below/above a significant moving average (20 EMA, 50 EMA)\n- Below/above a VWAP band\n\n### ATR-Based SL\n```\nSL distance = 1.5 \u00d7 ATR(14)\n```\nAdapts to current volatility \u2014 wider SL in volatile markets.\n\n### Options SL\n- Bought options: SL at 30\u201340% of premium paid (e.g., bought at \u20b9100, exit at \u20b960)\n- Sold options: SL at 2\u00d7 premium received (e.g., sold at \u20b950, exit when option reaches \u20b9100)\n\n## Portfolio Risk Limits\n\n| Limit | Conservative | Aggressive |\n|---|---|---|\n| Max single trade risk | 1% capital | 2% capital |\n| Max daily loss | 3% capital | 5% capital |\n| Max open trades | 5 | 10 |\n| Max sector concentration | 25% | 40% |\n| Max overnight F&O exposure | 10% capital | 25% capital |\n\n## Strategy Risk Rules (Not FlintTrade Layer 4/5)\n1. Daily loss > 3% \u2192 stop new orders for the day; this does not activate Layer 5 or flatten positions\n2. 3 consecutive losses \u2192 pause and review\n3. Weekly loss > 7% \u2192 stop all trades, do post-mortem\n4. Any single trade > 5% loss \u2192 emergency exit, review system\n\n## Margin Management\nAlways maintain minimum 30% free margin buffer. Never deploy >70% of available margin.\nMonitor using the connected native account funds reader before each new position.",
+    "classification": "public",
+    "receipt": "984924ca-bfe3-4d92-afd1-64d32fbfcc26",
+    "reference": "skill:risk_management",
+    "scope": null,
+    "version": "stock:c040a02bec0ab2a71b4b588c3ff067e30791bc6398ebdbde5997171e62d9f602"
+  },
+  "provider_calls": 4,
+  "task_posts": 4,
+  "task_gets": 4
+}

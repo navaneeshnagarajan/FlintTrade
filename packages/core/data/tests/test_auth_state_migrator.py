@@ -1,9 +1,8 @@
-"""auth_state migrator canonical-schema tests (data-layer §5/§7.1; DL-06/DL-09).
+"""Retain the historical schema utility without claiming runtime migration.
 
-Exercises the dependency-free path: ``create_schema`` (fresh-install DDL) and
-``migrate`` on a workspace with no legacy DuckDB. The Parquet round-trip +
-age-archive paths require the ``migration`` extra (duckdb/pyarrow/pyrage) and are
-covered separately when that extra is installed.
+These DDL controls are not proof of current AuthState reader compatibility.
+Migration refuses unowned destinations and verifies the actual SQLite reader.
+Public CLI/crypto regressions live under scripts/__tests__/.
 """
 
 from __future__ import annotations
@@ -14,6 +13,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.integration
 
 _MIG_PATH = Path(__file__).resolve().parents[4] / "scripts" / "migrate-auth-state-duckdb-to-sqlite.py"
 
@@ -121,16 +122,29 @@ def test_webhook_id_immutability_check(mig, tmp_path: Path) -> None:
         conn.close()
 
 
-def test_migrate_fresh_install_creates_schema(mig, tmp_path: Path) -> None:
-    """No legacy DuckDB → migrate() creates the canonical schema and returns 0."""
+def test_migrate_fresh_install_uses_the_actual_runtime_schema(mig, tmp_path: Path) -> None:
+    """The CLI's fresh path must be consumable by the actual AuthState."""
     args = argparse.Namespace(master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None)
-    rc = mig.migrate(tmp_path, args)
-    assert rc == 0
-    assert (tmp_path / "auth_state.sqlite").exists()
-    assert "webhooks" in _tables(tmp_path / "auth_state.sqlite")
+    from flinttrade_core.auth_state import AuthState
 
-
-def test_migrate_idempotent_when_sqlite_exists(mig, tmp_path: Path) -> None:
-    args = argparse.Namespace(master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None)
     assert mig.migrate(tmp_path, args) == 0
-    assert mig.migrate(tmp_path, args) == 0  # second run is a no-op
+    state = AuthState(tmp_path / "auth_state.sqlite")
+    try:
+        assert not state.is_jti_revoked("new-installation")
+        state.revoke_jti("new-installation", 4102444800.0)
+        assert state.is_jti_revoked("new-installation")
+    finally:
+        state.close()
+
+
+def test_migrate_repeatedly_refuses_unowned_sqlite_without_overwrite(mig, tmp_path: Path) -> None:
+    args = argparse.Namespace(master_password_fd=None, accept_unknown_tables=False, legacy_fernet_key_path=None)
+    from flinttrade_core.legacy_sqlite_migration import MigrationRefused
+
+    target = tmp_path / "auth_state.sqlite"
+    mig.create_schema(target)
+    original = target.read_bytes()
+    for _ in range(2):
+        with pytest.raises(MigrationRefused, match="unowned destination"):
+            mig.migrate(tmp_path, args)
+        assert target.read_bytes() == original

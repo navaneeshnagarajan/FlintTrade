@@ -681,7 +681,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
   });
 
-  it("keeps Workspace off the inline bar and reachable from More", () => {
+  it("keeps retired Workspace controls out and points More to the reachable app layout toolbar", () => {
     renderTopBarV2();
 
     expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
@@ -690,7 +690,10 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
 
     const sheet = screen.getByTestId("topbar-more-sheet");
     expect(sheet).toBeVisible();
-    expect(screen.getByTestId("workspace-switcher")).toBeVisible();
+    expect(screen.getByText("Use this app’s layout toolbar")).toBeVisible();
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+    // Actual compact toolbar save/restore and navigation reachability are
+    // exercised through AppLayout in AppNavigation.layoutReachability.test.tsx.
   });
 
   it("reaches account, Tools, search, fullscreen, and clock from More", () => {
@@ -794,17 +797,21 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(root.className).not.toMatch(/z-\[121]/);
   });
 
-  it("opens the navigation drawer from the menu button on phones", () => {
+  it("keeps phone More accessible without restoring the retired navigation drawer", () => {
     useSidebarStore.setState({ mobileOpen: false });
     renderTopBarV2();
-
-    const menu = screen.getByTestId("nav-drawer-btn");
-    expect(menu).toHaveAccessibleName("Open navigation");
-    fireEvent.click(menu);
-    expect(useSidebarStore.getState().mobileOpen).toBe(true);
-    useSidebarStore.setState({ mobileOpen: false });
-  });
-});
+    expect(screen.queryByTestId("nav-drawer-btn")).not.toBeInTheDocument();
+    const more = screen.getByRole("button", { name: "More" });
+    expect(more).toHaveAttribute("aria-haspopup", "dialog");
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    expect(screen.getByRole("dialog", { name: "More" })).toBeVisible();
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(useSidebarStore.getState().mobileOpen).toBe(false);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "More" })).not.toBeInTheDocument();
+    expect(more).toHaveAttribute("aria-expanded", "false");
+  });});
 
 describe("FT-UX-001 Compact desk chrome at 1280", () => {
   beforeEach(() => {

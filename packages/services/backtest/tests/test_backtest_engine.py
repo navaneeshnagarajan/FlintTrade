@@ -414,7 +414,7 @@ class TestDataConnector:
         assert bar["open"] == 100.0
         assert bar["close"] == 105.0
         assert bar["volume"] == 5000
-        assert bar["oi"] == 0
+        assert bar["oi"] is None  # missing observation, not measured zero
 
     def test_normalize_bar_lowercase(self):
         from flinttrade_backtest.data_connector import normalize_bar

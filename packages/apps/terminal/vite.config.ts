@@ -111,6 +111,9 @@ export default defineConfig({
     },
   },
   build: {
+    // Installed core keeps fonts same-origin under default-src 'self'. Tiny
+    // subsets must not become data: URLs; keep Vite defaults for other assets.
+    assetsInlineLimit: (filePath) => /\.(?:woff2?|ttf|otf)$/i.test(filePath) ? false : undefined,
     // Plotly powers 3D volatility surfaces and is isolated in a lazy analysis
     // chunk. Keep the warning budget above that known async payload so new
     // warnings point at unexpected growth, not the intentional chart engine.

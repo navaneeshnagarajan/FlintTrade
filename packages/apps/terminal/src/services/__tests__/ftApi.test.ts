@@ -16,6 +16,7 @@ vi.mock("@/stores/connectionStore", () => ({
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: {
     getState: () => authState,
+    subscribe: () => () => {},
   },
 }));
 vi.mock("@/stores/modeStore", () => ({

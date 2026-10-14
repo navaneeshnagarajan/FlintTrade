@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { X, AlertTriangle } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
-import { useTradingStore } from "@/stores/tradingStore";
+import { useCurrentTradingState } from "@/stores/tradingStore";
 import { useHolidays } from "@/hooks/useMarketStatus";
 import { holidayClosesExchange } from "@/lib/market";
 import { resolveNseCashSession } from "@/lib/nseSession";
@@ -148,7 +148,7 @@ function getHolidayContext(holidays: Holiday[] | undefined): HolidayContext {
 export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const name = useSettingsStore((s) => s.name);
-  const positionCount = useTradingStore((s) => s.positionCount);
+  const { positionCount, positionsStatus } = useCurrentTradingState();
   const { data: holidays } = useHolidays();
   const navigate = useNavigate();
 
@@ -207,7 +207,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
     };
   }, [onDismiss]);
 
-  const isRecovery = wasCrash.current && positionCount > 0;
+  const isRecovery = wasCrash.current && (positionsStatus !== "ready" || positionCount > 0);
 
   // If crash recovery, show the red card regardless of market hours
   // Dismiss via useEffect to avoid React "Cannot update component during render" error
@@ -303,9 +303,16 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
         </p>
       </div>
       <p className="text-sm text-text-secondary mt-1">
-        Previous session ended unexpectedly. You have{" "}
-        <span className="font-mono text-loss">{positionCount}</span> open
-        position{positionCount !== 1 ? "s" : ""}.
+        Previous session ended unexpectedly.{" "}
+        {positionsStatus === "ready" ? <>
+          You have <span className="font-mono text-loss">{positionCount}</span> open
+          position{positionCount !== 1 ? "s" : ""}.
+        </> : positionsStatus === "stale" ? <>
+          Last known open positions: <span className="font-mono text-loss">{positionCount}</span>.
+          Positions are stale; review the current account.
+        </> : positionsStatus === "loading"
+          ? "Current-account positions are loading. Review positions before trading."
+          : "Current-account positions are unavailable. Review positions before trading."}
       </p>
       <button
         type="button"

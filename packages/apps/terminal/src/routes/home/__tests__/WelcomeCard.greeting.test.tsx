@@ -20,6 +20,7 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => false,
 }));
 vi.mock("@/stores/tradingStore", () => ({
+  useCurrentTradingState: () => ({ totalPnl: 0, positionsStatus: "unavailable" }),
   useTradingStore: (sel: (s: { totalPnl: number }) => unknown) => sel({ totalPnl: 0 }),
 }));
 vi.mock("@/stores/settingsStore", () => ({

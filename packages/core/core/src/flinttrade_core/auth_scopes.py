@@ -2,9 +2,10 @@
 
 Right-sized for personal use — NO multi-tenant RBAC ceremony. The model:
 
-* Every ``/v1/*`` request is already authenticated at the app level by the operator's
-  single API key (``app.py`` ``require_auth``). The operator IS the admin and holds every
-  scope; an API-key request with no session token passes ``require_scope`` unchanged.
+* Every ``/v1/*`` request is authenticated at the app level. This guard also
+  verifies the presented operator API key; absence of a session is not authority.
+* Session JWTs carry additive scopes. Every supported session carrier is checked,
+  and conflicting credentials are refused instead of selecting a broader identity.
 * A session JWT (from ``auth_routes._create_token``) carries an additive ``scopes`` claim.
   The operator's own session gets :data:`DEFAULT_SESSION_SCOPES` (read access to every
   admin surface). A deliberately narrowed session — e.g. a low-trust dashboard token —
@@ -59,11 +60,18 @@ def resolve_session_scopes(payload: Mapping[str, object]) -> tuple[str, ...]:
 
 
 def _session_token() -> str | None:
-    """Return the session JWT from the Authorization header or session cookie, or None."""
+    """Return the one unambiguous credential across supported session carriers."""
     auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        return auth[7:].strip() or None
-    return request.cookies.get("flinttrade_session") or None
+    bearer = auth[7:].strip() if auth.startswith("Bearer ") else ""
+    fallback = request.headers.get("X-FlintTrade-Token", "").strip()
+    cookie = request.cookies.get("flinttrade_session", "")
+    tokens = {value for value in (bearer, fallback, cookie) if value}
+    if len(tokens) > 1:
+        # Different carriers must never select different authentication identities.
+        from werkzeug.exceptions import Unauthorized
+
+        raise Unauthorized("Conflicting session credentials")
+    return next(iter(tokens), None)
 
 
 def require_scope(scope: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -85,8 +93,11 @@ def require_scope(scope: str) -> Callable[[Callable[..., Any]], Callable[..., An
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             token = _session_token()
             if token is None:
-                # Operator authenticated by the shared API key — holds every scope.
-                return fn(*args, **kwargs)
+                expected_key = os.environ.get("FLINTTRADE_API_KEY", "")
+                api_key = request.headers.get("X-API-Key", "")
+                if expected_key and api_key and hmac.compare_digest(api_key, expected_key):
+                    return fn(*args, **kwargs)
+                return jsonify({"status": "error", "message": "Authentication required"}), 401
             try:
                 from .auth_routes import decode_token  # lazy: avoid import cycle
 
@@ -99,6 +110,8 @@ def require_scope(scope: str) -> Callable[[Callable[..., Any]], Callable[..., An
                     jsonify({"status": "error", "message": "invalid or expired session token"}),
                     401,
                 )
+            if payload.get("type") != "session":
+                return jsonify({"status": "error", "message": "Full session required"}), 401
             scopes = resolve_session_scopes(payload)
             if scope not in scopes:
                 return (

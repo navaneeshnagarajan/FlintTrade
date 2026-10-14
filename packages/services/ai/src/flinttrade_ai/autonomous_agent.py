@@ -361,6 +361,10 @@ class AutonomousTrader:
         memory: Any | None = None,
         skill_registry: Any | None = None,
         skills_workspace: Any | None = None,
+        selected_skills: tuple[str, ...] = ("risk_management",),
+        learning_records: Any | None = None,
+        automatic_learning: bool = True,
+        learning_client: Any | None = None,
     ) -> None:
         """Initialise the autonomous trader.
 
@@ -399,9 +403,9 @@ class AutonomousTrader:
                 Pure learning I/O — NEVER on the order path, and no lesson
                 mutates safety limits or order parameters. Any memory error
                 degrades to "no lessons" rather than disrupting trading.
-            skill_registry: Optional operator-approved SkillRegistry. Only
-                APPROVED skills ever reach the decision prompt — drafts are
-                invisible here by construction.
+            skill_registry: Stock/validated SkillRegistry. Selected full bodies
+                and references reach the prompt with content receipts. Learned
+                files without independent ledger validation remain invisible.
             skills_workspace: Optional workspace ``Path`` enabling the
                 post-session skill DRAFT (AI1): the reflection result renders
                 into ``skill_drafts/`` for operator review. ``None`` disables
@@ -414,6 +418,12 @@ class AutonomousTrader:
         self.memory = memory
         self.skill_registry = skill_registry
         self.skills_workspace = skills_workspace
+        self.selected_skills = selected_skills
+        self.context_receipts: list[dict[str, Any]] = []
+        self.learning_candidates: list[str] = []
+        self.learning_records = learning_records
+        self.automatic_learning = automatic_learning
+        self.learning_client = learning_client
         self.order_executor = order_executor
         self.entry_intent_sink = entry_intent_sink
         self._market_session_provider = market_session_provider
@@ -1092,17 +1102,14 @@ class AutonomousTrader:
         return float(details.get("entry_price", 0) or 0), True
 
     def _skills_context(self) -> str:
-        """Bounded approved-skills block for the decision prompt, or ``""``.
-
-        Reads the operator-approved registry's cached summaries (cheap,
-        in-memory). Fully guarded; a concurrent route-triggered reload can at
-        worst momentarily omit a line — never break a decision.
-        """
+        """Selected complete procedures/references with exact context receipts."""
         registry = self.skill_registry
         if registry is None:
             return ""
         try:
-            section = registry.get_system_prompt_section()
+            names = [name for name in self.selected_skills if name in registry]
+            section, receipt = registry.context(names)
+            self.context_receipts.append(receipt)
         except Exception as exc:
             logger.debug("Skill registry read failed: %s", exc)
             return ""
@@ -1114,10 +1121,12 @@ class AutonomousTrader:
         Fully guarded — a memory backend must never break a decision.
         """
         memory = self.memory
-        if memory is None:
+        from .knowledge_store import KnowledgeMemory
+        if not isinstance(memory, KnowledgeMemory):
             return ""
         try:
-            summary = memory.summarise_context(symbol, "trading lessons", max_tokens=400)
+            summary, receipt = memory.context(symbol, "trading lessons")
+            self.context_receipts.append({"memory": receipt.to_dict()})
         except Exception as exc:
             logger.debug("Memory context lookup failed for %s: %s", symbol, exc)
             return ""
@@ -1133,7 +1142,7 @@ class AutonomousTrader:
         any failure logs and the session ends exactly as it would have
         without a learning tier.
         """
-        if self.memory is None:
+        if not self.automatic_learning or self.memory is None:
             return
         if self._status == AgentStatus.STOP_FAILED:
             logger.warning(
@@ -1166,8 +1175,8 @@ class AutonomousTrader:
             finished = await asyncio.to_thread(done.wait, _LEARNING_TIMEOUT_SECONDS)
             if not finished:
                 logger.warning(
-                    "Post-session reflection still running after %.0fs — abandoned "
-                    "(any lessons it stores will arrive late)",
+                    "Post-session reflection still running after %.0fs — timed out waiting; "
+                    "learner and dependencies remain owned until joined",
                     _LEARNING_TIMEOUT_SECONDS,
                 )
         except Exception:
@@ -1182,10 +1191,16 @@ class AutonomousTrader:
                 trigger_every_n_trades=1,
                 min_trades_for_reflection=1,
             ),
-            llm_client=self.llm,
+            llm_client=self.learning_client if self.learning_client is not None else self.llm,
+            learning_records=self.learning_records,
         )
         result = await reflector.reflect_batch(trades)
         if result is None:
+            return
+        persist = getattr(self.learning_records, "persist", None)
+        if callable(persist):
+            candidates = await asyncio.to_thread(persist, result, trades)
+            self.learning_candidates.extend(candidates)
             return
         session_date = self._ist_now().date().isoformat()
         symbols = sorted({str(t.get("symbol", "")) for t in trades if t.get("symbol")})
@@ -1194,6 +1209,8 @@ class AutonomousTrader:
             + [("losing_pattern", p) for p in result.losing_patterns]
             + [("winning_pattern", p) for p in result.winning_patterns]
         )
+
+        candidate_ids: list[str] = []
 
         def _persist() -> int:
             # Off-loop: ChromaDB adds may load the embedding model. One copy
@@ -1206,6 +1223,12 @@ class AutonomousTrader:
                 if not content:
                     continue
                 for lesson_symbol in symbols or [""]:
+                    from .knowledge_store import KnowledgeMemory
+                    if isinstance(self.memory, KnowledgeMemory):
+                        candidate_ids.append(self.memory.propose("trading lessons: " + content, symbol=lesson_symbol,
+                                                                source_ref="session:" + self.memory.scope.run_id))
+                        stored += 1
+                        continue
                     self.memory.add(
                         content,
                         category="reflection",
@@ -1223,6 +1246,20 @@ class AutonomousTrader:
             return stored
 
         stored = await asyncio.to_thread(_persist)
+        self.learning_candidates.extend(candidate_ids)
+        knowledge = getattr(self.skill_registry, "knowledge_store", None)
+        if knowledge is not None and candidate_ids:
+            # Generate an inert, scoped adaptation of the procedure actually used.
+            # Independent evaluators can validate/promote it automatically; no UI
+            # approve/reject queue is required and absent evidence leaves it inert.
+            for name in self.selected_skills:
+                base = knowledge.resolve(name, run_id=self.skill_registry.run_id, scope=self.memory.scope)
+                package = knowledge.version(base)["files"]
+                main = name + ".md" if name + ".md" in package else "SKILL.md"
+                package[main] += "\n\n## Candidate session lessons\n" + "\n".join(text for _, text in lessons)
+                candidate = knowledge.adapt(base, package, proposer="reflection", scope=self.memory.scope,
+                                            evidence_ids=tuple(candidate_ids))
+                self.learning_candidates.append(candidate)
         logger.info(
             "Post-session reflection stored %d lesson entries (%d trades, win_rate=%.0f%%)",
             stored, result.trades_analysed, result.win_rate * 100,
@@ -1231,7 +1268,7 @@ class AutonomousTrader:
         # AI1: render the same reflection into a DRAFT skill for operator
         # review. Drafts influence nothing until approved; failures degrade
         # to "no draft" like every other learning step.
-        if self.skills_workspace is not None:
+        if self.skills_workspace is not None and knowledge is None:
             def _draft() -> None:
                 from .skill_drafts import draft_skill_from_reflection  # noqa: PLC0415
 

@@ -4669,6 +4669,227 @@ def test_emergency_modules_have_no_raw_client_write_escape_hatch():
     assert re.search(r"router\.execute_gated\s*\(", safety_src)
 
 
+def _proven_strategy_route_lines(
+    tree: ast.Module, relative: str, *, adapter_tree: ast.Module | None = None,
+    ingress_tree: ast.Module | None = None,
+) -> set[int]:
+    """Qualify two concrete typed calls, not a file-level/raw-router exemption.
+
+    Fail closed on receiver/constructor/alias mutation. Follow the existing
+    adapter's stable method chain to the original decorated canonical ingress.
+    Every other lexical route_order hit still goes through the unchanged guard.
+    """
+    if relative != "packages/core/core/src/flinttrade_core/execution_strategy.py":
+        return set()
+    base = _REPO_ROOT / "packages/core/core/src/flinttrade_core"
+    adapter_tree = adapter_tree if adapter_tree is not None else _parse_source(base / "practice_agent_adapter.py")
+    ingress_tree = ingress_tree if ingress_tree is not None else _parse_source(base / "order_routes.py")
+    adapter = [n for n in adapter_tree.body if isinstance(n, ast.ClassDef) and n.name == "PracticeAgentAdapter"]
+    if len(adapter) != 1 or not _practice_class_has_stable_delegation(adapter[0], _parent_nodes(adapter_tree)):
+        return set()
+    dispatch = next(n for n in adapter[0].body if isinstance(n, ast.FunctionDef) and n.name == "_dispatch")
+    contexts = [n for n in ast.walk(dispatch) if isinstance(n, ast.With) and any(
+        isinstance(item.context_expr, ast.Call)
+        and ast.unparse(item.context_expr.func) == "self._app.test_request_context"
+        and item.context_expr.args and isinstance(item.context_expr.args[0], ast.Constant)
+        and item.context_expr.args[0].value == "/api/v1/orders/place"
+        and any(k.arg == "method" and isinstance(k.value, ast.Constant) and k.value.value == "POST"
+                for k in item.context_expr.keywords) for item in n.items)]
+    if len(contexts) != 1 or not any(isinstance(n, ast.Call) and _is_direct_practice_route_call(n, dispatch)
+                                    for n in ast.walk(contexts[0])):
+        return set()
+    ingress = [n for n in ingress_tree.body if isinstance(n, ast.FunctionDef) and n.name == "place_order"]
+    if len(ingress) != 1:
+        return set()
+    if [ast.unparse(d) for d in ingress[0].decorator_list] != [
+        "orders_bp.route('/place', methods=['POST'])",
+        "rate_limit('orders', user_rate=10, global_rate=100, identity='jwt')",
+    ] or [ast.unparse(n) for n in ingress[0].body if not isinstance(n, ast.Expr)] != [
+        "return _dispatch_live_place_from_request()"
+    ]:
+        return set()
+
+    parents = _parent_nodes(tree)
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
+    if (set(classes) != {"ExecutionStrategyOwner", "_BoundStrategyRunner"}
+            or sum(isinstance(n, ast.ClassDef) for n in tree.body) != 2):
+        return set()
+    if classes["ExecutionStrategyOwner"].bases or any(c.decorator_list or c.keywords for c in classes.values()):
+        return set()
+    required = {"PracticeAgentAdapter": ("practice_agent_adapter", 1), "_Run": ("practice_agent_runtime", 1),
+                "Order": ("models", 1), "StrategyRunner": ("flinttrade_engine.scheduler", 0)}
+    for name, (module, level) in required.items():
+        imports = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                   and any((a.asname or a.name) == name for a in n.names)]
+        if (len(imports) != 1 or imports[0].module != module or imports[0].level != level
+                or any(a.asname is not None for a in imports[0].names)):
+            return set()
+    protected = set(required) | set(classes) | {"type"}
+    if protected & _module_assignment_sources(tree).keys():
+        return set()
+    for function in (n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
+        if function.name in protected or protected & (_assignment_sources(function).keys() | _argument_names(function.args)):
+            return set()
+    # This small producer module has no legitimate reflective rebinding.
+    lexical_cache: dict[int, dict[str, list[ast.AST]]] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute) and n.attr in {"__dict__", "__getattr__", "__getattribute__", "__wrapped__", "__setattr__", "__delattr__"}:
+            return set()
+        if isinstance(n, ast.Call):
+            assignments = _lexical_assignment_sources(n, tree, parents, lexical_cache)
+            if _resolves_builtin_member(n.func, frozenset({"setattr", "delattr", "vars", "locals", "globals", "exec", "eval"}), assignments):
+                return set()
+        if isinstance(n, ast.Attribute) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.attr in {
+            "route_order", "place_order", "_dispatch", "start", "_tick", "_close_positions",
+        }:
+            return set()
+    stores = {name: [] for name in ("adapter", "run", "owner")}
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Assign, ast.AnnAssign)):
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+            for target in targets:
+                if isinstance(target, ast.Attribute) and target.attr in stores:
+                    function = _containing_callable(n, parents)
+                    stores[target.attr].append((ast.unparse(target), getattr(function, "name", ""),
+                                               ast.unparse(n.value) if n.value is not None else ""))
+    if stores["run"] != [("self.run", "__init__", "None"), ("self.run", "start", "run")]:
+        return set()
+    if stores["owner"] != [("self.owner", "__init__", "owner")]:
+        return set()
+    if len(stores["adapter"]) != 1 or stores["adapter"][0][:2] != ("run.adapter", "start"):
+        return set()
+    source = ast.parse(stores["adapter"][0][2], mode="eval").body
+    if (not isinstance(source, ast.Call) or ast.unparse(source.func) != "PracticeAgentAdapter"
+            or [ast.unparse(n) for n in source.args] != ["self.app", "token"]
+            or not any(k.arg == "execution_binding" and ast.unparse(k.value) == "self.execution_binding"
+                       for k in source.keywords)):
+        return set()
+    methods = {(c.name, n.name): n for c in classes.values() for n in c.body
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    start = methods.get(("ExecutionStrategyOwner", "start"))
+    tick = methods.get(("_BoundStrategyRunner", "_tick"))
+    close = methods.get(("ExecutionStrategyOwner", "_close_positions"))
+    if start is None or tick is None or close is None:
+        return set()
+    if [ast.unparse(n) for n in _assignment_sources(start).get("run", [])] != [
+        "_Run(scope.run_id, owner, config, row['created_at'])"
+    ] or {name: [ast.unparse(n) for n in _assignment_sources(tick).get(name, [])] for name in ("owner", "run")} != {
+        "owner": ["self.owner"], "run": ["self.owner.run"],
+    }:
+        return set()
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "route_order"]
+    if len(calls) != 2:
+        return set()
+    for call in calls:
+        function = _containing_callable(call, parents)
+        receiver = "run.adapter" if function is tick else "self.run.adapter" if function is close else None
+        if (receiver is None or ast.unparse(call.func.value) != receiver or call.keywords
+                or [ast.unparse(n) for n in call.args] != ["order"]):
+            return set()
+        # Require the exact unconditional first guard on the execution path,
+        # not merely matching text or a preceding but unreachable check.
+        block = tick.body[1] if function is tick and len(tick.body) > 1 else None
+        guard = block.body[0] if isinstance(block, ast.Try) and block.body else close.body[0] if function is close else None
+        condition = "type(run.adapter) is not PracticeAgentAdapter" if function is tick else (
+            "self.run is None or type(self.run.adapter) is not PracticeAgentAdapter")
+        if (not isinstance(guard, ast.If) or ast.unparse(guard.test) != condition or guard.orelse
+                or len(guard.body) != 1 or not isinstance(guard.body[0], ast.Raise)
+                or guard.lineno >= call.lineno):
+            return set()
+        if function is close:
+            node = parents.get(id(call))
+            while node is not None and node is not function:
+                if isinstance(node, ast.With) and any(ast.unparse(item.context_expr) == "self.run.adapter.protective_action()"
+                                                     for item in node.items):
+                    break
+                node = parents.get(id(node))
+            else:
+                return set()
+    return {call.lineno for call in calls}
+
+
+@pytest.mark.unit
+def test_strategy_adapter_qualification_proves_exact_two_calls() -> None:
+    relative = "packages/core/core/src/flinttrade_core/execution_strategy.py"
+    qualifier = globals().get("_proven_strategy_route_lines")
+    assert callable(qualifier), "typed strategy delegation qualification missing"
+    tree = _parse_source(_REPO_ROOT / relative)
+    lines = qualifier(tree, relative)
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute) and node.func.attr == "route_order"]
+    assert len(calls) == 2 and lines == {call.lineno for call in calls}
+    assert not qualifier(tree, "untrusted.py")
+    assert relative not in _RAW_ROUTE_ORDER_ALLOWLIST
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("old,new", [
+    ("from .practice_agent_adapter import PracticeAgentAdapter", "from provider import PracticeAgentAdapter"),
+    ("run.adapter = PracticeAgentAdapter(", "run.adapter = RawRouter("),
+    ("owner, run = self.owner, self.owner.run", "owner, run = self.owner, raw_run"),
+    ("self.owner = owner", "self.owner = raw_owner"),
+    ("run.adapter.route_order(order)", "raw_client.route_order(order)"),
+    ("self.run.adapter.route_order(order)", "self.raw_client.route_order(order)"),
+    ("with self.run.adapter.protective_action():", "with nullcontext():"),
+    ("run = _Run(scope.run_id, owner, config, row[\"created_at\"])", "run = raw_run"),
+    ("self.run = run", "self.run = raw_run"),
+    ("class ExecutionStrategyOwner:", "class ExecutionStrategyOwner(RawOwner):"),
+    ("if type(run.adapter) is not PracticeAgentAdapter:", "if False and type(run.adapter) is not PracticeAgentAdapter:"),
+    ("if self.run is None or type(self.run.adapter) is not PracticeAgentAdapter:",
+     "if False and type(self.run.adapter) is not PracticeAgentAdapter:"),
+])
+def test_strategy_adapter_qualification_rejects_changed_receiver(old: str, new: str) -> None:
+    relative = "packages/core/core/src/flinttrade_core/execution_strategy.py"
+    source = (_REPO_ROOT / relative).read_text()
+    assert old in source
+    qualifier = globals().get("_proven_strategy_route_lines")
+    assert callable(qualifier), "typed strategy delegation qualification missing"
+    assert not qualifier(ast.parse(source.replace(old, new)), relative)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mutation", [
+    "PracticeAgentAdapter = RawRouter",
+    "ExecutionStrategyOwner.start = raw_start",
+    "def replace(self):\n    self.run.adapter = raw_client",
+    "def replace(self):\n    setattr(self.run, 'adapter', raw_client)",
+    "def replace(self):\n    self.run.__dict__['adapter'] = raw_client",
+    "def extra(self, order):\n    return self.run.adapter.route_order(order)",
+    "from builtins import setattr as alter\ndef replace(self):\n    alter(self.run, 'adapter', raw_client)",
+    "def type(value):\n    return PracticeAgentAdapter",
+    "def replace(self):\n    object.__setattr__(self.run, 'adapter', raw_client)",
+])
+def test_strategy_adapter_qualification_rejects_rebinding_and_extra_calls(mutation: str) -> None:
+    relative = "packages/core/core/src/flinttrade_core/execution_strategy.py"
+    source = (_REPO_ROOT / relative).read_text()
+    qualifier = globals().get("_proven_strategy_route_lines")
+    assert callable(qualifier), "typed strategy delegation qualification missing"
+    assert not qualifier(ast.parse(source + "\n" + mutation), relative)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target,old,new", [
+    ("adapter", "from flinttrade_core.order_routes import place_order", "from provider import place_order"),
+    ("adapter", "make_response(place_order())", "make_response(place_order.__wrapped__())"),
+    ("adapter", "return self._dispatch(body, context, cached_on_drain=cached_on_drain)", "return raw_client.place_order(body)"),
+    ("adapter", '"/api/v1/orders/place",', '"/other/place",'),
+    ("ingress", '@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")\ndef place_order', 'def place_order'),
+    ("ingress", "return _dispatch_live_place_from_request()", "return raw_client.place_order()"),
+])
+def test_strategy_adapter_qualification_requires_decorated_canonical_chain(target: str, old: str, new: str) -> None:
+    relative = "packages/core/core/src/flinttrade_core/execution_strategy.py"
+    base = _REPO_ROOT / "packages/core/core/src/flinttrade_core"
+    sources = {"adapter": (base / "practice_agent_adapter.py").read_text(),
+               "ingress": (base / "order_routes.py").read_text()}
+    assert old in sources[target]
+    sources[target] = sources[target].replace(old, new)
+    qualifier = globals().get("_proven_strategy_route_lines")
+    assert callable(qualifier), "typed strategy delegation qualification missing"
+    assert not qualifier(_parse_source(_REPO_ROOT / relative), relative,
+                         adapter_tree=ast.parse(sources["adapter"]), ingress_tree=ast.parse(sources["ingress"]))
+
+
 def test_no_new_raw_route_order_dispatchers():
     """G12 tripwire: no new calls into the legacy ``OrderRouter.route_order`` API.
 
@@ -4694,11 +4915,12 @@ def test_no_new_raw_route_order_dispatchers():
             rel = path.relative_to(_REPO_ROOT).as_posix()
             if rel in _RAW_ROUTE_ORDER_ALLOWLIST:
                 continue
+            qualified_lines = _proven_strategy_route_lines(_parse_source(path), rel)
             for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 stripped = line.strip()
                 if stripped.startswith("#") or "def " in stripped:
                     continue
-                if _ROUTE_ORDER_RE.search(line):
+                if _ROUTE_ORDER_RE.search(line) and n not in qualified_lines:
                     offenders.append(f"{rel}:{n}: {stripped}")
     assert not offenders, (
         "Raw route_order dispatcher outside the canonical gate_order -> BrokerRouter path "

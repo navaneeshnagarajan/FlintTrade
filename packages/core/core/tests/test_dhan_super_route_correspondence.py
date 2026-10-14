@@ -7,6 +7,7 @@ readiness changes or native HTTP listing cutover are involved.
 from __future__ import annotations
 
 from copy import deepcopy
+from time import monotonic
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,6 +16,7 @@ from dhanhq import ForeverOrder, Funds, Order as SDKOrder, Portfolio, SuperOrder
 
 from flinttrade_core.app import create_flask_app
 from flinttrade_core.auth_routes import _create_token
+from flinttrade_core.desktop import _DesktopShutdownRecoveryOwner
 from flinttrade_engine.reduce_only import reset_reduce_only_for_tests
 from flinttrade_engine.safety import SafetyConfig, SafetyGate, SafetySystem
 from flinttrade_gateway.brokers._base import Session
@@ -67,32 +69,43 @@ def route_stack(backend_lease_factory):
     safety = SafetySystem(SafetyConfig(check_market_hours=False))
     app = create_flask_app(safety=safety, safety_config_ready=True, backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
-    transport = RecordingHTTP()
-    sdk = RecordingSDK(transport)
-    adapter = DhanAdapter(client_factory=lambda _session: sdk, security_resolver=lambda _symbol, _exchange: "1333")
-    session = Session("synthetic-token", 4102444800.0, "route-account", "dhan")
+    recovery = _DesktopShutdownRecoveryOwner(app)
+    router = None
+    try:
+        transport = RecordingHTTP()
+        sdk = RecordingSDK(transport)
+        adapter = DhanAdapter(client_factory=lambda _session: sdk, security_resolver=lambda _symbol, _exchange: "1333")
+        session = Session("synthetic-token", 4102444800.0, "route-account", "dhan")
 
-    def session_for(_context: Any, broker: str, account: str) -> Session:
-        assert (broker, account) == ("dhan", "route-account")
-        return session
+        def session_for(_context: Any, broker: str, account: str) -> Session:
+            assert (broker, account) == ("dhan", "route-account")
+            return session
 
-    consumed = []
-    gate = SafetyGate()
+        consumed = []
+        gate = SafetyGate()
 
-    def consume(*args: Any, **kwargs: Any) -> Any:
-        result = gate.consume(*args, **kwargs)
-        consumed.append(result)
-        return result
+        def consume(*args: Any, **kwargs: Any) -> Any:
+            result = gate.consume(*args, **kwargs)
+            consumed.append(result)
+            return result
 
-    router = BrokerRouter(
-        {"dhan": adapter}, session_for, consume_gate=consume, backend_lease_proof=backend_lease_factory(),
-    )
-    app.config["BROKER_ROUTER"] = router
-    app.config["NATIVE_ADAPTERS"] = {"dhan": adapter}
-    app.config["REGISTRY"] = SimpleNamespace(get_session_for=lambda broker, account: session_for(None, broker, account))
-    yield app, transport, consumed
-    router.revoke_and_drain(timeout=0.0)
-    reset_reduce_only_for_tests()
+        router = BrokerRouter(
+            {"dhan": adapter}, session_for, consume_gate=consume, backend_lease_proof=backend_lease_factory(),
+        )
+        app.config["BROKER_ROUTER"] = router
+        app.config["NATIVE_ADAPTERS"] = {"dhan": adapter}
+        app.config["REGISTRY"] = SimpleNamespace(get_session_for=lambda broker, account: session_for(None, broker, account))
+        yield app, transport, consumed
+    finally:
+        try:
+            if router is not None:
+                router.revoke_and_drain(timeout=0.0)
+        finally:
+            try:
+                # Close the factory's owners before the fixture releases its backend lease.
+                recovery.release(deadline=monotonic() + 10)
+            finally:
+                reset_reduce_only_for_tests()
 
 
 def modify(app, changes: dict[str, Any], *, mode: str = "live", unlocked: bool = True):

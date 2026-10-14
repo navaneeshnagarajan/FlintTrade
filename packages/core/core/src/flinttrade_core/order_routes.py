@@ -266,6 +266,17 @@ def _get_mode_from_jwt() -> str | None:
         invalid.
     """
     from .auth_routes import decode_token  # noqa: PLC0415
+    from .practice_agent_adapter import PracticeAgentError  # noqa: PLC0415
+    from .protection_grants import request_principal  # noqa: PLC0415
+    from .protection_scope import request_execution_binding  # noqa: PLC0415
+
+    try:
+        if request_principal() is not None:
+            return _MODE_PRACTICE
+        if request_execution_binding() is not None:
+            return _MODE_PRACTICE
+    except PracticeAgentError:
+        return None
 
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.removeprefix("Bearer ").strip()
@@ -2696,6 +2707,9 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     """
     from flinttrade_engine.reduce_only import contract_key, contract_lock  # noqa: PLC0415
 
+    from .protection_scope import request_execution_binding  # noqa: PLC0415
+
+    binding = request_execution_binding()
     try:
         body = normalise_order_type_fields(body)
     except ValueError:
@@ -2704,7 +2718,7 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     key = contract_key(
         mode=_MODE_PRACTICE,
         adapter="sandbox",
-        account="sandbox",
+        account=binding.scope.account if binding is not None else "sandbox",
         symbol=str(body.get("symbol") or ""),
         exchange=str(body.get("exchange") or ""),
         product=str(body.get("product") or "MIS"),
@@ -2716,8 +2730,9 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
 def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     """Place one Practice order while the contract lock is held."""
     from .practice_agent_adapter import PracticeAgentError  # noqa: PLC0415
+    from .protection_scope import practice_request_sandbox  # noqa: PLC0415
 
-    sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
+    sandbox = practice_request_sandbox()
     positions, orders = _practice_books(sandbox)
     if _own_exit_pending(body, positions, orders):
         return _exit_pending_response(_contract_label(body))
@@ -2760,7 +2775,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         elif refused is not None:
             return refused
 
-    sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
+    sandbox = practice_request_sandbox()
     if sandbox is None:
         logger.error("SandboxEngine not configured in app.config — cannot process practice order")
         return jsonify(
@@ -2804,7 +2819,11 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
 
     sandbox_write_started = False
     try:
-        with write_admission:
+        from .protection_grants import request_principal  # noqa: PLC0415
+
+        protection = request_principal()
+        protection_admission = protection.owner.admit(protection, body) if protection is not None else nullcontext()
+        with write_admission, protection_admission:
             sandbox_write_started = True
             result = sandbox.place_order(
                 symbol=str(body.get("symbol", "")).strip().upper(),
@@ -2819,6 +2838,8 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                 instrument_token=str(body.get("instrument_token") or body.get("security_id") or "").strip(),
                 **provenance,
             )
+            if protection is not None:
+                protection.owner.record_result(protection, result)
         if not _subscribe_pending_practice_order(result, body):
             order_id = str(result.get("order_id") or "")
             if order_id:

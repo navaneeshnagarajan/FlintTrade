@@ -10,6 +10,10 @@ volume (BIGINT), oi (BIGINT), symbol (VARCHAR), exchange (VARCHAR).
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +148,22 @@ def _merge_group(group: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _serialised(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return call
+
+
+def app_history_pipeline(app: Any = None) -> DataPipeline | None:
+    """Borrow the installed history owner without creating a competing connection."""
+    from flask import current_app, has_app_context
+    if app is None and has_app_context():
+        app = current_app
+    return app.config.get("HISTORY_PIPELINE") if app is not None else None
+
+
 class DataPipeline:
     """DuckDB pipeline for storing, merging, aggregating, and exporting OHLCV data.
 
@@ -157,21 +177,41 @@ class DataPipeline:
         pipeline.close()
     """
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(self, db_path: str | None = None, *, read_only: bool = False) -> None:
         self._db_path = db_path or _default_db_path()
-        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._read_only = read_only
+        if not read_only:
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn: duckdb.DuckDBPyConnection | None = None
+        self._lock = threading.RLock()
+        self._retired = False
 
     @property
+    @_serialised
     def connection(self) -> duckdb.DuckDBPyConnection:
+        if self._retired:
+            raise RuntimeError("historical owner retired")
         if self._conn is None:
-            self._conn = duckdb.connect(self._db_path)
+            self._conn = duckdb.connect(self._db_path, read_only=self._read_only)
         return self._conn
 
+    @_serialised
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+    @_serialised
+    def retire(self) -> None:
+        """Permanently fence borrowed readers when their app owner shuts down."""
+        self._retired = True
+        self.close()
+
+    @contextmanager
+    def borrow_connection(self) -> Iterator[duckdb.DuckDBPyConnection]:
+        """Serialise a complete SQL/result operation in an existing local consumer."""
+        with self._lock:
+            yield self.connection
 
     def __enter__(self) -> DataPipeline:
         return self
@@ -183,6 +223,7 @@ class DataPipeline:
     # Schema
     # ------------------------------------------------------------------
 
+    @_serialised
     def initialise(self) -> None:
         """Create all OHLCV interval tables and indexes."""
         for table in set(INTERVAL_TABLES.values()):
@@ -257,6 +298,7 @@ class DataPipeline:
         table = _validate_table(table)
         return self._merge_bars(table, symbol, exchange, bars)
 
+    @_serialised
     def _merge_bars(
         self,
         table: str,
@@ -350,10 +392,78 @@ class DataPipeline:
         )
         return inserted
 
+    @_serialised
+    def publish_history(self, *, identity: dict[str, Any], scope: dict[str, Any],
+                        policy: dict[str, Any], contributors: list[dict[str, Any]]) -> dict[str, Any]:
+        """Publish a content-addressed history in this existing store.
+
+        Legacy OHLCV tables remain distinct: their absent source/adjustment
+        metadata cannot be retroactively asserted by this publication.
+        """
+        from flinttrade_core.data_contracts import canonical_json
+        from flinttrade_historical.history_manifest import build_history
+
+        snapshot = build_history(identity=identity, scope=scope, policy=policy, contributors=contributors)
+        encoded = canonical_json(snapshot)
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS history_manifests (snapshot_id VARCHAR PRIMARY KEY, document VARCHAR NOT NULL)"
+        )
+        self.connection.execute("INSERT INTO history_manifests VALUES (?, ?) ON CONFLICT DO NOTHING",
+                                [snapshot["snapshot_id"], encoded])
+        stored = self.history_snapshot(snapshot["snapshot_id"], scope=scope)
+        if stored is None:
+            raise ValueError("historical publication missing on readback")
+        return stored
+
+    @_serialised
+    def history_snapshots(self, *, scope: dict[str, Any]) -> list[dict[str, Any]]:
+        """Enumerate only verified snapshots owned by the exact current scope."""
+        import json
+
+        from flinttrade_core.data_contracts import validate_scope
+
+        scope = validate_scope(scope)
+        if self._conn is None and self._db_path != ":memory:" and not Path(self._db_path).exists():
+            return []
+        if not self.connection.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name='history_manifests'"
+        ).fetchone():
+            return []
+        rows = self.connection.execute("SELECT snapshot_id, document FROM history_manifests ORDER BY snapshot_id").fetchall()
+        return [self.history_snapshot(identifier, scope=scope) for identifier, document in rows
+                if json.loads(document)["scope"] == scope]
+
+    @_serialised
+    def history_snapshot(self, snapshot_id: str, *, scope: dict[str, Any]) -> dict[str, Any] | None:
+        """Read and hash-verify an immutable snapshot in its exact scope."""
+        import json
+        import re
+
+        from flinttrade_core.data_contracts import DataIntegrityError, digest, validate_scope
+
+        scope = validate_scope(scope)
+        if not re.fullmatch(r"[0-9a-f]{64}", snapshot_id):
+            raise DataIntegrityError("invalid snapshot identity")
+        if not self.connection.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name='history_manifests'"
+        ).fetchone():
+            return None
+        row = self.connection.execute("SELECT document FROM history_manifests WHERE snapshot_id=?", [snapshot_id]).fetchone()
+        if row is None:
+            return None
+        snapshot = json.loads(row[0])
+        content = {key: value for key, value in snapshot.items() if key != "snapshot_id"}
+        if snapshot.get("snapshot_id") != snapshot_id or digest(content) != snapshot_id:
+            raise DataIntegrityError("historical manifest checksum mismatch")
+        if snapshot["scope"] != scope:
+            raise PermissionError("historical snapshot scope mismatch")
+        return snapshot
+
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
 
+    @_serialised
     def get_bars(
         self,
         table: str,
@@ -386,6 +496,7 @@ class DataPipeline:
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
+    @_serialised
     def count_bars(self, table: str, symbol: str, exchange: str) -> int:
         """Count bars in a table for a symbol."""
         table = _validate_table(table)
@@ -396,6 +507,7 @@ class DataPipeline:
         row = result.fetchone()
         return row[0] if row else 0
 
+    @_serialised
     def summary(self) -> dict[str, dict[str, Any]]:
         """Summarise the local store: per interval table, row/symbol counts.
 

@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -13,14 +17,27 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node", "@playwright/test"]
+    "allowImportingTsExtensions": true,
+    "types": [
+      "node",
+      "@playwright/test"
+    ]
   },
   "include": [
+    "playwright.incidents.config.ts",
+    "playwright.policy.config.ts",
+    "e2e/incidents/SystemIncidents.spec.ts",
+    "e2e/incidents/vite.config.ts",
     "playwright.config.ts",
     "playwright.infra.config.ts",
     "playwright.public-demo.config.ts",
     "playwright.visual.config.ts",
     "playwright.order-flow.config.ts",
+    "playwright.reticle.config.ts",
+    "vite.reticle.config.ts",
+    "e2e/foundation-transport-failure.spec.ts",
+    "e2e/foundation-truth-fixtures.ts",
+    "e2e/foundation-truth.spec.ts",
     "e2e/order-flow-fixtures.ts",
     "e2e/order-flow-presentation.spec.ts",
     "e2e/operator-error-fixtures.ts",
@@ -30,6 +47,13 @@
     "e2e/indstocks-disclosure-fixtures.ts",
     "e2e/indstocks-disclosure.spec.ts",
     "e2e/account-action-retry.spec.ts",
+    "e2e/shared-core-integrated.spec.ts",
+    "e2e/run-policy-integrated.spec.ts",
+    "e2e/run-policy-core-fixture.ts",
+    "e2e/run-policy-remaining.spec.ts",
+    "e2e/run-policy-negative-seams.ts",
+    "e2e/run-policy-negative-seams.spec.ts",
+    "e2e/schema-csp.spec.ts",
     "e2e/fixture-registry.ts",
     "e2e/about-versions.spec.ts",
     "e2e/infra-self-tests.spec.ts",
@@ -41,6 +65,8 @@
     "e2e/learn-ai-polish.spec.ts",
     "e2e/visual-a11y.spec.ts",
     "e2e/visual/support.ts",
-    "e2e/visual/desk-mocks.ts"
+    "e2e/visual/desk-mocks.ts",
+    "playwright.csp.config.ts",
+    "e2e/csp/schema-probe.ts"
   ]
 }

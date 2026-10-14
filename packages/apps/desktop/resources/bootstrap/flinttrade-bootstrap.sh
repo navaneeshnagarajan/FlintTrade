@@ -1,16 +1,17 @@
 #!/bin/sh
 # Canonical packaged source-build entrypoint. Tool acquisition and checksums are owned by Electron.
 set -eu
+umask 077
 
 if [ "$#" -ne 6 ]; then
-  printf '%s\n' "usage: flinttrade-bootstrap.sh <candidate> <uv> <node> <corepack-js> <tools-root> <pnpm-version>" >&2
+  printf '%s\n' "usage: flinttrade-bootstrap.sh <candidate> <uv> <node> <pnpm> <tools-root> <pnpm-version>" >&2
   exit 64
 fi
 
 candidate=$1
 uv=$2
 node=$3
-corepack_js=$4
+pnpm=$4
 tools=$5
 pnpm_version_expected=$6
 PATH=/usr/bin:/bin
@@ -61,6 +62,21 @@ validate_managed_tools_path() (
   done
 )
 
+validate_owned_tree() (
+  tree=$1
+  # uv 0.13.0 creates its non-executable install-lock inode with mode 0666.
+  # Exempt only that ordinary owned lock from the code-tree mode guard.
+  if [ -L "$tree/.lock" ] || { [ -e "$tree/.lock" ] && [ ! -f "$tree/.lock" ]; }; then
+    printf '%s\n' "Refusing non-ordinary managed Python install lock." >&2
+    exit 68
+  fi
+  unsafe=$(find "$tree" \( ! -user "$(id -u)" -o \( ! -type l ! -path "$tree/.lock" \( -perm -0020 -o -perm -0002 \) \) -o \( ! -type d ! -type f ! -type l \) \) -print)
+  if [ -n "$unsafe" ]; then
+    printf '%s\n' "Refusing managed runtime ownership, ordinary-file or write-mode drift." >&2
+    exit 68
+  fi
+)
+
 validate_managed_python_tree() (
   python_root="$tools/python"
   if [ -L "$python_root" ] || { [ -e "$python_root" ] && [ ! -d "$python_root" ]; }; then
@@ -68,6 +84,7 @@ validate_managed_python_tree() (
     exit 68
   fi
   [ -e "$python_root" ] || exit 0
+  validate_owned_tree "$python_root"
 
   canonical_root=$(CDPATH= cd "$python_root" 2>/dev/null && pwd -P) || {
     printf '%s\n' "Refusing managed Python tool root because it cannot be resolved." >&2
@@ -187,6 +204,7 @@ validate_virtual_environment_links() (
   environment_root=$1
   expected_python=$2
   error_message=$3
+  validate_owned_tree "$environment_root"
   unsafe_environment_links=$(
     find "$environment_root" -type l -exec sh -c '
       environment_root=$1
@@ -200,7 +218,7 @@ validate_virtual_environment_links() (
         case "$link" in
           "$environment_root/lib64") [ "$target" = lib ] || printf "%s\n" "$link" ;;
           "$environment_root/bin/python") [ "$target" = "$expected_python" ] || printf "%s\n" "$link" ;;
-          "$environment_root/bin/python3"|"$environment_root/bin/python3.12")
+          "$environment_root/bin/python3"|"$environment_root/bin/${expected_python##*/}")
             [ "$target" = python ] || printf "%s\n" "$link"
             ;;
           *) printf "%s\n" "$link" ;;
@@ -269,8 +287,8 @@ finally:
 ' "$source_path" "$destination_path"
 }
 
-[ "$pnpm_version_expected" = "10.34.5" ] || {
-  printf '%s\n' "bootstrap entrypoint requires pnpm 10.34.5" >&2
+[ "$pnpm_version_expected" = "12.11.2" ] || {
+  printf '%s\n' "bootstrap entrypoint requires pnpm 12.11.2" >&2
   exit 66
 }
 
@@ -281,8 +299,8 @@ for required in package.json pyproject.toml uv.lock pnpm-lock.yaml packages/apps
   }
 done
 validate_managed_tools_path
-[ -f "$corepack_js" ] || {
-  printf '%s\n' "verified Corepack JavaScript is missing" >&2
+[ -f "$pnpm" ] || {
+  printf '%s\n' "verified pnpm executable is missing" >&2
   exit 67
 }
 if [ -L "$tools/python" ] || { [ -e "$tools/python" ] && [ ! -d "$tools/python" ]; }; then
@@ -308,18 +326,21 @@ elif [ -e "$candidate/.venv" ]; then
   version_value=$(read_uv_config_value version_info "$candidate/.venv/pyvenv.cfg") || configuration_valid=0
   relocatable_value=$(read_uv_config_value relocatable "$candidate/.venv/pyvenv.cfg") || configuration_valid=0
   python_home=$(read_uv_config_value home "$candidate/.venv/pyvenv.cfg") || configuration_valid=0
-  [ "$uv_value" = 0.11.16 ] || configuration_valid=0
+  # Preserve and rebuild the previously supported environment; never execute it.
+  case "$uv_value" in 0.11.16|0.13.0) ;; *) configuration_valid=0 ;; esac
   case "$version_value" in
     3.12.*)
       version_patch=${version_value#3.12.}
       case "$version_patch" in ""|*[!0-9]*) configuration_valid=0 ;; esac
+      python_minor=3.12
       ;;
+    3.14.8) python_minor=3.14 ;;
     *) configuration_valid=0 ;;
   esac
   [ "$relocatable_value" = true ] || configuration_valid=0
   [ -n "$python_home" ] || configuration_valid=0
   if [ "$configuration_valid" -ne 1 ]; then
-    printf '%s\n' "Refusing existing .venv because it is not a uv-managed relocatable Python 3.12 environment." >&2
+    printf '%s\n' "Refusing existing .venv: expected relocatable managed Python 3.14.8 or supported legacy Python 3.12 for explicit rebuild." >&2
     exit 68
   fi
   python_home_canonical=$(CDPATH= cd "$python_home" 2>/dev/null && pwd -P) || {
@@ -340,14 +361,13 @@ elif [ -e "$candidate/.venv" ]; then
   validate_managed_python_tree
   validate_virtual_environment_links \
     "$candidate/.venv" \
-    "$python_home/python3.12" \
+    "$python_home/python$python_minor" \
     "Refusing unexpected linked entry inside .venv in the managed source checkout."
   replace_virtual_environment=1
 fi
 validate_managed_python_tree
 
-export COREPACK_DEFAULT_TO_LATEST=0
-export COREPACK_HOME="$tools/corepack"
+export npm_config_pm_on_fail=error
 for uv_environment_name in $(env | sed -n 's/^\(UV_[A-Za-z0-9_]*\)=.*/\1/p'); do
   unset "$uv_environment_name"
 done
@@ -356,10 +376,10 @@ export UV_MANAGED_PYTHON=1
 export UV_NO_CONFIG=1
 export UV_NO_EDITABLE=1
 export UV_PROJECT="$candidate"
-export UV_PYTHON=3.12
+export UV_PYTHON=3.14.8
 export UV_PYTHON_INSTALL_DIR="$tools/python"
 export UV_WORKING_DIR="$candidate"
-PATH=${node%/*}:$PATH
+PATH=${node%/*}:${pnpm%/*}:$PATH
 export PATH
 
 swap_parent=$(mktemp -d "$candidate/.venv.flinttrade-swap.XXXXXX") || {
@@ -402,7 +422,7 @@ cleanup_staging_virtual_environment() {
     if [ "$bootstrap_completed" -eq 1 ]; then
       validate_virtual_environment_links \
         "$backup_virtual_environment" \
-        "$python_home/python3.12" \
+        "$python_home/python$python_minor" \
         "Refusing to clean a changed virtual-environment backup path."
       rm -rf -- "$backup_virtual_environment"
       backup_created=0
@@ -429,20 +449,20 @@ export UV_PROJECT_ENVIRONMENT="$staging_virtual_environment"
 
 "$uv" --version
 "$node" --version
-"$node" "$corepack_js" --version
+"$pnpm" --version
 
 cd "$candidate"
-printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-python\t48\tInstalling managed Python 3.12\n'
-"$uv" python install 3.12 --no-bin --no-config --directory "$candidate"
+printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-python\t48\tInstalling managed Python 3.14.8 (explicit staged rebuild)\n'
+"$uv" python install 3.14.8 --no-bin --no-config --directory "$candidate"
 validate_managed_python_tree
 tools_python_canonical=$(CDPATH= cd "$tools/python" 2>/dev/null && pwd -P) || {
   printf '%s\n' "Refusing an unavailable managed Python tool root." >&2
   exit 68
 }
-"$uv" venv --relocatable --python 3.12 "$staging_virtual_environment" \
+"$uv" venv --relocatable --python 3.14.8 "$staging_virtual_environment" \
   --no-project --no-config --managed-python --directory "$candidate"
 "$uv" sync --frozen --all-packages --no-install-package flinttrade-ticks \
-  --no-config --managed-python --directory "$candidate" --project "$candidate"
+  --no-config --managed-python --directory "$candidate" --project "$candidate" --no-build-package growwapi
 
 if [ -L "$staging_virtual_environment" ] ||
   [ ! -d "$staging_virtual_environment" ] ||
@@ -466,18 +486,12 @@ staged_relocatable=$(read_uv_config_value relocatable "$staging_virtual_environm
   staged_configuration_valid=0
   staged_relocatable=
 }
-[ "$staged_uv_value" = 0.11.16 ] || staged_configuration_valid=0
-case "$staged_version_value" in
-  3.12.*)
-    staged_version_patch=${staged_version_value#3.12.}
-    case "$staged_version_patch" in ""|*[!0-9]*) staged_configuration_valid=0 ;; esac
-    ;;
-  *) staged_configuration_valid=0 ;;
-esac
+[ "$staged_uv_value" = 0.13.0 ] || staged_configuration_valid=0
+[ "$staged_version_value" = 3.14.8 ] || staged_configuration_valid=0
 [ "$staged_relocatable" = true ] || staged_configuration_valid=0
 [ -n "$staged_python_home" ] || staged_configuration_valid=0
 if [ "$staged_configuration_valid" -ne 1 ]; then
-  printf '%s\n' "Refusing staged .venv because it is not a uv-managed relocatable Python 3.12 environment." >&2
+  printf '%s\n' "Refusing staged .venv because it is not a uv-managed relocatable Python 3.14.8 environment." >&2
   exit 68
 fi
 staged_python_home_canonical=$(CDPATH= cd "$staged_python_home" 2>/dev/null && pwd -P) || {
@@ -488,14 +502,14 @@ case "$staged_python_home_canonical/" in
   "$tools_python_canonical/"*) ;;
   *) printf '%s\n' "Refusing a staged Python home outside the managed tool root." >&2; exit 68 ;;
 esac
-safe_rename_python="$staged_python_home/python3.12"
+safe_rename_python="$staged_python_home/python3.14"
 [ -x "$safe_rename_python" ] || {
   printf '%s\n' "Refusing an unavailable managed Python rename helper." >&2
   exit 68
 }
 validate_virtual_environment_links \
   "$staging_virtual_environment" \
-  "$staged_python_home/python3.12" \
+  "$staged_python_home/python3.14" \
   "Refusing unexpected linked entry inside the staged virtual environment."
 
 if [ "$replace_virtual_environment" -eq 1 ]; then
@@ -505,7 +519,7 @@ if [ "$replace_virtual_environment" -eq 1 ]; then
   }
   validate_virtual_environment_links \
     "$candidate/.venv" \
-    "$python_home/python3.12" \
+    "$python_home/python$python_minor" \
     "Refusing to replace a changed existing virtual environment."
   backup_created=1
   safe_rename_directory "$candidate/.venv" "$backup_virtual_environment"
@@ -523,15 +537,15 @@ if ! safe_rename_directory "$staging_virtual_environment" "$candidate/.venv"; th
 fi
 export UV_PROJECT_ENVIRONMENT="$candidate/.venv"
 
-printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 10.34.5 dependencies\n'
-pnpm_version=$("$node" "$corepack_js" pnpm --version)
-[ "$pnpm_version" = "10.34.5" ] || {
-  printf 'Corepack resolved pnpm %s; expected 10.34.5.\n' "$pnpm_version" >&2
+printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 12.11.2 dependencies\n'
+pnpm_version=$("$pnpm" --version)
+[ "$pnpm_version" = "$pnpm_version_expected" ] || {
+  printf 'Verified pnpm reported %s; expected %s.\n' "$pnpm_version" "$pnpm_version_expected" >&2
   exit 66
 }
-"$node" "$corepack_js" pnpm install --frozen-lockfile
+"$pnpm" install --frozen-lockfile
 printf 'FLINTTRADE_BOOTSTRAP_PHASE\tbuilding-terminal\t84\tBuilding the terminal for production\n'
-"$node" "$corepack_js" pnpm --filter @flinttrade/terminal build
+"$pnpm" --filter @flinttrade/terminal build
 bootstrap_completed=1
 if [ "$backup_created" -eq 1 ]; then
   [ ! -L "$backup_virtual_environment" ] && [ -d "$backup_virtual_environment" ] || {
@@ -540,7 +554,7 @@ if [ "$backup_created" -eq 1 ]; then
   }
   validate_virtual_environment_links \
     "$backup_virtual_environment" \
-    "$python_home/python3.12" \
+    "$python_home/python$python_minor" \
     "Refusing to clean a changed virtual-environment backup path."
   rm -rf -- "$backup_virtual_environment"
   backup_created=0

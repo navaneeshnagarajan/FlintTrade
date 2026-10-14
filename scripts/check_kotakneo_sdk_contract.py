@@ -676,7 +676,7 @@ neo_module.PositionsAPI = FakePositions
 neo.quotes = synthetic_quotes
 assert neo.holdings()["data"][0]["averagePrice"] == 100.0
 position = neo.positions()["data"][0]
-if md.version("kotakneoapi") == "3.0.8":
+if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
     assert position["netQty"] == 2.0
     assert position["averagePrice"] == 100.0
     assert position["positionPnl"] == 40.0
@@ -724,7 +724,7 @@ for service, method, failure in (
     finally:
         service.failure = None
 
-if md.version("kotakneoapi") == "3.0.8":
+if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
     # Exercise the actual new disk-cache reader, not a stubbed exception.
     from neo_api_client.utils import holdings_cache
 
@@ -804,7 +804,7 @@ async def require_callback_cancellation_and_cleanup():
     feed_module.decode_packet = failed_decode
     try:
         market_feed.on_error = failed_callback
-        if md.version("kotakneoapi") == "3.0.8":
+        if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
             assert market_feed._decode_packet(b"synthetic") is None
         else:
             try:

@@ -168,6 +168,7 @@ from __future__ import annotations
 # file directly via importlib to avoid a circular reference.
 import importlib.util
 import os as _os
+import sys as _sys
 
 _parent_strategies_path = _os.path.join(_os.path.dirname(__file__), "..", "strategies.py")
 _parent_strategies_path = _os.path.normpath(_parent_strategies_path)
@@ -175,7 +176,20 @@ _parent_strategies_path = _os.path.normpath(_parent_strategies_path)
 _spec = importlib.util.spec_from_file_location("_backtest_strategies_parent", _parent_strategies_path)
 if _spec is not None and _spec.loader is not None:
     _parent = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_parent)  # type: ignore[union-attr]
+    # Class introspection resolves __module__ through sys.modules. Register the
+    # real loader-owned module before execution, as a normal Python import does.
+    # A failed reload must not replace earlier source custody with a partial module.
+    _previous_registration = {_spec.name: _sys.modules[_spec.name]} if _spec.name in _sys.modules else {}
+    _sys.modules[_spec.name] = _parent
+    try:
+        _spec.loader.exec_module(_parent)
+    except BaseException:
+        if _sys.modules.get(_spec.name) is _parent:
+            _sys.modules.pop(_spec.name, None)
+            _sys.modules.update(_previous_registration)
+        raise
+    finally:
+        _previous_registration.clear()
 
     # Re-export all public names
     from typing import Any as _Any

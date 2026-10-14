@@ -39,7 +39,6 @@ interface TabDef {
   id: TabId;
   label: string;
   icon: typeof BookOpen;
-  progress: number;
 }
 
 interface GlossaryEntry {
@@ -85,11 +84,11 @@ interface BasicsSection {
 // ---------------------------------------------------------------------------
 
 const TABS: TabDef[] = [
-  { id: "basics",     label: "Market Basics",    icon: BookOpen,     progress: 33 },
-  { id: "glossary",   label: "Glossary",          icon: GraduationCap, progress: 0  },
-  { id: "strategies", label: "Strategy Library",  icon: BarChart3,    progress: 16 },
-  { id: "paper",      label: "Practice Trading",  icon: TrendingUp,   progress: 0  },
-  { id: "resources",  label: "Resource Hub",      icon: PlayCircle,   progress: 0  },
+  { id: "basics",     label: "Market Basics",    icon: BookOpen },
+  { id: "glossary",   label: "Glossary",          icon: GraduationCap},
+  { id: "strategies", label: "Strategy Library",  icon: BarChart3 },
+  { id: "paper",      label: "Practice Trading",  icon: TrendingUp},
+  { id: "resources",  label: "Resource Hub",      icon: PlayCircle},
 ];
 
 const BASICS_SECTIONS: BasicsSection[] = [
@@ -821,7 +820,6 @@ export default function LearnRoute() {
         id: tab.id,
         label: tab.label,
         icon: tab.icon,
-        progress: tab.progress,
       })),
     },
   ];
@@ -829,7 +827,7 @@ export default function LearnRoute() {
   return (
     <Page>
       <PageHeader
-        title="Learn"
+        title="Learning library"
         tourTarget="course-list"
         description={
           level === "beginner"
@@ -838,6 +836,7 @@ export default function LearnRoute() {
         }
       />
 
+      <p className="shrink-0 px-4 py-1 text-xs text-text-muted">Progress not recorded</p>
       <div
         data-testid="learn-body"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row"

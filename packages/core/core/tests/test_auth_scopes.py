@@ -26,16 +26,24 @@ def _token(scopes, secret="x"):
     return jwt.encode({"sub": "op", "jti": "j1", "scopes": scopes}, secret, algorithm="HS256")
 
 
-def test_no_token_passes_operator_via_api_key(app):
-    # No session token => operator authenticated by the shared API key => all scopes.
+@pytest.mark.unit
+def test_absent_credential_does_not_infer_operator_authority(app):
     with app.test_client() as c:
-        assert c.get("/guarded").status_code == 200
+        assert c.get("/guarded").status_code == 401
+
+
+@pytest.mark.unit
+def test_explicit_operator_key_is_verified(app, monkeypatch):
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-key")
+    with app.test_client() as c:
+        assert c.get("/guarded", headers={"X-API-Key": "fixture-key"}).status_code == 200
+        assert c.get("/guarded", headers={"X-API-Key": "incorrect"}).status_code == 401
 
 
 def test_session_with_scope_passes(app, monkeypatch):
     monkeypatch.setattr(
         "flinttrade_core.auth_routes.decode_token",
-        lambda t: {"scopes": ["admin.audit.read", "admin.activity"]},
+        lambda t: {"type": "session", "scopes": ["admin.audit.read", "admin.activity"]},
     )
     with app.test_client() as c:
         r = c.get("/guarded", headers={"Authorization": "Bearer abc"})
@@ -45,7 +53,7 @@ def test_session_with_scope_passes(app, monkeypatch):
 def test_session_missing_scope_is_403(app, monkeypatch):
     monkeypatch.setattr(
         "flinttrade_core.auth_routes.decode_token",
-        lambda t: {"scopes": ["admin.observability.read"]},  # no admin.audit.read
+        lambda t: {"type": "session", "scopes": ["admin.observability.read"]},  # no admin.audit.read
     )
     with app.test_client() as c:
         r = c.get("/guarded", headers={"Authorization": "Bearer abc"})
@@ -65,7 +73,7 @@ def test_invalid_session_token_is_401(app, monkeypatch):
 
 def test_legacy_token_without_scopes_claim_gets_full_default(app, monkeypatch):
     # A session minted before the scopes claim existed is the operator => full scopes.
-    monkeypatch.setattr("flinttrade_core.auth_routes.decode_token", lambda t: {"sub": "op", "jti": "j1"})
+    monkeypatch.setattr("flinttrade_core.auth_routes.decode_token", lambda t: {"type": "session", "sub": "op", "jti": "j1"})
     with app.test_client() as c:
         assert c.get("/guarded", headers={"Authorization": "Bearer abc"}).status_code == 200
 

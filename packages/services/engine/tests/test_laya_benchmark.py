@@ -271,7 +271,7 @@ def test_tune_is_refused_on_test_and_does_not_edit_dev_thresholds(capsys: pytest
     assert _POLICY.read_bytes() == before
     assert main(["--cases", str(_FIXTURE), "--split", "test", "--skip-drills"]) == 0
     scored = capsys.readouterr().out
-    assert "test_scored_once=yes" in scored
+    assert "test_scored_once=yes" not in scored
     assert "split=test " in scored
     assert "id=ex-side-01-a" in scored
     assert "id=ex-rat-01-a" not in scored

@@ -443,7 +443,9 @@ function PasswordReset({ onBack }: { onBack: () => void }) {
       });
       const data = await resp.json();
       if (!resp.ok) {
-        setError(data?.message ?? `Password reset failed (HTTP ${resp.status}).`);
+        setError(resp.status === 409 && data?.code === "authenticator_recovery_required"
+          ? "Password reset was not completed. The existing password and authenticator are unchanged; enrolled-authenticator recovery is required (authenticator_recovery_required)."
+          : data?.message ?? data?.error ?? `Password reset failed (HTTP ${resp.status}).`);
         return;
       }
       setOtp("");

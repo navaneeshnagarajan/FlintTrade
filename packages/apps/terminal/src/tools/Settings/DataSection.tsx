@@ -3,9 +3,9 @@
  */
 
 import { FieldRow, TextInput, SectionTitle } from "./shared";
-import { HistoricalDownloadPanel } from "./HistoricalDownloadPanel";
+import { Link } from "react-router";
 import { WatchlistManagerPanel } from "./WatchlistManagerPanel";
-import { LocalDataPanel } from "./LocalDataPanel";
+import { CanonicalDataControls } from "@/components/data/CanonicalDataControls";
 
 interface DataPathSettings {
   fastStoragePath: string;
@@ -53,11 +53,10 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
         />
       </FieldRow>
 
+      <CanonicalDataControls />
       <WatchlistManagerPanel />
 
-      <HistoricalDownloadPanel />
-
-      <LocalDataPanel />
+      <Link to="/testing" state={{ openWidget: { widgetId: "historical-downloads" } }} className="text-sm text-accent">Open downloads and datasets in Testing</Link>
     </div>
   );
 }

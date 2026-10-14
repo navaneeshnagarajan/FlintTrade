@@ -11,10 +11,10 @@ permissions:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # NOTE: `submodules: recursive` was removed 2026-05-19. External services +
         # OpenClaw + AlgoMirror are no longer git submodules — they were
         # detached in commit 3da42e4 and live under `.local/external/`
@@ -22,10 +22,10 @@ jobs:
         # Trying to recursively check them out triggered noisy warnings
         # on every weekly run.
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
 
       - name: Install dependencies
         run: uv sync --frozen          # SC-07: hash-verified install
@@ -39,7 +39,7 @@ jobs:
           fi
           uv run python scripts/audit_repos.py --format markdown > .local/STATUS.md
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: status-report
           path: .local/STATUS.md

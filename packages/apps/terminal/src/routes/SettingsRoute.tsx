@@ -10,7 +10,7 @@
  */
 
 import { useState, useCallback, useEffect, useMemo, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useLayoutStore } from "@/stores/layoutStore";
@@ -35,7 +35,6 @@ import { LeverageSection }   from "@/tools/Settings/LeverageSection";
 import { PracticeSection }   from "@/tools/Settings/PracticeSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
-import { SkillSection }      from "@/tools/Settings/SkillSection";
 import { UpdatesSection }    from "@/tools/Settings/UpdatesSection";
 import { SupportSection }    from "@/tools/Settings/SupportSection";
 import { TickerSettings }    from "@/routes/settings/TickerSettings";
@@ -51,6 +50,7 @@ import { PracticeLaterSetup } from "@/routes/SetupAccountRoute";
 
 export default function SettingsRoute() {
   const navigate = useNavigate();
+  const location = useLocation();
   const mode = useModeStore((state) => state.mode);
   const hasConnectedAccount = useBrokerStore((state) =>
     state.accounts.some((account) => account.source === "native" && account.status === "connected"),
@@ -71,12 +71,16 @@ export default function SettingsRoute() {
 
   useEffect(() => {
     const syncSectionFromHash = () => {
+      if (window.location.pathname !== "/settings") return;
       const hash = window.location.hash.slice(1);
-      setRequestedSection(hash);
+      // A generic app return keeps its local section. An explicit deep link
+      // wins, including one reached while Activity disconnected this effect.
+      if (hash) setRequestedSection(hash);
     };
+    syncSectionFromHash();
     window.addEventListener("hashchange", syncSectionFromHash);
     return () => window.removeEventListener("hashchange", syncSectionFromHash);
-  }, []);
+  }, [location.pathname, location.hash]);
 
   useEffect(() => {
     if (requestedSection === "presets") {
@@ -120,7 +124,6 @@ export default function SettingsRoute() {
     updateTelegram,
     updateDataPaths,
 
-    handleRestart,
     retryLlmHydration,
   } = useSettingsState();
 
@@ -170,7 +173,6 @@ export default function SettingsRoute() {
       case "dataPaths":  return <DataSection       settings={dataPaths}  onChange={updateDataPaths} />;
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;
-      case "skill":      return <SkillSection />;
       case "presets":    return <></>;
       case "updates":    return <UpdatesSection />;
       case "support":    return <SupportSection />;
@@ -224,8 +226,8 @@ export default function SettingsRoute() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => handleRestart((msg) => setToastMsg(msg))}
-              disabled={restarting}
+              title="Service restart is not implemented by this client. No command will be sent."
+              disabled
             >
               <RefreshCw className={restarting ? "animate-spin" : ""} aria-hidden="true" />
               {restarting ? "Restarting..." : "Restart Services"}

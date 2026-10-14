@@ -77,7 +77,7 @@ export default function LabRoute() {
   }
 
   return (
-    <Page>
+    <Page scroll="page" role="region" aria-label="Strategy Lab" tabIndex={0}>
       <PageHeader
         title="Strategy Lab"
         tourTarget="strategy-picker"

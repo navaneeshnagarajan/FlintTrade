@@ -3,8 +3,8 @@ import { Outlet, useLocation } from "react-router";
 import { useThemeStore } from "@/stores/themeStore";
 import { useApplyDensity } from "@/hooks/useApplyDensity";
 import { useApplyFontScale } from "@/hooks/useApplyFontScale";
-import { AITutorPill } from "@/components/help/AITutorPill";
-import { UpgradeSuggestionHost } from "@/components/help/UpgradeSuggestion";
+import { LogoutNotice } from "@/components/LogoutNotice";
+import { AppCompanion } from "@/components/help/LocalHelp";
 
 const ROUTE_TITLES: Record<string, string> = {
   "/welcome": "Welcome",
@@ -50,11 +50,11 @@ export default function RootLayout() {
 
   return (
     <>
+      <LogoutNotice />
       <Outlet />
       {/* AITutorPill is rendered here so it appears on every route including /welcome and /explore */}
-      <AITutorPill />
-      {/* UpgradeSuggestionHost polls for upgrade suggestions every 60 s */}
-      <UpgradeSuggestionHost />
+      <AppCompanion />
+
     </>
   );
 }

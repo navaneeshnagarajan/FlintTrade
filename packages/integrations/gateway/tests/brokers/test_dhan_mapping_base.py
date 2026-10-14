@@ -212,7 +212,7 @@ def test_forever_gtt_kwargs():
     assert kw["order_flag"] == "SINGLE" and kw["trigger_Price"] == 2890.0
     assert kw["price"] == 2900.0 and kw["product_type"] == "CNC" and kw["tag"] == "G1"
     assert kw["disclosed_quantity"] == 2 and kw["validity"] == "IOC"
-    assert kw["symbol"] == "RELIANCE"
+    assert "symbol" not in kw
 
 
 def test_forever_without_trigger_raises():

@@ -12,7 +12,7 @@ autoInstallPeers: false
 saveExact: true
 auditLevel: high
 verifyStoreIntegrity: true
-fund: false
+# fund: false — removed setting in pnpm 12; no funding behaviour is enabled here.
 
 # pnpm self-management, disabled deliberately.
 #
@@ -27,8 +27,11 @@ fund: false
 # packageManagerStrictVersion turns a version mismatch against the
 # "packageManager" field in package.json into an error rather than a warning,
 # which is what makes the integrity pin load-bearing instead of advisory.
-managePackageManagerVersions: false
-packageManagerStrictVersion: true
+# managePackageManagerVersions: false (removed since pnpm 11)
+# packageManagerStrictVersion: true (removed since pnpm 11)
+# Primary pnpm migration table maps strict version refusal to pmOnFail: error.
+# This also prevents automatic manager download/switching on mismatch.
+pmOnFail: error
 
 # Dependency build scripts.
 #
@@ -101,7 +104,7 @@ peerDependencyRules:
 # so this pin is a fix, not an allowlist.
 # Verify a target exists before pinning to it: npm view brace-expansion@<version> version
 overrides:
-  '@hono/node-server': 2.1.3
+  '@hono/node-server': 2.1.4
   'body-parser@>=2.0.0 <2.3.0': 2.3.0
   'brace-expansion@<2.0.0': 2.1.7
   'brace-expansion@>=2.0.0 <2.1.7': 2.1.7
@@ -116,19 +119,20 @@ overrides:
   # GHSA-5jgf-p345-68v8 / GHSA-f65p-4m7j-42xc / GHSA-fph4-wmhf-6fwf /
   # GHSA-jqff-g426-hqxp, plus the 4.1.5 host-normalization and mailto-header
   # fixes. Pin the latest 4.x so ajv cannot keep 4.1.4.
-  fast-uri: 4.2.1
+  fast-uri: 4.2.2
   hono: 4.13.13
   # isInSubnet family confusion, unbounded Address6 diagnostics, fe80::/10,
   # and NAT64 64:ff9b:1::/48. Latest 10.x, not the 10.7.1 floor.
   ip-address: 10.7.3
   # GHSA-2883-xcg3-v3hh / CVE-2026-84375: empty merge-source CPU bypass,
   # patched in 4.3.2 (and 3.15.2). The tree is already on the 4.x line.
-  js-yaml: 4.3.2
+  # Preserve the security pin for 4.x consumers; permit resolver-owned 5.x.
+  'js-yaml@>=4.0.0 <5.0.0': 4.3.2
   # GHSA-jrc7-96c5-q579 / CVE-2026-85061: XSS sanitizer bypass, patched in
   # 6.4.1. Keep the source dependency on the latest 6.x line. The terminal
   # renders through the matching plotly.js-dist-min bundle, whose embedded
   # dependencies must be checked separately when upgrading Plotly.
-  maplibre-gl: 6.12.0
+  maplibre-gl: 6.13.0
   postcss: 8.5.29
   # GHSA-rgj7-g3m4-5g8c: inherited libheif RCEs, patched in 0.35.4.
   # Stay on the latest 0.35.x.
@@ -137,7 +141,12 @@ overrides:
   # GHSA-w293-vg96-wgc3 (BalancedPool TLS validation bypass) are patched in
   # 7.29.1. Pin the current 7.30.0 line (dist-tag seven) so a transitive
   # 7.29.0 cannot remain. 8.x is patched in 8.10.2; this tree is forced onto 7.x.
-  undici: 7.30.0
+  # Supersedes the historical global 7.x coercion above: current jsdom requires
+  # ^8.11.2, @electron/get requests ^7.24.4, node-gyp requests ^6.25.0.
+  # Retain exact newest maintenance pins per compatible consumer line;
+  # 8.x is resolved normally from its actual parent range.
+  'undici@>=6.0.0 <7.0.0': 6.29.0
+  'undici@>=7.0.0 <8.0.0': 7.30.0
   # Eight HIGH name-injection / ReDoS advisories on the 0.8 line that
   # electron-builder's plist@3.1.0 still requests. 0.8.15 is the patched
   # release for that line (0.9.12 is the 0.9 equivalent).
@@ -161,7 +170,7 @@ overrides:
   # (CVE-2026-104845): promise thenable invocation and unbounded TypedArray
   # allocation. solid-js 1.9.15 still requests seroval 1.5.6. Stay on the
   # latest 1.6.x, not the minimum patched release.
-  seroval: 1.6.8
+  seroval: 1.6.9
 
 # Keep the upstream tarball/integrity and BSD-2-Clause licence. Fail installation
 # if this exact-version patch no longer applies. See patches/README.md.

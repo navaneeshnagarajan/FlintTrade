@@ -62,11 +62,9 @@ Response::
         }
     }
 
-Note: ``strategy_class`` cannot be passed via HTTP.  The endpoint uses
-a built-in ``BuyAndHoldStrategy`` (close-to-close returns) as a baseline.
-For full strategy walk-forward with a real strategy class, use
-:class:`~flinttrade_backtest.walk_forward.WalkForwardAnalyser`
-programmatically.
+An explicit ``strategy`` registry name is required. The selected candidate
+runs through its actual engine. ``BuyAndHold`` is an explicit research baseline,
+never an error fallback. Results are exploratory, not qualification receipts.
 
 Response::
 
@@ -321,9 +319,8 @@ def run_permutation_test() -> tuple[Response, int]:
 def run_walk_forward() -> tuple[Response, int]:
     """Run walk-forward analysis on a bar series.
 
-    Uses a built-in buy-and-hold baseline strategy.  For custom strategy
-    classes use :class:`~flinttrade_backtest.walk_forward.WalkForwardAnalyser`
-    programmatically.
+    Runs the explicitly named registered strategy, with a fresh instance per
+    window. Failed windows retain their reasons and cannot establish robustness.
 
     Request JSON:
         bars (list[dict], required): OHLCV bar dicts with a ``"close"`` key.
@@ -335,6 +332,21 @@ def run_walk_forward() -> tuple[Response, int]:
     """
     body: dict[str, Any] = request.get_json(silent=True) or {}
 
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "JSON object required"}), 400
+    from .strategies import ALL_STRATEGIES, BUILTIN_STRATEGIES, STRATEGY_REGISTRY
+
+    candidate = body.get("strategy")
+    available = {**STRATEGY_REGISTRY, **ALL_STRATEGIES, **BUILTIN_STRATEGIES,
+                 "BuyAndHold": _BuyAndHoldStrategy}
+    if not isinstance(candidate, str) or candidate not in available:
+        return jsonify({"status": "error", "message": "An explicit known strategy is required"}), 400
+    kwargs = body.get("strategy_kwargs", {})
+    if not isinstance(kwargs, dict):
+        return jsonify({"status": "error", "message": "strategy_kwargs must be an object"}), 400
+    kwargs = dict(kwargs)
+    if "symbol" in body:
+        kwargs["symbol"] = body["symbol"]
     bars_raw = body.get("bars")
     if not isinstance(bars_raw, list) or not bars_raw:
         return jsonify({
@@ -359,8 +371,8 @@ def run_walk_forward() -> tuple[Response, int]:
     try:
         result = analyser.analyse(
             bars=bars_raw,
-            strategy_class=_BuyAndHoldStrategy,
-            strategy_kwargs={},
+            strategy_class=available[candidate],
+            strategy_kwargs=kwargs,
             metric=metric,
         )
     except ValueError:
@@ -371,6 +383,8 @@ def run_walk_forward() -> tuple[Response, int]:
 
     logger.info(
         "Walk-forward complete: %d splits, degradation=%.1f%%, robust=%s",
-        result.n_splits_run, result.degradation_pct, result.is_robust,
+        result.n_splits_run, result.degradation_pct or 0, result.is_robust,
     )
-    return jsonify({"status": "success", "data": result.as_dict()}), 200
+    data = result.as_dict()
+    data["candidate"] = candidate
+    return jsonify({"status": "success" if result.status == "completed" else "error", "data": data}), (200 if result.status == "completed" else 422)

@@ -312,8 +312,11 @@ class TestHostResourceReadings:
 
         health = agg.get_health()
 
-        assert health["status"] == "ok"
-        assert "gpu" not in health
+        assert health["status"] == "degraded"  # no broker/DB collection, not a healthy skipped check
+        assert health["broker"]["status"] == "unavailable"
+        assert health["duckdb"]["status"] == "unavailable"
+        assert health["gpu"]["status"] == "unavailable"
+        assert "used_pct" not in health["gpu"]
         assert health["cpu"]["used_pct"] == 99.0
         assert health["network"]["scope"] == "host"
         assert health["memory"]["scope"] == "host"

@@ -32,6 +32,7 @@ def _mock_perm_result():
 def _mock_wf_result():
     r = MagicMock()
     r.n_splits_run = 5
+    r.status = "completed"
     r.degradation_pct = 20.5
     r.is_robust = True
     r.as_dict.return_value = {
@@ -125,7 +126,7 @@ def test_walkforward_ok(client):
 
         resp = client.post(
             "/v1/backtest/walkforward",
-            json={"bars": _BARS},
+            json={"bars": _BARS, "strategy": "BuyAndHold"},
         )
 
     assert resp.status_code == 200

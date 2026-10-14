@@ -158,9 +158,9 @@ def test_installed_kotak_pin_and_request_chain_match_distribution_record(record_
     metadata = dist.read_text("direct_url.json")
     assert isinstance(metadata, str)
     source = json.loads(metadata)
-    assert dist.version == "3.0.8"
-    assert source["vcs_info"]["commit_id"] == "9a37488d77dc96442ee2a90ef78462e688cf4856"
-    assert source["vcs_info"]["requested_revision"] == "9a37488d77dc96442ee2a90ef78462e688cf4856"
+    assert dist.version == "3.0.9"
+    assert source["vcs_info"]["commit_id"] == "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
+    assert source["vcs_info"]["requested_revision"] == "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
     module_path = neo_api_client.__file__
     assert isinstance(module_path, str)
     assert Path(module_path).parent.samefile(str(dist.locate_file("neo_api_client")))

@@ -73,14 +73,15 @@ vi.mock("@/hooks/useOrders", () => ({
   useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false }),
 }));
 
-const mockMode = vi.hoisted(() => ({ current: "practice" }));
+// Setup imports the real account/incident scope readers. Keep their mode and
+// the widget's mode on the same production store; a module mock splits them.
+import { useModeStore, type AppMode } from "@/stores/modeStore";
 
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: Object.assign(
-    (selector: (s: { mode: string }) => unknown) => selector({ mode: mockMode.current }),
-    { getState: () => ({ mode: mockMode.current }) },
-  ),
-}));
+const selectedMode = {
+  set current(mode: AppMode) {
+    act(() => useModeStore.setState({ mode }));
+  },
+};
 
 vi.mock("@/lib/market", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/market")>()),
@@ -129,7 +130,7 @@ async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell
 describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
     mockOpenPositions.rows = [];
     mockOpenOrders.rows = [];
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
@@ -572,7 +573,7 @@ describe("OrderPadWidget", () => {
   });
 
   it("caps Close at the open quantity and keeps it enabled while Laya is Down", async () => {
-    mockMode.current = "live";
+    selectedMode.current = "live";
     useOperatorSignalStore.setState({ decisionStatus: "down" });
     mockOpenPositions.rows = [{
       symbol: "NIFTY",
@@ -625,7 +626,7 @@ describe("OrderPadWidget", () => {
   });
 
   it("keeps Close reduce-only on a new explicit request, never offering Retry after a lost response", async () => {
-    mockMode.current = "live";
+    selectedMode.current = "live";
     mockOpenPositions.rows = [{
       symbol: "NIFTY",
       exchange: "NSE",
@@ -795,7 +796,7 @@ describe("OrderPadWidget", () => {
 describe("OrderPadWidget options premium prefill", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
   });
 
   function renderOptionsPad(): void {
@@ -821,7 +822,7 @@ describe("OrderPadWidget options premium prefill", () => {
   });
 
   it("shows the sandbox premium hint on options exchanges in Practice", () => {
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
@@ -830,7 +831,7 @@ describe("OrderPadWidget options premium prefill", () => {
   });
 
   it("labels Explore option premium as sample, not Live", () => {
-    mockMode.current = "explore";
+    selectedMode.current = "explore";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
@@ -866,7 +867,7 @@ describe("OrderPadWidget options premium prefill", () => {
 describe("OrderPadWidget F&O lot-size validation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -1047,11 +1048,11 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
       symbol, name: symbol, exchange, instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
     }));
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
   });
 
   it("opens the sample review from Explore Sample Buy without requiring a broker", async () => {
-    mockMode.current = "explore";
+    selectedMode.current = "explore";
     render(<OrderPadWidget {...defaultProps} />);
 
     expect(screen.getByRole("button", { name: /example buy/i })).toBeInTheDocument();
@@ -1064,7 +1065,7 @@ describe("OrderPadWidget shared pre-trade guards", () => {
   });
 
   it("confirms an Explore Sample Buy on the paper path, never as a live order", async () => {
-    mockMode.current = "explore";
+    selectedMode.current = "explore";
     mockPlaceOrder.mockResolvedValue({ orderId: "SAMPLE-EXPLORE" });
     render(<OrderPadWidget {...defaultProps} />);
 
@@ -1134,7 +1135,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
       symbol, name: symbol, exchange, instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
     }));
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
   });
 
   it("renders distinct Practice review stage with exact details and simulated/no-broker copy before any placement", async () => {
@@ -1221,7 +1222,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     await screen.findByRole("dialog", { name: /review practice order/i });
 
-    mockMode.current = "live";
+    selectedMode.current = "live";
     view.rerender(<OrderPadWidget {...props} params={{ channel: "blue" }} />);
 
     await vi.waitFor(() => {
@@ -1236,8 +1237,15 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
 
-    mockMode.current = "live";
-    fireEvent.click(confirm);
+    act(() => {
+      useModeStore.setState({ mode: "live" });
+      // The review is still committed: confirm must read the store before
+      // React renders the subscription update and removes this button.
+      expect(confirm).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /review practice order/i })).toBeVisible();
+      fireEvent.click(confirm);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/mode changed/i);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
@@ -1259,7 +1267,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
       { mode: "practice" },
     );
 
-    mockMode.current = "live";
+    selectedMode.current = "live";
     await act(async () => {
       resolveOrder({ orderId: "PRAC-PIN" });
       await Promise.resolve();
@@ -1273,7 +1281,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     await screen.findByRole("dialog", { name: /review practice order/i });
 
-    mockMode.current = "live";
+    selectedMode.current = "live";
     view.rerender(<OrderPadWidget {...props} params={{ channel: "blue" }} />);
     await vi.waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
@@ -1306,7 +1314,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
   });
 
   it("leaves the existing Live placement behaviour untouched and never opens Practice review", async () => {
-    mockMode.current = "live";
+    selectedMode.current = "live";
     render(<OrderPadWidget {...defaultProps} />);
 
     fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));

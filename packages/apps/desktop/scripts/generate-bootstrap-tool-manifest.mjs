@@ -8,23 +8,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const nodeVersion = "22.23.2";
-const uvVersion = "0.11.16";
+const nodeVersion = "26.11.1";
+const uvVersion = "0.13.0";
+const pnpmVersion = "12.11.2";
 const authoritativeChecksumDigests = Object.freeze({
-  node: "778ac5b2fcdbd68d9c0ae9f4310674faa3af0910bd0d18e7f6597787c40a3e39",
-  uv: "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a",
+  node: "75ff0c104acddb008964dd5feb88f58844b652820cb1cb01696f95031372b293",
+  uv: "dc052c54b83ec8a6c04899ce4ee66f9e7fda667bc56145747b78099d23ca22c7",
+  pnpm: "5e7a55df966ff3301e84eccfbd3bd6fe939d07415c1f4e96eed96dfc888fae1d",
 });
 // Node releases are signed by whichever release manager cut them, so the pinned
 // key travels WITH the pinned version - it is not a stable repository constant.
-// v22.23.1 was signed by Rafael Gonzaga, whose key expired on 2026-07-08; there
-// is therefore no currently-valid key for that release, and the only route to a
-// verifiable signature is a version signed by a key that has not expired.
-// v22.23.2 is signed by Marco Ippolito (key valid to 2034-03), which is why the
-// version bump and the key swap are one change rather than two.
+// Verify the current release's signature with its exact release-team key;
+// a previously trusted key does not authorise a different release signature.
 const nodeSignature = Object.freeze({
-  fingerprint: "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
-  keySha256: "9c51e903b0da945fc21947fd6fce8fb4d72bc20ddf82e8f0aada694e9688447d",
-  sha256: "169f1452c14cd653247408352f1534b9f31e3d13f9c6399c3977368095e11eda",
+  fingerprint: "5BE8A3F6C8A5C01D106C0AD820B1A390B168D356",
+  keySha256: "5115095e2f8010c75da052ecb1cfb3af630e084f0f8daa93a863557b01b0f90a",
+  sha256: "671e48de01184d7b0aa3df79c7aaa373ede2374231099973643a20311ed372f9",
   url: `https://nodejs.org/dist/v${nodeVersion}/SHASUMS256.txt.sig`,
 });
 const targetFiles = {
@@ -61,7 +60,7 @@ function parseArgs(argv) {
       "checksums",
       `node-v${nodeVersion}-SHASUMS256.txt`,
     ),
-    nodeReleaseKey: path.join(desktopRoot, "resources", "bootstrap", "checksums", "node-release-marco-ippolito.asc"),
+    nodeReleaseKey: path.join(desktopRoot, "resources", "bootstrap", "checksums", "node-release-key.asc"),
     nodeSignature: path.join(
       desktopRoot,
       "resources",
@@ -70,6 +69,7 @@ function parseArgs(argv) {
       `node-v${nodeVersion}-SHASUMS256.txt.sig`,
     ),
     uvChecksums: path.join(desktopRoot, "resources", "bootstrap", "checksums", `uv-${uvVersion}-sha256.sum`),
+    pnpmAssets: path.join(desktopRoot, "resources", "bootstrap", "checksums", `pnpm-${pnpmVersion}-assets.json`),
     verifySignature: false,
   };
 
@@ -89,6 +89,7 @@ function parseArgs(argv) {
       "--node-release-key": "nodeReleaseKey",
       "--node-signature": "nodeSignature",
       "--uv-checksums": "uvChecksums",
+      "--pnpm-assets": "pnpmAssets",
     }[argument];
     if (!key || !argv[index + 1]) throw new Error(`Unknown or incomplete argument: ${argument}`);
     options[key] = path.resolve(argv[index + 1]);
@@ -127,12 +128,15 @@ function requiredDigest(table, file, label) {
   return digest;
 }
 
-export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, nodeSignatureContent, packageContent, uvChecksumContent }) {
+export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, nodeSignatureContent, packageContent, uvChecksumContent, pnpmAssetContent }) {
   if (sha256(nodeChecksumContent) !== authoritativeChecksumDigests.node) {
     throw new Error("Node checksum snapshot does not match the pinned authoritative file digest.");
   }
   if (sha256(uvChecksumContent) !== authoritativeChecksumDigests.uv) {
     throw new Error("uv checksum snapshot does not match the pinned authoritative file digest.");
+  }
+  if (sha256(pnpmAssetContent) !== authoritativeChecksumDigests.pnpm) {
+    throw new Error("pnpm asset snapshot does not match the pinned authoritative file digest.");
   }
   if (sha256(nodeSignatureContent) !== nodeSignature.sha256) {
     throw new Error("Node checksum signature does not match its pinned authoritative digest.");
@@ -141,9 +145,10 @@ export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, n
     throw new Error("Node release key does not match its pinned authoritative digest.");
   }
   const packageMetadata = JSON.parse(packageContent);
-  const packageManager = /^pnpm@(\d+\.\d+\.\d+)\+(sha512)\.([0-9a-f]+)$/.exec(packageMetadata.packageManager ?? "");
-  if (!packageManager || packageManager[1] !== "10.34.5") {
-    throw new Error("The repository packageManager must integrity-pin pnpm 10.34.5.");
+  const pnpmSnapshot = JSON.parse(pnpmAssetContent);
+  const packageManager = /^pnpm@(\d+\.\d+\.\d+)\+(sha512)\.([0-9a-f]{128})$/.exec(packageMetadata.packageManager ?? "");
+  if (!packageManager || packageManager[1] !== pnpmVersion || packageMetadata.packageManager !== pnpmSnapshot.packageManager) {
+    throw new Error(`The repository packageManager must integrity-pin the verified pnpm ${pnpmVersion} release.`);
   }
   const nodeChecksums = checksumTable(nodeChecksumContent, "Node");
   const uvChecksums = checksumTable(uvChecksumContent, "uv");
@@ -185,9 +190,20 @@ export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, n
         sha256: sha256(uvChecksumContent),
         url: `https://github.com/astral-sh/uv/releases/download/${uvVersion}/sha256.sum`,
       },
+      pnpm: {
+        // This table is app-owned, derived from the platform archives checked
+        // against npm's published dist.integrity, not an upstream checksum body.
+        sha256: sha256(pnpmAssetContent),
+        snapshot: `checksums/pnpm-${pnpmVersion}-assets.json`,
+        sources: [
+          `https://registry.npmjs.org/pnpm/${pnpmVersion}`,
+          ...Object.keys(targetFiles).map((target) => `https://registry.npmjs.org/@pnpm/exe.${target}/${pnpmVersion}`),
+        ],
+      },
     },
     node: { version: nodeVersion, assets: nodeAssets },
     pnpm: {
+      assets: pnpmSnapshot.assets,
       version: packageManager[1],
       integrity: `${packageManager[2]}-${packageManager[3]}`,
       packageManager: packageMetadata.packageManager,
@@ -296,6 +312,7 @@ function main() {
       nodeSignatureContent: readFileSync(options.nodeSignature),
       packageContent: readFileSync(path.resolve(desktopRoot, "../../..", "package.json"), "utf8"),
       uvChecksumContent: readFileSync(options.uvChecksums, "utf8"),
+      pnpmAssetContent: readFileSync(options.pnpmAssets, "utf8"),
     }),
     null,
     2,

@@ -16,7 +16,7 @@ import { useMemo, useCallback, useState } from "react";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 import { useThemeStore } from "@/stores/themeStore";
-import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { APPS } from "@/layout/appCatalog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,7 +117,6 @@ export function useCommandRegistry() {
   const setTheme = useThemeStore((s) => s.setTheme);
   const setMode  = useThemeStore((s) => s.setMode);
   const mode     = useThemeStore((s) => s.mode);
-  const tradeLevel = useSkillLevel("trade");
 
   const [recentIds, setRecentIds] = useState<string[]>(loadRecentIds);
 
@@ -125,11 +124,7 @@ export function useCommandRegistry() {
   // the theme store actions change identity (effectively: once per mount).
   const commands: Command[] = useMemo(() => {
     // ----- Widget commands (one per entry in widgetCatalog) -----
-    const visibleWidgets = widgetCatalog.filter((widget) => {
-      if (tradeLevel === "advanced") return true;
-      if (tradeLevel === "intermediate") return INTERMEDIATE_WIDGET_IDS.has(widget.id);
-      return BEGINNER_WIDGET_IDS.has(widget.id);
-    });
+    const visibleWidgets = widgetCatalog;
 
     const widgetCommands: Command[] = visibleWidgets.map((w) => ({
       id:          `widget:${w.id}`,
@@ -181,19 +176,7 @@ export function useCommandRegistry() {
     ];
 
     // ----- Navigate commands -----
-    const navEntries: Array<{ id: string; label: string; path: string; shortcut?: string }> = [
-      { id: "nav:home",    label: "Go to Home",    path: "/home",    shortcut: "Alt+H" },
-      { id: "nav:trade",    label: "Go to Trade",    path: "/trade",    shortcut: "Alt+T" },
-      { id: "nav:invest",   label: "Go to Invest",   path: "/invest",   shortcut: "Alt+I" },
-      { id: "nav:learn",    label: "Go to Learn",    path: "/learn",    shortcut: "Alt+L" },
-      { id: "nav:lab",      label: "Go to Lab",      path: "/lab" },
-      { id: "nav:automate", label: "Go to Automate", path: "/automate" },
-      { id: "nav:ai",       label: "Go to AI",       path: "/ai" },
-      { id: "nav:settings", label: "Go to Settings", path: "/settings" },
-    ];
-    if (import.meta.env.DEV) {
-      navEntries.push({ id: "nav:admin", label: "Go to Admin", path: "/admin" });
-    }
+    const navEntries = APPS.map(app => ({ id: `nav:${app.id}`, label: `Go to ${app.name}`, path: app.path, shortcut: app.id === "terminal" ? "Alt+T" : undefined }));
 
     const navigateCommands: Command[] = navEntries.map((entry) => ({
       id:       entry.id,
@@ -315,7 +298,7 @@ export function useCommandRegistry() {
       ...layoutPresetCommands,
       ...themeCommands,
     ];
-  }, [setTheme, setMode, mode, tradeLevel]);
+  }, [setTheme, setMode, mode]);
 
   // ----- Derived: commands indexed by id -----
   const commandById = useMemo(() => {

@@ -237,6 +237,7 @@ if (!hasSingleInstanceLock) {
   let sourceRuntimePrepared = false;
   const startupController = createStartupRecoveryController({
     bootstrap: bootstrapController,
+    recoveredBackend: backendRuntime.getRunning,
     recovery: {
       cancel: sourceUpdateRuntime.cancelRecovery,
       async recover(signal) {
@@ -393,7 +394,7 @@ if (!hasSingleInstanceLock) {
         // Seed the known installed source revision so Settings -> Updates reports
         // it before the user runs a manual check, instead of "Not reported".
         if (result.revision !== undefined) sourceUpdateState.noteCurrentVersion(result.revision);
-        await backendRuntime.start();
+        await backendRuntime.startAfterBootstrap(result);
         return true;
       } catch {
         lifecycle!.markBackendFailed();

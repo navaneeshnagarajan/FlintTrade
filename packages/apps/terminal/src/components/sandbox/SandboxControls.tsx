@@ -41,14 +41,20 @@ import {
 // API types
 // ---------------------------------------------------------------------------
 
-interface SandboxStatus {
-  capital: number;
-  initial_capital: number;
-  pnl: number;
-  gross_pnl?: number;
-  charges?: number;
-  trades_count: number;
-}
+// This panel consumes the complete /sandbox/status producer, not a partial
+// capital projection. Missing values are unavailable, never successful zeros.
+const sandboxStatusSchema = SandboxStatusSchema.extend({
+  status: z.literal("success"),
+  data: SandboxStatusSchema.shape.data.extend({
+    capital: z.number().finite(),
+    initial_capital: z.number().finite(),
+    pnl: z.number().finite(),
+    gross_pnl: z.number().finite(),
+    charges: z.number().finite(),
+    trades_count: z.number().int().nonnegative(),
+  }),
+});
+type SandboxStatus = z.infer<typeof sandboxStatusSchema>["data"];
 
 const sandboxConfigSchema = z.object({
   starting_capital: z.number().finite().positive(),
@@ -62,15 +68,10 @@ const sandboxConfigSchema = z.object({
 
 type SandboxConfig = z.infer<typeof sandboxConfigSchema>;
 
-const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
-  starting_capital: 1_000_000,
-  equity_leverage: 1,
-  futures_leverage: 1,
-  option_buy_leverage: 1,
-  option_sell_leverage: 1,
-  squareoff_time: "15:15",
-  mcx_squareoff_time: "23:25",
-};
+const sandboxConfigResponseSchema = z.object({
+  status: z.literal("success"),
+  data: z.object({ config: sandboxConfigSchema }),
+});
 
 interface ExportData {
   capital: number;
@@ -89,20 +90,14 @@ async function fetchSandboxStatus(): Promise<SandboxStatus> {
   const resp = await fetch(`${BASE}/status`, { headers: buildHeaders(false) });
   if (!resp.ok) throw new Error("Failed to fetch Practice status.");
   const raw: unknown = await resp.json();
-  const result = SandboxStatusSchema.safeParse(raw);
-  if (!result.success) {
-    console.error("[SandboxControls] /sandbox/status shape mismatch:", result.error.issues);
-    // Return safe fallback so UI does not crash
-    return { capital: 0, initial_capital: 0, pnl: 0, trades_count: 0 };
-  }
-  return result.data.data as SandboxStatus;
+  return sandboxStatusSchema.parse(raw).data;
 }
 
 async function fetchSandboxConfig(): Promise<SandboxConfig> {
   const resp = await fetch(`${BASE}/config`, { headers: buildHeaders(false) });
   if (!resp.ok) throw new Error("Failed to fetch Practice policy.");
-  const raw = await resp.json() as { data?: { config?: unknown } };
-  return sandboxConfigSchema.parse(raw.data?.config);
+  const raw: unknown = await resp.json();
+  return sandboxConfigResponseSchema.parse(raw).data.config;
 }
 
 async function updateSandboxConfig(config: SandboxConfig): Promise<SandboxConfig> {
@@ -112,8 +107,8 @@ async function updateSandboxConfig(config: SandboxConfig): Promise<SandboxConfig
     body: JSON.stringify(config),
   });
   if (!resp.ok) throw new Error("Failed to save Practice policy.");
-  const raw = await resp.json() as { data?: { config?: unknown } };
-  return sandboxConfigSchema.parse(raw.data?.config);
+  const raw: unknown = await resp.json();
+  return sandboxConfigResponseSchema.parse(raw).data.config;
 }
 
 async function adjustCapital(delta: number): Promise<SandboxStatus> {
@@ -202,13 +197,13 @@ export default function SandboxControls() {
   }, []);
 
   // Status query
-  const { data: status, isLoading } = useQuery({
+  const { data: status, isLoading, isError: statusError } = useQuery({
     queryKey: ["sandboxStatus"],
     queryFn: fetchSandboxStatus,
     retry: 1,
   });
 
-  const { data: sandboxConfig, isLoading: configLoading } = useQuery({
+  const { data: sandboxConfig, isLoading: configLoading, isError: configError, isFetching: configFetching, refetch: reloadConfig } = useQuery({
     queryKey: ["sandboxConfig"],
     queryFn: fetchSandboxConfig,
     retry: 1,
@@ -216,7 +211,7 @@ export default function SandboxControls() {
 
   const configForm = useForm<SandboxConfig>({
     resolver: zodResolver(sandboxConfigSchema),
-    defaultValues: DEFAULT_SANDBOX_CONFIG,
+    // No policy is invented before an authoritative read.
   });
 
   useEffect(() => {
@@ -297,6 +292,7 @@ export default function SandboxControls() {
   };
 
   const onConfigSubmit = (values: SandboxConfig) => {
+    if (!sandboxConfig || configError || configFetching) return;
     configMutation.mutate(values);
   };
 
@@ -322,7 +318,7 @@ export default function SandboxControls() {
 
         {isLoading ? (
           <div className="h-8 w-40 rounded bg-surface-hover animate-pulse" aria-label="Loading capital..." />
-        ) : (
+        ) : !status || statusError ? <p role="alert">Sandbox balance and P&L unavailable; no zero balance is inferred.</p> : (
           <div className="space-y-0.5">
             <p className="font-mono font-bold text-2xl text-text-primary">
               ₹{formatInr(status?.capital ?? 0)}
@@ -427,18 +423,18 @@ export default function SandboxControls() {
       {/* Divider */}
       <div className="border-t border-border-default" />
 
-      <form
+      {sandboxConfig && !configError ? <form
         onSubmit={configForm.handleSubmit(onConfigSubmit)}
         className="space-y-3"
         aria-label="Practice policy"
-      >
+      ><fieldset disabled={configFetching || configMutation.isPending} className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-medium text-text-secondary">Practice Policy</p>
           <Button
             type="submit"
             variant="outline"
             size="sm"
-            disabled={configLoading || configMutation.isPending}
+            disabled={configFetching || configMutation.isPending}
           >
             {configMutation.isPending ? "Saving..." : "Save Policy"}
           </Button>
@@ -529,7 +525,7 @@ export default function SandboxControls() {
         {configMutation.isSuccess && (
           <p className="text-xs text-profit" role="status">Practice policy saved.</p>
         )}
-      </form>
+      </fieldset></form> : <section className="space-y-2"><p role={configLoading ? "status" : "alert"}>{configLoading ? "Reading Practice policy…" : "Practice policy unavailable; editing is disabled. No defaults have been applied."}</p><Button type="button" variant="outline" disabled={configFetching} onClick={() => void reloadConfig()}>Retry policy read</Button></section>}
 
       <div className="border-t border-border-default" />
 

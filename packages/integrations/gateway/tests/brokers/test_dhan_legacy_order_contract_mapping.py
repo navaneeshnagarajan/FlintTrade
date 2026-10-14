@@ -165,7 +165,7 @@ def test_legacy_forever_absent_second_leg_and_exact_oco_request() -> None:
     assert mapped == {"security_id": "11536", "exchange_segment": "NSE_EQ", "transaction_type": "BUY",
                       "product_type": "CNC", "order_type": "LIMIT", "quantity": 10, "price": 100.0,
                       "trigger_Price": 99.0, "order_flag": "OCO", "disclosed_quantity": 0,
-                      "validity": "IOC", "symbol": "TCS", "price1": 110.0, "trigger_Price1": 109.0,
+                      "validity": "IOC", "price1": 110.0, "trigger_Price1": 109.0,
                       "quantity1": 9007199254740993, "tag": "offline-contract"}
 
 

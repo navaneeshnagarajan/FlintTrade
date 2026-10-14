@@ -35,6 +35,7 @@ const SUPPRESSED_ROUTE_PREFIXES = [
   "/invest",
   "/ai",
   "/lab",
+  "/testing",
   "/automate",
   "/ditto",
   "/admin",
@@ -56,7 +57,7 @@ export function NoConnectionOverlay({ suppress = false }: { suppress?: boolean }
 
   // Issue #72 — Don't interrupt routes that work without a live connection.
   const isSuppressedRoute = SUPPRESSED_ROUTE_PREFIXES.some((prefix) =>
-    location.pathname.startsWith(prefix),
+    location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
   );
 
   useEffect(() => {

@@ -25,6 +25,7 @@ const caps = vi.hoisted(() => ({
 
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
+  useLocation: () => window.location,
 }));
 
 vi.mock("@/components/brand/Logo", () => ({

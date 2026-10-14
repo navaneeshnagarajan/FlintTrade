@@ -139,6 +139,7 @@ export interface CancelAllParams {
 // Fetch core
 // ---------------------------------------------------------------------------
 
+import { captureOperatorIncidentScope } from "./operatorIncidentScope";
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 function withNativeBrokerTarget<T extends BrokerTarget>(target: T): T {
@@ -174,6 +175,7 @@ async function request<T>(
   path: string,
   options: { body?: object; query?: Record<string, string | undefined> } = {},
 ): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const mode = useModeStore.getState().mode;
   // Every non-GET here is a live broker-management WRITE (forever/GTT, super,
   // conditional-trigger, multi, cancel-all, cancel-smart). Fail closed on the
@@ -201,7 +203,7 @@ async function request<T>(
     });
   } catch {
     const message = "Cannot reach the FlintTrade backend — check that it is running.";
-    noteObservedFailure({ message, httpStatus: null, provenance: "order" });
+    noteObservedFailure({ message, httpStatus: null, provenance: "order", scope: incidentScope });
     throw new BrokerOrdersApiError(message);
   }
 
@@ -212,7 +214,7 @@ async function request<T>(
     const failureMessage = resp.ok
       ? `Broker orders API ${path}: invalid JSON response.`
       : `Broker orders API ${path}: HTTP ${resp.status}`;
-    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order" });
+    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order", scope: incidentScope });
     throw new BrokerOrdersApiError(failureMessage, resp.status);
   }
   const message = extractMessage(json);
@@ -224,7 +226,7 @@ async function request<T>(
 
   if (!resp.ok || isErrorBody) {
     const failureMessage = message ?? `Broker orders API ${path}: HTTP ${resp.status}`;
-    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order" });
+    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order", scope: incidentScope });
     throw new BrokerOrdersApiError(failureMessage, resp.status);
   }
 

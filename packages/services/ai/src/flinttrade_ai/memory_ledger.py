@@ -237,6 +237,7 @@ class MemoryQuery:
     text: str = ""
     limit: int = 50
     minimum_scope: EvidenceUseScope = EvidenceUseScope.ISOLATED_RESEARCH
+    metadata_filters: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if self.domain is not None and type(self.domain) is not MemoryDomain:
@@ -251,6 +252,10 @@ class MemoryQuery:
         for identity in ids:
             _id(identity)
         object.__setattr__(self, "event_ids", tuple(sorted(ids)))
+        filters = tuple(tuple(pair) for pair in self.metadata_filters)
+        if any(len(pair) != 2 or any(type(v) is not str or not v for v in pair) for pair in filters):
+            raise ValueError("invalid memory metadata filters")
+        object.__setattr__(self, "metadata_filters", filters)
 
     def to_dict(self) -> dict[str, Any]:
         """Detach the exact query/filter used for influence selection."""
@@ -260,6 +265,7 @@ class MemoryQuery:
             "text": self.text,
             "limit": self.limit,
             "minimum_scope": self.minimum_scope.value,
+            **({"metadata_filters": [list(pair) for pair in self.metadata_filters]} if self.metadata_filters else {}),
         }
 
 
@@ -486,11 +492,22 @@ class MemoryLedger:
         except (ValueError, TypeError, KeyError) as exc:
             raise MemoryUnavailable("invalid stored memory event") from exc
 
-    def append(self, event: MemoryEvent) -> MemoryEvent:
+    def append(self, event: MemoryEvent, *, expected_head: tuple[str, str | None] | None = None) -> MemoryEvent:
         """Append exact evidence idempotently, intersecting every parent ceiling."""
         if type(event) is not MemoryEvent:
             raise ValueError("exact MemoryEvent required")
         with self._transaction() as db:
+            if expected_head is not None:
+                stream, expected = expected_head
+                if not isinstance(event.payload, Mapping) or event.payload.get("stream") != stream:
+                    raise ValueError("conditional append requires matching stream")
+                head = None
+                for (identity,) in db.execute("SELECT event_id FROM events ORDER BY rowid"):
+                    previous_event = self._event(db, identity)
+                    if isinstance(previous_event.payload, Mapping) and previous_event.payload.get("stream") == stream:
+                        head = identity
+                if head != expected:
+                    raise MemoryConflict("memory stream head changed")
             ancestors = []
             identities = tuple(
                 dict.fromkeys((*event.parent_ids, *((event.correction_of,) if event.correction_of else ())))
@@ -528,6 +545,17 @@ class MemoryLedger:
             )
             return event
 
+    def get_event(self, event_id: str) -> MemoryEvent:
+        """Read immutable evidence through the trusted writer interface."""
+        with self._transaction() as db:
+            return self._event(db, event_id)
+
+    def history(self, domain: MemoryDomain | None = None) -> tuple[MemoryEvent, ...]:
+        """Return validated append order for core-owned curation, not prompt recall."""
+        with self._transaction() as db:
+            events = tuple(self._event(db, row[0]) for row in db.execute("SELECT event_id FROM events ORDER BY rowid"))
+            return tuple(event for event in events if domain is None or event.domain is domain)
+
     def read_projection(self) -> MemoryReadProjection:
         """Return only receipt-backed retrieval/replay operations for the gateway."""
         return MemoryReadProjection(self)
@@ -545,6 +573,10 @@ class MemoryLedger:
                 or (query.domain is not None and event.domain is not query.domain)
                 or (query.event_ids and event.event_id not in query.event_ids)
                 or (query.text and query.text.casefold() not in _canonical(_thaw(event.payload)).casefold())
+                or (query.metadata_filters and (
+                    not isinstance(event.payload, Mapping)
+                    or any(event.payload.get(key) != value for key, value in query.metadata_filters)
+                ))
                 or _SCOPES.index(event.rights.rights.max_evidence_use_scope) < _SCOPES.index(query.minimum_scope)
                 or len(events) >= query.limit
             ):

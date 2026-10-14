@@ -30,7 +30,10 @@ export interface AuthSessionFence {
   readonly generation: number;
 }
 
+export interface LogoutResult { state: "local-only" | "pending" | "confirmed" | "unconfirmed"; code?: string }
+
 interface AuthState {
+  logoutResult: LogoutResult | null;
   status: AuthStatus;
   token: string | null;
   /**
@@ -142,6 +145,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     const nextGeneration = current.sessionGeneration + 1;
     set({
       status: "transitioning",
+      logoutResult: null,
       token: null,
       reauthToken: null,
       sessionGeneration: nextGeneration,
@@ -176,6 +180,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
   return {
     status: "unknown",
+    logoutResult: null,
     token: null,
     reauthToken: null,
     username: null,
@@ -211,6 +216,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       clearDemoSession();
       clearPersistedAuthSession();
       set((state) => ({
+        logoutResult: state.token || state.reauthToken ? { state: "local-only" as const } : state.logoutResult,
         status: "logged-out", token: null, reauthToken: null, username: null,
         expiresAt: null, _expiryTimerId: null,
         sessionGeneration: state.sessionGeneration + 1,

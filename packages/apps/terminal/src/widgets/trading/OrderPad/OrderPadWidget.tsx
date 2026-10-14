@@ -89,6 +89,7 @@ import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/Admis
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { LAYA_EXIT_WHILE_DOWN, liveWritesMuted } from "@/lib/operatorIncident";
+import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
@@ -916,6 +917,7 @@ function OrderPadWidget(props: WidgetProps) {
     authority?: { mode: "practice" | "live" },
     options?: { exit?: boolean },
   ): Promise<boolean> => {
+    const incidentScope = captureOperatorIncidentScope();
     const submissionMode = useModeStore.getState().mode;
     const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
     const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
@@ -925,7 +927,7 @@ function OrderPadWidget(props: WidgetProps) {
       const result = options?.exit
         ? await placeOrder(params, authority, { exit: true })
         : await placeOrder(params, authority);
-      const scopeStillCurrent = submissionScope === resolveDataScope({
+      const scopeStillCurrent = isOperatorIncidentScopeCurrent(incidentScope) && submissionScope === resolveDataScope({
         ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
       });
       if (scopeStillCurrent) setAdmission(null);
@@ -978,7 +980,7 @@ function OrderPadWidget(props: WidgetProps) {
       const presentation = submissionMode === "live" ? nativeOrderErrorPresentation(err, {
         broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
       }) : null;
-      if (submissionScope !== resolveDataScope({ ...useBrokerStore.getState(), mode: useModeStore.getState().mode })) {
+      if (!isOperatorIncidentScopeCurrent(incidentScope) || submissionScope !== resolveDataScope({ ...useBrokerStore.getState(), mode: useModeStore.getState().mode })) {
         emitNotification({
           category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true,
           title: presentation?.title ?? capturedOrderTitle("Order response", params),
@@ -1027,7 +1029,7 @@ function OrderPadWidget(props: WidgetProps) {
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
-      noteObservedFailure({ message: msg, httpStatus, provenance: "order" });
+      noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
       const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
       showToast("error", msg, 6000, retryable);
       emitNotification({

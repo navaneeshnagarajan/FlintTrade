@@ -96,8 +96,8 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     : showConnectedRead
       ? "Connected (read)"
       : mode === "practice"
-        ? "Practice"
-        : "Example";
+        ? "Sandbox · Paper"
+        : "Sandbox · Example";
 
   useEffect(() => {
     setConnectedReadPosture(showConnectedRead);
@@ -201,7 +201,7 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" aria-label="Mode" className="w-64">
           <DropdownMenuItem onSelect={() => { void selectPractice(); }}>
-            Practice
+            Sandbox (Paper)
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!brokerConnected}

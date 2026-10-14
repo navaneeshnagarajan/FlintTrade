@@ -588,7 +588,7 @@ class ProviderRegistry:
         start_date: str,
         end_date: str,
         *,
-        fallback: bool = True,
+        fallback: bool = False,
     ) -> ProviderResult:
         """Fetch historical data using the first suitable provider.
 
@@ -602,7 +602,7 @@ class ProviderRegistry:
             interval: Data interval.
             start_date: Start date "YYYY-MM-DD".
             end_date: End date "YYYY-MM-DD".
-            fallback: When True (default), try the next provider on failure.
+            fallback: Explicit per-call permission to try another provider. Defaults to False.
 
         Returns:
             ProviderResult from the first successful provider. If all providers
@@ -668,7 +668,7 @@ class ProviderRegistry:
         start_date: str,
         end_date: str,
         *,
-        fallback: bool = True,
+        fallback: bool = False,
     ) -> list[ProviderResult]:
         """Fetch historical data for multiple symbols.
 

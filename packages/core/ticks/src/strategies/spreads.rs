@@ -538,13 +538,13 @@ impl SpreadBacktest {
     fn check_max_loss(&self, unrealised: f64) -> bool {
         self.config
             .max_loss
-            .map_or(false, |limit| unrealised < -limit)
+            .is_some_and(|limit| unrealised < -limit)
     }
 
     fn check_target_profit(&self, unrealised: f64) -> bool {
         self.config
             .target_profit
-            .map_or(false, |target| unrealised > target)
+            .is_some_and(|target| unrealised > target)
     }
 
     fn entry_fees(&self, legs: &[LegState]) -> Result<f64, EngineError> {
@@ -1272,6 +1272,77 @@ mod tests {
         let result = bt.run(ts, vec![premiums], entries, exits).unwrap();
         // The position should have been exited (either by max_loss or end of data)
         assert!(result.total_trades >= 1);
+    }
+
+    #[test]
+    fn test_max_loss_preserves_strict_threshold() {
+        let mut cfg = SpreadConfig::new(100.0, 0.0, Some(10.0), None);
+        cfg.add_leg(LegConfig::new(OptionType::Call, 100.0, 1, 1));
+        let bt = SpreadBacktest::new("STRICT_LOSS".to_string(), cfg);
+
+        let result = bt
+            .run(
+                make_ts(4),
+                vec![vec![20.0, 10.0, 9.0, 30.0]],
+                vec![true, false, false, false],
+                vec![false; 4],
+            )
+            .unwrap();
+
+        // Equality keeps the position open; the next bar crosses the limit.
+        assert_eq!(result.total_trades, 1);
+        assert_eq!(result.total_pnl, -11.0);
+        assert_eq!(
+            result.equity_curve,
+            vec![100.0, 100.0, 90.0, 89.0, 89.0, 89.0]
+        );
+    }
+
+    #[test]
+    fn test_target_profit_preserves_strict_threshold() {
+        let mut cfg = SpreadConfig::new(100.0, 0.0, None, Some(10.0));
+        cfg.add_leg(LegConfig::new(OptionType::Call, 100.0, 1, 1));
+        let bt = SpreadBacktest::new("STRICT_PROFIT".to_string(), cfg);
+
+        let result = bt
+            .run(
+                make_ts(4),
+                vec![vec![20.0, 30.0, 31.0, 5.0]],
+                vec![true, false, false, false],
+                vec![false; 4],
+            )
+            .unwrap();
+
+        assert_eq!(result.total_trades, 1);
+        assert_eq!(result.total_pnl, 11.0);
+        assert_eq!(
+            result.equity_curve,
+            vec![100.0, 100.0, 110.0, 111.0, 111.0, 111.0]
+        );
+    }
+
+    #[test]
+    fn test_absent_risk_limits_preserves_position_until_end() {
+        for (premiums, expected_pnl) in [
+            (vec![20.0, 10.0, 9.0, 30.0], 10.0),
+            (vec![20.0, 30.0, 31.0, 5.0], -15.0),
+        ] {
+            let mut cfg = SpreadConfig::new(100.0, 0.0, None, None);
+            cfg.add_leg(LegConfig::new(OptionType::Call, 100.0, 1, 1));
+            let bt = SpreadBacktest::new("NO_LIMITS".to_string(), cfg);
+
+            let result = bt
+                .run(
+                    make_ts(4),
+                    vec![premiums],
+                    vec![true, false, false, false],
+                    vec![false; 4],
+                )
+                .unwrap();
+
+            assert_eq!(result.total_trades, 1);
+            assert_eq!(result.total_pnl, expected_pnl);
+        }
     }
 
     #[test]

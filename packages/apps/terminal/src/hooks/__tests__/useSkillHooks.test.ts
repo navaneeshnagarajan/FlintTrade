@@ -11,6 +11,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSkillStore } from "@/stores/skillStore";
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useFeatureGate } from "../useFeatureGate";
+import { useCommandRegistry } from "@/components/CommandPalette/useCommandRegistry";
+import { widgetCatalog } from "@/layout/widgetFactory";
+import { assertNativeWriteTargetReadyOrThrow, pickNativeWriteTarget, NATIVE_TARGET_NOT_READY_MESSAGE } from "@/services/brokerTargets";
+import type { Domain } from "@/types/skill";
 
 // ---------------------------------------------------------------------------
 // Import hooks
@@ -33,47 +41,73 @@ beforeEach(() => {
 // useSkillLevel
 // ---------------------------------------------------------------------------
 
+// Exercise discovery alongside the real frontend write-target refusal, not a
+// mocked readiness result. Presentation compatibility cannot mint authority.
+function useDiscovery(domain?: Domain) {
+  return {
+    level: useSkillLevel(domain),
+    gate: useFeatureGate("widget:orderpad", domain),
+    commands: useCommandRegistry().commands.filter(command => command.category === "widget").map(command => command.id),
+  };
+}
+function expectDiscoveryOnly(value: ReturnType<typeof useDiscovery>) {
+  expect(value.level).toBe("advanced");
+  expect(value.gate).toBe("visible");
+  expect(value.commands).toEqual(widgetCatalog.map(widget => `widget:${widget.id}`));
+  expect(value.commands).toContain("widget:orderpad");
+  expect(useAuthStore.getState().status).toBe("logged-out");
+  expect(useAuthStore.getState().token).toBeNull();
+  expect(useModeStore.getState().mode).toBe("live");
+  expect(useBrokerStore.getState().activeAccountId).toBe("native:upstox:READ_ONLY");
+  expect(useBrokerStore.getState().accounts[0].read_only).toBe(true);
+  expect(pickNativeWriteTarget("live")).toBeUndefined();
+  expect(() => assertNativeWriteTargetReadyOrThrow("live")).toThrow(NATIVE_TARGET_NOT_READY_MESSAGE);
+}
+
 describe("useSkillLevel", () => {
-  it("returns global level when no domain is specified", () => {
-    const { result } = renderHook(() => useSkillLevel());
-    expect(result.current).toBe("beginner"); // default
+  beforeEach(() => {
+    useAuthStore.setState({ status: "logged-out", token: null });
+    useModeStore.setState({ mode: "live" });
+    useBrokerStore.setState({ activeAccountId: "native:upstox:READ_ONLY", accounts: [{
+      account_id: "READ_ONLY", broker: "upstox", source: "native", status: "connected",
+      read_only: true, label: "Synthetic read-only", is_primary: true, connected_at: null, error_message: null,
+    }] });
   });
 
-  it("returns global level for a domain without override", () => {
-    const { result } = renderHook(() => useSkillLevel("trade"));
-    expect(result.current).toBe("beginner");
+  it("keeps default global discovery open without granting execution authority", () => {
+    const { result } = renderHook(() => useDiscovery());
+    expect(useSkillStore.getState().globalLevel).toBe("beginner");
+    expectDiscoveryOnly(result.current);
   });
 
-  it("returns domain override when one is set", () => {
+  it("keeps domain discovery open without an override or execution authority", () => {
+    const { result } = renderHook(() => useDiscovery("trade"));
+    expectDiscoveryOnly(result.current);
+  });
+
+  it("keeps a domain override presentation-only without execution authority", () => {
     useSkillStore.getState().setRouteOverride("trade", "advanced");
-
-    const { result } = renderHook(() => useSkillLevel("trade"));
-    expect(result.current).toBe("advanced");
+    const { result } = renderHook(() => useDiscovery("trade"));
+    expectDiscoveryOnly(result.current);
   });
 
-  it("reflects global level changes", () => {
-    const { result } = renderHook(() => useSkillLevel());
-
-    act(() => {
-      useSkillStore.getState().setGlobalLevel("intermediate");
-    });
-
-    expect(result.current).toBe("intermediate");
+  it("keeps discovery and authority unchanged after a global level change", () => {
+    const { result, rerender } = renderHook(() => useDiscovery());
+    expectDiscoveryOnly(result.current);
+    act(() => { useSkillStore.getState().setGlobalLevel("intermediate"); });
+    rerender();
+    expect(useSkillStore.getState().globalLevel).toBe("intermediate");
+    expectDiscoveryOnly(result.current);
   });
 
-  it("falls back to global when domain override is cleared", () => {
+  it("keeps discovery and authority unchanged when a domain override is cleared", () => {
     useSkillStore.getState().setGlobalLevel("intermediate");
     useSkillStore.getState().setRouteOverride("lab", "advanced");
-
-    const { result, rerender } = renderHook(() => useSkillLevel("lab"));
-    expect(result.current).toBe("advanced");
-
-    act(() => {
-      useSkillStore.getState().clearRouteOverride("lab");
-    });
+    const { result, rerender } = renderHook(() => useDiscovery("lab"));
+    expectDiscoveryOnly(result.current);
+    act(() => { useSkillStore.getState().clearRouteOverride("lab"); });
     rerender();
-
-    expect(result.current).toBe("intermediate");
+    expectDiscoveryOnly(result.current);
   });
 });
 

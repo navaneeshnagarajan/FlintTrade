@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "name": "R46 access grant revoke actual Testing Paper identity with unchanged live selection"
+    },
+    {
+      "name": "R46 access grant revoke actual Testing Paper identity with unchanged practice selection"
+    },
+    {
+      "name": "R46 exact rights-source selected read preview confirmation independent GET"
+    },
+    {
+      "name": "R46 exact rights-output selected read preview confirmation independent GET"
+    },
+    {
+      "name": "R46 exact evaluation selected read preview confirmation independent GET"
+    },
+    {
+      "name": "R46 exact candidate selected read preview confirmation independent GET"
+    },
+    {
+      "name": "R46 exact training-backend selected read preview confirmation independent GET"
+    },
+    {
+      "name": "R46 compact long document review keyboard cancel"
+    },
+    {
+      "name": "R46 mismatched reviewed rights refuse"
+    },
+    {
+      "name": "R46 learning dataset nine explicit bounds separate consent and existing binding"
+    },
+    {
+      "name": "R46 binding refusal expired retains no extra authority"
+    },
+    {
+      "name": "R46 binding refusal revoked retains no extra authority"
+    },
+    {
+      "name": "R46 binding refusal expanded retains no extra authority"
+    },
+    {
+      "name": "R46 history selector blank omission"
+    },
+    {
+      "name": "R46 history selector exact owned scope"
+    },
+    {
+      "name": "R46 history selector malformed refusal"
+    },
+    {
+      "name": "R46 held real preview retires across run without replay"
+    },
+    {
+      "name": "R46 held real preview retires across Activity without replay"
+    },
+    {
+      "name": "R46 held real ack retires across run without replay"
+    },
+    {
+      "name": "R46 held real ack retires across Activity without replay"
+    },
+    {
+      "name": "R46 held real readback retires across run without replay"
+    },
+    {
+      "name": "R46 held real readback retires across Activity without replay"
+    },
+    {
+      "name": "R46 protection not issued compact review and keyboard cancel"
+    },
+    {
+      "name": "R46 protection custody unavailable"
+    }
+  ]
+}

@@ -21,7 +21,7 @@ import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { EmptyState } from "@/components/ui/states";
 import { classifySerializedLayout, useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
-import { useTradingStore } from "@/stores/tradingStore";
+import { useCurrentTradingState } from "@/stores/tradingStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
 import WidgetPicker from "@/chrome/WidgetPicker";
@@ -68,10 +68,10 @@ const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
  * presentation, but cannot hide an active, loading, or unavailable kill switch.
  * Activation halts routing and asks the backend to attempt emergency actions.
  */
-function KillSwitchPill() {
+export function KillSwitchPill() {
   const queryClient = useQueryClient();
   const mode = useModeStore((s) => s.mode);
-  const totalPnl = useTradingStore((s) => s.totalPnl);
+  const { totalPnl, positionsStatus } = useCurrentTradingState();
   // mtmStoploss is stored as a positive rupee value, e.g. 5000 = ₹5,000 daily loss limit
   const mtmStoploss = useSettingsStore((s) => s.riskLimits.mtmStoploss);
   const {
@@ -132,7 +132,8 @@ function KillSwitchPill() {
   });
 
   const threshold = mtmStoploss > 0 ? mtmStoploss * 0.5 : Infinity;
-  const isNearLimit = totalPnl < 0 && Math.abs(totalPnl) >= threshold;
+  const hasPnl = positionsStatus === "ready" || positionsStatus === "stale";
+  const isNearLimit = hasPnl && totalPnl < 0 && Math.abs(totalPnl) >= threshold;
   const killSwitchState = safetyConfig === undefined
     ? safetyLoading ? "loading" : "unavailable"
     : safetyConfig.kill_switch_active ? "active" : "inactive";
@@ -142,7 +143,7 @@ function KillSwitchPill() {
 
   if (mode !== "live") return null;
 
-  const isAtLimit = mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
+  const isAtLimit = hasPnl && mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
   const isUnavailable = killSwitchState === "unavailable";
   const isLoading = killSwitchState === "loading";
   const statusLabel = isNearLimit && killSwitchState === "inactive"
@@ -207,6 +208,9 @@ function KillSwitchPill() {
             </span>
           </div>
           <span className="text-xs text-text-secondary">{statusText}</span>
+          {isNearLimit && positionsStatus === "stale" && (
+            <span className="text-xs text-warning">Stale positions — last known P&L</span>
+          )}
         </div>
         <Button
           size="sm"

@@ -2,11 +2,12 @@
  * WelcomeCard — Hero card (wide). Greeting + daily P&L + regime + position count.
  */
 
-import { useTradingStore } from "@/stores/tradingStore";
+import { useCurrentTradingState } from "@/stores/tradingStore";
 import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoPositions } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
+import { cn } from "@/lib/utils";
 import { BentoCard } from "@/components/bento/BentoCard";
 import { DemoBadge } from "./DemoBadge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
@@ -17,7 +18,7 @@ export function WelcomeCard() {
   const name = useOperatorGreetingName();
   const isExplore = useModeStore((s) => s.mode === "explore");
   const accountReadsEnabled = useAccountReadsEnabled();
-  const storePnl = useTradingStore((s) => s.totalPnl);
+  const aggregate = useCurrentTradingState();
   const query = usePositions({ enabled: accountReadsEnabled });
 
   // Demo mode: simulated positions + a P&L derived from them (the trading-store
@@ -27,7 +28,8 @@ export function WelcomeCard() {
   const positionCount = openPositions.length;
   const totalPnl = isExplore
     ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
-    : accountReadsEnabled ? storePnl : 0;
+    : aggregate.totalPnl;
+  const hasAggregate = isExplore || aggregate.positionsStatus === "ready" || aggregate.positionsStatus === "stale";
 
   const pnlPositive = totalPnl >= 0;
 
@@ -51,16 +53,19 @@ export function WelcomeCard() {
               {isExplore || accountReadsEnabled ? "Today's P&L" : "Broker required"}
             </p>
             <p
-              className="font-mono text-2xl font-semibold"
-              style={{ color: pnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
+              className={cn("font-mono text-2xl font-semibold", !hasAggregate ? "text-text-muted" : pnlPositive ? "text-bullish-text" : "text-bearish-text")}
             >
-              {pnlPositive ? "+" : ""}
-              {totalPnl.toLocaleString("en-IN", {
+              {hasAggregate ? `${pnlPositive ? "+" : ""}${totalPnl.toLocaleString("en-IN", {
                 style: "currency",
                 currency: "INR",
                 maximumFractionDigits: 0,
-              })}
+              })}` : "—"}
             </p>
+            {!isExplore && aggregate.positionsStatus !== "ready" && (
+              <p role="status" className="text-xs text-text-muted">
+                {aggregate.positionsStatus === "loading" ? "Loading positions" : aggregate.positionsStatus === "stale" ? "Positions stale — last known P&L" : "Positions unavailable"}
+              </p>
+            )}
           </div>
 
           {/* Position count */}
@@ -69,7 +74,7 @@ export function WelcomeCard() {
               Open Positions
             </p>
             <p className="font-mono text-2xl font-semibold text-text-primary">
-              {positionCount}
+              {hasAggregate ? positionCount : "—"}
             </p>
           </div>
 

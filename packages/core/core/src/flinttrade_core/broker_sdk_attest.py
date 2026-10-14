@@ -15,13 +15,14 @@ It is intentionally dependency-light and injectable: ``attest_all`` takes a
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from importlib import metadata
+from importlib import metadata, util
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -56,9 +57,15 @@ class AttestationResult:
     pinned_version: str
     installed_version: str | None
     status: str
+    # Configured policy kind, not an additional provenance/eligibility verdict.
+    # An explicit version-only test resolver never populates this field.
+    source_kind: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        if self.source_kind is None:
+            result.pop("source_kind")
+        return result
 
 
 def _default_brokers_lock() -> Path:
@@ -154,6 +161,174 @@ def _attest_kotak(pin: dict[str, Any]) -> tuple[str | None, str]:
     return installed, STATUS_OK
 
 
+_SOURCE_IDENTITIES = {
+    "dhanhq": ("dhanhq", "https://github.com/dhan-oss/DhanHQ-py.git"),
+    "upstox-python-sdk": ("upstox_client", "https://github.com/upstox/upstox-python.git"),
+    "kotakneoapi": ("neo_api_client", "https://github.com/Kotak-Neo/kotak-neo-python.git"),
+    "growwapi": ("growwapi", None),
+}
+
+
+# Explicit Groww-only policy: official SDK Git source and publisher attestation
+# are unavailable. These independently reviewed wheel pins are not Git identity.
+# The inventory seal is SHA256 of sorted, compact JSON for all original wheel
+# files except installer-rewritten RECORD. Includes package resources and build/
+# licence metadata. Updating this release requires reviewing new official bytes.
+_GROWW_RELEASE_ARTIFACT = {
+    "filename": "growwapi-1.5.0-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/e1/69/7dd0766c3a9dcf2688eb363a90fadca7a8388ac947efebd737b830bd478a/growwapi-1.5.0-py3-none-any.whl",
+    "sha256": "b4871ed19415b6ad7434bee2178f53aa1e180fbddd4a25693c458440f66939cc",
+}
+_GROWW_RELEASE_FILES_SHA256 = "550a790160b9cb2e905b2885d38eab6cdab3a40e6998154242cc8478f3d2fc25"
+
+
+def _published_release_pin_matches(pin: dict[str, Any]) -> bool:
+    """Bind installed bytes to one trusted release pin, not publisher provenance."""
+    files = pin.get("build_files")
+    if (
+        pin.get("name") != "growwapi"
+        or pin.get("version") != "1.5.0"
+        or pin.get("source_kind") != "published-release"
+        or pin.get("source_module") != "growwapi"
+        or any(key in pin for key in ("source_url", "source_commit", "source_tree"))
+        or pin.get("release_artifact") != _GROWW_RELEASE_ARTIFACT
+        or pin.get("sha256") != _GROWW_RELEASE_ARTIFACT["sha256"]
+        or pin.get("build_wheel_sha256") != _GROWW_RELEASE_ARTIFACT["sha256"]
+        or type(files) is not dict
+        or any(type(k) is not str or type(v) is not str for k, v in files.items())
+    ):
+        return False
+    inventory = json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(inventory).hexdigest() == _GROWW_RELEASE_FILES_SHA256
+
+
+def _published_release_direct_url_matches(raw: str | None) -> bool:
+    """A registry install has no PEP610 URL; a supplied URL must corroborate it."""
+    if raw is None:
+        return True
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result = dict(pairs)
+        if len(result) != len(pairs):
+            raise ValueError("Duplicate direct URL field")
+        return result
+
+    try:
+        direct = json.loads(raw, object_pairs_hook=unique_object)
+        if type(direct) is not dict or set(direct) != {"url", "archive_info"}:
+            return False
+        if direct["url"] != _GROWW_RELEASE_ARTIFACT["url"]:
+            return False
+        archive = direct["archive_info"]
+        if type(archive) is not dict or not archive or set(archive) - {"hash", "hashes"}:
+            return False
+        digest = _GROWW_RELEASE_ARTIFACT["sha256"]
+        return (
+            ("hash" not in archive or archive["hash"] == "sha256=" + digest)
+            and ("hashes" not in archive or archive["hashes"] == {"sha256": digest})
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _attest_source(pin: dict[str, Any]) -> tuple[str | None, str]:
+    """Check source, installed build bytes and import ownership, not just version."""
+    name = pin.get("name")
+    identity = _SOURCE_IDENTITIES.get(name) if type(name) is str else None
+    if identity is None:
+        return None, STATUS_PROVENANCE_MISMATCH
+    module, source_url = identity
+    distributions = list(metadata.distributions())
+    selected = [dist for dist in distributions if _distribution_name(dist) == name]
+    if len(selected) > 1:
+        return selected[0].version, STATUS_CONFLICT
+    if not selected:
+        return None, STATUS_MISSING
+    dist = selected[0]
+    installed = dist.version
+    if installed != pin.get("version"):
+        return installed, STATUS_MISMATCH
+    for other in distributions:
+        if other is dist:
+            continue
+        top_level = (other.read_text("top_level.txt") or "").splitlines()
+        if module in top_level or any(str(file).split("/")[0] == module for file in (other.files or ())):
+            return installed, STATUS_CONFLICT
+    release = name == "growwapi"
+    if release:
+        if not _published_release_pin_matches(pin):
+            return installed, STATUS_PROVENANCE_MISMATCH
+    elif (
+        pin.get("source_url") != source_url
+        or pin.get("source_module") != module
+        or any(not re.fullmatch(r"[0-9a-f]{40}", str(pin.get(key, ""))) for key in ("source_commit", "source_tree"))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(pin.get("build_wheel_sha256", "")))
+    ):
+        return installed, STATUS_PROVENANCE_MISMATCH
+    if not release and pin.get("source_kind") == "git":
+        try:
+            direct = json.loads(dist.read_text("direct_url.json") or "null")
+            vcs = direct["vcs_info"]
+            if (
+                direct["url"] != source_url
+                or vcs.get("vcs") != "git"
+                or vcs.get("commit_id") != pin["source_commit"]
+                or vcs.get("requested_revision", pin["source_commit"]) != pin["source_commit"]
+            ):
+                return installed, STATUS_PROVENANCE_MISMATCH
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return installed, STATUS_PROVENANCE_MISMATCH
+    elif not release and not (name == "dhanhq" and pin.get("source_kind") == "published-rc"):
+        return installed, STATUS_PROVENANCE_MISMATCH
+    files = pin.get("build_files")
+    if type(files) is not dict or not files or f"{module}/__init__.py" not in files:
+        return installed, STATUS_PROVENANCE_MISMATCH
+    try:
+        root = Path(str(dist.locate_file(""))).resolve(strict=True)
+        package = root / module
+        if release:
+            info = root / "growwapi-1.5.0.dist-info"
+            for base in (package, info):
+                if base.is_symlink() or not base.is_dir():
+                    return installed, STATUS_PROVENANCE_MISMATCH
+                for path in base.rglob("*"):
+                    if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                        return installed, STATUS_PROVENANCE_MISMATCH
+            # Only installer bookkeeping may accompany the original wheel metadata.
+            # Its RECORD is not a source of resource hashes or completeness authority.
+            generated = {f"{info.name}/{name}" for name in ("RECORD", "INSTALLER", "REQUESTED", "direct_url.json")}
+            actual_metadata = {path.relative_to(root).as_posix() for path in info.rglob("*") if path.is_file()}
+            expected_metadata = {key for key in files if key.startswith(info.name + "/")}
+            if actual_metadata - generated != expected_metadata:
+                return installed, STATUS_PROVENANCE_MISMATCH
+            if not _published_release_direct_url_matches(dist.read_text("direct_url.json")):
+                return installed, STATUS_PROVENANCE_MISMATCH
+        spec = util.find_spec(module)
+        if spec is None or spec.origin is None or Path(spec.origin).resolve() != package / "__init__.py":
+            return installed, STATUS_CONFLICT
+        # RECORD is not an authority: compare physical package resources with
+        # the independently locked built wheel, including unrecorded additions.
+        expected = {path for path in files if type(path) is str and path.startswith(module + "/")}
+        actual = {
+            path.relative_to(root).as_posix()
+            for path in package.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+        }
+        if actual != expected:
+            return installed, STATUS_PROVENANCE_MISMATCH
+        for relative, digest in files.items():
+            if type(relative) is not str or type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                return installed, STATUS_PROVENANCE_MISMATCH
+            path = root / relative
+            if Path(relative).is_absolute() or ".." in Path(relative).parts or path.is_symlink():
+                return installed, STATUS_PROVENANCE_MISMATCH
+            if not path.resolve(strict=True).is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                return installed, STATUS_PROVENANCE_MISMATCH
+    except (OSError, ValueError, TypeError, ImportError, AttributeError):
+        return installed, STATUS_PROVENANCE_MISMATCH
+    return installed, STATUS_OK
+
+
 def attest_all(
     lock_path: Path | None = None,
     version_resolver: Callable[[str], str | None] | None = None,
@@ -175,11 +350,18 @@ def attest_all(
         pinned = str(pin.get("version", "")).strip()
         if not name:
             continue
-        if not pinned or _PLACEHOLDER in pinned.upper():
+        # The explicit release exception requires a concrete version; it cannot
+        # be converted into a non-blocking placeholder by incomplete metadata.
+        release_claim = version_resolver is None and (name == "growwapi" or pin.get("source_kind") == "published-release")
+        if (not pinned or _PLACEHOLDER in pinned.upper()) and not release_claim:
             results.append(AttestationResult(name, pinned, None, STATUS_SKIPPED))
             continue
-        if name == "kotakneoapi" and version_resolver is None:
-            installed, status = _attest_kotak(pin)
+        source_kind = None
+        if version_resolver is None and (name in _DIST_NAMES or pin.get("source_kind")):
+            installed, status = _attest_source(pin)
+            kind = pin.get("source_kind")
+            if type(kind) is str and kind in ("git", "published-rc", "published-release"):
+                source_kind = kind
         else:
             installed = resolve(_DIST_NAMES.get(name, name))
             if installed is None:
@@ -188,7 +370,7 @@ def attest_all(
                 status = STATUS_OK
             else:
                 status = STATUS_MISMATCH
-        results.append(AttestationResult(name, pinned, installed, status))
+        results.append(AttestationResult(name, pinned, installed, status, source_kind))
     return results
 
 
@@ -215,6 +397,7 @@ def attestations_by_pin(
             "pinned_version": result.pinned_version,
             "installed_version": result.installed_version,
             "status": result.status,
+            **({"source_kind": result.source_kind} if result.source_kind is not None else {}),
         }
         for result in attest_all(lock_path=lock_path, version_resolver=version_resolver)
     }

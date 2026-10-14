@@ -282,7 +282,8 @@ class EngineResult:
         equity_curve: Per-bar equity snapshot.
         orders: All submitted orders (filled, cancelled, rejected).
         final_equity: Terminal equity value.
-        total_bars: Number of bars processed.
+        total_bars: Fully completed iterations, excluding a failed attempt even
+            when its fills and marked equity are retained as partial evidence.
         execution_seconds: Wall-clock time for the run.
         error: Non-empty string if the run failed.
     """
@@ -344,6 +345,7 @@ class BacktestEngine:
         self._is_running: bool = False
         self._strategy: Any | None = None  # BaseStrategy
         self._progress_callback: Callable | None = None
+        self._notification_error: str = ""
 
         # Lazy import to avoid circular dependency
         self._tax_calculator: Any | None = None
@@ -450,17 +452,28 @@ class BacktestEngine:
             )
 
         self._is_running = True
+        self._notification_error = ""
         start_wall = time.perf_counter()
 
+        error = ""
         if hasattr(self._strategy, "start"):
-            self._strategy.start()
+            try:
+                self._strategy.start()
+            except Exception as exc:
+                logger.error("Strategy start error: %s", exc)
+                error = f"Strategy start failed: {exc}"
 
         logger.info(
             "BacktestEngine.run: symbol=%s bars=%d capital=%s",
             self.config.symbol, len(bars), self.config.initial_capital,
         )
 
+        completed_bars = 0
+        close_p = Decimal(0)
+        ts = ""
         for i, bar in enumerate(bars):
+            if error:
+                break
             if not self._is_running:
                 logger.info("Backtest stopped early at bar %d", i)
                 break
@@ -476,28 +489,32 @@ class BacktestEngine:
 
             # 1. Process pending orders (against this bar's range)
             self._process_pending_orders(bar, open_p, high_p, low_p, close_p, ts)
+            error = self._notification_error
 
             # 2. Update unrealized P&L for open positions
             self._update_positions(close_p)
 
             # 3. Feed bar to strategy
-            if self._strategy:
+            if not error and self._strategy:
                 try:
                     # Support both dict-based and OHLCV-model strategies
                     if hasattr(self._strategy, "on_bar"):
                         self._strategy.on_bar(_make_ohlcv(bar))
                 except Exception as exc:
                     logger.error("Strategy on_bar error at bar %d (%s): %s", i, ts, exc)
+                    error = f"Strategy on_bar failed at {ts}: {exc}"
                     if hasattr(self._strategy, "set_error"):
                         self._strategy.set_error(str(exc))
-                    break
 
             # 4. Collect and submit orders from strategy
-            if self._strategy and hasattr(self._strategy, "generate_orders"):
+            if not error and self._strategy and hasattr(self._strategy, "generate_orders"):
                 try:
                     new_orders = self._strategy.generate_orders() or []
                 except Exception as exc:
                     logger.error("Strategy generate_orders error: %s", exc)
+                    error = f"Strategy generate_orders failed at {ts}: {exc}"
+                    if hasattr(self._strategy, "set_error"):
+                        self._strategy.set_error(str(exc))
                     new_orders = []
 
                 for raw_order in new_orders:
@@ -506,8 +523,9 @@ class BacktestEngine:
                         self._accept_order(engine_order)
 
             # 5. Immediately fill market orders placed this bar (CURRENT_CLOSE mode)
-            if self.config.fill_mode == FillMode.CURRENT_CLOSE:
+            if not error and self.config.fill_mode == FillMode.CURRENT_CLOSE:
                 self._fill_immediate_market_orders(close_p, ts)
+                error = self._notification_error
 
             # 6. Record equity
             equity = self._calculate_equity()
@@ -525,6 +543,9 @@ class BacktestEngine:
                 positions_value=equity - self._cash,
                 drawdown_pct=dd_pct.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP),
             ))
+            if error:
+                break
+            completed_bars += 1
 
             # Progress callback every 100 bars
             if self._progress_callback and i % 100 == 0:
@@ -545,15 +566,23 @@ class BacktestEngine:
                 except Exception as exc:
                     logger.debug("Progress callback error: %s", exc)
 
-        # Close remaining positions at last bar's close
-        if bars and self._positions:
-            last_close = Decimal(str(bars[-1].get("close", 0)))
-            last_ts = str(bars[-1].get("timestamp", ""))
-            for symbol in list(self._positions.keys()):
-                self._close_position(symbol, last_close, last_ts, reason="end_of_backtest")
+        if not self._is_running:
+            error = error or "Backtest stopped before completion"
 
         if hasattr(self._strategy, "stop"):
-            self._strategy.stop()
+            try:
+                self._strategy.stop()
+            except Exception as exc:
+                logger.error("Strategy stop error: %s", exc)
+                error = error or f"Strategy stop failed: {exc}"
+
+        # Failed runs retain reached evidence, without an invented liquidation.
+        if not error and self._positions:
+            for symbol in list(self._positions.keys()):
+                self._close_position(symbol, close_p, ts, reason="end_of_backtest")
+                if self._notification_error:
+                    error = self._notification_error
+                    break
 
         self._is_running = False
         execution_seconds = time.perf_counter() - start_wall
@@ -566,13 +595,14 @@ class BacktestEngine:
             equity_curve=list(self._equity_curve),
             orders=list(self._all_orders),
             final_equity=final_equity,
-            total_bars=len(bars),
+            total_bars=completed_bars,
             execution_seconds=execution_seconds,
+            error=error,
         )
 
         logger.info(
             "BacktestEngine.run done: bars=%d trades=%d final_equity=%s return=%.2f%% time=%.2fs",
-            len(bars), len(self._trades), final_equity,
+            completed_bars, len(self._trades), final_equity,
             result.total_return_pct, execution_seconds,
         )
         return result
@@ -594,6 +624,11 @@ class BacktestEngine:
         Returns:
             True if accepted.
         """
+        if self._notification_error:
+            order.status = OrderStatus.REJECTED
+            self._all_orders.append(order)
+            return False
+
         if order.quantity <= 0:
             logger.warning("Order rejected: quantity %d <= 0", order.quantity)
             order.status = OrderStatus.REJECTED
@@ -665,6 +700,9 @@ class BacktestEngine:
         for order in self._pending_orders:
             if not order.is_active:
                 continue
+            if self._notification_error:
+                still_pending.append(order)
+                continue
 
             fill_price: Decimal | None = None
 
@@ -717,7 +755,7 @@ class BacktestEngine:
         """
         still_pending: list[EngineOrder] = []
         for order in self._pending_orders:
-            if order.order_type == OrderType.MARKET and order.is_active:
+            if not self._notification_error and order.order_type == OrderType.MARKET and order.is_active:
                 slipped = self._apply_slippage(close_p, order.side)
                 self._execute_fill(order, slipped, order.quantity, ts)
             else:
@@ -866,12 +904,13 @@ class BacktestEngine:
         else:
             order.status = OrderStatus.PARTIAL
 
-        # Notify strategy
-        if self._strategy and hasattr(self._strategy, "on_order_update"):
+        # A failed trade notification must not be followed by another callback.
+        if not self._notification_error and self._strategy and hasattr(self._strategy, "on_order_update"):
             try:
                 self._strategy.on_order_update(order)
             except Exception as exc:
-                logger.debug("on_order_update error: %s", exc)
+                logger.error("Strategy on_order_update error at %s: %s", ts, exc)
+                self._notification_error = f"Strategy on_order_update failed at {ts}: {exc}"
 
         logger.debug(
             "Fill: %s %s %d @ %s commission=%s",
@@ -973,11 +1012,15 @@ class BacktestEngine:
         )
         self._trades.append(trade)
 
-        if self._strategy and hasattr(self._strategy, "on_trade"):
+        if not self._notification_error and self._strategy and hasattr(self._strategy, "on_trade"):
             try:
                 self._strategy.on_trade(trade)
             except Exception as exc:
-                logger.debug("on_trade callback error: %s", exc)
+                logger.error("Strategy on_trade error at %s: %s", ts, exc)
+                # Finish this executed close and its enclosing fill before the
+                # run loop stops. Raising here would leave the position, fees
+                # and closing order only partially updated.
+                self._notification_error = f"Strategy on_trade failed at {ts}: {exc}"
 
         # Update or remove position
         if qty >= pos.quantity:

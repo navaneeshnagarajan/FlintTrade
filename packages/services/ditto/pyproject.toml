@@ -6,14 +6,14 @@ requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
     "flinttrade-screener",
-    "httpx>=0.27.0",
-    "cryptography>=50.0.2",
-    "numpy>=2.5.3",
-    "pydantic>=2.13.5",
+    "httpx==0.28.1",
+    "cryptography==50.0.2",
+    "numpy==2.5.4",
+    "pydantic==2.14.0",
 ]
 
 [project.optional-dependencies]
-numba = ["numba>=0.66.0"]
+numba = ["numba==0.68.0"]
 
 [build-system]
 requires = ["hatchling"]

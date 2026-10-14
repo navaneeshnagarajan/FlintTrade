@@ -24,8 +24,8 @@ vi.mock("@/stores/themeStore", () => ({
   ),
 }));
 
-vi.mock("@/components/help/AITutorPill", () => ({
-  AITutorPill: () => <div data-testid="ai-tutor-pill" />,
+vi.mock("@/components/help/LocalHelp", () => ({
+  AppCompanion: () => <div data-testid="ai-tutor-pill" />,
 }));
 
 vi.mock("@/components/help/UpgradeSuggestion", () => ({
@@ -64,11 +64,11 @@ describe("RootLayout", () => {
     expect(screen.getByText("Child Route")).toBeInTheDocument();
   });
 
-  it("renders global overlay components (AITutorPill, UpgradeSuggestionHost)", () => {
+  it("renders the shared companion without experience upgrade prompts", () => {
     render(<RootLayout />);
 
     expect(screen.getByTestId("ai-tutor-pill")).toBeInTheDocument();
-    expect(screen.getByTestId("upgrade-suggestion")).toBeInTheDocument();
+    expect(screen.queryByTestId("upgrade-suggestion")).not.toBeInTheDocument();
   });
 
   it("mirrors the persisted font-size setting onto <html data-font-scale>", () => {

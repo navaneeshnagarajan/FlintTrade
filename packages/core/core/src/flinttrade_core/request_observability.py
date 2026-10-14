@@ -69,6 +69,10 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
             return "/admin/credentials/rotation/{broker}/" + action
         case ("PUT", ["", "v1", "rate-limits"]):
             return "/v1/rate-limits"
+    for prefix in ("/v1/knowledge", "/v1/learning", "/api/v1/ai/skill-drafts",
+                   "/v1/model-runs", "/api/v1/execution-sessions", "/api/v1/protection", "/api/v1/backtest/run"):
+        if _exact_or_descendant(clean, prefix):
+            return prefix + "/{resource}"
     if _exact_or_descendant(clean, "/v1/services/connections"):
         return (
             "/v1/services/connections"

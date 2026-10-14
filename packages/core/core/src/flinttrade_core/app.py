@@ -80,7 +80,7 @@ import hmac  # noqa: E402
 import time  # noqa: E402
 
 import structlog  # noqa: E402
-from flask import Flask, g as _flask_g, jsonify, request  # noqa: E402
+from flask import Flask, g as _flask_g, jsonify, request, request_started  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 from flask_limiter import Limiter  # noqa: E402
 from flask_limiter.util import get_remote_address  # noqa: E402
@@ -98,6 +98,7 @@ from .backend_instance import (  # noqa: E402
     retain_backend_instance_lease,
 )
 from .config import Settings  # noqa: E402
+from .factory_lifecycle import FACTORY_STORES, capture_factory_app, recover_factory  # noqa: E402
 from .csp import (  # noqa: E402
     build_csp_header as _build_csp_header,
     csp_report_bp as _csp_report_bp,
@@ -3455,6 +3456,16 @@ def _attach_log_file_handler(root_logger: logging.Logger, shared_processors: lis
     root_logger.addHandler(file_handler)
 
 
+def _install_managed_maintenance(app: Flask, request_shutdown: Callable[[], None]) -> Any:
+    """Expose only a proved managed owner; unsupported platforms stay unavailable."""
+    if sys.platform != "linux" or app.config.get("BACKEND_LEASE_PROOF") is None:
+        return None
+    from .maintenance_control import install_maintenance_control  # noqa: PLC0415
+
+    return install_maintenance_control(app, _workspace_dir(), request_shutdown=request_shutdown)
+
+
+@recover_factory
 def create_flask_app(
     safety: Any | None = None,
     scheduler: Any | None = None,
@@ -3528,6 +3539,14 @@ def create_flask_app(
         from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
 
         raise RegistrySessionUnavailable
+
+    app = Flask(__name__, static_folder=None)
+    injected = {"CLIENT": client, "AUDIT": audit, "CREDENTIAL_STORE": credential_store,
+                "SERVICE_CONNECTION_STORE": service_connection_store, "RAG": rag,
+                "SCHEDULER": scheduler, "CRON": cron, "TELEGRAM_BOT": telegram}
+    capture_factory_app(app, borrowed=frozenset(key for key, value in injected.items() if value is not None))
+    app.config.update(injected)
+    app.config.update(BACKEND_LEASE_PROOF=backend_lease_proof, BACKEND_LEASE_READY=runtime_ready)
 
     if safety is None:
         from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
@@ -3640,7 +3659,6 @@ def create_flask_app(
     # The SPA fallback owns every frontend response so index.html always goes
     # through CSP nonce injection. A second Flask static route could expose the
     # raw document with a nonce-bearing CSP header that blocks its scripts.
-    app = Flask(__name__, static_folder=None)
     app.config["BACKEND_LEASE_PROOF"] = backend_lease_proof
     app.config["BACKEND_LEASE_READY"] = runtime_ready
 
@@ -3672,9 +3690,15 @@ def create_flask_app(
     app.config["_FRONTEND_AVAILABLE"] = _frontend_available
     app.config["_DIST_PATH"] = _dist_path
 
-    @app.before_request
-    def _bind_request_context() -> None:
-        """Bind request fields before any hook can reject the request."""
+    @request_started.connect_via(app)
+    def _bind_request_context(_sender: Flask, **_extra: Any) -> None:
+        """Bind pure diagnostics before ANY before-request hook can refuse.
+
+        Flask emits request_started before preprocessing. Specialised installers
+        may reorder admission/auth hooks, but cannot move this pure classifier
+        behind an early return. No store, principal or dependency is consulted;
+        the existing teardown restores the exact prior ContextVar token.
+        """
         safe_request = project_safe_request(request.method, request.path, request.content_length)
         _flask_g._safe_request_token = set_safe_request_summary(safe_request)
         structlog.contextvars.clear_contextvars()
@@ -3965,11 +3989,16 @@ def create_flask_app(
         service_connection_bp,
     )
 
-    app.config["SERVICE_CONNECTION_STORE"] = service_connection_store
+    from .service_oauth_routes import bind_oauth
+    app.config["SERVICE_OAUTH_CONFIG"] = {
+        "deployment": os.environ.get("FLINTTRADE_SERVICE_OAUTH_DEPLOYMENT", ""),
+        "redirect_uri": os.environ.get("FLINTTRADE_SERVICE_OAUTH_REDIRECT_URI", ""),
+    }
+    app.config["SERVICE_CONNECTION_STORE"] = bind_oauth(app, service_connection_store) if service_connection_store is not None else None
     app.config["SERVICE_CONNECTION_STORE_LOCK"] = threading.Lock()
 
     def _create_service_connection_store() -> ServiceConnectionStore:
-        return ServiceConnectionStore(_workspace_dir(), audit_sink=build_connection_audit_sink(audit))
+        return bind_oauth(app, ServiceConnectionStore(_workspace_dir(), audit_sink=build_connection_audit_sink(audit)))
 
     app.config["SERVICE_CONNECTION_STORE_FACTORY"] = _create_service_connection_store
     app.register_blueprint(service_connection_bp)
@@ -4052,6 +4081,7 @@ def create_flask_app(
         flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
         credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+        app.config["CREDENTIAL_STORE"] = credential_store
 
     if contract_manager is None:
         flinttrade_dir = _workspace_dir()
@@ -4640,21 +4670,42 @@ def create_flask_app(
         app.config["AI_SESSION_STORE"] = None
     app.register_blueprint(session_bp)
 
-    # AI1 — operator-approved skill drafts. The registry serves ONLY the
-    # workspace skills/ directory (operator-approved files); drafts under
-    # skill_drafts/ influence nothing until approved through the guarded
-    # routes below.
+    # Shared versioned procedures/recall; retained draft routes do not bypass
+    # independent validation or confer learning/trading authority.
     from flinttrade_ai.skill_draft_routes import skill_draft_bp  # noqa: PLC0415
+    from flinttrade_backtest.result_store import BacktestResultStore  # noqa: PLC0415
+    from .data_runtime import install_data_runtime  # noqa: PLC0415
+    from .evaluation import EvaluationStore  # noqa: PLC0415
+    from .knowledge_integration import install_knowledge_runtime  # noqa: PLC0415
+    from .run_adoption import install_run_services  # noqa: PLC0415
 
     app.config["WORKSPACE_DIR"] = _workspace_dir()
-    try:
-        from flinttrade_ai.skill_drafts import skills_dir as _operator_skills_dir  # noqa: PLC0415
-        from flinttrade_ai.skill_system import SkillRegistry  # noqa: PLC0415
+    # Both installed entrypoints own immutable receipts. Database/directory
+    # handles are transaction-scoped; runtime request drain fences their users.
+    backtest_results = BacktestResultStore(_workspace_dir() / "backtest-results")
+    app.config["BACKTEST_RESULT_STORE"] = backtest_results
+    app.config["EVALUATION_STORE"] = EvaluationStore(backtest_results.evidence_path)
+    install_knowledge_runtime(app, _workspace_dir())
+    install_data_runtime(app, _workspace_dir())
+    install_run_services(app, _workspace_dir())
+    from .model_run_config import model_run_config_bp  # noqa: PLC0415
+    from .protection_grants import install_protection_services  # noqa: PLC0415
+    from .execution_sessions_routes import get_execution_sessions, install_execution_sessions  # noqa: PLC0415
 
-        app.config["SKILL_REGISTRY"] = SkillRegistry(_operator_skills_dir(_workspace_dir()))
-    except Exception:  # noqa: BLE001 - skills are never start-critical
-        logger.warning("Workspace skill registry unavailable", exc_info=True)
-        app.config["SKILL_REGISTRY"] = None
+    app.register_blueprint(model_run_config_bp)
+    install_protection_services(app, _workspace_dir())
+    install_execution_sessions(app, _workspace_dir())
+    if runtime_ready:
+        # Normal runtime ownership, not maintenance-created evidence of absence.
+        # Opening does not arm entries or grant independent protection authority.
+        from flinttrade_ai.run_store import AgentRunStore  # noqa: PLC0415
+        from flinttrade_engine.scheduler import StrategyScheduler  # noqa: PLC0415
+
+        app.config["PRACTICE_AGENT_RUN_STORE"] = AgentRunStore(_workspace_dir() / "practice_agent_runs.sqlite")
+        if app.config["SCHEDULER"] is None:
+            app.config["SCHEDULER"] = StrategyScheduler(client=client, time_scheduler=resolved_time_scheduler)
+        # Recovery can run canonical protective requests: defer acquisition to
+        # the completed factory below, after auth and every route are mounted.
     app.register_blueprint(skill_draft_bp)
 
     from flinttrade_ai.ai_routes import ai_bp  # noqa: PLC0415
@@ -4887,10 +4938,11 @@ def create_flask_app(
     from flinttrade_webhooks.webhook_receiver import WebhookConfig, WebhookReceiver  # noqa: PLC0415
     from flinttrade_webhooks.webhook_routes import init_webhook_routes, webhook_bp  # noqa: PLC0415
     from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore  # noqa: PLC0415
+    from .auth_state_migration import select_webhook_store_path  # noqa: PLC0415
     from .operations_routes import webhook_endpoint_enabled  # noqa: PLC0415
     from .webhook_dispatch import WebhookOrderDispatcher  # noqa: PLC0415
 
-    webhook_secret_store = WebhookSecretStore(_workspace_dir() / "webhook_secrets.db", _get_master_password())
+    webhook_secret_store = WebhookSecretStore(select_webhook_store_path(_workspace_dir()), _get_master_password())
     app.config["WEBHOOK_SECRET_STORE"] = webhook_secret_store
     webhook_order_dispatcher = WebhookOrderDispatcher(app)
     init_webhook_routes(
@@ -4910,6 +4962,10 @@ def create_flask_app(
 
     from .health_routes import health_bp  # noqa: PLC0415
 
+    from .system_incidents import install_incident_timeline
+    install_incident_timeline(app, _workspace_dir())
+    from .incident_routes import incident_bp
+    app.register_blueprint(incident_bp)
     app.register_blueprint(health_bp)
 
     # Backtest route blueprints — imported from the installed flinttrade_backtest
@@ -5455,8 +5511,14 @@ def create_flask_app(
             # Otherwise serve index.html (SPA client-side routing) with the CSP nonce.
             return _serve_index_with_nonce()
 
-    # Acquire the worker only after factory construction can no longer fail,
-    # then publish its exact owner for ordinary stop and startup rollback.
+    # Resume only after auth and canonical ingress are fully mounted. Retain
+    # every acquired owner if recovery or any later construction step fails.
+    if runtime_ready:
+        from .execution_sessions_routes import resume_execution_protection  # noqa: PLC0415
+
+        get_execution_sessions(app)
+        app.config["EXECUTION_PROTECTION_RECOVERY"] = resume_execution_protection(app)
+
     if runtime_ready and not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
             from flinttrade_core.instrument_lot_master import start_instrument_master_refresh  # noqa: PLC0415
@@ -6200,9 +6262,93 @@ class FlintTradeApp:
             return False, "TimeoutError"
         return True, None
 
+    async def _close_shared_service_dependencies(
+        self, flask_app: Flask | None, deadline: _LifecycleDeadline, *, prefix: str,
+        keys: tuple[str, ...] = ("EXECUTION_SESSIONS", "PROTECTION_SERVICES", "MODEL_RUN_SERVICES", "DATA_RUNTIME", "LEARNING_CONSENT_LEDGER", "KNOWLEDGE_RUNTIME", "SERVICE_TASK_DISPATCHER", *FACTORY_STORES),
+    ) -> bool:
+        """Release learning/context owners before their shared usage authority.
+
+        Call only after request admission closes and every request/background
+        consumer quiesces. A failed or still-running close retains that exact
+        owner and all downstream dependencies for an explicit shutdown retry.
+        """
+        if flask_app is None:
+            return True
+        retained = self.__dict__.setdefault("_shared_shutdown_owners", {})
+        completed = self.__dict__.setdefault("_shared_shutdown_completed", set())
+        for key in keys:
+            current = flask_app.config.get(key)
+            if key in completed:
+                if current is not None:
+                    return False
+                continue
+            owner = retained.setdefault(key, current)
+            if current is not owner:
+                return False
+            if owner is None:
+                completed.add(key)
+                continue
+            if key == "EXECUTION_SESSIONS":
+                stopped, _ = await self._run_retained_sync_owner(
+                    "shared-execution-drain", lambda owner=owner: owner.shutdown(deadline.remaining()), deadline,
+                    require_truthy=True, resume_incomplete=True,
+                )
+                if not stopped:
+                    return False
+
+            def close_owner(owner: Any = owner, key: str = key) -> None:
+                with flask_app.app_context():
+                    close = getattr(owner, "close", None)
+                    if not callable(close) and key not in FACTORY_STORES:
+                        raise RuntimeError("shared owner close protocol unavailable")
+                    if callable(close) and close() is False:
+                        raise RuntimeError("shared owner close remains incomplete")
+
+            stopped, error_type = await self._run_retained_sync_owner(
+                f"shared-{key.lower()}", close_owner, deadline,
+            )
+            if not stopped:
+                logger.warning("Shared service dependency %s remains owned (%s)", key, error_type)
+                return False
+            if flask_app.config.get(key) is not owner:
+                logger.error("Shared service dependency %s changed during shutdown", key)
+                return False
+            flask_app.config.pop(key)
+            completed.add(key)
+        return True
+
+    async def _finish_maintenance(self, deadline: _LifecycleDeadline) -> bool:
+        """Complete the exact channel only after all managed borrowers stopped."""
+        app = getattr(self, "_flask_app", None)
+        control = getattr(self, "_maintenance_control", None)
+        if app is not None and app.extensions.get("flinttrade.maintenance") is not control:
+            return False
+        if control is None:
+            return True
+        completed = self.__dict__.setdefault("_maintenance_completed", set())
+        for key, operation in (
+            ("handoff", lambda: control.runtime_stopped(timeout=deadline.remaining())),
+            ("close", control.close),
+        ):
+            if key in completed:
+                continue
+            stopped, _ = await self._run_retained_sync_owner("maintenance-" + key, operation, deadline)
+            if not stopped:
+                return False
+            completed.add(key)
+        return True
+
     async def _rollback_startup_dependencies(self, deadline: _LifecycleDeadline) -> bool:
         """Release shared dependencies only after every acquired owner quiesces."""
         flask_app = getattr(self, "_flask_app", None)
+        factory_recovery = getattr(self, "_factory_recovery", None)
+        if factory_recovery is not None:
+            recovered, _ = await self._run_retained_sync_owner(
+                "factory-recovery", lambda: factory_recovery.release(deadline=deadline.expires_at), deadline,
+            )
+            if not recovered:
+                return False
+            self._factory_recovery = None
 
         async def stop_sync(
             key: str,
@@ -6284,6 +6430,14 @@ class FlintTradeApp:
                 require_truthy=True,
             ):
                 return False
+            if self.scheduler is not None and not await stop_async(
+                "startup-scheduler", "scheduler", self.scheduler.stop_all,
+            ):
+                return False
+            if not await self._close_shared_service_dependencies(
+                flask_app, deadline, prefix="startup-", keys=("EXECUTION_SESSIONS", "PROTECTION_SERVICES", "MODEL_RUN_SERVICES", "DATA_RUNTIME"),
+            ):
+                return False
             if not await stop_sync(
                 "startup-broker-router",
                 "broker router",
@@ -6295,7 +6449,7 @@ class FlintTradeApp:
             ):
                 return False
 
-        if self.scheduler is not None and not await stop_async(
+        if flask_app is None and self.scheduler is not None and not await stop_async(
             "startup-scheduler",
             "scheduler",
             self.scheduler.stop_all,
@@ -6320,6 +6474,9 @@ class FlintTradeApp:
                 close_rag,
             ):
                 return False
+
+        if not await self._close_shared_service_dependencies(flask_app, deadline, prefix="startup-"):
+            return False
 
         # The vault is acquired before contracts, registry and RAG. A failure
         # in any later constructor still owns its hardened directory handles.
@@ -6350,6 +6507,8 @@ class FlintTradeApp:
             self.audit.close,
         )
         if client_closed and audit_closed:
+            if not await self._finish_maintenance(deadline):
+                return False
             self._flask_app = None
             self._stop_completed = True
             self._stop_event.set()
@@ -6434,13 +6593,17 @@ class FlintTradeApp:
         try:
             initialise_backend_runtime(self._backend_lease_proof, self._initialise_runtime)
             await self._start_owned(ledger)
-        except BaseException:
+        except BaseException as error:
+            factory_recovery = getattr(error, "recovery_owner", None)
+            if factory_recovery is not None and self._flask_app is None:
+                self._factory_recovery = factory_recovery
             if self._stop_started:
                 raise
             flask_app = getattr(self, "_flask_app", None)
+            failed_app = flask_app if flask_app is not None else getattr(factory_recovery, "app", None)
             raw_timeout = (
-                flask_app.config.get("RUNTIME_STARTUP_ROLLBACK_TIMEOUT_SECONDS", 10.0)
-                if flask_app is not None
+                failed_app.config.get("RUNTIME_STARTUP_ROLLBACK_TIMEOUT_SECONDS", 10.0)
+                if failed_app is not None
                 else 10.0
             )
             try:
@@ -6501,6 +6664,13 @@ class FlintTradeApp:
             telegram=self.telegram,
         )
         self._flask_app = flask_app
+
+        def request_maintenance_shutdown() -> None:
+            # Submit the existing stop algorithm to its owning loop. The
+            # channel worker remains free for the final custody exchange.
+            asyncio.run_coroutine_threadsafe(self.stop(), runtime_loop)
+
+        self._maintenance_control = _install_managed_maintenance(flask_app, request_maintenance_shutdown)
 
         def request_lease_shutdown() -> None:
             def schedule_stop() -> None:
@@ -6611,7 +6781,6 @@ class FlintTradeApp:
                 enrich_strategies,
             )
             from flinttrade_ai.strategy_refiner import StrategyRefiner  # noqa: PLC0415
-            from flinttrade_backtest.result_store import BacktestResultStore  # noqa: PLC0415
 
             # The report store is created unconditionally so the Lab UI can read
             # past reports even when the optimiser isn't wired this boot.
@@ -6622,8 +6791,8 @@ class FlintTradeApp:
             # (backtest_routes), read here so the optimiser refines on REAL
             # metrics instead of an empty dict. Before this the refiner only ever
             # saw {} and produced generic rule-based output (R16).
-            _bt_result_store = BacktestResultStore(_workspace_dir() / "backtest-results")
-            flask_app.config["BACKTEST_RESULT_STORE"] = _bt_result_store
+            # Reuse the normal factory's exact index/evidence authority.
+            _bt_result_store = flask_app.config["BACKTEST_RESULT_STORE"]
 
             _runner = flask_app.config.get("STRATEGY_RUNNER")
 
@@ -6667,7 +6836,8 @@ class FlintTradeApp:
 
                 def _start_eod_sync() -> Any:
                     today = _date.today()
-                    return start_watchlist_download(today - _timedelta(days=lookback), today)
+                    with flask_app.app_context():
+                        return start_watchlist_download(today - _timedelta(days=lookback), today)
 
                 self.cron.eod_sync_starter = _start_eod_sync
                 logger.info("EOD auto-sync wired (lookback %d days)", lookback)
@@ -6879,6 +7049,12 @@ class FlintTradeApp:
             deadline = _LifecycleDeadline.after(60.0)
         if flask_app is not None and not _stop_backend_lease_watch(flask_app, timeout=deadline.remaining()):
             raise RuntimeError("backend lease watcher did not stop")
+        if getattr(self, "_managed_stop_completed", False):
+            if not await self._finish_maintenance(deadline):
+                raise RuntimeError("shutdown encountered errors: maintenance handoff remains owned")
+            self._stop_completed = True
+            self._stop_event.set()
+            return
         if getattr(self, "_startup_recovery_pending", False):
             if not await self._recover_startup_rollback(deadline):
                 raise RuntimeError("shutdown encountered errors: startup rollback incomplete")
@@ -7116,7 +7292,11 @@ class FlintTradeApp:
             )
             live_write_owners_stopped = live_write_owners_stopped and ditto_stopped
 
-            if live_write_owners_stopped:
+            # Shared source/model borrowers must survive until admitted requests
+            # and their actual background workers have drained below.
+            if live_write_owners_stopped and all(
+                flask_app.config.get(key) is None for key in ("EXECUTION_SESSIONS", "PROTECTION_SERVICES", "DATA_RUNTIME", "MODEL_RUN_SERVICES")
+            ):
                 await stop_sync(
                     "broker-router-quiesce",
                     "broker router",
@@ -7255,7 +7435,14 @@ class FlintTradeApp:
                 ),
                 require_truthy=True,
             )
+            shared_borrowers_stopped = False
             if uploaded_stopped and registered_stopped and ditto_stopped:
+                shared_borrowers_stopped = await self._close_shared_service_dependencies(
+                    flask_app, deadline, prefix="", keys=("EXECUTION_SESSIONS", "PROTECTION_SERVICES", "MODEL_RUN_SERVICES", "DATA_RUNTIME"),
+                )
+                if not shared_borrowers_stopped:
+                    errors.append(("data/model dependencies", "RuntimeError"))
+            if uploaded_stopped and registered_stopped and ditto_stopped and shared_borrowers_stopped:
                 await stop_sync(
                     "broker-router-drained",
                     "broker router after request drain",
@@ -7360,6 +7547,9 @@ class FlintTradeApp:
             logger.error("FlintTrade shutdown dependency finalisation failed: %s", summary)
             raise RuntimeError(f"shutdown encountered errors: {summary}")
 
+        if not await self._close_shared_service_dependencies(flask_app, deadline, prefix=""):
+            raise RuntimeError("shutdown encountered errors: shared service dependencies remain owned")
+
         # Log shutdown to audit before closing.
         await stop_sync(
             "audit-stop-event",
@@ -7387,6 +7577,9 @@ class FlintTradeApp:
             logger.error("FlintTrade shutdown encountered errors: %s", summary)
             raise RuntimeError(f"shutdown encountered errors: {summary}")
 
+        self._managed_stop_completed = True
+        if not await self._finish_maintenance(deadline):
+            raise RuntimeError("shutdown encountered errors: maintenance handoff remains owned")
         self._stop_completed = True
         self._stop_event.set()
         logger.info("FlintTrade %s stopped", self.version)
@@ -7542,48 +7735,59 @@ class _WSGIStartupRecovery:
     """Retain exact cleanup authority when WSGI startup fails after its factory."""
 
     def __init__(self, candidate: Flask, backend_lease: Any) -> None:
+        from .desktop import _RetainedBoundedWorker  # noqa: PLC0415
+
+        self._owner_pid = os.getpid()
+        self._lease_worker = _RetainedBoundedWorker("wsgi-lease-release")
         self._candidate = candidate
+        self._release_owner = candidate.extensions.get("flinttrade.factory_recovery") or candidate.extensions.get("flinttrade.wsgi_shutdown_owner")
         self._backend_lease = backend_lease
         self._lock = threading.Lock()
         self._complete = False
 
-    def retain(self) -> None:
+    def _ensure_release_owner(self) -> Any:
+        """Snapshot current owners once, at actual stop, and retain every retry."""
+        if self._release_owner is None:
+            from .desktop import _DesktopShutdownRecoveryOwner  # noqa: PLC0415
+
+            self._release_owner = _DesktopShutdownRecoveryOwner(self._candidate)
+            self._candidate.extensions["flinttrade.wsgi_shutdown_owner"] = self._release_owner
+        return self._release_owner
+
+    def retain(self, *, startup: bool = True) -> None:
         """Attach this recovery owner before preserving the failed lease."""
         global _WSGI_STARTUP_RECOVERY
+        if os.getpid() != self._owner_pid:
+            raise RuntimeError("inherited WSGI recovery cannot retain ownership")
         retain_owner = getattr(self._backend_lease, "retain_recovery_owner", None)
         if callable(retain_owner):
             retain_owner(self)
         else:
             self._backend_lease._recovery_owner = self
         retain_backend_instance_lease(self._backend_lease)
-        _WSGI_STARTUP_RECOVERY = self
+        if startup:
+            _WSGI_STARTUP_RECOVERY = self
 
-    def retry_recovery(self) -> None:
+    def retry_recovery(self, *, timeout: float = 60.0) -> None:
         """Stop factory-owned runtimes, then release the retained lease."""
         global _WSGI_STARTUP_RECOVERY
-        with self._lock:
+        if os.getpid() != self._owner_pid:
+            raise RuntimeError("inherited WSGI recovery cannot dispose ownership")
+        deadline = _LifecycleDeadline.after(timeout)
+        if not self._lock.acquire(timeout=deadline.remaining()):
+            raise TimeoutError("WSGI recovery remains in progress")
+        try:
             if self._complete:
                 return
-            from .local_ai_routes import shutdown_local_ai_runtime  # noqa: PLC0415
-
-            self._candidate.config["RUNTIME_ACCEPTING_REQUESTS"] = False
-            failures: list[str] = []
-            try:
-                if not shutdown_local_ai_runtime(self._candidate, timeout=5.0):
-                    failures.append("managed local AI")
-            except BaseException as exc:  # noqa: BLE001 - retain authority for retry
-                failures.append(f"managed local AI ({type(exc).__name__})")
-            try:
-                if not shutdown_ditto_runtime(self._candidate, timeout=5.0):
-                    failures.append("ditto runtime")
-            except BaseException as exc:  # noqa: BLE001 - retain authority for retry
-                failures.append(f"ditto runtime ({type(exc).__name__})")
-            if failures:
-                raise RuntimeError("WSGI startup recovery incomplete: " + ", ".join(failures))
-            release_retained_backend_instance_lease(self._backend_lease)
+            self._ensure_release_owner().release(deadline=deadline.expires_at)
+            self._lease_worker.run(
+                lambda: release_retained_backend_instance_lease(self._backend_lease), deadline=deadline.expires_at,
+            )
             self._complete = True
             if _WSGI_STARTUP_RECOVERY is self:
                 _WSGI_STARTUP_RECOVERY = None
+        finally:
+            self._lock.release()
 
 
 class _ProcessBoundWSGIApp:
@@ -7639,36 +7843,56 @@ def _get_wsgi_app(*, shutdown_callback: Callable[[], None] | None = None) -> Fla
                         backend_lease.proof,
                         lambda: create_flask_app(backend_lease_proof=backend_lease.proof),
                     )
-                except BaseException:
-                    backend_lease.release()
+                except BaseException as error:
+                    owner = getattr(error, "recovery_owner", None)
+                    if owner is not None and not owner._released:
+                        recovery = _WSGIStartupRecovery(owner.app, backend_lease)
+                        recovery.retain()
+                    else:
+                        backend_lease.release()
                     raise
                 try:
                     from .local_ai_routes import start_configured_local_ai_runtime  # noqa: PLC0415
 
                     start_configured_local_ai_runtime(candidate)
                     import atexit  # noqa: PLC0415
-                    from .local_ai_routes import shutdown_local_ai_runtime  # noqa: PLC0415
 
-                    atexit.register(shutdown_ditto_runtime, candidate, timeout=5.0)
-                    atexit.register(shutdown_local_ai_runtime, candidate, timeout=5.0)
-                    candidate.wsgi_app = _ProcessBoundWSGIApp(  # type: ignore[method-assign]
-                        candidate.wsgi_app,
-                        owner_pid=current_pid,
-                        backend_lease=backend_lease,
-                    )
-                    from .desktop import _DesktopShutdownRecoveryOwner  # noqa: PLC0415
+                    stop_lock = threading.Lock()
 
                     def stop_revoked_worker() -> None:
-                        recovery_owner = candidate.extensions.get("flinttrade.wsgi_shutdown_owner")
-                        if recovery_owner is None:
-                            recovery_owner = _DesktopShutdownRecoveryOwner(candidate)
-                            candidate.extensions["flinttrade.wsgi_shutdown_owner"] = recovery_owner
-                        recovery_owner.release(deadline=time.monotonic() + 60.0)
+                        recovery.retain(startup=False)
+                        try:
+                            recovery.retry_recovery()
+                        except Exception as error:
+                            logger.error("WSGI managed shutdown remains owned (%s)", type(error).__name__)
+                            return
                         (shutdown_callback or _request_wsgi_shutdown)()
 
-                    watch = _BackendLeaseRuntimeWatch(candidate, backend_lease.proof, stop_revoked_worker)
+                    def request_managed_stop() -> None:
+                        # The control-channel thread must remain available for
+                        # the final descriptor exchange while cleanup waits.
+                        with stop_lock:
+                            worker = candidate.extensions.get("flinttrade.wsgi_stop_thread")
+                            if worker is None or not worker.is_alive():
+                                worker = threading.Thread(target=stop_revoked_worker,
+                                                          name="wsgi-managed-stop", daemon=True)
+                                candidate.extensions["flinttrade.wsgi_stop_thread"] = worker
+                                worker.start()
+
+                    _install_managed_maintenance(candidate, request_managed_stop)
+                    recovery = _WSGIStartupRecovery(candidate, backend_lease)
+                    candidate.wsgi_app = _ProcessBoundWSGIApp(  # type: ignore[method-assign]
+                        candidate.wsgi_app, owner_pid=current_pid, backend_lease=backend_lease,
+                    )
+                    def stop_at_exit() -> None:
+                        # An inherited worker or a non-production factory double
+                        # owns neither this generation nor its disposal authority.
+                        if os.getpid() == current_pid and candidate.config.get("BACKEND_LEASE_PROOF") is backend_lease.proof:
+                            recovery.retry_recovery()
+
+                    atexit.register(stop_at_exit)
+                    watch = _BackendLeaseRuntimeWatch(candidate, backend_lease.proof, request_managed_stop)
                     watch.start()
-                    atexit.register(watch.stop, timeout=1.0)
                 except BaseException:
                     recovery = _WSGIStartupRecovery(candidate, backend_lease)
                     recovery.retain()

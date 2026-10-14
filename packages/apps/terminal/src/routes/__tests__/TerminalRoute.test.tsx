@@ -138,6 +138,7 @@ vi.mock("@/stores/themeStore", () => ({
 }));
 
 vi.mock("@/stores/tradingStore", () => ({
+  useCurrentTradingState: () => ({ totalPnl: mockTradingState.totalPnl, positionsStatus: "ready" }),
   useTradingStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
     selector({ totalPnl: mockTradingState.totalPnl }),
   ),

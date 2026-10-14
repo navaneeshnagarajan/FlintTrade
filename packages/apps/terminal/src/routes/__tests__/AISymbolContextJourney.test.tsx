@@ -53,18 +53,14 @@ vi.mock("@/hooks/useTradingStoreSync", () => ({ useTradingStoreSync: vi.fn() }))
 vi.mock("@/hooks/useBrokerAccounts", () => ({ useBrokerAccounts: vi.fn() }));
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({ useNotificationFeed: vi.fn() }));
 vi.mock("@/hooks/useGlobalKeys", () => ({ default: vi.fn() }));
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector: (state: Record<string, unknown>) => unknown) => selector({ mode: "live" }),
-}));
-vi.mock("@/stores/authStore", () => ({
-  useAuthStore: Object.assign(
-    (selector: (state: Record<string, unknown>) => unknown) => selector({ status: "logged-in" }),
-    { getState: () => ({ checkIdle: vi.fn(), touchActivity: vi.fn() }) },
-  ),
-}));
-vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: (selector: (state: Record<string, unknown>) => unknown) => selector({ apiKey: "" }),
-}));
+// Share the genuine subscribed authority stores with import-time receipt guards.
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+vi.mock("@/routes/UnifiedAppsHost", () => ({ UnifiedAppsHost: () => null }));
+vi.mock("@/lib/instrumentLots", () => ({ loadInstrumentLotRows: vi.fn() }));
+
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: (selector: (state: Record<string, unknown>) => unknown) => selector({ workspaceApi: null }),
 }));
@@ -98,6 +94,18 @@ describe("AI symbol context journey", () => {
     sessionStorage.clear();
     localStorage.clear();
     Object.defineProperty(window, "innerWidth", { value: 1920, writable: true });
+    useAuthStore.setState(state => ({
+      ...useAuthStore.getInitialState(), status: "logged-in",
+      token: "synthetic-symbol-session", username: "synthetic-operator",
+      sessionGeneration: state.sessionGeneration + 1, lastActivity: Date.now(),
+    }));
+    useModeStore.setState({ mode: "live" });
+    useConnectionStore.setState({ ...useConnectionStore.getInitialState(), status: "connected" });
+    useBrokerStore.setState({
+      ...useBrokerStore.getInitialState(), activeAccountId: "native:upstox:SYMBOL",
+      accounts: [{ broker: "upstox", account_id: "SYMBOL", source: "native", status: "connected",
+        label: "Synthetic symbol account", is_primary: true, connected_at: null, error_message: null }],
+    });
     searchSymbolMock.mockResolvedValue([{ symbol: "RELIANCE", exchange: "NSE" }]);
   });
 

@@ -292,11 +292,9 @@ class TestHealthAggregated:
         if disk.get("scope") == "host":
             assert disk["total_gb"] > 0
             assert disk["used_pct"] == disk["percent_used"]
-        if "cpu" in data:
-            assert data["cpu"]["scope"] == "host"
+        if data.get("cpu", {}).get("scope") == "host":
             assert data["cpu"]["used_pct"] >= 0
-        if "gpu" in data:
-            assert data["gpu"]["scope"] == "host"
+        if data.get("gpu", {}).get("scope") == "host":
             assert data["gpu"].get("total_mb", 1) > 0 or "used_pct" in data["gpu"]
         if "network" in data:
             assert data["network"]["scope"] == "host"

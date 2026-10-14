@@ -1,0 +1,1784 @@
+[
+  {
+    "category": "rights-source",
+    "selector": {
+      "action": "learning-rights",
+      "subject": "source"
+    },
+    "base": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "2ec74818-46e6-4b52-86ea-138f43e6d455"
+      }
+    },
+    "before": {
+      "exact_control": {
+        "identity": null,
+        "revision": 0,
+        "selector": {
+          "action": "learning-rights",
+          "subject": "source"
+        },
+        "value": null
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "2ec74818-46e6-4b52-86ea-138f43e6d455"
+      }
+    },
+    "proposal": {
+      "action": "learning-rights",
+      "expected_revision": 0,
+      "value": {
+        "subject": "source",
+        "selection": {
+          "connection_id": "1c37a4a2-44a7-412a-a892-06dfa2c345c2",
+          "connection_revision": "\"b57057305793822a5036261b896780a2cb7f79fa43aa136c9090866b217c9683\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "rights": {
+          "rights": {
+            "model_distribution": "unknown",
+            "derivative_distribution": "unknown",
+            "commercial_use": "unknown",
+            "production_use": "unknown",
+            "output_use": "allowed",
+            "output_distribution": "unknown",
+            "retention": "allowed",
+            "training_distillation": "allowed",
+            "max_evidence_use_scope": "isolated_research",
+            "restrictions": []
+          },
+          "grants": [
+            {
+              "grant_id": "synthetic-source",
+              "basis": "licence",
+              "rights": {
+                "model_distribution": "unknown",
+                "derivative_distribution": "unknown",
+                "commercial_use": "unknown",
+                "production_use": "unknown",
+                "output_use": "allowed",
+                "output_distribution": "unknown",
+                "retention": "allowed",
+                "training_distillation": "allowed",
+                "max_evidence_use_scope": "isolated_research",
+                "restrictions": []
+              },
+              "evidence": [
+                {
+                  "fact_id": "synthetic-source",
+                  "subject_kind": "dataset",
+                  "identifier": "closed-trades:2ec74818-46e6-4b52-86ea-138f43e6d455",
+                  "source_uri": "https://example.invalid/synthetic",
+                  "revision": "synthetic-v1",
+                  "sha256": "5254864f275c652847a84dcb1170447a7361e4f0e0b44b37e6547891dd1f26d8",
+                  "reviewed_at": "2026-10-10T00:00:00+00:00",
+                  "basis": "licence"
+                }
+              ],
+              "model_identity": null
+            }
+          ]
+        },
+        "documents": {
+          "synthetic-source": "Synthetic reviewed bytes only: \u0928\u092e\u0938\u094d\u0924\u0947 \ud83d\udea6 \"quoted\"\\path\nsource"
+        },
+        "fields": [
+          "symbol",
+          "exchange",
+          "action",
+          "entry_price",
+          "exit_price",
+          "quantity",
+          "pnl",
+          "pnl_pct",
+          "exit_reason",
+          "exit_price_estimated",
+          "timestamp"
+        ],
+        "review_statement": "Explicit synthetic review \u2014 not entitlement"
+      }
+    },
+    "preview": {
+      "confirmation": "_kBc9fUBwWrNxYbFYysG2HArsecJYURvBw-7aiTQOCc",
+      "expires_in_seconds": 120,
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "proposal": {
+        "action": "learning-rights",
+        "expected_revision": 0,
+        "value": {
+          "documents": {
+            "synthetic-source": "Synthetic reviewed bytes only: \u0928\u092e\u0938\u094d\u0924\u0947 \ud83d\udea6 \"quoted\"\\path\nsource"
+          },
+          "fields": [
+            "symbol",
+            "exchange",
+            "action",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "exit_reason",
+            "exit_price_estimated",
+            "timestamp"
+          ],
+          "review_statement": "Explicit synthetic review \u2014 not entitlement",
+          "rights": {
+            "grants": [
+              {
+                "basis": "licence",
+                "evidence": [
+                  {
+                    "basis": "licence",
+                    "fact_id": "synthetic-source",
+                    "identifier": "closed-trades:2ec74818-46e6-4b52-86ea-138f43e6d455",
+                    "reviewed_at": "2026-10-10T00:00:00+00:00",
+                    "revision": "synthetic-v1",
+                    "sha256": "5254864f275c652847a84dcb1170447a7361e4f0e0b44b37e6547891dd1f26d8",
+                    "source_uri": "https://example.invalid/synthetic",
+                    "subject_kind": "dataset"
+                  }
+                ],
+                "grant_id": "synthetic-source",
+                "model_identity": null,
+                "rights": {
+                  "commercial_use": "unknown",
+                  "derivative_distribution": "unknown",
+                  "max_evidence_use_scope": "isolated_research",
+                  "model_distribution": "unknown",
+                  "output_distribution": "unknown",
+                  "output_use": "allowed",
+                  "production_use": "unknown",
+                  "restrictions": [],
+                  "retention": "allowed",
+                  "training_distillation": "allowed"
+                }
+              }
+            ],
+            "rights": {
+              "commercial_use": "unknown",
+              "derivative_distribution": "unknown",
+              "max_evidence_use_scope": "isolated_research",
+              "model_distribution": "unknown",
+              "output_distribution": "unknown",
+              "output_use": "allowed",
+              "production_use": "unknown",
+              "restrictions": [],
+              "retention": "allowed",
+              "training_distillation": "allowed"
+            }
+          },
+          "selection": {
+            "connection_id": "1c37a4a2-44a7-412a-a892-06dfa2c345c2",
+            "connection_revision": "\"b57057305793822a5036261b896780a2cb7f79fa43aa136c9090866b217c9683\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "subject": "source"
+        }
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "2ec74818-46e6-4b52-86ea-138f43e6d455"
+      },
+      "target_identity": null
+    },
+    "confirmed": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "exact_control": {
+        "identity": {
+          "event_id": "b2145af5-35f8-4208-a133-f09deca12303",
+          "rights_digest": "888285d403b9375f15fa7b8d30e7233eb998e70ce2893560385003505d30c8b5"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "learning-rights",
+          "subject": "source"
+        },
+        "value": {
+          "document_digests": {
+            "synthetic-source": "5254864f275c652847a84dcb1170447a7361e4f0e0b44b37e6547891dd1f26d8"
+          },
+          "fields": [
+            "symbol",
+            "exchange",
+            "action",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "exit_reason",
+            "exit_price_estimated",
+            "timestamp"
+          ],
+          "review_statement_digest": "2a760fbff731172cc2a6bd67e16ce1d4fa9b7b10bfe47c52b47eed1290ecc57f",
+          "rights_digest": "888285d403b9375f15fa7b8d30e7233eb998e70ce2893560385003505d30c8b5",
+          "selection": {
+            "connection_id": "1c37a4a2-44a7-412a-a892-06dfa2c345c2",
+            "connection_revision": "\"b57057305793822a5036261b896780a2cb7f79fa43aa136c9090866b217c9683\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "subject": "source"
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "result": {
+        "event_id": "b2145af5-35f8-4208-a133-f09deca12303",
+        "policy_provenance": "operator-reviewed-document-evidence",
+        "rights_digest": "888285d403b9375f15fa7b8d30e7233eb998e70ce2893560385003505d30c8b5"
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "2ec74818-46e6-4b52-86ea-138f43e6d455"
+      }
+    },
+    "after": {
+      "exact_control": {
+        "identity": {
+          "event_id": "b2145af5-35f8-4208-a133-f09deca12303",
+          "rights_digest": "888285d403b9375f15fa7b8d30e7233eb998e70ce2893560385003505d30c8b5"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "learning-rights",
+          "subject": "source"
+        },
+        "value": {
+          "document_digests": {
+            "synthetic-source": "5254864f275c652847a84dcb1170447a7361e4f0e0b44b37e6547891dd1f26d8"
+          },
+          "fields": [
+            "symbol",
+            "exchange",
+            "action",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "exit_reason",
+            "exit_price_estimated",
+            "timestamp"
+          ],
+          "review_statement_digest": "2a760fbff731172cc2a6bd67e16ce1d4fa9b7b10bfe47c52b47eed1290ecc57f",
+          "rights_digest": "888285d403b9375f15fa7b8d30e7233eb998e70ce2893560385003505d30c8b5",
+          "selection": {
+            "connection_id": "1c37a4a2-44a7-412a-a892-06dfa2c345c2",
+            "connection_revision": "\"b57057305793822a5036261b896780a2cb7f79fa43aa136c9090866b217c9683\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "subject": "source"
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "2ec74818-46e6-4b52-86ea-138f43e6d455"
+      }
+    },
+    "read_proof": {
+      "before_get": {
+        "usage": "28fcd6fefd4da2a688a623d71ee3d0f165e213e9845c01f3fc9bd4b48e1ac117",
+        "evaluation": "dc72290a1cce54933b9ee6e26ffe25f758f0ccf5fa1fa7da84057b5eb8a24ad5",
+        "memory": "06c51b5336fba22007f7ff5729956a3927048549a4626d33fe73cb3063fc8128",
+        "run": "fbaf5ad8c1464b24ff46590ee0295d47724459513b84a5172cee47d1e8feb44b",
+        "sandbox": "f6e4754f552486438c076d301c1646a353606232699505784a3de5117e34510a"
+      },
+      "after_configure": {
+        "usage": "28fcd6fefd4da2a688a623d71ee3d0f165e213e9845c01f3fc9bd4b48e1ac117",
+        "evaluation": "dc72290a1cce54933b9ee6e26ffe25f758f0ccf5fa1fa7da84057b5eb8a24ad5",
+        "memory": "90780ce0eab3b975f934ed06bfc458d7e7e627a2229fc5e125fd0818b19f9c0c",
+        "run": "bc624bb39af059c30a3a2068cd9e7abfeab7e61bdd20d66f8a4dae7cd18dd854",
+        "sandbox": "f6e4754f552486438c076d301c1646a353606232699505784a3de5117e34510a"
+      },
+      "after_get": {
+        "usage": "28fcd6fefd4da2a688a623d71ee3d0f165e213e9845c01f3fc9bd4b48e1ac117",
+        "evaluation": "dc72290a1cce54933b9ee6e26ffe25f758f0ccf5fa1fa7da84057b5eb8a24ad5",
+        "memory": "90780ce0eab3b975f934ed06bfc458d7e7e627a2229fc5e125fd0818b19f9c0c",
+        "run": "bc624bb39af059c30a3a2068cd9e7abfeab7e61bdd20d66f8a4dae7cd18dd854",
+        "sandbox": "f6e4754f552486438c076d301c1646a353606232699505784a3de5117e34510a"
+      },
+      "provider_calls": 0,
+      "training_job_store_exists": false
+    }
+  },
+  {
+    "category": "rights-output",
+    "selector": {
+      "action": "learning-rights",
+      "subject": "output"
+    },
+    "base": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "591734eb-a886-4ca5-bcc5-acd26ccd087e"
+      }
+    },
+    "before": {
+      "exact_control": {
+        "identity": null,
+        "revision": 0,
+        "selector": {
+          "action": "learning-rights",
+          "subject": "output"
+        },
+        "value": null
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "591734eb-a886-4ca5-bcc5-acd26ccd087e"
+      }
+    },
+    "proposal": {
+      "action": "learning-rights",
+      "expected_revision": 0,
+      "value": {
+        "subject": "output",
+        "selection": {
+          "connection_id": "0a75110c-793f-45ce-b3fd-563cf8482ecd",
+          "connection_revision": "\"d61e58fb9d799123053188f09573bccdca70b2ecae2498f95dfeace9e353b200\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "rights": {
+          "rights": {
+            "model_distribution": "unknown",
+            "derivative_distribution": "unknown",
+            "commercial_use": "unknown",
+            "production_use": "unknown",
+            "output_use": "allowed",
+            "output_distribution": "unknown",
+            "retention": "allowed",
+            "training_distillation": "allowed",
+            "max_evidence_use_scope": "isolated_research",
+            "restrictions": []
+          },
+          "grants": [
+            {
+              "grant_id": "synthetic-output",
+              "basis": "provider_terms",
+              "rights": {
+                "model_distribution": "unknown",
+                "derivative_distribution": "unknown",
+                "commercial_use": "unknown",
+                "production_use": "unknown",
+                "output_use": "allowed",
+                "output_distribution": "unknown",
+                "retention": "allowed",
+                "training_distillation": "allowed",
+                "max_evidence_use_scope": "isolated_research",
+                "restrictions": []
+              },
+              "evidence": [
+                {
+                  "fact_id": "synthetic-output",
+                  "subject_kind": "provider-output",
+                  "identifier": "test-model-v1",
+                  "source_uri": "https://example.invalid/synthetic",
+                  "revision": "synthetic-v1",
+                  "sha256": "87268cb9d614a54cd8347cf5a2ee9d5c92e0630593715a4fec79ebe0a3117a67",
+                  "reviewed_at": "2026-10-10T00:00:00+00:00",
+                  "basis": "provider_terms"
+                }
+              ],
+              "model_identity": null
+            }
+          ]
+        },
+        "documents": {
+          "synthetic-output": "Synthetic reviewed bytes only: \u0928\u092e\u0938\u094d\u0924\u0947 \ud83d\udea6 \"quoted\"\\path\noutput"
+        },
+        "fields": [
+          "symbol",
+          "exchange",
+          "action",
+          "entry_price",
+          "exit_price",
+          "quantity",
+          "pnl",
+          "pnl_pct",
+          "exit_reason",
+          "exit_price_estimated",
+          "timestamp"
+        ],
+        "review_statement": "Explicit synthetic review \u2014 not entitlement"
+      }
+    },
+    "preview": {
+      "confirmation": "uWZQm8MHRXug-o3MSFUmmLGtt1Z8p3Bhx0IbOooK68Q",
+      "expires_in_seconds": 120,
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "proposal": {
+        "action": "learning-rights",
+        "expected_revision": 0,
+        "value": {
+          "documents": {
+            "synthetic-output": "Synthetic reviewed bytes only: \u0928\u092e\u0938\u094d\u0924\u0947 \ud83d\udea6 \"quoted\"\\path\noutput"
+          },
+          "fields": [
+            "symbol",
+            "exchange",
+            "action",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "exit_reason",
+            "exit_price_estimated",
+            "timestamp"
+          ],
+          "review_statement": "Explicit synthetic review \u2014 not entitlement",
+          "rights": {
+            "grants": [
+              {
+                "basis": "provider_terms",
+                "evidence": [
+                  {
+                    "basis": "provider_terms",
+                    "fact_id": "synthetic-output",
+                    "identifier": "test-model-v1",
+                    "reviewed_at": "2026-10-10T00:00:00+00:00",
+                    "revision": "synthetic-v1",
+                    "sha256": "87268cb9d614a54cd8347cf5a2ee9d5c92e0630593715a4fec79ebe0a3117a67",
+                    "source_uri": "https://example.invalid/synthetic",
+                    "subject_kind": "provider-output"
+                  }
+                ],
+                "grant_id": "synthetic-output",
+                "model_identity": null,
+                "rights": {
+                  "commercial_use": "unknown",
+                  "derivative_distribution": "unknown",
+                  "max_evidence_use_scope": "isolated_research",
+                  "model_distribution": "unknown",
+                  "output_distribution": "unknown",
+                  "output_use": "allowed",
+                  "production_use": "unknown",
+                  "restrictions": [],
+                  "retention": "allowed",
+                  "training_distillation": "allowed"
+                }
+              }
+            ],
+            "rights": {
+              "commercial_use": "unknown",
+              "derivative_distribution": "unknown",
+              "max_evidence_use_scope": "isolated_research",
+              "model_distribution": "unknown",
+              "output_distribution": "unknown",
+              "output_use": "allowed",
+              "production_use": "unknown",
+              "restrictions": [],
+              "retention": "allowed",
+              "training_distillation": "allowed"
+            }
+          },
+          "selection": {
+            "connection_id": "0a75110c-793f-45ce-b3fd-563cf8482ecd",
+            "connection_revision": "\"d61e58fb9d799123053188f09573bccdca70b2ecae2498f95dfeace9e353b200\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "subject": "output"
+        }
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "591734eb-a886-4ca5-bcc5-acd26ccd087e"
+      },
+      "target_identity": null
+    },
+    "confirmed": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "exact_control": {
+        "identity": {
+          "event_id": "ba98fac5-607f-4b18-82bf-794d114c900b",
+          "rights_digest": "a1a3a13e5dbf39c129b8c3833453f7a69399d8a3cb79520a7b81654774c67eb5"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "learning-rights",
+          "subject": "output"
+        },
+        "value": {
+          "document_digests": {
+            "synthetic-output": "87268cb9d614a54cd8347cf5a2ee9d5c92e0630593715a4fec79ebe0a3117a67"
+          },
+          "fields": [
+            "symbol",
+            "exchange",
+            "action",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "exit_reason",
+            "exit_price_estimated",
+            "timestamp"
+          ],
+          "review_statement_digest": "2a760fbff731172cc2a6bd67e16ce1d4fa9b7b10bfe47c52b47eed1290ecc57f",
+          "rights_digest": "a1a3a13e5dbf39c129b8c3833453f7a69399d8a3cb79520a7b81654774c67eb5",
+          "selection": {
+            "connection_id": "0a75110c-793f-45ce-b3fd-563cf8482ecd",
+            "connection_revision": "\"d61e58fb9d799123053188f09573bccdca70b2ecae2498f95dfeace9e353b200\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "subject": "output"
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "result": {
+        "event_id": "ba98fac5-607f-4b18-82bf-794d114c900b",
+        "policy_provenance": "operator-reviewed-document-evidence",
+        "rights_digest": "a1a3a13e5dbf39c129b8c3833453f7a69399d8a3cb79520a7b81654774c67eb5"
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "591734eb-a886-4ca5-bcc5-acd26ccd087e"
+      }
+    },
+    "after": {
+      "exact_control": {
+        "identity": {
+          "event_id": "ba98fac5-607f-4b18-82bf-794d114c900b",
+          "rights_digest": "a1a3a13e5dbf39c129b8c3833453f7a69399d8a3cb79520a7b81654774c67eb5"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "learning-rights",
+          "subject": "output"
+        },
+        "value": {
+          "document_digests": {
+            "synthetic-output": "87268cb9d614a54cd8347cf5a2ee9d5c92e0630593715a4fec79ebe0a3117a67"
+          },
+          "fields": [
+            "symbol",
+            "exchange",
+            "action",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "exit_reason",
+            "exit_price_estimated",
+            "timestamp"
+          ],
+          "review_statement_digest": "2a760fbff731172cc2a6bd67e16ce1d4fa9b7b10bfe47c52b47eed1290ecc57f",
+          "rights_digest": "a1a3a13e5dbf39c129b8c3833453f7a69399d8a3cb79520a7b81654774c67eb5",
+          "selection": {
+            "connection_id": "0a75110c-793f-45ce-b3fd-563cf8482ecd",
+            "connection_revision": "\"d61e58fb9d799123053188f09573bccdca70b2ecae2498f95dfeace9e353b200\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "subject": "output"
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "591734eb-a886-4ca5-bcc5-acd26ccd087e"
+      }
+    },
+    "read_proof": {
+      "before_get": {
+        "usage": "f4f1164732a472151d4c0d0ef97eab908abbb1954ae4172b3189e55e9a9803f4",
+        "evaluation": "5b105f7f8e0ae4aa8bcd9e0c2f8b98deaa4a3d9dcfca76bf1288e1b3462624cb",
+        "memory": "085a07795e467cbfe51b1f3c087ca1342611e330931b2a38d5daefcc137fcb4b",
+        "run": "85eb70af7c2cd5385035410c86377a3c61230ecb05cae427da22ded87a74ebdd",
+        "sandbox": "7feeb5dcd997eb634aae5baa2b3b05b60d66be3936b35c3c3b540d8a904e9ec8"
+      },
+      "after_configure": {
+        "usage": "f4f1164732a472151d4c0d0ef97eab908abbb1954ae4172b3189e55e9a9803f4",
+        "evaluation": "5b105f7f8e0ae4aa8bcd9e0c2f8b98deaa4a3d9dcfca76bf1288e1b3462624cb",
+        "memory": "8aeb8acfaed7828f18e6500f6f8d296a5d8d83ca05fdb0e8f250b85acbedd7cb",
+        "run": "9e5284fabaf83e32ab9565ef2c711f74881b76dd89c2627161e254f65a978857",
+        "sandbox": "7feeb5dcd997eb634aae5baa2b3b05b60d66be3936b35c3c3b540d8a904e9ec8"
+      },
+      "after_get": {
+        "usage": "f4f1164732a472151d4c0d0ef97eab908abbb1954ae4172b3189e55e9a9803f4",
+        "evaluation": "5b105f7f8e0ae4aa8bcd9e0c2f8b98deaa4a3d9dcfca76bf1288e1b3462624cb",
+        "memory": "8aeb8acfaed7828f18e6500f6f8d296a5d8d83ca05fdb0e8f250b85acbedd7cb",
+        "run": "9e5284fabaf83e32ab9565ef2c711f74881b76dd89c2627161e254f65a978857",
+        "sandbox": "7feeb5dcd997eb634aae5baa2b3b05b60d66be3936b35c3c3b540d8a904e9ec8"
+      },
+      "provider_calls": 0,
+      "training_job_store_exists": false
+    }
+  },
+  {
+    "category": "candidate",
+    "selector": {
+      "action": "candidate",
+      "trial": "3e9948a9477e470dab71ac44dd38aadc"
+    },
+    "base": {
+      "controls": {
+        "access": {
+          "revision": 1,
+          "value": {
+            "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+            "evidence": "synthetic-evaluation-only",
+            "operations": [
+              "evaluation.score"
+            ],
+            "valid_until": 1791594000.0
+          }
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "d4c31c4d-241b-4ef7-81bc-3f8a845d1e7c"
+      }
+    },
+    "before": {
+      "exact_control": {
+        "identity": {
+          "evidence_digest": "238947b07fa000b19cc362065a2dd58c372e22d51cdffe4561f9142332e950f6",
+          "experiment_id": "ad0474f1f59343a8b6ccba47c90d1287",
+          "manifest_digest": "6dfe8b7cdb37fc4b86a77017517fd27205fa96923e151b882bdb25d9d25a9916",
+          "serving_identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+          "trial": "3e9948a9477e470dab71ac44dd38aadc"
+        },
+        "revision": 0,
+        "selector": {
+          "action": "candidate",
+          "trial": "3e9948a9477e470dab71ac44dd38aadc"
+        },
+        "value": null
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "d4c31c4d-241b-4ef7-81bc-3f8a845d1e7c"
+      }
+    },
+    "proposal": {
+      "action": "candidate",
+      "expected_revision": 0,
+      "value": {
+        "candidate": "3e9948a9477e470dab71ac44dd38aadc",
+        "selection": {
+          "connection_id": "b663421d-73d9-484d-8f4b-407b14f9526d",
+          "connection_revision": "\"f352621acaa54929c68ec39cae263a3c4d5e054629f5ed7ae77976fac5b35698\"",
+          "model": "test-model-v1",
+          "effort": "balanced"
+        },
+        "role": "reasoning",
+        "identity_scope": "provider-reported-revision",
+        "valid_until": 1791594000.0,
+        "deadline_ms": 2000,
+        "max_output_tokens": 256,
+        "readiness_ttl_seconds": 60
+      }
+    },
+    "preview": {
+      "confirmation": "s06Gfgui7g7NJmDVsyivoogrvPP9ORH1TPPdKdV30pc",
+      "expires_in_seconds": 120,
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "proposal": {
+        "action": "candidate",
+        "expected_revision": 0,
+        "value": {
+          "candidate": "3e9948a9477e470dab71ac44dd38aadc",
+          "deadline_ms": 2000,
+          "identity_scope": "provider-reported-revision",
+          "max_output_tokens": 256,
+          "readiness_ttl_seconds": 60,
+          "role": "reasoning",
+          "selection": {
+            "connection_id": "b663421d-73d9-484d-8f4b-407b14f9526d",
+            "connection_revision": "\"f352621acaa54929c68ec39cae263a3c4d5e054629f5ed7ae77976fac5b35698\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "valid_until": 1791594000.0
+        }
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "d4c31c4d-241b-4ef7-81bc-3f8a845d1e7c"
+      },
+      "target_identity": {
+        "evidence_digest": "238947b07fa000b19cc362065a2dd58c372e22d51cdffe4561f9142332e950f6",
+        "experiment_id": "ad0474f1f59343a8b6ccba47c90d1287",
+        "manifest_digest": "6dfe8b7cdb37fc4b86a77017517fd27205fa96923e151b882bdb25d9d25a9916",
+        "serving_identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+        "trial": "3e9948a9477e470dab71ac44dd38aadc"
+      }
+    },
+    "confirmed": {
+      "controls": {
+        "access": {
+          "revision": 1,
+          "value": {
+            "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+            "evidence": "synthetic-evaluation-only",
+            "operations": [
+              "evaluation.score"
+            ],
+            "valid_until": 1791594000.0
+          }
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "exact_control": {
+        "identity": {
+          "evidence_digest": "238947b07fa000b19cc362065a2dd58c372e22d51cdffe4561f9142332e950f6",
+          "experiment_id": "ad0474f1f59343a8b6ccba47c90d1287",
+          "manifest_digest": "6dfe8b7cdb37fc4b86a77017517fd27205fa96923e151b882bdb25d9d25a9916",
+          "serving_identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+          "trial": "3e9948a9477e470dab71ac44dd38aadc"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "candidate",
+          "trial": "3e9948a9477e470dab71ac44dd38aadc"
+        },
+        "value": {
+          "candidate": "3e9948a9477e470dab71ac44dd38aadc",
+          "deadline_ms": 2000,
+          "identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+          "identity_scope": "provider-reported-revision",
+          "max_output_tokens": 256,
+          "model_revision": "test-model-v1",
+          "readiness_ttl_seconds": 60,
+          "role": "reasoning",
+          "selection": {
+            "connection_id": "b663421d-73d9-484d-8f4b-407b14f9526d",
+            "connection_revision": "\"f352621acaa54929c68ec39cae263a3c4d5e054629f5ed7ae77976fac5b35698\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "valid_until": 1791594000.0
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "result": {
+        "candidate": "3e9948a9477e470dab71ac44dd38aadc",
+        "deadline_ms": 2000,
+        "identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+        "identity_scope": "provider-reported-revision",
+        "max_output_tokens": 256,
+        "model_revision": "test-model-v1",
+        "readiness_ttl_seconds": 60,
+        "role": "reasoning",
+        "selection": {
+          "connection_id": "b663421d-73d9-484d-8f4b-407b14f9526d",
+          "connection_revision": "\"f352621acaa54929c68ec39cae263a3c4d5e054629f5ed7ae77976fac5b35698\"",
+          "effort": "balanced",
+          "model": "test-model-v1"
+        },
+        "valid_until": 1791594000.0
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "d4c31c4d-241b-4ef7-81bc-3f8a845d1e7c"
+      }
+    },
+    "after": {
+      "exact_control": {
+        "identity": {
+          "evidence_digest": "238947b07fa000b19cc362065a2dd58c372e22d51cdffe4561f9142332e950f6",
+          "experiment_id": "ad0474f1f59343a8b6ccba47c90d1287",
+          "manifest_digest": "6dfe8b7cdb37fc4b86a77017517fd27205fa96923e151b882bdb25d9d25a9916",
+          "serving_identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+          "trial": "3e9948a9477e470dab71ac44dd38aadc"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "candidate",
+          "trial": "3e9948a9477e470dab71ac44dd38aadc"
+        },
+        "value": {
+          "candidate": "3e9948a9477e470dab71ac44dd38aadc",
+          "deadline_ms": 2000,
+          "identity": "provider-reported-revision:b88161da88de8345ba706d01ef6a9e84758c47038a01adf00e40c2ac97131ccb",
+          "identity_scope": "provider-reported-revision",
+          "max_output_tokens": 256,
+          "model_revision": "test-model-v1",
+          "readiness_ttl_seconds": 60,
+          "role": "reasoning",
+          "selection": {
+            "connection_id": "b663421d-73d9-484d-8f4b-407b14f9526d",
+            "connection_revision": "\"f352621acaa54929c68ec39cae263a3c4d5e054629f5ed7ae77976fac5b35698\"",
+            "effort": "balanced",
+            "model": "test-model-v1"
+          },
+          "valid_until": 1791594000.0
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "d4c31c4d-241b-4ef7-81bc-3f8a845d1e7c"
+      }
+    },
+    "read_proof": {
+      "before_get": {
+        "usage": "317c35cefe958416a3d5cde5da72da799158f0655988b2118e87d28b20e01ff7",
+        "evaluation": "8984c04f8150ed4eccc376abed96aa913e8d28e2c535c6dd4ff8b8efdd063a0f",
+        "memory": "6cb26ee11365439f9dbc7f26a76ce18aecd5cd518f7fec51c6b034d153757c67",
+        "run": "001c86800f06417dee81907e13a243b0bb6a038bd8ba18abb44b5a8b1341d375",
+        "sandbox": "248b8a71f32d76c5276125fea6c8aab0d3b8890fb5cedded5cc2d5d40cb6b4f1"
+      },
+      "after_configure": {
+        "usage": "269d15e828fe89898ad640d81844dc1d1f847d8988200e5e4bb9dda0744aa03d",
+        "evaluation": "8984c04f8150ed4eccc376abed96aa913e8d28e2c535c6dd4ff8b8efdd063a0f",
+        "memory": "6cb26ee11365439f9dbc7f26a76ce18aecd5cd518f7fec51c6b034d153757c67",
+        "run": "001c86800f06417dee81907e13a243b0bb6a038bd8ba18abb44b5a8b1341d375",
+        "sandbox": "248b8a71f32d76c5276125fea6c8aab0d3b8890fb5cedded5cc2d5d40cb6b4f1"
+      },
+      "after_get": {
+        "usage": "269d15e828fe89898ad640d81844dc1d1f847d8988200e5e4bb9dda0744aa03d",
+        "evaluation": "8984c04f8150ed4eccc376abed96aa913e8d28e2c535c6dd4ff8b8efdd063a0f",
+        "memory": "6cb26ee11365439f9dbc7f26a76ce18aecd5cd518f7fec51c6b034d153757c67",
+        "run": "001c86800f06417dee81907e13a243b0bb6a038bd8ba18abb44b5a8b1341d375",
+        "sandbox": "248b8a71f32d76c5276125fea6c8aab0d3b8890fb5cedded5cc2d5d40cb6b4f1"
+      },
+      "provider_calls": 0,
+      "training_job_store_exists": false
+    }
+  },
+  {
+    "category": "evaluation",
+    "selector": {
+      "action": "evaluation",
+      "trial": "74aeb370f43c499db24f39f29afb2b03",
+      "suite": "sealed-config"
+    },
+    "base": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "8dcda8fe-a8af-4cfc-82fc-c169ff879482"
+      }
+    },
+    "before": {
+      "exact_control": {
+        "identity": {
+          "experiment_id": "4518c5da867449aa88857716601d8277",
+          "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+          "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        },
+        "revision": 0,
+        "selector": {
+          "action": "evaluation",
+          "suite": "sealed-config",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        },
+        "value": null
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "8dcda8fe-a8af-4cfc-82fc-c169ff879482"
+      }
+    },
+    "proposal": {
+      "action": "evaluation",
+      "expected_revision": 0,
+      "value": {
+        "trial": "74aeb370f43c499db24f39f29afb2b03",
+        "suite": "sealed-config"
+      }
+    },
+    "preview": {
+      "confirmation": "UTDy13cobau8INJ4ghdA3ik1_l31iYcbo28_TkOz7hQ",
+      "expires_in_seconds": 120,
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "proposal": {
+        "action": "evaluation",
+        "expected_revision": 0,
+        "value": {
+          "suite": "sealed-config",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        }
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "8dcda8fe-a8af-4cfc-82fc-c169ff879482"
+      },
+      "target_identity": {
+        "experiment_id": "4518c5da867449aa88857716601d8277",
+        "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+        "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9",
+        "trial": "74aeb370f43c499db24f39f29afb2b03"
+      }
+    },
+    "confirmed": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "exact_control": {
+        "identity": {
+          "experiment_id": "4518c5da867449aa88857716601d8277",
+          "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+          "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "evaluation",
+          "suite": "sealed-config",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        },
+        "value": {
+          "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+          "suite": "sealed-config",
+          "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "result": {
+        "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+        "suite": "sealed-config",
+        "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9"
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "8dcda8fe-a8af-4cfc-82fc-c169ff879482"
+      }
+    },
+    "after": {
+      "exact_control": {
+        "identity": {
+          "experiment_id": "4518c5da867449aa88857716601d8277",
+          "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+          "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        },
+        "revision": 1,
+        "selector": {
+          "action": "evaluation",
+          "suite": "sealed-config",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        },
+        "value": {
+          "manifest_digest": "08a1539c6a8df01c6a0ffe695ea4cdfc5177b3d639f492a050a2073cbbb7efa9",
+          "suite": "sealed-config",
+          "suite_digest": "bc48788cb76d4de99201886ea98f678afe60fc44669f76217728e230e1a986b9",
+          "trial": "74aeb370f43c499db24f39f29afb2b03"
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "8dcda8fe-a8af-4cfc-82fc-c169ff879482"
+      }
+    },
+    "read_proof": {
+      "before_get": {
+        "usage": "1a13252a2f2d84928c420f125cfb4be24f0fae951170a03cd019df5435a55746",
+        "evaluation": "cc30db14ce86cd6ee46d718d3a011764cecdc8ab7c641e12133303a38c6f975c",
+        "memory": "1ef220f8905cfcef22e2b6c957f1f5479fbdf999ac2b3715141a44169755e2ab",
+        "run": "1060ada2837a2d1d28c40033350f61015daaf7dbbd0b573e73360763e90b1d8b",
+        "sandbox": "68c71f8fcf35e48fb16df1fa6c7ba8fd1cb021cbcbf1548b468d4890cc156bff"
+      },
+      "after_configure": {
+        "usage": "51f8034b70a946ed64bfccceca3c2432d90d8272d46e2a04eb6bc9bfbd17118a",
+        "evaluation": "cc30db14ce86cd6ee46d718d3a011764cecdc8ab7c641e12133303a38c6f975c",
+        "memory": "1ef220f8905cfcef22e2b6c957f1f5479fbdf999ac2b3715141a44169755e2ab",
+        "run": "1060ada2837a2d1d28c40033350f61015daaf7dbbd0b573e73360763e90b1d8b",
+        "sandbox": "68c71f8fcf35e48fb16df1fa6c7ba8fd1cb021cbcbf1548b468d4890cc156bff"
+      },
+      "after_get": {
+        "usage": "51f8034b70a946ed64bfccceca3c2432d90d8272d46e2a04eb6bc9bfbd17118a",
+        "evaluation": "cc30db14ce86cd6ee46d718d3a011764cecdc8ab7c641e12133303a38c6f975c",
+        "memory": "1ef220f8905cfcef22e2b6c957f1f5479fbdf999ac2b3715141a44169755e2ab",
+        "run": "1060ada2837a2d1d28c40033350f61015daaf7dbbd0b573e73360763e90b1d8b",
+        "sandbox": "68c71f8fcf35e48fb16df1fa6c7ba8fd1cb021cbcbf1548b468d4890cc156bff"
+      },
+      "provider_calls": 0,
+      "training_job_store_exists": false
+    }
+  },
+  {
+    "category": "training-backend",
+    "selector": {
+      "action": "training-backend",
+      "connection_id": "2d592562-ff18-4066-b6b1-777c94258410"
+    },
+    "base": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "7859e180-3737-4639-9572-5b9b445d98f2"
+      }
+    },
+    "before": {
+      "exact_control": {
+        "identity": {
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+          "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\""
+        },
+        "revision": 0,
+        "selector": {
+          "action": "training-backend",
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410"
+        },
+        "value": null
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "7859e180-3737-4639-9572-5b9b445d98f2"
+      }
+    },
+    "proposal": {
+      "action": "training-backend",
+      "expected_revision": 0,
+      "value": {
+        "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+        "policy": {
+          "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\"",
+          "budget": {
+            "currency": "USD",
+            "window_start": "2026-10-10T00:00:00+00:00",
+            "window_end": "2026-10-10T01:00:00+00:00",
+            "limits": {
+              "requests": 100000,
+              "input_tokens": 100000,
+              "output_tokens": 100000,
+              "currency_micros": 100000,
+              "credits_micros": 100000,
+              "compute_milliseconds": 100000,
+              "bytes": 100000,
+              "concurrency": 100000,
+              "storage_bytes": 100000
+            }
+          },
+          "tariff": {
+            "provider_id": "llm:custom",
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "source_kind": "operator",
+            "source": "synthetic-tariff",
+            "currency": "USD",
+            "effective_from": "2026-10-10T00:00:00+00:00",
+            "effective_until": "2026-10-10T01:00:00+00:00",
+            "prices": {
+              "input_tokens": {
+                "micros": 1,
+                "units": 100
+              },
+              "output_tokens": {
+                "micros": 1,
+                "units": 10
+              }
+            },
+            "exchange_rate": null
+          },
+          "reservation": {
+            "requests": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "currency_micros": 100,
+            "credits_micros": 0,
+            "compute_milliseconds": 0,
+            "bytes": 10000,
+            "concurrency": 1,
+            "storage_bytes": 0
+          },
+          "quota_group": "synthetic-shared-account",
+          "version": "3e7898659344873423a9a09438c80d51bc056655",
+          "principal": "synthetic-owner",
+          "principal_role": "owner",
+          "region": "test-region",
+          "terms_revision": "synthetic-terms",
+          "model_revision": "test-model-v1",
+          "valid_until": 1791594000.0,
+          "isolation": {
+            "dedicated": true,
+            "pool": "synthetic-training-only",
+            "evidence": "synthetic-capacity-evidence"
+          },
+          "controls": {
+            "requests": "hard-provider",
+            "input_tokens": "hard-provider",
+            "output_tokens": "hard-provider",
+            "currency_micros": "hard-provider",
+            "credits_micros": "hard-provider",
+            "compute_milliseconds": "hard-provider",
+            "bytes": "hard-provider",
+            "concurrency": "hard-provider",
+            "storage_bytes": "hard-provider"
+          },
+          "controls_evidence": "synthetic-controls",
+          "timeout_seconds": 2
+        }
+      }
+    },
+    "preview": {
+      "confirmation": "jAs8AgzsI57piQ7kgsakYo-4ZodbERLins7MnOqbMfA",
+      "expires_in_seconds": 120,
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "proposal": {
+        "action": "training-backend",
+        "expected_revision": 0,
+        "value": {
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+          "policy": {
+            "budget": {
+              "currency": "USD",
+              "limits": {
+                "bytes": 100000,
+                "compute_milliseconds": 100000,
+                "concurrency": 100000,
+                "credits_micros": 100000,
+                "currency_micros": 100000,
+                "input_tokens": 100000,
+                "output_tokens": 100000,
+                "requests": 100000,
+                "storage_bytes": 100000
+              },
+              "window_end": "2026-10-10T01:00:00+00:00",
+              "window_start": "2026-10-10T00:00:00+00:00"
+            },
+            "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\"",
+            "controls": {
+              "bytes": "hard-provider",
+              "compute_milliseconds": "hard-provider",
+              "concurrency": "hard-provider",
+              "credits_micros": "hard-provider",
+              "currency_micros": "hard-provider",
+              "input_tokens": "hard-provider",
+              "output_tokens": "hard-provider",
+              "requests": "hard-provider",
+              "storage_bytes": "hard-provider"
+            },
+            "controls_evidence": "synthetic-controls",
+            "isolation": {
+              "dedicated": true,
+              "evidence": "synthetic-capacity-evidence",
+              "pool": "synthetic-training-only"
+            },
+            "model_revision": "test-model-v1",
+            "principal": "synthetic-owner",
+            "principal_role": "owner",
+            "quota_group": "synthetic-shared-account",
+            "region": "test-region",
+            "reservation": {
+              "bytes": 10000,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 100,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:custom",
+              "source": "synthetic-tariff",
+              "source_kind": "operator"
+            },
+            "terms_revision": "synthetic-terms",
+            "timeout_seconds": 2,
+            "valid_until": 1791594000.0,
+            "version": "3e7898659344873423a9a09438c80d51bc056655"
+          }
+        }
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "7859e180-3737-4639-9572-5b9b445d98f2"
+      },
+      "target_identity": {
+        "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+        "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\""
+      }
+    },
+    "confirmed": {
+      "controls": {
+        "access": {
+          "revision": 0,
+          "value": null
+        },
+        "grant:reasoning": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-binding": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-dataset": {
+          "revision": 0,
+          "value": null
+        },
+        "learning-policy": {
+          "revision": 0,
+          "value": null
+        }
+      },
+      "exact_control": {
+        "identity": {
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+          "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\""
+        },
+        "revision": 1,
+        "selector": {
+          "action": "training-backend",
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410"
+        },
+        "value": {
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+          "policy": {
+            "budget": {
+              "currency": "USD",
+              "limits": {
+                "bytes": 100000,
+                "compute_milliseconds": 100000,
+                "concurrency": 100000,
+                "credits_micros": 100000,
+                "currency_micros": 100000,
+                "input_tokens": 100000,
+                "output_tokens": 100000,
+                "requests": 100000,
+                "storage_bytes": 100000
+              },
+              "window_end": "2026-10-10T01:00:00+00:00",
+              "window_start": "2026-10-10T00:00:00+00:00"
+            },
+            "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\"",
+            "controls": {
+              "bytes": "hard-provider",
+              "compute_milliseconds": "hard-provider",
+              "concurrency": "hard-provider",
+              "credits_micros": "hard-provider",
+              "currency_micros": "hard-provider",
+              "input_tokens": "hard-provider",
+              "output_tokens": "hard-provider",
+              "requests": "hard-provider",
+              "storage_bytes": "hard-provider"
+            },
+            "controls_evidence": "synthetic-controls",
+            "isolation": {
+              "dedicated": true,
+              "evidence": "synthetic-capacity-evidence",
+              "pool": "synthetic-training-only"
+            },
+            "model_revision": "test-model-v1",
+            "principal": "synthetic-owner",
+            "principal_role": "owner",
+            "quota_group": "synthetic-shared-account",
+            "region": "test-region",
+            "reservation": {
+              "bytes": 10000,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 100,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:custom",
+              "source": "synthetic-tariff",
+              "source_kind": "operator"
+            },
+            "terms_revision": "synthetic-terms",
+            "timeout_seconds": 2,
+            "valid_until": 1791594000.0,
+            "version": "3e7898659344873423a9a09438c80d51bc056655"
+          }
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "result": {
+        "revision": 1,
+        "value": {
+          "budget": {
+            "currency": "USD",
+            "limits": {
+              "bytes": 100000,
+              "compute_milliseconds": 100000,
+              "concurrency": 100000,
+              "credits_micros": 100000,
+              "currency_micros": 100000,
+              "input_tokens": 100000,
+              "output_tokens": 100000,
+              "requests": 100000,
+              "storage_bytes": 100000
+            },
+            "window_end": "2026-10-10T01:00:00+00:00",
+            "window_start": "2026-10-10T00:00:00+00:00"
+          },
+          "budget_revision": 1,
+          "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\"",
+          "controls": {
+            "bytes": "hard-provider",
+            "compute_milliseconds": "hard-provider",
+            "concurrency": "hard-provider",
+            "credits_micros": "hard-provider",
+            "currency_micros": "hard-provider",
+            "input_tokens": "hard-provider",
+            "output_tokens": "hard-provider",
+            "requests": "hard-provider",
+            "storage_bytes": "hard-provider"
+          },
+          "controls_evidence": "synthetic-controls",
+          "isolation": {
+            "dedicated": true,
+            "evidence": "synthetic-capacity-evidence",
+            "pool": "synthetic-training-only"
+          },
+          "model_revision": "test-model-v1",
+          "principal": "synthetic-owner",
+          "principal_role": "owner",
+          "protocol": "unsloth_training",
+          "quota_group": "synthetic-shared-account",
+          "region": "test-region",
+          "reservation": {
+            "bytes": 10000,
+            "compute_milliseconds": 0,
+            "concurrency": 1,
+            "credits_micros": 0,
+            "currency_micros": 100,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "requests": 1,
+            "storage_bytes": 0
+          },
+          "role": "training",
+          "tariff": {
+            "currency": "USD",
+            "effective_from": "2026-10-10T00:00:00+00:00",
+            "effective_until": "2026-10-10T01:00:00+00:00",
+            "exchange_rate": null,
+            "model": "test-model-v1",
+            "model_revision": "test-model-v1",
+            "prices": {
+              "input_tokens": {
+                "micros": 1,
+                "units": 100
+              },
+              "output_tokens": {
+                "micros": 1,
+                "units": 10
+              }
+            },
+            "provider_id": "llm:custom",
+            "source": "synthetic-tariff",
+            "source_kind": "operator"
+          },
+          "terms_revision": "synthetic-terms",
+          "timeout_seconds": 2,
+          "valid_until": 1791594000.0,
+          "version": "3e7898659344873423a9a09438c80d51bc056655"
+        }
+      },
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "7859e180-3737-4639-9572-5b9b445d98f2"
+      }
+    },
+    "after": {
+      "exact_control": {
+        "identity": {
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+          "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\""
+        },
+        "revision": 1,
+        "selector": {
+          "action": "training-backend",
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410"
+        },
+        "value": {
+          "connection_id": "2d592562-ff18-4066-b6b1-777c94258410",
+          "policy": {
+            "budget": {
+              "currency": "USD",
+              "limits": {
+                "bytes": 100000,
+                "compute_milliseconds": 100000,
+                "concurrency": 100000,
+                "credits_micros": 100000,
+                "currency_micros": 100000,
+                "input_tokens": 100000,
+                "output_tokens": 100000,
+                "requests": 100000,
+                "storage_bytes": 100000
+              },
+              "window_end": "2026-10-10T01:00:00+00:00",
+              "window_start": "2026-10-10T00:00:00+00:00"
+            },
+            "connection_revision": "\"5a372f2031f8666fcc50ebfbe0f5b97779590bcf4f2b1a8a28c46f793e8f4ab8\"",
+            "controls": {
+              "bytes": "hard-provider",
+              "compute_milliseconds": "hard-provider",
+              "concurrency": "hard-provider",
+              "credits_micros": "hard-provider",
+              "currency_micros": "hard-provider",
+              "input_tokens": "hard-provider",
+              "output_tokens": "hard-provider",
+              "requests": "hard-provider",
+              "storage_bytes": "hard-provider"
+            },
+            "controls_evidence": "synthetic-controls",
+            "isolation": {
+              "dedicated": true,
+              "evidence": "synthetic-capacity-evidence",
+              "pool": "synthetic-training-only"
+            },
+            "model_revision": "test-model-v1",
+            "principal": "synthetic-owner",
+            "principal_role": "owner",
+            "quota_group": "synthetic-shared-account",
+            "region": "test-region",
+            "reservation": {
+              "bytes": 10000,
+              "compute_milliseconds": 0,
+              "concurrency": 1,
+              "credits_micros": 0,
+              "currency_micros": 100,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "requests": 1,
+              "storage_bytes": 0
+            },
+            "tariff": {
+              "currency": "USD",
+              "effective_from": "2026-10-10T00:00:00+00:00",
+              "effective_until": "2026-10-10T01:00:00+00:00",
+              "exchange_rate": null,
+              "model": "test-model-v1",
+              "model_revision": "test-model-v1",
+              "prices": {
+                "input_tokens": {
+                  "micros": 1,
+                  "units": 100
+                },
+                "output_tokens": {
+                  "micros": 1,
+                  "units": 10
+                }
+              },
+              "provider_id": "llm:custom",
+              "source": "synthetic-tariff",
+              "source_kind": "operator"
+            },
+            "terms_revision": "synthetic-terms",
+            "timeout_seconds": 2,
+            "valid_until": 1791594000.0,
+            "version": "3e7898659344873423a9a09438c80d51bc056655"
+          }
+        }
+      },
+      "policy_provenance": "operator-supplied-not-measured-entitlement",
+      "scope": {
+        "account": "paper:sandbox",
+        "actor": "operator:0aa4ee83567503d4ad0383bc3bbc14b3d2137a0ff5bd4016541f5c80da7712a8",
+        "environment": "paper",
+        "run_id": "7859e180-3737-4639-9572-5b9b445d98f2"
+      }
+    },
+    "read_proof": {
+      "before_get": {
+        "usage": "76249b31adb64e97b39ce5f73a0503ac9ff73462ca32682a419299e6e940164b",
+        "evaluation": "ccd4689cfc325630543c1f1f7fc7c73ca6d6f5923a20f2350d9f9afad79a36bc",
+        "memory": "b2ca601535ae88375e33aef9223a5ed284e70cbad68b2bfb2f366e36f13e4079",
+        "run": "8ce436590c57e984196dc7594727577972564d30da19974515cada7aad9be1c2",
+        "sandbox": "b930ce035b23b2c46cf10cc63d6fe295db9dccaa4b379b87f02ffa6a2908325a"
+      },
+      "after_configure": {
+        "usage": "6913449bbd5f15f01534e3b442217387ffb652d09bf31aa361487ae920520e04",
+        "evaluation": "ccd4689cfc325630543c1f1f7fc7c73ca6d6f5923a20f2350d9f9afad79a36bc",
+        "memory": "b2ca601535ae88375e33aef9223a5ed284e70cbad68b2bfb2f366e36f13e4079",
+        "run": "8ce436590c57e984196dc7594727577972564d30da19974515cada7aad9be1c2",
+        "sandbox": "b930ce035b23b2c46cf10cc63d6fe295db9dccaa4b379b87f02ffa6a2908325a"
+      },
+      "after_get": {
+        "usage": "6913449bbd5f15f01534e3b442217387ffb652d09bf31aa361487ae920520e04",
+        "evaluation": "ccd4689cfc325630543c1f1f7fc7c73ca6d6f5923a20f2350d9f9afad79a36bc",
+        "memory": "b2ca601535ae88375e33aef9223a5ed284e70cbad68b2bfb2f366e36f13e4079",
+        "run": "8ce436590c57e984196dc7594727577972564d30da19974515cada7aad9be1c2",
+        "sandbox": "b930ce035b23b2c46cf10cc63d6fe295db9dccaa4b379b87f02ffa6a2908325a"
+      },
+      "provider_calls": 0,
+      "training_job_store_exists": false
+    }
+  }
+]

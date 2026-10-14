@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import shutil
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from typing import Any
+from uuid import uuid4, uuid5
 
 logger = logging.getLogger("flinttrade.historical.historify_jobs")
 
@@ -91,12 +93,16 @@ class HistorifyJobManager:
         clock: Callable[[], float] = time.monotonic,
         recheck_every: int = 200,
     ) -> None:
+        self.failure_sink: Callable[[str], None] | None = None
+        self._incident_namespace = uuid4()
         self._jobs: dict[str, DownloadJob] = {}
         self._lock = threading.Lock()
         self._counter = 0
         self._min_free_disk_mb = min_free_disk_mb
         self._clock = clock
         self._recheck_every = recheck_every
+        self._accepting = True
+        self._threads: dict[str, threading.Thread] = {}
 
     # ------------------------------------------------------------------
     # Safety
@@ -134,6 +140,13 @@ class HistorifyJobManager:
         """
         with self._lock:
             job_id = self._next_id()
+            if not self._accepting:
+                job = DownloadJob(
+                    job_id=job_id, status=STATUS_REFUSED, total=total,
+                    error="historical_owner_retired", message="Historical download owner is shutting down",
+                )
+                self._jobs[job_id] = job
+                return job
             ok, free_mb = self.check_disk_safety(storage_path)
             if not ok:
                 job = DownloadJob(
@@ -161,14 +174,44 @@ class HistorifyJobManager:
             )
             self._jobs[job_id] = job
 
-        thread = threading.Thread(
-            target=self._run,
-            args=(job_id, runner),
-            name=f"historify-{job_id}",
-            daemon=True,
-        )
-        thread.start()
+            # Publish and start under the same lock as close's admission fence.
+            # A close cannot miss a registered-but-not-yet-started thread.
+            thread = threading.Thread(
+                target=self._run,
+                args=(job_id, runner),
+                name=f"historify-{job_id}",
+                daemon=True,
+            )
+            self._threads[job_id] = thread
+            try:
+                thread.start()
+            except RuntimeError:
+                self._threads.pop(job_id)
+                job.status, job.error, job.message = STATUS_ERROR, "worker_start_failed", "Worker could not start"
+                raise
         return self.get(job_id) or job
+
+    def close(self, *, timeout: float = 5.0) -> bool:
+        """Seal admission and join actual workers without cancelling their I/O.
+
+        False retains live handles for explicit retry. A cancelled async wait
+        would not prove that its underlying source worker released storage.
+        """
+        if type(timeout) not in {int, float} or not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("Finite nonnegative historical close timeout required")
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            self._accepting = False
+            workers = tuple(self._threads.items())
+        for _, thread in workers:
+            if thread is threading.current_thread():
+                return False
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        with self._lock:
+            for job_id, thread in workers:
+                if not thread.is_alive() and self._threads.get(job_id) is thread:
+                    self._threads.pop(job_id)
+            return not self._threads
 
     def _run(self, job_id: str, runner: RunnerFactory) -> None:
         self._update(job_id, status=STATUS_RUNNING, message="Downloading…")
@@ -186,6 +229,9 @@ class HistorifyJobManager:
         except Exception as exc:  # noqa: BLE001 - surface any failure to the job
             logger.exception("Download job %s failed", job_id)
             self._update(job_id, status=STATUS_ERROR, error=str(exc), message="Failed")
+            if self.failure_sink is not None:
+                # job-N is process-local; include this actual manager incarnation.
+                self.failure_sink(str(uuid5(self._incident_namespace, job_id)))
 
     # ------------------------------------------------------------------
     # State updates / reads
@@ -247,3 +293,14 @@ class HistorifyJobManager:
     def list_jobs(self) -> list[DownloadJob]:
         with self._lock:
             return [DownloadJob(**asdict(j)) for j in self._jobs.values()]
+
+    def diagnostic_observation(self) -> dict[str, Any]:
+        """Observe this process's actual registered workers, never their paths."""
+        from datetime import UTC, datetime
+        with self._lock:
+            active = sum(thread.is_alive() for thread in self._threads.values())
+            counts = {state: sum(job.status == state for job in self._jobs.values())
+                      for state in (STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR, STATUS_REFUSED, STATUS_ABORTED)}
+        return {"status": "available", "source": "historify_job_manager", "observed_at": datetime.now(UTC).isoformat(),
+                "measurement": "registered_worker_liveness", "freshness": "observed", "active": active,
+                "states": counts, "coverage": "this_process_registered_history_downloads", "historical_census": "unknown"}

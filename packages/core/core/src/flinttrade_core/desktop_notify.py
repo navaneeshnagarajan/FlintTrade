@@ -53,3 +53,19 @@ def notify(title: str, body: str = "") -> None:
 def _one_line(text: str) -> str:
     """Collapse tabs/newlines to spaces so the sentinel line stays single-line."""
     return " ".join(str(text or "").split())
+
+
+def submit_incident() -> str:
+    """Submit a fixed private-data-free incident notice, never claim OS delivery.
+
+    The existing Electron guardian owns the native Notification API. A stdout
+    flush proves only bridge submission, not OS support, display or user receipt.
+    """
+    if not desktop_shell_active():
+        return "failed"
+    try:
+        sys.stdout.write(f"{NOTIFY_SENTINEL}\tFlintTrade critical incident\tOpen System for retained evidence. Root cause unconfirmed.\n")
+        sys.stdout.flush()
+    except Exception:
+        return "unknown"
+    return "submitted_unobserved"

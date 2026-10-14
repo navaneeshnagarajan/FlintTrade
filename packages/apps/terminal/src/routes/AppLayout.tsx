@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import { UnifiedAppsHost } from "./UnifiedAppsHost";
 import { OperatorIncidentProbes } from "@/chrome/OperatorIncidentProbes";
 import { OperatorStatusStrip } from "@/chrome/OperatorStatusStrip";
 import TopBarV2 from "@/chrome/TopBarV2";
 import ModeHonestyBar from "@/chrome/ModeHonestyBar";
-import DockSidebar from "@/chrome/DockSidebar";
-import PageTransition from "@/components/motion/PageTransition";
+import { AppNavigation, SystemStatusBar } from "@/chrome/AppNavigation";
+import { APPS, appForPath, appPath, homeForWidget } from "@/layout/appCatalog";
 import TickerBar from "@/chrome/TickerBar";
 import { useWsBridge } from "@/hooks/useWsBridge";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -22,12 +23,8 @@ import DocsSearch, { type DocSearchResult } from "@/components/DocsSearch/DocsSe
 import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useLayoutStore, WorkspaceStorageError } from "@/stores/layoutStore";
-import { DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
-import { Button } from "@/components/ui/button";
-import { ArrowRight } from "lucide-react";
 import { appendAISymbolContext } from "@/lib/aiSymbolContext";
 import { operatorProbesEnabled } from "@/lib/operatorProbes";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
@@ -35,10 +32,10 @@ import { usePrimaryBanner } from "@/hooks/usePrimaryBannerKind";
 import { useChromeCollapse } from "@/chrome/useChromeCollapse";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { isPublicDemoBuild } from "@/lib/demoSession";
+import { PublicPreviewHeader } from "@/chrome/PublicPreviewHeader";
 import { loadInstrumentLotRows } from "@/lib/instrumentLots";
 
-const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
-const SMALL_SCREEN_BREAKPOINT = 768;
 
 /** Landmark names match the sidebar label and each page's H1. */
 const ROUTE_TITLES: Record<string, string> = {
@@ -55,18 +52,6 @@ const ROUTE_TITLES: Record<string, string> = {
 };
 
 type NavigationEventDetail = string | { path?: unknown; context?: unknown };
-type TradeForwardEventName =
-  | "flinttrade:addWidget"
-  | "flinttrade:open-tool"
-  | "flinttrade:apply-layout"
-  | "flinttrade:export-layout"
-  | "flinttrade:reset-layout";
-
-interface PendingTradeEvent {
-  name: TradeForwardEventName;
-  detail?: unknown;
-}
-
 function getNavigationPath(detail: NavigationEventDetail): string | null {
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && typeof detail.path === "string") {
@@ -79,72 +64,11 @@ function getCustomEventDetail(event: Event): unknown {
   return (event as CustomEvent<unknown>).detail;
 }
 
-function getPresetId(detail: unknown): string | null {
-  if (detail && typeof detail === "object" && typeof (detail as { presetId?: unknown }).presetId === "string") {
-    return (detail as { presetId: string }).presetId;
-  }
-  return null;
-}
-
 function getToolId(detail: unknown): string | null {
   if (detail && typeof detail === "object" && typeof (detail as { toolId?: unknown }).toolId === "string") {
     return (detail as { toolId: string }).toolId;
   }
   return null;
-}
-
-function downloadJson(filename: string, data: unknown): void {
-  if (typeof document === "undefined" || typeof URL === "undefined" || !URL.createObjectURL) return;
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="small-screen-title"
-      className="fixed inset-0 z-200 flex flex-col items-center justify-center bg-surface-base px-6 text-center"
-    >
-      <div className="flex flex-col items-center gap-5 max-w-xs">
-        <div
-          className="grid size-10 place-items-center rounded-lg bg-accent/15 text-accent"
-          aria-hidden="true"
-        >
-          <ArrowRight className="size-5" strokeWidth={2} />
-        </div>
-        <div className="space-y-2">
-          <h2 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
-            FlintTrade is designed for desktop
-          </h2>
-          <p className="text-sm text-text-secondary leading-relaxed">
-            For the best experience, use a screen wider than 768px. The workspace, charts, and data grids require more horizontal space.
-          </p>
-        </div>
-        <Button
-          // Autofocus is deliberate: this is a modal dismissal prompt, so the
-          // only actionable control should already hold focus. (The directive
-          // that used to sit here named jsx-a11y, a plugin this repo has never
-          // installed, so it silenced nothing.)
-          autoFocus
-          variant="outline"
-          onClick={onDismiss}
-          className="mt-2 border-accent/30 text-accent hover:bg-accent/20 hover:text-accent"
-        >
-          Continue anyway
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -177,8 +101,6 @@ export default function AppLayout() {
   useNotificationFeed(); // Feed real connection/mode/order events into the Notification Centre
   const location = useLocation();
   const navigate = useNavigate();
-  const pendingTradeEventRef = useRef<PendingTradeEvent | null>(null);
-  const workspaceApi = useLayoutStore((s) => s.workspaceApi);
 
   // Route focus management — move keyboard focus to <main> on every route change.
   // This ensures screen-reader users and keyboard-only users land at the new
@@ -190,12 +112,12 @@ export default function AppLayout() {
   }, [location.pathname]);
 
   useEffect(() => {
-    void loadInstrumentLotRows();
+    if (!isPublicDemoBuild()) void loadInstrumentLotRows();
   }, []);
   // Practice mode drives the persistent amber indicator bar.
   // Mode is now owned exclusively by modeStore — settingsStore no longer has sandboxMode.
 
-  const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
+  const routeTitle = APPS.find(app => app.id === appForPath(location.pathname))?.name ?? ROUTE_TITLES[location.pathname] ?? "FlintTrade";
 
   // Global navigation event listener — widgets (e.g. AIAdvisor) dispatch this
   // because they can't use useNavigate() inside workspace panels
@@ -227,12 +149,6 @@ export default function AppLayout() {
     };
   }, []);
 
-  const [showSmallScreenWarning, setShowSmallScreenWarning] = useState(() => {
-    if (typeof window === "undefined") return false;
-    if (sessionStorage.getItem(SMALL_SCREEN_DISMISSED_KEY) === "true") return false;
-    return window.innerWidth < SMALL_SCREEN_BREAKPOINT;
-  });
-
   // Keyboard shortcuts dialog — opened by `?` key or programmatically.
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showDocsSearch, setShowDocsSearch] = useState(false);
@@ -258,148 +174,37 @@ export default function AppLayout() {
     };
   }, [handleOpenCommandPalette]);
 
-  const executeTradeWorkspaceAction = useCallback((pending: PendingTradeEvent) => {
-    if (pending.name === "flinttrade:apply-layout") {
-      const presetId = getPresetId(pending.detail);
-      if (presetId) {
-        try {
-          useLayoutStore.getState().applyPreset(presetId);
-        } catch (error) {
-          if (!(error instanceof WorkspaceStorageError)) throw error;
-        }
-      }
-      return;
-    }
-
-    if (pending.name === "flinttrade:export-layout") {
-      const api = useLayoutStore.getState().workspaceApi;
-      if (!api) return;
-      const activeTabId = useLayoutStore.getState().activeTabId;
-      downloadJson(`flinttrade-layout-${activeTabId}.json`, api.toJSON());
-      return;
-    }
-
-    if (pending.name === "flinttrade:reset-layout") {
-      try {
-        useLayoutStore.getState().applyPreset(DEFAULT_PRESET_ID);
-      } catch (error) {
-        if (!(error instanceof WorkspaceStorageError)) throw error;
-      }
-      return;
-    }
-
-    window.dispatchEvent(new CustomEvent(pending.name, { detail: pending.detail }));
-  }, []);
-
-  const routeOrRunTradeWorkspaceAction = useCallback(
-    (pending: PendingTradeEvent) => {
-      pendingTradeEventRef.current = pending;
-      if (location.pathname !== "/trade") {
-        navigate("/trade");
-        return;
-      }
-      if (workspaceApi) {
-        pendingTradeEventRef.current = null;
-        window.setTimeout(() => executeTradeWorkspaceAction(pending), 0);
-      }
-    },
-    [workspaceApi, executeTradeWorkspaceAction, location.pathname, navigate],
-  );
-
   useEffect(() => {
-    if (location.pathname !== "/trade" || !workspaceApi || !pendingTradeEventRef.current) return;
-    const pending = pendingTradeEventRef.current;
-    pendingTradeEventRef.current = null;
-    const timer = window.setTimeout(() => executeTradeWorkspaceAction(pending), 0);
-    return () => window.clearTimeout(timer);
-  }, [workspaceApi, executeTradeWorkspaceAction, location.pathname]);
-
-  useEffect(() => {
-    function handleTradeOnlyEvent(event: Event) {
-      const detail = getCustomEventDetail(event);
-      if (event.type === "flinttrade:open-tool" && getToolId(detail) === "settings") {
-        navigate("/settings");
-        return;
-      }
-      if (location.pathname === "/trade" && workspaceApi) return;
-      pendingTradeEventRef.current = {
-        name: event.type as TradeForwardEventName,
-        detail,
-      };
-      if (location.pathname !== "/trade") navigate("/trade");
+    function onWidget(event: Event) {
+      const detail = getCustomEventDetail(event) as { widgetId?: string; props?: Record<string, unknown> } | undefined;
+      const current = appForPath(location.pathname);
+      const target = detail?.widgetId ? homeForWidget(detail.widgetId, current) : undefined;
+      if (!target) return;
+      if (target === current) window.dispatchEvent(new CustomEvent("flinttrade:app-widget", { detail }));
+      else navigate(appPath(target), { state: { openWidget: detail } });
     }
-
-    window.addEventListener("flinttrade:addWidget", handleTradeOnlyEvent);
-    window.addEventListener("flinttrade:open-tool", handleTradeOnlyEvent);
-    return () => {
-      window.removeEventListener("flinttrade:addWidget", handleTradeOnlyEvent);
-      window.removeEventListener("flinttrade:open-tool", handleTradeOnlyEvent);
+    function onTool(event: Event) {
+      const id = getToolId(getCustomEventDetail(event));
+      if (id === "settings") navigate("/settings");
+      if (id === "trade-journal") navigate("/reports");
+    }
+    function onDocs() { setDocsInitialQuery(""); setShowDocsSearch(true); }
+    function onChangelog() { setShowChangelog(true); }
+    function onDoc(event: Event) {
+      const detail = getCustomEventDetail(event) as { path?: string; anchor?: string } | undefined;
+      if (detail?.path) navigate("/learn", { state: { selectedDocPath: detail.path, docAnchor: detail.anchor } });
+    }
+    async function onFullscreen() {
+      try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { /* Browser refusal is not an application mutation. */ }
+    }
+    const handlers: Record<string, EventListener> = {
+      "flinttrade:addWidget": onWidget, "flinttrade:open-tool": onTool,
+      "flinttrade:search-docs": onDocs, "flinttrade:show-changelog": onChangelog,
+      "flinttrade:openDoc": onDoc, "flinttrade:toggle-fullscreen": onFullscreen,
     };
-  }, [workspaceApi, location.pathname, navigate]);
-
-  useEffect(() => {
-    function handleApplyLayout(event: Event) {
-      routeOrRunTradeWorkspaceAction({
-        name: "flinttrade:apply-layout",
-        detail: getCustomEventDetail(event),
-      });
-    }
-    function handleExportLayout() {
-      routeOrRunTradeWorkspaceAction({ name: "flinttrade:export-layout" });
-    }
-    function handleResetLayout() {
-      routeOrRunTradeWorkspaceAction({ name: "flinttrade:reset-layout" });
-    }
-    async function handleFullscreen() {
-      try {
-        if (document.fullscreenElement) {
-          await document.exitFullscreen();
-        } else {
-          await document.documentElement.requestFullscreen();
-        }
-      } catch {
-        // Browsers can deny fullscreen outside direct user activation.
-      }
-    }
-    function handleSearchDocs() {
-      setDocsInitialQuery("");
-      setShowDocsSearch(true);
-    }
-    function handleShowChangelog() {
-      setShowChangelog(true);
-    }
-    function handleOpenDoc(event: Event) {
-      const detail = getCustomEventDetail(event);
-      const path = detail && typeof detail === "object"
-        ? (detail as { path?: unknown }).path
-        : null;
-      if (typeof path === "string") {
-        const anchor = (detail as { anchor?: unknown }).anchor;
-        navigate("/learn", {
-          state: typeof anchor === "string" && anchor
-            ? { selectedDocPath: path, docAnchor: anchor }
-            : { selectedDocPath: path },
-        });
-      }
-    }
-
-    window.addEventListener("flinttrade:apply-layout", handleApplyLayout);
-    window.addEventListener("flinttrade:export-layout", handleExportLayout);
-    window.addEventListener("flinttrade:reset-layout", handleResetLayout);
-    window.addEventListener("flinttrade:toggle-fullscreen", handleFullscreen);
-    window.addEventListener("flinttrade:search-docs", handleSearchDocs);
-    window.addEventListener("flinttrade:show-changelog", handleShowChangelog);
-    window.addEventListener("flinttrade:openDoc", handleOpenDoc);
-    return () => {
-      window.removeEventListener("flinttrade:apply-layout", handleApplyLayout);
-      window.removeEventListener("flinttrade:export-layout", handleExportLayout);
-      window.removeEventListener("flinttrade:reset-layout", handleResetLayout);
-      window.removeEventListener("flinttrade:toggle-fullscreen", handleFullscreen);
-      window.removeEventListener("flinttrade:search-docs", handleSearchDocs);
-      window.removeEventListener("flinttrade:show-changelog", handleShowChangelog);
-      window.removeEventListener("flinttrade:openDoc", handleOpenDoc);
-    };
-  }, [navigate, routeOrRunTradeWorkspaceAction]);
+    Object.entries(handlers).forEach(([name, handler]) => window.addEventListener(name, handler));
+    return () => Object.entries(handlers).forEach(([name, handler]) => window.removeEventListener(name, handler));
+  }, [location.pathname, navigate]);
 
   const handleSelectDoc = useCallback(
     (result: DocSearchResult) => {
@@ -426,25 +231,11 @@ export default function AppLayout() {
       window.dispatchEvent(new CustomEvent("flinttrade:escape"));
     }, []),
     onCommandPalette: handleToggleCommandPalette,
+    tradingHotkeysEnabled: appForPath(location.pathname) === "terminal",
     onShowShortcuts: handleShowShortcuts,
     onGoHome: handleGoHome,
     onGoTrade: handleGoTrade,
   });
-
-  useEffect(() => {
-    function handleResize() {
-      if (window.innerWidth >= SMALL_SCREEN_BREAKPOINT) {
-        setShowSmallScreenWarning(false);
-      }
-    }
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  function handleDismissSmallScreen() {
-    sessionStorage.setItem(SMALL_SCREEN_DISMISSED_KEY, "true");
-    setShowSmallScreenWarning(false);
-  }
 
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
 
@@ -456,9 +247,6 @@ export default function AppLayout() {
 
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
-      {showSmallScreenWarning && (
-        <SmallScreenOverlay onDismiss={handleDismissSmallScreen} />
-      )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a
@@ -469,18 +257,19 @@ export default function AppLayout() {
       </a>
       {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
-        <TopBarV2 />
+        {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
+        <AppNavigation />
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
-        <ModeHonestyBar mode={mode} />
+        {!isPublicDemoBuild() && <ModeHonestyBar mode={mode} />}
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
       {/* Content area: DockSidebar + main panel side by side */}
       {/* Issue #54: aria-label on main landmark mirrors the route title. Each
           route renders its own single H1 (PageHeader, or Trade's sr-only H1). */}
       <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
-        <DockSidebar />
+
         <main
           id="main-content"
           ref={mainRef}
@@ -492,13 +281,13 @@ export default function AppLayout() {
             data-testid="route-body"
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
-            <PageTransition locationKey={location.pathname}>
-              <Outlet />
-            </PageTransition>
+            <UnifiedAppsHost />
+            <Outlet />
           </div>
         </main>
       </div>
-      <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
+      <SystemStatusBar />
+      {!isPublicDemoBuild() && <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}
         onClose={handleCloseShortcuts}

@@ -1,6 +1,6 @@
 /**
- * Slice 2 Home vs Trade ownership source guard.
- * Prevents regressions that re-merge the two desks or drop Home navigation.
+ * Unified app compatibility source guard.
+ * Preserve legacy entry/shortcut access without restoring separate Home/Trade apps.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -35,11 +35,14 @@ function walkTsx(dir: string, acc: string[] = []): string[] {
 }
 
 describe("Slice 2 Home vs Trade ownership — source guard", () => {
-  it("command palette exposes nav:home Go to Home Alt+H", () => {
+  it("command palette derives all canonical app commands without dummy legacy identities", () => {
     const src = stripComments(read("components/CommandPalette/useCommandRegistry.ts"));
-    expect(src).toMatch(/nav:home/);
-    expect(src).toMatch(/Go to Home/);
-    expect(src).toMatch(/Alt\+H/);
+    expect(src).toContain("APPS.map");
+    expect(src).toContain("`nav:${app.id}`");
+    expect(src).toContain("`Go to ${app.name}`");
+    expect(src).toContain("path: app.path");
+    expect(src).toContain('"Alt+T"');
+    expect(src).not.toMatch(/nav:home|nav:trade/);
   });
 
   it("KeyboardShortcutsDialog documents Go to Home and Go to Trade", () => {
@@ -74,18 +77,23 @@ describe("Slice 2 Home vs Trade ownership — source guard", () => {
     expect(src).not.toMatch(/to=["']\/trade["'][\s\S]{0,80}aria-label=["']Flint home["']/);
   });
 
-  it("persona helper maps beginner/investor → home and trader → trade", () => {
+  it("all persona inputs enter the unified Terminal compatibility route", () => {
     expect(personaDefaultRoute("trader")).toBe("/trade");
-    expect(personaDefaultRoute("beginner")).toBe("/home");
-    expect(personaDefaultRoute("investor")).toBe("/home");
+    expect(personaDefaultRoute("beginner")).toBe("/trade");
+    expect(personaDefaultRoute("investor")).toBe("/trade");
     const setup = stripComments(read("routes/setup/applySetupChoices.ts"));
     expect(setup).toMatch(/personaDefaultRoute/);
   });
 
-  it("main keeps /terminal → /trade replace and never hard-redirects /home → /trade", () => {
-    const src = stripComments(read("main.tsx"));
-    expect(src).toMatch(/path:\s*["']terminal["'][\s\S]{0,120}Navigate\s+to=["']\/trade["']/);
-    expect(src).not.toMatch(/path:\s*["']home["'][\s\S]{0,160}Navigate\s+to=["']\/trade["']/);
+  it("Application owns canonical apps and legacy redirects behind the protected shell", () => {
+    const src = stripComments(read("Application.tsx"));
+    expect(read("main.tsx")).toContain('import("./Application")');
+    expect(src).toContain("...APPS.map");
+    expect(src).toContain("element: <LegacyAppRedirect />");
+    expect(src).toContain("<ProtectedRoute><AppLayout /></ProtectedRoute>");
+    expect(src).toContain("appPath(app) + location.search + location.hash");
+    expect(src).toContain("location.state} replace");
+    // Mounted alias/state/history assertions live in ApplicationCompatibility.navigation.
   });
 
   it("HomeRoute does not import Trade workspace chrome", () => {

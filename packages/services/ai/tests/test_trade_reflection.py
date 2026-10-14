@@ -13,6 +13,8 @@ import threading
 import time
 from typing import Any
 from unittest.mock import MagicMock
+from types import SimpleNamespace
+
 
 import pytest
 
@@ -29,6 +31,11 @@ from flinttrade_ai.trade_reflection import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _canonical_records(rows):
+    """Synthetic canonical-record port; send-gate coverage uses the real HTTP client."""
+    return tuple(SimpleNamespace(values=dict(row), record_id=f"fixture-{i}") for i, row in enumerate(rows))
 
 
 def _make_trade(
@@ -233,10 +240,10 @@ class TestReflectOne:
     def _make_reflector(lesson: str = "LESSON: Respect the opening range."):
         response = LLMResponse(content=lesson)
         llm = MagicMock()
-        llm.chat.return_value = response
+        llm.learning_chat.return_value = response
         memory = MagicMock()
         memory.add_memory.return_value = "reflection-memory-id"
-        return TradeReflector(llm_client=llm, memory=memory), llm, memory
+        return TradeReflector(llm_client=llm, memory=memory, learning_records=_canonical_records), llm, memory
 
     def test_trade_outcome_is_exported_from_package_root(self) -> None:
         from flinttrade_ai import TradeOutcome as ExportedTradeOutcome
@@ -246,7 +253,7 @@ class TestReflectOne:
     def test_legacy_positional_constructor_remains_available(self) -> None:
         _, llm, memory = self._make_reflector()
 
-        reflector = TradeReflector(llm, memory)
+        reflector = TradeReflector(llm, memory, learning_records=_canonical_records)
         lesson = reflector.reflect_one(_make_outcome())
 
         assert lesson == "Respect the opening range."
@@ -273,7 +280,7 @@ class TestReflectOne:
 
         reflector.reflect_one(_make_outcome(pnl=-125.5, pnl_pct=-0.57))
 
-        messages = llm.chat.call_args.args[0]
+        messages = llm.learning_chat.call_args.args[0]
         prompt = next(message.content for message in messages if message.role == "user")
         assert "₹22000.00" in prompt
         assert "₹22450.00" in prompt
@@ -295,9 +302,9 @@ class TestReflectOne:
 
     def test_reflect_one_rejects_failed_llm_response_without_writing(self) -> None:
         llm = MagicMock()
-        llm.chat.return_value = LLMResponse(error="provider unavailable")
+        llm.learning_chat.return_value = LLMResponse(error="provider unavailable")
         memory = MagicMock()
-        reflector = TradeReflector(llm_client=llm, memory=memory)
+        reflector = TradeReflector(llm_client=llm, memory=memory, learning_records=_canonical_records)
 
         with pytest.raises(RuntimeError, match="provider unavailable"):
             reflector.reflect_one(_make_outcome(), contributing_memory_ids=["source-memory"])
@@ -307,9 +314,9 @@ class TestReflectOne:
 
     def test_reflect_one_rejects_prefix_only_response_without_writing(self) -> None:
         llm = MagicMock()
-        llm.chat.return_value = LLMResponse(content="LESSON:   ")
+        llm.learning_chat.return_value = LLMResponse(content="LESSON:   ")
         memory = MagicMock()
-        reflector = TradeReflector(llm_client=llm, memory=memory)
+        reflector = TradeReflector(llm_client=llm, memory=memory, learning_records=_canonical_records)
 
         with pytest.raises(RuntimeError, match="empty response"):
             reflector.reflect_one(_make_outcome(), contributing_memory_ids=["source-memory"])
@@ -354,7 +361,8 @@ class TestFormatForPrompt:
     @pytest.mark.asyncio
     async def test_non_empty_after_reflect(self, reflector: TradeReflector) -> None:
         await reflector.reflect(_make_trades(10))
-        output = reflector.format_for_prompt()
+        assert reflector.format_for_prompt() == ""  # raw reflection is not validated influence
+        output = reflector.format_for_review()
         assert len(output) > 0
         assert "[Trade Reflection" in output
 
@@ -428,9 +436,9 @@ class TestLLMPath:
         )
 
         mock_llm = MagicMock()
-        mock_llm.chat = MagicMock(return_value=llm_response)
+        mock_llm.learning_chat = MagicMock(return_value=llm_response)
 
-        reflector = TradeReflector(llm_client=mock_llm)
+        reflector = TradeReflector(llm_client=mock_llm, learning_records=_canonical_records)
         trades = _make_trades(10)
         result = await reflector.reflect(trades)
 
@@ -445,9 +453,9 @@ class TestLLMPath:
         llm_response.content = "not valid json at all"
 
         mock_llm = MagicMock()
-        mock_llm.chat = MagicMock(return_value=llm_response)
+        mock_llm.learning_chat = MagicMock(return_value=llm_response)
 
-        reflector = TradeReflector(llm_client=mock_llm)
+        reflector = TradeReflector(llm_client=mock_llm, learning_records=_canonical_records)
         trades = _make_trades(10)
         result = await reflector.reflect(trades)
 
@@ -458,9 +466,9 @@ class TestLLMPath:
     @pytest.mark.asyncio
     async def test_llm_exception_falls_back_to_rules(self) -> None:
         mock_llm = MagicMock()
-        mock_llm.chat = MagicMock(side_effect=RuntimeError("LLM unavailable"))
+        mock_llm.learning_chat = MagicMock(side_effect=RuntimeError("LLM unavailable"))
 
-        reflector = TradeReflector(llm_client=mock_llm)
+        reflector = TradeReflector(llm_client=mock_llm, learning_records=_canonical_records)
         trades = _make_trades(10)
         result = await reflector.reflect(trades)
 
@@ -475,7 +483,7 @@ class TestLLMPath:
         release_chat = threading.Event()
         chat_finished_at = 0.0
 
-        def blocking_chat(_messages: list[Any]) -> MagicMock:
+        def blocking_chat(_messages: list[Any], **_kwargs) -> MagicMock:
             nonlocal chat_finished_at
             chat_started.set()
             release_chat.wait(timeout=0.5)
@@ -483,8 +491,8 @@ class TestLLMPath:
             return llm_response
 
         mock_llm = MagicMock()
-        mock_llm.chat.side_effect = blocking_chat
-        reflector = TradeReflector(llm_client=mock_llm)
+        mock_llm.learning_chat.side_effect = blocking_chat
+        reflector = TradeReflector(llm_client=mock_llm, learning_records=_canonical_records)
         heartbeat_at = 0.0
 
         async def heartbeat() -> None:
@@ -507,8 +515,8 @@ class TestLLMPath:
     @pytest.mark.asyncio
     async def test_numeric_string_prices_still_reach_rule_fallback(self) -> None:
         mock_llm = MagicMock()
-        mock_llm.chat.side_effect = RuntimeError("LLM unavailable")
-        reflector = TradeReflector(llm_client=mock_llm)
+        mock_llm.learning_chat.side_effect = RuntimeError("LLM unavailable")
+        reflector = TradeReflector(llm_client=mock_llm, learning_records=_canonical_records)
         trades = _make_trades(10)
         for trade in trades:
             trade["entry_price"] = "22000.50"
