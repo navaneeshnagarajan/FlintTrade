@@ -102,6 +102,9 @@ def test_new_learned_procedure_automatically_validated_reaches_real_private_http
     request = task(identifier, revision, context_refs=["skill:learned_procedure"])
     assert client.post(BASE + "/tasks", headers=HEADERS, json=request).json["code"] == "privacy_denied"
     assert not calls
+    # The product deadline stays 2s. Freeze the dispatcher clock so runner
+    # latency cannot turn a completed private read into deadline_exceeded.
+    app.config["SERVICE_TASK_DISPATCHER"].monotonic = lambda: 0.0
     admission["privacy"]["classifications"] = ["public", "private"]
     assert client.put(BASE + f"/{identifier}/admission", headers={**HEADERS, "If-Match": '"1"'},
                       json=admission).status_code == 200

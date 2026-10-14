@@ -7403,6 +7403,10 @@ class FlintTradeApp:
                     "active requests",
                     lambda: wait_for_idle(configured_budget("RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS", 60.0)),
                     require_truthy=True,
+                    # A previous attempt can finish False under its own short
+                    # budget while this attempt still has time. Resume once so
+                    # the fresh budget observes the request leaving.
+                    resume_incomplete=True,
                 )
                 if callable(wait_for_idle)
                 else True

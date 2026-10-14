@@ -59,6 +59,11 @@ from flinttrade_engine.laya_decision import (
     state_for_note,
 )
 
+# Callers that substitute a finite clock must patch this alias. Patching
+# time.perf_counter replaces the process-wide function and exhausts the
+# substitute on unrelated callers.
+_perf_counter = time.perf_counter
+
 _QUESTIONS = ("rationale", "tilt", "side")
 _QUESTION_SET = frozenset(_QUESTIONS)
 _SPLITS = frozenset({"dev", "test"})
@@ -329,9 +334,9 @@ def run_benchmark(
         model_eligible = bool(note) and len(note) <= 4000
         first: tuple[str, str, str] | None = None
         for _ in range(repeats):
-            started = time.perf_counter()
+            started = _perf_counter()
             decision, probs, failure, signature, scored = _score_case(case, client)
-            latencies.append((time.perf_counter() - started) * 1000)
+            latencies.append((_perf_counter() - started) * 1000)
             signatures.append(signature)
             bands.append(_band(case, decision))
             model_scored.append(model_eligible and scored and not stub)

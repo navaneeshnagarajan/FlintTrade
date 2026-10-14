@@ -14,12 +14,14 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.parametrize('fixture_name', ['route', 'upstox'])
 @pytest.mark.parametrize('body_fails', [False, True])
-def test_source_qualification_fixture_retains_and_releases_owner(backend_lease_factory, monkeypatch, fixture_name, body_fails):
+def test_source_qualification_fixture_retains_and_releases_owner(
+    backend_lease_factory, owned_flask_apps, monkeypatch, fixture_name, body_fails,
+):
     app = None
     owner = None
     competing = None
     function = route_stack if fixture_name == 'route' else native_stack
-    args = (backend_lease_factory,) if fixture_name == 'route' else (backend_lease_factory, monkeypatch)
+    args = (backend_lease_factory, owned_flask_apps) if fixture_name == 'route' else (backend_lease_factory, monkeypatch)
     try:
         try:
             with contextmanager(function.__wrapped__)(*args) as stack:

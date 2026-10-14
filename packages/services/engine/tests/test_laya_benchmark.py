@@ -402,7 +402,7 @@ def test_down_heavy_run_cannot_hide_the_successful_model_latency(monkeypatch: py
             return _Unavailable().decide(state, questions)
 
     ticks = iter([0.0, 4.0, *[value for i in range(1, 301) for value in (10.0 * i, 10.0 * i + 0.001)]])
-    monkeypatch.setattr("flinttrade_engine.laya_benchmark.time.perf_counter", lambda: next(ticks))
+    monkeypatch.setattr("flinttrade_engine.laya_benchmark._perf_counter", lambda: next(ticks))
     text = run_benchmark(_deny_cases(301), _OneModelResult(0.95)).render()
     assert _metric(text, "latency_p95_within_bar") == "no"
     assert _metric(text, "latency_p95_ms") == "4000.000"
