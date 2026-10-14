@@ -13,6 +13,21 @@ from flask import current_app, g, jsonify, request
 class ModelControlDenied(ValueError):
     """Safe bounded refusal, distinct from provider/credential exceptions."""
 
+    @property
+    def public_code(self) -> str:
+        """Return a fixed public code, never arbitrary exception text."""
+        for code in (
+            "backtest_history_scope_changed", "backtest_run_owner_changed", "backtest_run_scope_changed",
+            "backtest_run_scope_refused", "backtest_run_session_changed", "evaluation_owner_unavailable",
+            "evaluation_scope_not_owned", "execution_scope_required", "loopback_required", "model_control_scope_required",
+            "model_operation_not_authorised", "model_services_closed", "operation_forbidden", "operator_session_changed",
+            "operator_session_required", "origin_forbidden", "run_not_owned", "run_producer_unavailable",
+            "run_scope_not_owned", "sealed_access_not_authorised",
+        ):
+            if self.args == (code,):
+                return code
+        return "model_control_refused"
+
 
 def principal() -> Any:
     """Verify the existing full operator session and exact carrier on every call."""
@@ -118,7 +133,7 @@ def guard_model_control() -> Any:
         g.model_control_actor = who.actor_ref
         return None
     except ModelControlDenied as exc:
-        return jsonify(status="error", code=str(exc)), 403
+        return jsonify(status="error", code=exc.public_code), 403
     except (ValueError, TypeError, KeyError):
         return jsonify(status="error", code="invalid_model_control"), 400
     except Exception:

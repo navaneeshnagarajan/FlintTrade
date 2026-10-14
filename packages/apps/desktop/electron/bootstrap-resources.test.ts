@@ -173,7 +173,8 @@ if [ "\${1-}" = venv ]; then
   else
     staged_version=3.14.8
   fi
-  printf '%s\n' 'home = ${stagedPythonHome}' 'uv = 0.13.0' "version_info = \$staged_version" 'relocatable = true' > "\$target/pyvenv.cfg"
+  staged_uv=\${FLINTTRADE_TEST_STAGED_UV_VERSION-0.13.1}
+  printf '%s\n' 'home = ${stagedPythonHome}' "uv = \$staged_uv" "version_info = \$staged_version" 'relocatable = true' > "\$target/pyvenv.cfg"
 fi
 if [ "\${1-}" = sync ]; then
   [ -n "\${UV_PROJECT_ENVIRONMENT-}" ] || exit 79
@@ -199,6 +200,19 @@ exit 0
           }),
         ).not.toThrow();
         expect(existsSync(staleEnvironmentFile)).toBe(false);
+        const configurationPath = path.join(candidate, ".venv", "pyvenv.cfg");
+        const currentConfiguration = readFileSync(configurationPath, "utf8");
+        // Both the previous release and a healthy current environment must be
+        // preserved until their explicitly requested replacement succeeds.
+        for (const previousUv of ["0.13.0", "0.13.1"]) {
+          writeFileSync(configurationPath, currentConfiguration.replace(/^uv = .+$/m, `uv = ${previousUv}`));
+          const rebuilt = spawnSync(
+            "/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
+            { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } },
+          );
+          expect(rebuilt.status, `${rebuilt.stdout}\n${rebuilt.stderr}`).toBe(0);
+          expect(readFileSync(configurationPath, "utf8")).toContain("\nuv = 0.13.1\n");
+        }
         rmSync(path.join(candidate, ".venv"), { force: true, recursive: true });
         expect(() =>
           execFileSync("/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"], {
@@ -236,6 +250,17 @@ exit 0
         expect(readdirSync(candidate).filter((entry) => entry.startsWith(".venv.flinttrade-"))).toEqual(
           [],
         );
+        for (const stagedUv of ["0.13.0", "0.13.2"]) {
+          const retainedConfiguration = readFileSync(configurationPath);
+          const refused = spawnSync(
+            "/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
+            { encoding: "utf8", env: { PATH: "/usr/bin:/bin", FLINTTRADE_TEST_STAGED_UV_VERSION: stagedUv } },
+          );
+          expect(refused.status).not.toBe(0);
+          expect(`${refused.stdout}\n${refused.stderr}`).toContain("Refusing staged .venv");
+          expect(readFileSync(configurationPath)).toEqual(retainedConfiguration);
+          expect(readFileSync(preservedEnvironmentFile, "utf8")).toBe("preserved\n");
+        }
         const failedJavascriptResult = spawnSync(
           "/bin/sh",
           [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
@@ -372,7 +397,11 @@ if "%~1"=="venv" if not "%~5"==".venv" (
   copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\python.exe" >nul
   if not "%FLINTTRADE_TEST_MISSING_STAGED_LAUNCHER%"=="1" copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\pythonw.exe" >nul
   >"%~5\\pyvenv.cfg" echo home = ${stagedPythonHome}
-  >>"%~5\\pyvenv.cfg" echo uv = 0.13.0
+  if "%FLINTTRADE_TEST_STAGED_UV_VERSION%"=="" (
+    >>"%~5\\pyvenv.cfg" echo uv = 0.13.1
+  ) else (
+    >>"%~5\\pyvenv.cfg" echo uv = %FLINTTRADE_TEST_STAGED_UV_VERSION%
+  )
   if "%FLINTTRADE_TEST_INVALID_STAGED_CONFIG%"=="1" (
     >>"%~5\\pyvenv.cfg" echo version_info = 3.13.0
   ) else (
@@ -601,6 +630,14 @@ exit /b 0
         expect(readFileSync(path.join(incompleteOrphan, "sentinel"), "utf8")).toBe("preserve\n");
         rmSync(unownedLookalike, { recursive: true });
         rmSync(incompleteOrphan, { recursive: true });
+        const configurationPath = path.join(candidate, ".venv", "pyvenv.cfg");
+        const currentConfiguration = readFileSync(configurationPath, "utf8");
+        for (const previousUv of ["0.13.0", "0.13.1"]) {
+          writeFileSync(configurationPath, currentConfiguration.replace(/^uv = .+$/m, `uv = ${previousUv}`));
+          const rebuilt = invokeBootstrap();
+          expect(rebuilt.status, `${rebuilt.stdout}\n${rebuilt.stderr}`).toBe(0);
+          expect(readFileSync(configurationPath, "utf8")).toMatch(/(?:^|\r?\n)uv = 0\.13\.1(?:\r?\n|$)/);
+        }
         const preservedEnvironmentFile = path.join(candidate, ".venv", "preserved");
         writeFileSync(preservedEnvironmentFile, "preserved\n");
         const invalidStagedResult = spawnSync(
@@ -642,6 +679,14 @@ exit /b 0
         expect(readdirSync(candidate).filter((entry) => entry.startsWith(".venv.flinttrade-"))).toEqual(
           [],
         );
+        for (const stagedUv of ["0.13.0", "0.13.2"]) {
+          const retainedConfiguration = readFileSync(configurationPath);
+          const refused = invokeBootstrap({ FLINTTRADE_TEST_STAGED_UV_VERSION: stagedUv });
+          expect(refused.status).not.toBe(0);
+          expect(`${refused.stdout}\n${refused.stderr}`).toContain("Refusing staged .venv");
+          expect(readFileSync(configurationPath)).toEqual(retainedConfiguration);
+          expect(readFileSync(preservedEnvironmentFile, "utf8")).toBe("preserved\n");
+        }
         const failedJavascriptResult = spawnSync(
           "powershell.exe",
           [

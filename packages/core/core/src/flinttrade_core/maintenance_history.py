@@ -17,6 +17,7 @@ from .installation_state import InstallationState, stable_application_state_root
 from .maintenance_custody import MaintenanceRefused
 from .run_adoption_store import ModelEvidenceDatabase
 from .secure_file import validate_owner_owned_regular_file
+from .workspace import legacy_dotdir
 
 _SCHEMA = "CREATE TABLE origin (installation TEXT PRIMARY KEY, workspace TEXT NOT NULL, device INTEGER, inode INTEGER, sources TEXT NOT NULL);"
 _SOURCES = ("practice_agent_runs.sqlite", "sandbox/state.sqlite", "protection.sqlite", "protection.registry")
@@ -35,7 +36,7 @@ def initialise_fresh_history(workspace: Path, lease: BackendInstanceLease) -> bo
     """
     if (os.name != "posix" or type(lease) is not BackendInstanceLease or not lease._is_live()
             or not lease._created or lease._exclusion_lease is None or not lease._exclusion_lease._created
-            or lease._lock_path.parent != workspace or workspace != Path.home() / ".flinttrade"
+            or lease._lock_path.parent != workspace or workspace != legacy_dotdir()
             or stable_application_state_root() != _default_root()):
         return False
     root = _default_root()

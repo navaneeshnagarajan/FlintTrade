@@ -8,6 +8,7 @@ import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { captureOperatorIncidentScope } from "@/lib/operatorIncidentScope";
+import { buildAppPreset, readAppLayouts, saveAppLayout } from "@/layout/appLayouts";
 
 // Keep the real router, host, route, FlexLayout and appWidgetFactory. Only the
 // expensive leaf tools are inert lifecycle canaries; canonical real-client
@@ -43,6 +44,20 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("persists a restored model before any subsequent docking action or unmount", async () => {
+  const named = buildAppPreset("settings", "default");
+  named.layout.id = "named-layout-root";
+  saveAppLayout("settings", "Named", named);
+  render(<BrowserRouter><UnifiedAppsHost /></BrowserRouter>);
+  await screen.findByLabelText("Settings inner draft");
+  fireEvent.change(screen.getByLabelText("Restore saved layout"), { target: { value: "Named" } });
+  expect(screen.getByRole("status")).toHaveTextContent("Restored Named");
+  // Reading before unmount catches the old effect cleanup writing the PREVIOUS
+  // model to Current while the restored model was only visible in memory.
+  expect(readAppLayouts("settings").Current.layout.id).toBe("named-layout-root");
+  expect(readAppLayouts("settings").Named).toEqual(named);
+});
 
 it("retains both actual factory leaves while only the visible app owns effects and global layout commands", async () => {
   const view = render(<BrowserRouter><Link to="/learn">Learn app</Link><Link to="/settings">Settings app</Link><UnifiedAppsHost /></BrowserRouter>);

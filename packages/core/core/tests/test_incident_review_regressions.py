@@ -14,7 +14,7 @@ from .test_system_incidents import HEADERS, factory as factory
 pytestmark = pytest.mark.integration
 
 
-def test_real_httpx_telegram_redacts_before_every_log_sink(factory, monkeypatch, capsys):
+def test_real_httpx_telegram_redacts_before_every_log_sink(factory, monkeypatch, capsys, caplog):
     from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
     from flinttrade_core.log_stream import LogBuffer
     from flinttrade_core.workspace import Workspace
@@ -41,6 +41,10 @@ def test_real_httpx_telegram_redacts_before_every_log_sink(factory, monkeypatch,
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", inert_transport)
     logger = logging.getLogger("httpx")
+    # Prove real INFO records survive redaction independently of a previous
+    # test's process-wide logging threshold. caplog restores the prior level.
+    caplog.set_level(logging.INFO, logger="httpx")
+    monkeypatch.setattr(logger, "disabled", False)
     sink = Sink()
     logger.addHandler(sink)
     original_level, original_disabled = logger.level, logger.disabled

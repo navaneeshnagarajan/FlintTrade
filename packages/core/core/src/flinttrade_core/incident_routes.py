@@ -1,14 +1,13 @@
 """Scoped incident reads and explicit opt-in/cancellation; no repairs or purge."""
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 from flask.typing import ResponseReturnValue
 
 from .auth_scopes import _session_token, require_scope
-from .incident_delivery import configured_binding
+from .incident_delivery import binding_digest, configured_binding
 from .system_incidents import IncidentAuthorityChanged, IncidentConflict, IncidentTimeline, IncidentUnavailable
 
 incident_bp = Blueprint("system_incidents", __name__, url_prefix="/api/v1/system/incidents")
@@ -97,7 +96,7 @@ def read_channel(channel: str) -> ResponseReturnValue:
 @incident_bp.post("/deliveries/<delivery>/<action>")
 @require_scope("admin.observability.run")
 def change_delivery(delivery: str, action: str) -> ResponseReturnValue:
-    reader = hashlib.sha256((_session_token() or request.headers.get("X-API-Key", "")).encode()).hexdigest()
+    reader = binding_digest(("browser-reader", _session_token() or request.headers.get("X-API-Key", "")))
     if action == "claim":
         return scoped_read(owner().claim_browser(delivery, reader), "admin.observability.run")
     if action == "receipt":

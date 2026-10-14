@@ -10,8 +10,11 @@ import re
 from pathlib import Path
 
 import pytest
+
 import structlog
 from flask import Flask
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
 def _create_frontend_app(dist: Path, monkeypatch: pytest.MonkeyPatch) -> Flask:

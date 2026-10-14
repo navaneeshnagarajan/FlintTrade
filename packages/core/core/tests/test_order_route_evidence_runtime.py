@@ -86,7 +86,7 @@ class _DhanSDK:
 
 
 @pytest.fixture
-def route_stack(backend_lease_factory):
+def route_stack(backend_lease_factory, owned_flask_apps):
     reset_reduce_only_for_tests()
     safety = SafetySystem(SafetyConfig(check_market_hours=False))
     app = create_flask_app(safety=safety, safety_config_ready=True, backend_lease_proof=backend_lease_factory())
@@ -112,12 +112,10 @@ def route_stack(backend_lease_factory):
     try:
         yield app, source, sdk, router
     finally:
-        from time import monotonic
-        from flinttrade_core.desktop import _DesktopShutdownRecoveryOwner
         try:
             router.revoke_and_drain(timeout=0.0)
         finally:
-            _DesktopShutdownRecoveryOwner(app).release(deadline=monotonic() + 10)
+            owned_flask_apps.close()
             reset_reduce_only_for_tests()
 
 

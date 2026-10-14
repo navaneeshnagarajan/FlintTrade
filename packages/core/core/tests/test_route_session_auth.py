@@ -20,6 +20,49 @@ pytestmark = pytest.mark.unit
 
 _BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
+# Explicit protocol migrations, not a blanket acceptance of every 403/4xx.
+# These exact model-control routes require a full operator session before body
+# or owner access. External-browser OAuth uses one-shot ticket/state proofs.
+_MODEL_CONTROL_ROUTES = frozenset({
+    ("GET", "/v1/model-runs/<run_id>/configuration"),
+    ("GET", "/v1/model-runs/<run_id>/configuration/control"),
+    ("POST", "/v1/model-runs/<run_id>/configuration/preview"),
+    ("POST", "/v1/model-runs/<run_id>/configuration/confirm"),
+    ("GET", "/v1/model-runs/<run_id>/configuration/training-provenance/<identity>"),
+    ("GET", "/api/v1/backtest/trials/<identity>"),
+    ("GET", "/api/v1/backtest/experiments/<identity>"),
+    ("POST", "/api/v1/backtest/evaluation/suites/<identity>/score"),
+    ("POST", "/api/v1/backtest/training/jobs"),
+    ("GET", "/api/v1/backtest/training/jobs/<identity>"),
+    ("POST", "/api/v1/backtest/training/jobs/<identity>/cancel"),
+    ("POST", "/api/v1/backtest/training/jobs/<identity>/reconcile"),
+    ("POST", "/api/v1/backtest/adoptions"),
+    ("GET", "/api/v1/backtest/adoptions/<identity>"),
+    ("POST", "/api/v1/backtest/adoptions/<identity>/reconcile"),
+})
+_OAUTH_REFUSALS = {
+    ("GET", "/v1/services/connections/oauth/launch"):
+        (400, "Provider launch refused. Return to FlintTrade Settings."),
+    ("GET", "/v1/services/connections/oauth/callback"):
+        (422, "Provider response refused. Return to FlintTrade Settings."),
+}
+
+
+def _refuses_without_authority(response, method, rule):
+    key = ("GET" if method == "HEAD" else method, rule)
+    if key in _MODEL_CONTROL_ROUTES:
+        return (response.status_code == 403 and response.headers.get("Cache-Control") == "no-store"
+                and (method == "HEAD" or response.get_json() == {
+                    "status": "error", "code": "operator_session_required"}))
+    # HEAD is not a callback or capability redemption; its session guard stays.
+    if (method, rule) in _OAUTH_REFUSALS:
+        code, message = _OAUTH_REFUSALS[(method, rule)]
+        return (response.status_code == code and response.get_data(as_text=True) == message
+                and response.headers.get("Cache-Control") == "no-store"
+                and "Location" not in response.headers and "Set-Cookie" not in response.headers)
+    return response.status_code == 401
+
+
 
 def _sample_values(rule) -> dict[str, object]:
     """Build converter samples so the rule can be requested."""
@@ -78,7 +121,7 @@ def _rejected_bearers(secret: str) -> list[str]:
 
 
 def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -> None:
-    """Unauthenticated and invalid-bearer calls get 401 before validation.
+    """Unauthenticated calls must match the exact route-family refusal contract.
 
     A route added without an allowlist entry fails this test.
     """
@@ -108,7 +151,7 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
             for method in rule.methods or ():
                 registered.add((method, rule.rule))
 
-        missing = sorted(PUBLIC_ROUTES - registered)
+        missing = sorted((PUBLIC_ROUTES | _MODEL_CONTROL_ROUTES | set(_OAUTH_REFUSALS)) - registered)
         assert not missing, f"allowlist entries are not mounted: {missing}"
         assert ("GET", "/v1/sandbox/positions") in registered
 
@@ -164,7 +207,7 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
                         kwargs["data"] = "{}"
                         kwargs["content_type"] = "application/json"
                     missing_auth = client.open(path, method=method, **kwargs)
-                    if missing_auth.status_code != 401:
+                    if not _refuses_without_authority(missing_auth, method, rule.rule):
                         failures.append(f"{label} {method} {rule.rule} missing={missing_auth.status_code}")
                     for bearer in bearers:
                         rejected = client.open(
@@ -173,13 +216,13 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
                             headers={"Authorization": f"Bearer {bearer}"},
                             **kwargs,
                         )
-                        if rejected.status_code != 401:
+                        if not _refuses_without_authority(rejected, method, rule.rule):
                             failures.append(f"{label} {method} {rule.rule} bearer={rejected.status_code}")
 
         _probe("no-key")
         monkeypatch.setenv("FLINTTRADE_API_KEY", api_key)
         _probe("api-key")
-        assert not failures, "routes answered without a session:\n" + "\n".join(failures[:40])
+        assert not failures, "routes answered without a session:\n" + "\n".join(failures)
     finally:
         if monitor is not None:
             monitor._auth_ban_threshold = previous_threshold

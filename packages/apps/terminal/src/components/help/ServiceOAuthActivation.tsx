@@ -20,7 +20,11 @@ function Activation({ snapshot, disabled, onChanged, onBlocked }: Props) {
   const [notice, setNotice] = useState("");
   const generation = useRef(0);
   const inFlight = useRef(false);
-  useLayoutEffect(() => { generation.current++; return () => { generation.current++; }; }, []);
+  useLayoutEffect(() => {
+    const lifetime = generation;
+    lifetime.current++;
+    return () => { lifetime.current++; };
+  }, []);
   async function save() {
     if (disabled || inFlight.current) return;
     const fence = captureAuthSessionFence(), epoch = generation.current;

@@ -30,6 +30,10 @@ permissions:
 # §14.3 CI env allowlist — FLINTTRADE_CI activates the no-broker-creds gate; every broker
 # credential var is explicitly emptied so a leaked higher-scope secret cannot inherit.
 env:
+  # Exercise the supported Python floor, not .python-version's managed target.
+  # 3.12.8 predates Ubuntu 26.04 assets; this exact floor patch is published for it.
+  UV_PYTHON: "3.12.15"
+  UV_PYTHON_DOWNLOADS: "never"
   FLINTTRADE_CI: "1"
   DHAN_ACCESS_TOKEN: ""
   DHAN_API_KEY: ""
@@ -73,7 +77,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.12' }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -102,8 +106,9 @@ jobs:
           rm -f pip-audit-report.json
           rm -f "${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: { version: "0.13.1" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
         id: pip_audit
@@ -165,7 +170,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -192,7 +197,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - run: pip install --require-hashes -r requirements.lock
       - run: pip-licenses --from=mixed --order=license --format=json --output-file=supply-chain/transitive-licences.json
@@ -208,6 +213,9 @@ jobs:
   windows-acl-test:
     name: Windows secret-file ACL hardening (HI18)
     runs-on: windows-2025
+    env:
+      # actions/python-versions has no newer 3.12 Windows binary.
+      UV_PYTHON: "3.12.10"
     timeout-minutes: 45
     if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !github.event.pull_request.draft }}
     defaults:
@@ -216,8 +224,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: { version: "0.13.1" }
       - run: uv sync --frozen
       - name: ACL test
         run: uv run python -m pytest tests/test_secure_file_windows_acl.py -v
@@ -230,12 +239,23 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-26.04, macos-26, windows-2025]
+        include:
+          - os: ubuntu-26.04
+            python: "3.12.15"
+          # 3.12.10 is the latest published macOS/Windows floor binary.
+          - os: macos-26
+            python: "3.12.10"
+          - os: windows-2025
+            python: "3.12.10"
     runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: { version: "0.13.1" }
       - run: uv sync --frozen
       - run: uv run python -c "import flinttrade_core; print(flinttrade_core.__file__)"
 
@@ -253,7 +273,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }   # full history for GPG signature verification
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+        with: { python-version: "${{ env.UV_PYTHON }}" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - run: sudo apt-get install -y gnupg
       - run: python scripts/check-cla-gpg-binding.py

@@ -153,7 +153,11 @@ def test_actual_dispatch_binds_stock_context_to_original_run_receipt(installed, 
     admission = helpers.policy(revision)
     admission["reservation"].update(input_tokens=8192, currency_micros=1000)
     helpers.configure(client, identifier, admission)
-    ledger = app.config["SERVICE_TASK_DISPATCHER"].ledger
+    dispatcher = app.config["SERVICE_TASK_DISPATCHER"]
+    # Scope/receipt semantics are independent of CI scheduling latency. The
+    # existing injectable deadline clock remains explicit and bounded below.
+    dispatcher.monotonic = lambda: 10.0
+    ledger = dispatcher.ledger
     original = ledger.prepare
 
     def prepare(*args, **kwargs):
@@ -170,3 +174,45 @@ def test_actual_dispatch_binds_stock_context_to_original_run_receipt(installed, 
     assert len(calls) == (0 if change else 1)
     if change:
         assert response.json["code"] == "context_changed"
+
+
+@pytest.mark.parametrize("elapsed", [1.0, 3.0])
+def test_stock_context_deadline_is_enforced_after_evidence_preparation(installed, monkeypatch, elapsed):
+    import httpx
+    from packages.core.core.tests import test_service_tasks as helpers
+
+    app, client, headers = installed
+    monkeypatch.setattr(helpers, "HEADERS", headers)
+    app.config.update(SERVICE_TASK_CLOCK=lambda: helpers.NOW, KNOWLEDGE_SCOPE_RESOLVER=lambda actor: SCOPE)
+    calls = []
+
+    def transport(request):
+        calls.append(request)
+        return httpx.Response(200, json={"model": "test-model-v1", "provider": "approved-upstream",
+            "choices": [{"message": {"content": "Synthetic advisory"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 5}})
+
+    app.config["SERVICE_TASK_TRANSPORT"] = httpx.MockTransport(transport)
+    identifier = helpers.create(client)
+    revision = client.get(helpers.BASE, headers=headers).headers["ETag"]
+    admission = helpers.policy(revision)
+    admission["reservation"].update(input_tokens=8192, currency_micros=1000)
+    helpers.configure(client, identifier, admission)
+    dispatcher = app.config["SERVICE_TASK_DISPATCHER"]
+    clock = [10.0]
+    dispatcher.monotonic = lambda: clock[0]
+    original = dispatcher.ledger.prepare
+
+    def prepare(*args, **kwargs):
+        result = original(*args, **kwargs)
+        clock[0] += elapsed
+        return result
+
+    monkeypatch.setattr(dispatcher.ledger, "prepare", prepare)
+    response = client.post(helpers.BASE + "/tasks", headers=headers,
+        json=helpers.task(identifier, revision, context_refs=["skill:risk_management"]))
+    assert response.status_code == 200, response.json
+    assert response.json["outcome"] == ("completed" if elapsed < 2 else "refused"), response.json
+    assert len(calls) == (1 if elapsed < 2 else 0)
+    if elapsed > 2:
+        assert response.json["code"] == "deadline_exceeded"

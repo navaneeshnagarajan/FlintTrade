@@ -87,7 +87,7 @@ const manifest: BootstrapToolManifest = {
       },
       url: "https://nodejs.org/dist/v26.11.1/SHASUMS256.txt",
     },
-    uv: { sha256: "2".repeat(64), url: "https://github.com/astral-sh/uv/releases/download/0.13.0/sha256.sum" },
+    uv: { sha256: "2".repeat(64), url: "https://github.com/astral-sh/uv/releases/download/0.13.1/sha256.sum" },
     pnpm: { sha256: "5".repeat(64), snapshot: "checksums/pnpm-12.11.2-assets.json", sources: ["https://registry.npmjs.org/pnpm/12.11.2"] },
   },
   node: {
@@ -117,13 +117,13 @@ const manifest: BootstrapToolManifest = {
     }])),
   },
   uv: {
-    version: "0.13.0",
+    version: "0.13.1",
     assets: {
       "darwin-arm64": {
         archive: "tar.gz",
         executable: "uv-aarch64-apple-darwin/uv",
         sha256: sha256(uvBytes),
-        url: "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-aarch64-apple-darwin.tar.gz",
+        url: "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-aarch64-apple-darwin.tar.gz",
       },
       "win32-x64": {
         archive: "zip",
@@ -133,7 +133,7 @@ const manifest: BootstrapToolManifest = {
         // nested path, so it agreed with the bug instead of catching it.
         executable: "uv.exe",
         sha256: sha256(uvBytes),
-        url: "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip",
+        url: "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-pc-windows-msvc.zip",
       },
     },
   },
@@ -409,6 +409,7 @@ interface FixtureOptions {
   uncontainedOnAbort?: boolean;
   onExtract?: BootstrapDependencies["extractArchive"];
   virtualEnvironment?: "missing" | "nonrelocatable" | "relocatable";
+  virtualEnvironmentUv?: string;
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -660,7 +661,7 @@ async function fixture(options: FixtureOptions = {}) {
           {
             name: "uv --version",
             matches: toolName === "uv" && versionProbe && invocation.args.length === 1,
-            stdout: "uv 0.13.0 (135a36367 2026-05-21 aarch64-apple-darwin)\n",
+            stdout: "uv 0.13.1 (synthetic-test-build)\n",
           },
           {
             name: "node --version",
@@ -761,7 +762,7 @@ async function fixture(options: FixtureOptions = {}) {
             await writeFile(
               path.join(candidate, ".venv", "pyvenv.cfg"),
               virtualEnvironment === "relocatable"
-                ? `home = ${managedPythonHome}\nuv = 0.13.0\nversion_info = 3.14.8\nrelocatable = true\n`
+                ? `home = ${managedPythonHome}\nuv = ${options.virtualEnvironmentUv ?? "0.13.1"}\nversion_info = 3.14.8\nrelocatable = true\n`
                 : `home = ${candidate}/managed-python\n`,
               { mode: 0o600 },
             );
@@ -1134,6 +1135,15 @@ describe("first-run source bootstrap", () => {
     ]);
   });
 
+  it.each(["0.13.0", "0.13.2"])("refuses staged uv metadata from %s", async (virtualEnvironmentUv) => {
+    const test = await fixture({ virtualEnvironmentUv });
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/Managed Python 3\.14\.8 is required/),
+      ok: false,
+    });
+    expect(await exists(test.activeSource)).toBe(false);
+  });
+
   it.each(["darwin", "win32"] as const)(
     "refuses to promote a non-relocatable %s virtual environment",
     async (platform) => {
@@ -1292,12 +1302,12 @@ describe("first-run source bootstrap", () => {
       `${test.activeSource}.candidate-8.unpack`,
       `${test.activeSource}.candidate-9-${randomUUID()}`,
       `${test.activeSource}.candidate-10-${randomUUID()}.unpack-${randomUUID()}`,
-      path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64.extracting-9"),
+      path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64.extracting-9"),
       path.join(
         test.root,
         "tools",
         "uv",
-        "0.13.0",
+        "0.13.1",
         `darwin-arm64.extracting-10-${randomUUID()}`,
       ),
       path.join(
@@ -1791,7 +1801,7 @@ describe("first-run source bootstrap", () => {
 
   it("fails closed without deleting a pre-existing unverified tool root", async () => {
     const test = await fixture();
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const sentinel = path.join(installRoot, "foreign-sentinel");
     await mkdir(installRoot, { recursive: true });
     await writeFile(sentinel, "foreign");
@@ -1807,7 +1817,7 @@ describe("first-run source bootstrap", () => {
   it("fails closed and preserves a tool whose installed tree and marker were modified together", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const executable = path.join(installRoot, manifest.uv.assets["darwin-arm64"]!.executable);
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     await writeFile(executable, "tampered");
@@ -1832,7 +1842,7 @@ describe("first-run source bootstrap", () => {
   it("fails closed and preserves a tool whose verification marker is a symlink", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     const externalMarker = path.join(test.root, "external-tool-marker.json");
     await writeFile(externalMarker, await readFile(markerPath));
@@ -1851,7 +1861,7 @@ describe("first-run source bootstrap", () => {
 
   it("keeps a partial marker write inside an unpromoted candidate and succeeds on retry", async () => {
     const test = await fixture({ toolMarkerWriteFailure: "once" });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
 
     await expect(test.controller.start()).resolves.toMatchObject({
@@ -1871,7 +1881,7 @@ describe("first-run source bootstrap", () => {
 
   it("rejects an archive that claims FlintTrade's reserved internal tool marker", async () => {
     const test = await fixture({ toolReservedMarker: "file" });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
 
     await expect(test.controller.start()).resolves.toMatchObject({
       error: expect.stringMatching(/reserved verification marker/i),
@@ -1882,7 +1892,7 @@ describe("first-run source bootstrap", () => {
 
   it("retries cleanly when the marker-bearing tool root was promoted before interruption", async () => {
     const test = await fixture({ toolPromotionFailure: "after" });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
 
     await expect(test.controller.start()).resolves.toMatchObject({
@@ -1901,7 +1911,7 @@ describe("first-run source bootstrap", () => {
   it("accepts the exact legacy sibling marker used by pre-release tool installs", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const internalMarker = path.join(installRoot, ".flinttrade-tool-verified.json");
     const legacyMarker = `${installRoot}.flinttrade-tool-verified.json`;
     await rename(internalMarker, legacyMarker);
@@ -1917,7 +1927,7 @@ describe("first-run source bootstrap", () => {
   it("fails closed and preserves an altered tool root whose verification marker is missing", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const installRoot = path.join(test.root, "tools", "uv", "0.13.0", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const executable = path.join(installRoot, manifest.uv.assets["darwin-arm64"]!.executable);
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     const originalExecutable = await readFile(executable);

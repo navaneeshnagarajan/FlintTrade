@@ -17,7 +17,7 @@ from types import FunctionType
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.usefixtures("owned_flask_apps"), pytest.mark.unit]
 
 _ALLOWED_SUBMIT_ROUTES = frozenset(
     {
@@ -557,7 +557,7 @@ def test_submit_routes_never_request_dhan_forever_or_super(
     monkeypatch.setenv("FLINTTRADE_API_KEY", "order-submit-route-test")
     app = create_flask_app()
     router = _Router()
-    app.config["BROKER_ROUTER"] = router
+    monkeypatch.setitem(app.config, "BROKER_ROUTER", router)
     http = app.test_client()
     token = _create_token("nava", mode="live", live_mode_unlocked=True)
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}

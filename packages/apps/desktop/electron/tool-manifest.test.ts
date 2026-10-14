@@ -20,7 +20,7 @@ const uvChecksums = path.join(
   "resources",
   "bootstrap",
   "checksums",
-  "uv-0.13.0-sha256.sum",
+  "uv-0.13.1-sha256.sum",
 );
 
 interface ManifestAsset {
@@ -53,7 +53,7 @@ describe("bootstrap tool manifest", () => {
 
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.node.version).toBe("26.11.1");
-    expect(manifest.uv.version).toBe("0.13.0");
+    expect(manifest.uv.version).toBe("0.13.1");
     expect(Object.keys(manifest.node.assets).sort()).toEqual(targets);
     expect(Object.keys(manifest.uv.assets).sort()).toEqual(targets);
     expect(Object.keys(manifest.pnpm.assets).sort()).toEqual(targets);
@@ -71,7 +71,7 @@ describe("bootstrap tool manifest", () => {
           sha256: "671e48de01184d7b0aa3df79c7aaa373ede2374231099973643a20311ed372f9",
         },
       },
-      uv: { sha256: "dc052c54b83ec8a6c04899ce4ee66f9e7fda667bc56145747b78099d23ca22c7" },
+      uv: { sha256: "8804e68a18189ed9750e6330db95c49310f320adb89e66dd429c92058f25e1e1" },
       pnpm: { sha256: "5e7a55df966ff3301e84eccfbd3bd6fe939d07415c1f4e96eed96dfc888fae1d" },
     });
     for (const asset of [...Object.values(manifest.node.assets), ...Object.values(manifest.uv.assets), ...Object.values(manifest.pnpm.assets)]) {
@@ -103,7 +103,7 @@ describe("bootstrap tool manifest", () => {
       "checksums/node-release-key.asc",
       "checksums/node-v26.11.1-SHASUMS256.txt",
       "checksums/node-v26.11.1-SHASUMS256.txt.sig",
-      "checksums/uv-0.13.0-sha256.sum",
+      "checksums/uv-0.13.1-sha256.sum",
       "checksums/pnpm-12.11.2-assets.json",
     ]) expect(verifier).toContain(JSON.stringify(resource));
   });

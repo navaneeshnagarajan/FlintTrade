@@ -69,6 +69,10 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }, [app]);
   useEffect(() => {
     if (!active) return;
+    // Replacing/restoring a model is itself a presentation change. The old
+    // effect's cleanup flushes its model; publish the replacement afterwards
+    // even when the user performs no subsequent docking action before reload.
+    persist(model);
     const listener = () => { persist(model); setRevision(v => v + 1); };
     model.addChangeListener(listener);
     return () => { model.removeChangeListener(listener); persist(model); };

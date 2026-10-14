@@ -153,7 +153,7 @@ function Assert-ManagedPythonTree {
 }
 
 function Get-ValidatedUvVenvConfiguration {
-    param([string[]]$Lines, [string]$ErrorMessage, [string[]]$AllowedUvVersions = @("0.11.16", "0.13.0"), [switch]$ExactManagedVersion)
+    param([string[]]$Lines, [string]$ErrorMessage, [string[]]$AllowedUvVersions = @("0.11.16", "0.13.0", "0.13.1"), [switch]$ExactManagedVersion)
 
     $values = New-Object 'System.Collections.Generic.Dictionary[string,string]' `
         ([StringComparer]::Ordinal)
@@ -616,7 +616,7 @@ try {
     $stagedVirtualEnvironmentConfigValues = Get-ValidatedUvVenvConfiguration `
         $stagedVirtualEnvironmentConfigLines `
         "Refusing staged .venv because it is not a uv-managed relocatable Python 3.14.8 environment." `
-        @("0.13.0") -ExactManagedVersion
+        @("0.13.1") -ExactManagedVersion
     $stagedPythonHome = Get-CanonicalExistingDirectory `
         $stagedVirtualEnvironmentConfigValues["home"]
     $currentManagedPythonRoot = Get-CanonicalExistingDirectory $managedPythonRootPath

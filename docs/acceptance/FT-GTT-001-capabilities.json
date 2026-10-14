@@ -26,31 +26,31 @@
   "sdk_pins": {
     "dhan": {
       "package": "dhanhq",
-      "version": "2.2.0",
-      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/091510bf20501354102407afd139efcb570a461d/brokers.lock",
+      "version": "2.3.0rc1",
+      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock",
       "historical_activation_is_current_verification": false,
-      "pinned_public_sdk_inspection": "metadata and public schema/signature inspection only; no import or broker call"
+      "pinned_public_sdk_inspection": "current declared pin metadata only; prior source/schema inspection does not qualify this revision"
     },
     "upstox": {
       "package": "upstox-python-sdk",
       "version": "2.30.0",
-      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/091510bf20501354102407afd139efcb570a461d/brokers.lock",
+      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock",
       "historical_activation_is_current_verification": false,
       "pinned_public_sdk_inspection": "metadata and public schema/signature inspection only; no import or broker call"
     },
     "kotakneo": {
       "package": "kotakneoapi",
-      "version": "3.0.8",
-      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/091510bf20501354102407afd139efcb570a461d/brokers.lock",
+      "version": "3.0.9",
+      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock",
       "historical_activation_is_current_verification": false,
-      "source_commit": "9a37488d77dc96442ee2a90ef78462e688cf4856",
+      "source_commit": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8",
       "release_version": "3.0.7",
-      "pinned_public_sdk_inspection": "partial immutable placement method/value source review; complete installed runtime method parity remains unverified"
+      "pinned_public_sdk_inspection": "current declared pin metadata only; prior source/schema inspection does not qualify this revision"
     },
     "groww": {
       "package": "growwapi",
       "version": "1.5.0",
-      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/091510bf20501354102407afd139efcb570a461d/brokers.lock",
+      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock",
       "historical_activation_is_current_verification": false,
       "pinned_public_sdk_inspection": "metadata only; smart REST/SDK schema parity remains unverified"
     },
@@ -58,13 +58,13 @@
       "package": null,
       "version": null,
       "transport": "REST-native; no installable SDK pin in brokers.lock",
-      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/091510bf20501354102407afd139efcb570a461d/brokers.lock"
+      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock"
     },
     "delta": {
       "package": null,
       "version": null,
       "transport": "REST v2; no third-party SDK pin in brokers.lock",
-      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/091510bf20501354102407afd139efcb570a461d/brokers.lock"
+      "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock"
     }
   },
   "source_review": {

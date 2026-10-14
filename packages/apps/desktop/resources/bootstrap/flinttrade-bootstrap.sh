@@ -327,7 +327,7 @@ elif [ -e "$candidate/.venv" ]; then
   relocatable_value=$(read_uv_config_value relocatable "$candidate/.venv/pyvenv.cfg") || configuration_valid=0
   python_home=$(read_uv_config_value home "$candidate/.venv/pyvenv.cfg") || configuration_valid=0
   # Preserve and rebuild the previously supported environment; never execute it.
-  case "$uv_value" in 0.11.16|0.13.0) ;; *) configuration_valid=0 ;; esac
+  case "$uv_value" in 0.11.16|0.13.0|0.13.1) ;; *) configuration_valid=0 ;; esac
   case "$version_value" in
     3.12.*)
       version_patch=${version_value#3.12.}
@@ -486,7 +486,7 @@ staged_relocatable=$(read_uv_config_value relocatable "$staging_virtual_environm
   staged_configuration_valid=0
   staged_relocatable=
 }
-[ "$staged_uv_value" = 0.13.0 ] || staged_configuration_valid=0
+[ "$staged_uv_value" = 0.13.1 ] || staged_configuration_valid=0
 [ "$staged_version_value" = 3.14.8 ] || staged_configuration_valid=0
 [ "$staged_relocatable" = true ] || staged_configuration_valid=0
 [ -n "$staged_python_home" ] || staged_configuration_valid=0

@@ -302,7 +302,14 @@ def _install_runtime_request_tracking(app: Flask) -> _RuntimeRequestTracker:
         if response.is_streamed:
             # SSE/file iterators may outlive Flask's request dispatch. Their
             # dependencies remain owned until the WSGI server closes the body.
-            response.call_on_close(admission.release)
+            if response.direct_passthrough:
+                # Werkzeug returns the body directly for send_file, bypassing
+                # Response.close and its callbacks. Own the actual WSGI body.
+                from werkzeug.wsgi import ClosingIterator
+
+                response.response = ClosingIterator(response.response, admission.release)
+            else:
+                response.call_on_close(admission.release)
             _flask_g._runtime_request_release_deferred = True
         else:
             admission.release()
@@ -7183,6 +7190,7 @@ class FlintTradeApp:
                 "instrument master refresh",
                 lambda: _stop_instrument_master_refresh(flask_app, timeout=deadline.remaining()),
                 require_truthy=True,
+                resume_incomplete=True,
             )
 
         strategy_cron_scheduler = getattr(self, "strategy_cron_scheduler", None)

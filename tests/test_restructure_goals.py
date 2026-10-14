@@ -7,6 +7,7 @@ import re
 import runpy
 import subprocess
 import sys
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -715,8 +716,12 @@ def test_ci_runs_electron_desktop_build_and_cross_platform_package_smoke() -> No
     assert "packages/apps/desktop/src-tauri" not in test_workflow
 
     assert "desktop-electron-package-smoke:" in nightly
-    for runner in ("macos-latest", "windows-latest", "ubuntu-latest"):
-        assert runner in nightly
+    nightly_document = yaml.safe_load(nightly)
+    package_smoke = nightly_document["jobs"]["desktop-electron-package-smoke"]
+    assert package_smoke["runs-on"] == "${{ matrix.os }}"
+    assert set(package_smoke["strategy"]["matrix"]["os"]) == {
+        "macos-26", "windows-2025", "ubuntu-26.04",
+    }
     for command in (
         "electron-builder --dir --mac",
         "electron-builder --dir --win --x64",
@@ -744,14 +749,14 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
         assert isinstance(document, dict), path
         workflows[path.name] = document
 
-    # The authoritative verification lane pins ubuntu-24.04, matching flint.toml
-    # [requirements].os_requires. They package `--dir` and verify the security
+    # The authoritative verification lane pins ubuntu-26.04, matching flint.toml
+    # [requirements].os_target, not the supported OS floor. They package `--dir` and verify the security
     # contract; they publish nothing, so the build host's glibc never reaches a
     # user. desktop-release.yml's Linux build legs stay on ubuntu-22.04/-arm on
     # purpose - they compile flinttrade-fs-promoter.node and ship it inside the
     # AppImage, which makes the build host's glibc the installer's real floor.
     required_posix = {
-        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-24.04"),
+        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-26.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,
@@ -1001,12 +1006,19 @@ def test_dependency_provenance_gate_accepts_repo_local_cargo_patches() -> None:
 
 def test_desktop_release_does_not_require_numba_stack() -> None:
     """Native desktop packaging must not force llvmlite builds on macOS Intel."""
-    ditto_manifest = (ROOT / "packages" / "services" / "ditto" / "pyproject.toml").read_text(encoding="utf-8")
-    default_deps = ditto_manifest.split("[project.optional-dependencies]", 1)[0]
+    ditto_manifest = tomllib.loads(
+        (ROOT / "packages" / "services" / "ditto" / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    from packaging.requirements import Requirement
+
+    project = ditto_manifest["project"]
+    default_deps = {Requirement(item).name.lower() for item in project["dependencies"]}
+    optional_numba = [Requirement(item) for item in project["optional-dependencies"]["numba"]]
     requirements = (ROOT / "requirements.lock").read_text(encoding="utf-8")
 
-    assert '"numba>=' not in default_deps
-    assert 'numba = ["numba>=' in ditto_manifest
+    assert not {"numba", "llvmlite"} & default_deps
+    assert len(optional_numba) == 1 and optional_numba[0].name == "numba"
+    assert optional_numba[0].specifier
     assert "llvmlite==" not in requirements
     assert "numba==" not in requirements
 

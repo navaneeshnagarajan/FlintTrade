@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, act } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ServiceConnectionSetup from '../ServiceConnectionSetup';
 import { useAuthStore } from '@/stores/authStore';
+import { getBase } from '@/services/ftApi.helpers';
 const tag = '"' + 'a'.repeat(64) + '"';
 const id = '5a765bd0-48c1-4b8a-8db7-c94633b1abca';
 const row = { schema_version: 1 as const, connection_id: id, provider_id: 'llm:openai', label: 'Synthetic', model: 'test-model-v1', endpoint: 'https://api.openai.com/v1/chat/completions', auth_mode: 'chatgpt_oauth', credential_configured: false, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' };
@@ -62,4 +64,51 @@ it('retires a pending browser handoff through an activation off-on cycle', async
  const launch=window.location.origin+'/v1/services/connections/oauth/launch?ticket='+'a'.repeat(43);
  await act(async()=>resolve(reply({transaction_id:'2c607ae2-54e0-427c-b5cc-6eaf214b5932',authorization_url:launch,expires_at:1900000000})));
  expect(screen.queryByRole('link',{name:'Open provider sign-in'})).not.toBeInTheDocument();
+});
+
+it('retires a completed activation readback after same-session unmount and remount', async () => {
+  const configuration = `${getBase()}/v1/services/connections/oauth/configuration`;
+  const collection = `${getBase()}/v1/services/connections`;
+  const calls: string[] = [], unexpected: string[] = [];
+  let finishPost!: (response: Response) => void;
+  let finishRead!: () => void;
+  const readFinished = new Promise<void>(resolve => { finishRead = resolve; });
+  const read = reply({ connections: [row], oauth: enabled });
+  const decode = read.json.bind(read);
+  vi.spyOn(read, 'json').mockImplementation(async () => {
+    const value: unknown = await decode();
+    finishRead();
+    return value;
+  });
+  const postBodies: string[] = [], postTags: (string | null)[] = [];
+  vi.stubGlobal('fetch', vi.fn((url: string, init: RequestInit) => {
+    calls.push(`${init.method} ${url}`);
+    if (url === configuration && init.method === 'POST') {
+      postBodies.push(String(init.body));
+      postTags.push(new Headers(init.headers).get('If-Match'));
+      return new Promise<Response>(resolve => { finishPost = resolve; });
+    }
+    if (url === collection && init.method === 'GET') return Promise.resolve(read);
+    unexpected.push(`${init.method} ${url}`);
+    return Promise.reject(new Error('Unexpected activation transport'));
+  }));
+  const changed = vi.fn();
+  const props = {
+    snapshot: { etag: tag, connections: [row], oauth: { configured: false as const, providers: [], desktop_activation: true as const } },
+    unavailable: false, onChanged: changed, onRefresh: vi.fn(),
+  };
+  const first = render(<StrictMode><ServiceConnectionSetup {...props} /></StrictMode>);
+  fireEvent.click(screen.getByRole('button', { name: 'Enable local/OSS provider sign-in' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm local/OSS activation' }));
+  expect(calls).toEqual([`POST ${configuration}`]);
+  expect(postBodies).toEqual([JSON.stringify({ deployment: 'local_oss' })]);
+  expect(postTags).toEqual([tag]);
+  first.unmount();
+  render(<StrictMode><ServiceConnectionSetup {...props} /></StrictMode>);
+  await act(async () => { finishPost(reply(enabled)); await readFinished; });
+  expect(calls).toEqual([`POST ${configuration}`, `GET ${collection}`]);
+  expect(unexpected).toEqual([]);
+  expect(changed).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Enable local/OSS provider sign-in' })).toBeEnabled();
+  expect(screen.queryByText(/Local\/OSS activation read back/)).not.toBeInTheDocument();
 });

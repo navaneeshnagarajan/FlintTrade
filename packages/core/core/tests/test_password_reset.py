@@ -10,7 +10,10 @@ from unittest.mock import MagicMock, patch
 import jwt
 import pytest
 
+
 from flinttrade_core.auth_service import AuthService
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +136,7 @@ class TestResetToken:
 
 
 @pytest.fixture()
-def app_with_auth(tmp_path: Path):
+def app_with_auth(tmp_path: Path, monkeypatch, request):
     """Create a Flask test app with auth service and optionally mocked mail."""
     import os
 
@@ -152,7 +155,8 @@ def app_with_auth(tmp_path: Path):
     )
 
     app = create_flask_app()
-    app.config["AUTH_SERVICE"] = svc
+    monkeypatch.setitem(app.config, "AUTH_SERVICE", svc)
+    request.addfinalizer(svc.close)
     app.config["TESTING"] = True
     return app
 

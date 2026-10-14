@@ -30,6 +30,8 @@ export default defineConfig({
   // fail-closed: neither .env.production nor any other terminal .env* file can
   // populate import.meta.env. The launcher also strips inherited VITE_* values.
   envDir: publicDemoBuild ? false : undefined,
+  // Isolated CI keeps generated optimisation data outside read-only inputs.
+  cacheDir: process.env.FLINTTRADE_E2E_CACHE_DIR,
   define: {
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
     __FLINTTRADE_VERSION_INVENTORY__: JSON.stringify(readVersionInventory(import.meta.dirname)),

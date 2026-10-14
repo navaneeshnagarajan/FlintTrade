@@ -379,15 +379,17 @@ def _manifest_date_range(body: dict[str, Any], snapshot: dict[str, Any]) -> tupl
     Optional date selectors describe the first/last observed UTC date. The
     manifest's versioned session calendar remains the coverage authority.
     """
-    import re
-
     from .data_contracts import timestamp
 
     identity = snapshot["identity"]
     if body["symbol"] != identity["instrument_id"] or body["exchange"] != identity["venue"]:
         raise ValueError("Manifest instrument or venue does not match request")
-    match = re.fullmatch(r"([1-9][0-9]*)([smhd])", body["interval"])
-    if match is None or int(match[1]) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[match[2]] != identity["interval_seconds"]:
+    interval = body["interval"]
+    unit = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(interval[-1:])
+    seconds = identity["interval_seconds"]
+    # Compare to the canonical server-owned magnitude, never regex-match or
+    # convert an arbitrarily long client digit string to an integer.
+    if unit is None or seconds % unit or interval[:-1] != str(seconds // unit):
         raise ValueError("Manifest interval does not match request")
     dates = (timestamp(snapshot["bars"][0]["timestamp"]).date().isoformat(),
              timestamp(snapshot["bars"][-1]["timestamp"]).date().isoformat())
@@ -448,7 +450,15 @@ def backtest_run() -> tuple[Any, int]:
         try:
             _validate_manifest_request(body)
         except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+            message = "Invalid manifest request"
+            for public_message in (
+                "Unsupported manifest request fields", "Canonical history manifest identity required",
+                "Explicit canonical manifest selectors required", "Manifest dates must be strings",
+            ):
+                if exc.args == (public_message,):
+                    message = public_message
+                    break
+            return jsonify({"status": "error", "message": message}), 400
     symbol: str = body.get("symbol", "").strip()
     exchange: str = body.get("exchange", "NSE").strip()
     interval: str = body.get("interval", "5m").strip()

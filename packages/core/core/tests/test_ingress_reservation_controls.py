@@ -13,7 +13,7 @@ from packages.core.core.tests.test_ingress_safety_runtime import DispatchHTTP, D
 from packages.core.core.tests.test_order_route_evidence_runtime import _place
 from packages.core.core.tests.test_upstox_native_propagation import native_stack as native_stack, _place as place_upstox
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.usefixtures("owned_flask_apps"), pytest.mark.integration]
 
 
 @pytest.fixture

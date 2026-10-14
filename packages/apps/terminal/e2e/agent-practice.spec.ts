@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import type { Locator, Page, Request, TestInfo } from "@playwright/test";
 
 import { expect, test, type SyntheticFixtureRegistry } from "./fixture-registry";
-import { registerExampleDeskReads, registerPracticeOrderPadReads } from "./visual/desk-mocks";
+import { registerExampleDeskReads, registerPracticeOrderPadReads, registerSystemDiagnosticsRead } from "./visual/desk-mocks";
 
 // Synthetic authority only. The fail-closed registry intercepts every API call;
 // this journey never starts a backend, broker connection or model request.
@@ -108,6 +108,7 @@ async function openPracticeAgent(page: Page, registry: SyntheticFixtureRegistry)
   }, TOKEN);
   registerExampleDeskReads(registry);
   registerPracticeOrderPadReads(registry);
+  registerSystemDiagnosticsRead(registry, TOKEN);
   registry.register({
     name: "read-only AI signal stream", method: "GET", path: "/ft-api/api/v1/signals/stream",
     expectedCalls: READ_CALLS,
@@ -126,6 +127,8 @@ async function openPracticeAgent(page: Page, registry: SyntheticFixtureRegistry)
   const panel = page.getByRole("dialog", { name: "Autonomous Agent" });
   await expect(panel).toBeVisible();
   await expect(panel.getByText(/Practice · simulated money/)).toBeVisible();
+  await expect(page.getByTestId("system-status-bar")).toContainText("Host CPU: Unavailable");
+  await expect(page.getByTestId("system-status-bar")).toContainText("Core: error");
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
   return panel;
 }

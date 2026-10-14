@@ -142,7 +142,9 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
         return descriptor
 
     def fail_stat(path, *args, **kwargs):
-        if path.name == "backend_instance.lock":
+        # Python 3.12's pre-acquisition is_symlink also dispatches through
+        # Path.stat. Inject only after our real descriptor was acquired.
+        if path.name == "backend_instance.lock" and descriptors:
             raise PermissionError("injected post-acquisition failure")
         return original_stat(path, *args, **kwargs)
 
@@ -168,6 +170,7 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
             with pytest.raises((PermissionError, OSError)):
                 module.acquire_backend_instance_lease()
         retained = [owner for owner in module._RETAINED_FAILED_LEASES if owner not in retained_before]
+        assert len(descriptors) == 1, "the post-acquisition fault must reach the real kernel owner"
         if cleanup_fails:
             assert len(retained) == 1
             with pytest.raises(module.BackendInstanceAlreadyRunning):
@@ -209,6 +212,7 @@ def test_partial_standalone_construction_closes_actual_vault_before_lease_releas
             runtime.credential_store.close()
 
 
+@pytest.mark.usefixtures("owned_flask_apps")
 def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monkeypatch):
     import flinttrade_core.app as module
     import flinttrade_engine.scheduler as scheduling
@@ -405,6 +409,7 @@ def test_standalone_partial_construction_closes_owners_before_releasing_lease(mo
     assert events == ["client-closed", "audit-closed"]
 
 
+@pytest.mark.usefixtures("owned_flask_apps")
 def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
     import flinttrade_core.app as module
 

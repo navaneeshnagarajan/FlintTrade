@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -14,7 +15,17 @@ BODY = "Open System for retained evidence. Root cause unconfirmed."
 
 
 def binding_digest(values: Sequence[str | int]) -> str:
-    return hashlib.sha256(json.dumps(values, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+    """Opaque identity, not a password verifier.
+
+    SMTP passwords and operator API keys need not have capability entropy.
+    Key the fingerprint with the existing hardened authentication key owner,
+    as operator/session references do, under a separate protocol domain. No
+    credential or new persistent key is copied into incident custody.
+    """
+    from .auth_routes import _get_jwt_secret
+
+    data = json.dumps(values, separators=(",", ":"), ensure_ascii=True).encode()
+    return hmac.new(_get_jwt_secret().encode(), b"flinttrade:incident-binding:v1\0" + data, hashlib.sha256).hexdigest()
 
 
 class IncidentSender(Protocol):

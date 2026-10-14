@@ -1,0 +1,38 @@
+{
+  "typescript": {
+    "name": "typescript",
+    "version": "6.0.3",
+    "url": "https://registry.npmjs.org/typescript/-/typescript-6.0.3.tgz",
+    "file": "typescript-6.0.3.tgz",
+    "sha256": "33cd0ee1beaa8c9e9d15a9da836c62ddea4c34a42d7c2d349dbc80d94165d22a",
+    "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
+    "prefix": "package"
+  },
+  "node": {
+    "name": "@types/node",
+    "version": "26.6.4",
+    "url": "https://registry.npmjs.org/@types/node/-/node-26.6.4.tgz",
+    "file": "node-26.6.4.tgz",
+    "sha256": "bf2dbf11cfccd34681fc4d5e4d150afce77fd6610224757dbe6c92c8e5149700",
+    "integrity": "sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg==",
+    "prefix": "node"
+  },
+  "ws": {
+    "name": "@types/ws",
+    "version": "8.18.2",
+    "url": "https://registry.npmjs.org/@types/ws/-/ws-8.18.2.tgz",
+    "file": "ws-8.18.2.tgz",
+    "sha256": "9d774304de5397f58da47b31f68b69cf0ff84ef7b1087cf4fea27729f8db83fe",
+    "integrity": "sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==",
+    "prefix": "ws"
+  },
+  "pngjs": {
+    "name": "@types/pngjs",
+    "version": "6.0.5",
+    "url": "https://registry.npmjs.org/@types/pngjs/-/pngjs-6.0.5.tgz",
+    "file": "pngjs-6.0.5.tgz",
+    "sha256": "db919544cdd5c9bd50928619fee0498341e4c0845b03d38752b510cff3994e07",
+    "integrity": "sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==",
+    "prefix": "pngjs"
+  }
+}

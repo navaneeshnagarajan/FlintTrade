@@ -1,6 +1,7 @@
 import type { Page, Request } from "@playwright/test";
 
 import { expect, registerExploreAdvisorStatusProbe, registerOperatorStatusProbes, test } from "./fixture-registry";
+import { registerSystemDiagnosticsRead } from "./visual/desk-mocks";
 
 const LIVE_AUTHORITY_PAYLOAD = {
   sub: "synthetic-order-pad-operator",
@@ -32,45 +33,24 @@ test.use({
 async function seedOrderPadWorkspace(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem(
-      "flinttrade:layouts",
+      "flinttrade:app-layouts:v1:terminal",
       JSON.stringify({
-        state: {
-          tabs: [
-            {
-              id: "practice-order-pad-workspace",
-              name: "Practice Order Pad",
-              serializedLayout: {
-                global: {
-                  tabEnableRename: false,
-                  tabSetEnableSingleTabStretch: true,
-                  tabSetMinWidth: 100,
-                  tabSetMinHeight: 80,
-                },
-                borders: [],
-                layout: {
-                  type: "row",
-                  weight: 100,
-                  children: [
-                    {
-                      type: "tabset",
-                      weight: 100,
-                      children: [
-                        {
-                          type: "tab",
-                          id: "practice-order-pad-widget",
-                          component: "orderpad",
-                          name: "Order Pad",
-                        },
-                      ],
-                    },
-                  ],
-                },
-              },
-            },
-          ],
-          activeTabId: "practice-order-pad-workspace",
+        Current: {
+          global: {
+            tabEnableRename: false,
+            tabSetEnableSingleTabStretch: true,
+            tabSetMinWidth: 100,
+            tabSetMinHeight: 80,
+          },
+          borders: [],
+          layout: {
+            type: "row", weight: 100,
+            children: [{
+              type: "tabset", weight: 100,
+              children: [{ type: "tab", id: "practice-order-pad-widget", component: "orderpad", name: "Order Pad" }],
+            }],
+          },
         },
-        version: 0,
       }),
     );
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
@@ -116,25 +96,34 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   page,
   syntheticApi,
 }) => {
+  const discoveryOutcomes: string[] = [];
+  const isDiscovery = (request: Request) => request.method() === "GET"
+    && request.url() === "http://localhost:5173/ft-api/api/v1/native/accounts";
+  page.on("requestfinished", request => {
+    if (isDiscovery(request)) discoveryOutcomes.push("completed");
+  });
+  page.on("requestfailed", request => {
+    if (isDiscovery(request)) discoveryOutcomes.push(request.failure()?.errorText ?? "unknown failure");
+  });
   // Freeze application timers before mounting the product route. Terminal polls
   // safety state and accounts; wall-clock refetches must not change exact counts.
   const controlledTime = new Date("2026-08-11T00:00:00.000Z");
   await page.clock.install({ time: controlledTime });
   await page.clock.pauseAt(controlledTime);
   await seedOrderPadWorkspace(page);
+  registerSystemDiagnosticsRead(syntheticApi, LIVE_AUTHORITY_TOKEN);
   // This desk discovers native accounts through the endpoint below. Leave
   // unused gateway-account routes unregistered so any new request fails closed.
   syntheticApi.register({
     name: "list native accounts for Practice market-data resolution",
     method: "GET",
     path: "/ft-api/api/v1/native/accounts",
-    // AppLayout account hydration, Order Pad capability discovery, and Order
-    // Pad symbol metadata each run twice under StrictMode. TopBar timing
-    // discovery can run one to three times under the default retry policy.
-    // That makes 7-9 ordinary mount reads (5 remains the abort-tolerant floor).
-    // The controlled clock remains below the scheduled five- and ten-second
-    // refreshes, while the fail-closed registry still rejects a tenth request.
-    expectedCalls: { minimum: 5, maximum: 9 },
+    // Shared nativeAccountDiscovery coalesces borrowers. The two StrictMode
+    // transport pairs originate in useBrokerAccounts and nativeCapabilityBroker;
+    // a transport initiator is not a census of the symbol/timing borrowers.
+    // The old independent-consumer 5–9 range no longer describes this mount.
+    // Require four transports AND their native completion/cancellation split.
+    expectedCalls: 4,
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { accounts: [] } };
@@ -310,12 +299,12 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       path: string,
     ) => Promise<unknown>;
     await Promise.all([
-      importModule("/src/routes/TerminalRoute.tsx"),
+      importModule("/src/routes/UnifiedAppRoute.tsx"),
       importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"),
     ]);
   });
 
-  await expect(page).toHaveURL(/\/trade$/);
+  await expect(page).toHaveURL(/\/terminal$/);
   const limitOrderType = page.getByRole("radio", { name: "LIMIT" });
   // Lazy widget imports can schedule immediate work after their network module
   // resolves. Stay below usePositions' three-second stale window: a cold import
@@ -327,8 +316,10 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await expect(limitOrderType).toBeVisible();
   await expect.poll(
     () => syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts"),
-  ).toBeGreaterThanOrEqual(5);
-  expect(syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts")).toBeLessThanOrEqual(9);
+  ).toBe(4);
+  await expect.poll(() => [...discoveryOutcomes].sort()).toEqual([
+    "completed", "completed", "net::ERR_ABORTED", "net::ERR_ABORTED",
+  ]);
   await limitOrderType.click();
   await page.getByRole("spinbutton", { name: "Price", exact: true }).fill("123.45");
   await page.getByRole("button", { name: "Practice Buy" }).click();

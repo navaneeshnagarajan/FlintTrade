@@ -1335,7 +1335,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     if (configuration.size !== 4 || configuration.get("relocatable") !== "true") {
       throw new Error("The built virtual environment is not explicitly relocatable and source-bound.");
     }
-    if (configuration.get("version_info") !== "3.14.8" || configuration.get("uv") !== "0.13.0") {
+    if (configuration.get("version_info") !== "3.14.8" || configuration.get("uv") !== "0.13.1") {
       throw new Error("Managed Python 3.14.8 is required; preserve this environment and explicitly rebuild it before reuse.");
     }
     const pythonHome = configuration.get("home")!;

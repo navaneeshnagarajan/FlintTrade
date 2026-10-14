@@ -17,7 +17,7 @@ from flinttrade_backtest.strategies import BUILTIN_STRATEGIES, STRATEGY_REGISTRY
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.usefixtures("owned_flask_apps"), pytest.mark.integration]
 
 _API_KEY = "synthetic-backtest-completion-key"
 _NAME = "CompletionEvidence"

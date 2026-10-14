@@ -136,7 +136,7 @@ class _AttemptSink:
 
 
 @pytest.fixture
-def native_http_stack(backend_lease_factory, monkeypatch, tmp_path):
+def native_http_stack(backend_lease_factory, monkeypatch, tmp_path, owned_flask_apps):
     from flinttrade_core.secure_file import write_secret_text
 
     workspace = tmp_path / "bridge-workspace"
@@ -183,9 +183,15 @@ def native_http_stack(backend_lease_factory, monkeypatch, tmp_path):
         stack = SimpleNamespace(app=app, router=router, adapter=adapter, session=session, sessions=sessions,
                                 gate=gate, safety=safety, proof=proof, transport=transport, sink=sink, audit=audit,
                                 captured=captured, receipts=receipts, execute=execute)
-        yield stack
-        assert router.revoke_and_drain(timeout=0)
-        app.config["CLIENT"].close_sync()  # Retire the normal factory's owned loop after admitted writes drain.
+        try:
+            yield stack
+        finally:
+            try:
+                assert router.revoke_and_drain(timeout=0)
+            finally:
+                # Drain the complete factory before the borrowed audit exits.
+                owned_flask_apps.close()
+                reset_reduce_only_for_tests()
         assert transport.violations == []
     reset_reduce_only_for_tests()
 

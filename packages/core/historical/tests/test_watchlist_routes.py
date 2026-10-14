@@ -14,40 +14,44 @@ import pytest
 _TEST_API_KEY = "test-watchlist-routes-key"
 
 
-@pytest.fixture(scope="module")
-def monkeypatch_module():
-    """Module-scoped monkeypatch fixture."""
-    from _pytest.monkeypatch import MonkeyPatch
-
-    mp = MonkeyPatch()
-    yield mp
-    mp.undo()
-
-
-@pytest.fixture(scope="module")
-def app_client(monkeypatch_module, tmp_path_factory):
+@pytest.fixture
+def app_client(monkeypatch, tmp_path, owned_auth_state, owned_flask_apps):
     """Return a Flask test client with an in-memory watchlist."""
     from flinttrade_core.app import create_flask_app
     from flinttrade_historical.watchlist import DownloadWatchlist
     from flinttrade_historical.watchlist_routes import init_watchlist_routes
 
-    monkeypatch_module.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
-    workspace_root = tmp_path_factory.mktemp("workspace")
-    monkeypatch_module.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace_root))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace_root))
     (workspace_root / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
-    db_path = tmp_path_factory.mktemp("wl") / "watchlist.db"
+    db_path = tmp_path / "watchlist.db"
     watchlist = DownloadWatchlist(db_path)
     init_watchlist_routes(watchlist)
 
-    flask_app = create_flask_app()
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
+    try:
+        flask_app = create_flask_app()
+        flask_app.config["TESTING"] = True
+        import secrets
+        from flinttrade_core.auth_routes import _create_token
+        flask_app.config["AUTH_SERVICE"].setup_account(
+            "synthetic-watchlist", "watchlist@example.invalid", secrets.token_urlsafe(32))
+        with flask_app.app_context():
+            token = _create_token("synthetic-watchlist", mode="practice")
+        with flask_app.test_client() as c:
+            c.environ_base["HTTP_AUTHORIZATION"] = "Bearer " + token
+            yield c
+    finally:
+        # Requests/workers drain before either borrowed watchlist or the
+        # separately owned process auth authority may close.
+        owned_flask_apps.close()
+        watchlist.close()
 
 
 def _get(client, url):
-    return client.get(url, headers={"X-API-Key": _TEST_API_KEY})
+    return client.get(url)
 
 
 def _post(client, url, body=None):
@@ -55,7 +59,6 @@ def _post(client, url, body=None):
         url,
         data=json.dumps(body or {}),
         content_type="application/json",
-        headers={"X-API-Key": _TEST_API_KEY},
     )
 
 
@@ -64,21 +67,20 @@ def _delete(client, url, body=None):
         url,
         data=json.dumps(body or {}),
         content_type="application/json",
-        headers={"X-API-Key": _TEST_API_KEY},
     )
 
 
 class TestWatchlistRoutes:
     def test_list_empty(self, app_client):
         resp = _get(app_client, "/v1/historify/watchlist")
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.get_json()
         data = json.loads(resp.data)
         assert data["status"] == "success"
         assert isinstance(data["data"], list)
 
     def test_add_item(self, app_client):
         resp = _post(app_client, "/v1/historify/watchlist", {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.get_json()
         data = json.loads(resp.data)
         assert data["status"] == "success"
         assert data["data"]["symbol"] == "RELIANCE"
@@ -97,7 +99,7 @@ class TestWatchlistRoutes:
     def test_remove_item(self, app_client):
         _post(app_client, "/v1/historify/watchlist", {"symbol": "TEMPSTOCK", "exchange": "NSE"})
         resp = _delete(app_client, "/v1/historify/watchlist", {"symbol": "TEMPSTOCK", "exchange": "NSE"})
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.get_json()
         data = json.loads(resp.data)
         assert data["status"] == "success"
 
@@ -109,7 +111,6 @@ class TestWatchlistRoutes:
         download thread spawns.
         """
         from flinttrade_core.workspace import workspace_dir
-        import flinttrade_historical.watchlist_routes as wr
 
         _post(app_client, "/v1/historify/watchlist", {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
 
@@ -117,6 +118,7 @@ class TestWatchlistRoutes:
 
         class _StubJob:
             status = "running"
+            error = None
 
             @staticmethod
             def to_dict():
@@ -129,10 +131,13 @@ class TestWatchlistRoutes:
                 captured["storage_path"] = storage_path
                 return _StubJob()
 
-        monkeypatch.setattr(wr, "_job_manager", _StubManager())
+        # The normal factory owns historical jobs now. Observe that owner
+        # rather than replacing the unused standalone global.
+        manager = app_client.application.config["HISTORIFY_JOB_MANAGER"]
+        monkeypatch.setattr(manager, "start", _StubManager.start)
 
         resp = _post(app_client, "/v1/historify/download", {"start_date": "2026-01-01", "end_date": "2026-01-31"})
-        assert resp.status_code == 202
+        assert resp.status_code == 202, resp.get_json()
         data = json.loads(resp.data)
         assert data["status"] == "success"
         assert data["data"]["job_id"] == "stub-1"
@@ -200,3 +205,26 @@ def test_lazy_watchlist_prefers_existing_workspace_db(monkeypatch, tmp_path):
     resolved = wr._get_watchlist()
     assert [(i.symbol, i.exchange) for i in resolved.list_items()] == [("TCS", "NSE")]
     resolved.close()
+
+@pytest.mark.parametrize("authority", ["missing", "stale", "revoked"])
+def test_watchlist_refuses_missing_stale_and_revoked_sessions(app_client, authority):
+    import jwt
+    from flinttrade_core import auth_routes
+
+    app = app_client.application
+    client = app.test_client()
+    headers = {}
+    if authority != "missing":
+        with app.app_context():
+            token = auth_routes._create_token("synthetic-watchlist", mode="practice")
+            if authority == "stale":
+                claims = auth_routes.decode_token(token)
+                claims["epoch"] += 1
+                token = jwt.encode(claims, auth_routes._get_jwt_secret(), algorithm="HS256")
+        headers = {"Authorization": "Bearer " + token}
+        if authority == "revoked":
+            assert client.post("/v1/auth/logout", headers=headers).status_code == 200
+    result = client.get("/v1/historify/watchlist", headers=headers)
+    assert result.status_code == 401, result.json
+    assert result.json == {"status": "error", "code": "operator_session_required"}
+    assert _get(app_client, "/v1/historify/watchlist").status_code == 200

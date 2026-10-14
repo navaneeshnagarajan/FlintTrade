@@ -17,6 +17,8 @@ import os
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -46,8 +48,8 @@ def _restore_env():
     os.environ.update(original)
 
 
-@pytest.fixture(scope="module")
-def route_client(_restore_env):
+@pytest.fixture
+def route_client(_restore_env, monkeypatch, request):
     """Flask test client with a pre-seeded in-memory ActivityLog."""
     os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
@@ -59,7 +61,8 @@ def route_client(_restore_env):
     mem_log = ActivityLog(":memory:")
     for action, details, user, ip in _ACTIONS:
         mem_log.log(action, details, user=user, ip=ip)
-    app.config["ACTIVITY_LOG"] = mem_log
+    monkeypatch.setitem(app.config, "ACTIVITY_LOG", mem_log)
+    request.addfinalizer(mem_log.close)
 
     with app.test_client() as c:
         yield c
@@ -177,7 +180,7 @@ class TestAuditLog:
         data = resp.get_json()["data"]
         assert data["per_page"] == 500
 
-    def test_no_activity_log_returns_503(self, _restore_env):
+    def test_no_activity_log_returns_503(self, _restore_env, monkeypatch):
         """When ACTIVITY_LOG is not configured, return 503."""
         os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
         from flinttrade_core.app import create_flask_app
@@ -186,7 +189,7 @@ class TestAuditLog:
         app.config["TESTING"] = True
         app.config.pop("ACTIVITY_LOG", None)
         # Override with None explicitly
-        app.config["ACTIVITY_LOG"] = None
+        monkeypatch.setitem(app.config, "ACTIVITY_LOG", None)
 
         with app.test_client() as c:
             resp = c.get(
@@ -252,13 +255,13 @@ class TestAuditExport:
         # Only header row
         assert len(rows) == 1
 
-    def test_no_activity_log_returns_503(self, _restore_env):
+    def test_no_activity_log_returns_503(self, _restore_env, monkeypatch):
         os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
         from flinttrade_core.app import create_flask_app
 
         app = create_flask_app()
         app.config["TESTING"] = True
-        app.config["ACTIVITY_LOG"] = None
+        monkeypatch.setitem(app.config, "ACTIVITY_LOG", None)
 
         with app.test_client() as c:
             resp = c.get(
@@ -317,13 +320,13 @@ class TestAuditStats:
         assert data["total"] == 0
         assert data["by_action"] == {}
 
-    def test_no_activity_log_returns_503(self, _restore_env):
+    def test_no_activity_log_returns_503(self, _restore_env, monkeypatch):
         os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
         from flinttrade_core.app import create_flask_app
 
         app = create_flask_app()
         app.config["TESTING"] = True
-        app.config["ACTIVITY_LOG"] = None
+        monkeypatch.setitem(app.config, "ACTIVITY_LOG", None)
 
         with app.test_client() as c:
             resp = c.get(

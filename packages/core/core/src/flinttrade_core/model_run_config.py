@@ -26,6 +26,15 @@ PROVENANCE = "operator-supplied-not-measured-entitlement"
 class ConfigurationConflict(ValueError):
     """A preview expired, changed or was consumed; obtain a fresh preview."""
 
+    @property
+    def public_code(self) -> str:
+        """Preserve actionable conflicts without returning exception details."""
+        for code in ("configuration_revision_changed", "confirmation_capacity_reached",
+                     "confirmation_invalid_or_consumed", "candidate_identity_changed"):
+            if self.args == (code,):
+                return code
+        return "model_configuration_conflict"
+
 
 class ModelRunConfiguration:
     """Bounded one-shot confirmations; durable policy stays in the real owners."""
@@ -373,9 +382,9 @@ def _handled(function: Any) -> Any:
         try:
             return jsonify(function(*args, **kwargs))
         except ConfigurationConflict as exc:
-            return jsonify(code=str(exc)), 409
+            return jsonify(code=exc.public_code), 409
         except ModelControlDenied as exc:
-            return jsonify(code=str(exc)), 403
+            return jsonify(code=exc.public_code), 403
         except (ValueError, TypeError, KeyError):
             return jsonify(code="invalid_model_configuration"), 400
         except Exception:

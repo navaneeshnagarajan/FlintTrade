@@ -147,15 +147,15 @@ def test_repo_kotak_pin_is_the_reviewed_runtime_and_release() -> None:
     uv_lock = tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))
     runtime = next(package for package in uv_lock["package"] if package["name"] == "kotakneoapi")
 
-    assert neo["version"] == "3.0.8"
+    assert neo["version"] == "3.0.9"
     assert neo["release_version"] == "3.0.7"
-    assert neo["source_commit"] == "9a37488d77dc96442ee2a90ef78462e688cf4856"
-    assert neo["source_tree"] == "8474f26ca70c7b62f7c88843ca8b2e35e0c98313"
+    assert neo["source_commit"] == "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
+    assert neo["source_tree"] == "bf140dfeedf886b0269d627460a4d08cb62d8fe2"
     assert neo["release_tag"] == "v3.0.7"
     assert neo["release_commit"] == "53cccc45fe56a193b30ffce3c03c71c5c0378538"
     assert runtime["source"]["git"] == (
         "https://github.com/Kotak-Neo/kotak-neo-python.git?rev="
-        "9a37488d77dc96442ee2a90ef78462e688cf4856#9a37488d77dc96442ee2a90ef78462e688cf4856"
+        "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8#a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
     )
 
 

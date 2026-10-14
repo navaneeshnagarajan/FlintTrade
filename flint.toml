@@ -52,7 +52,7 @@ python_target = "3.14"
 # for the checked-in terminal test environment. Node 22 is in maintenance, so
 # the target runs ahead of the floor rather than dragging it up.
 node_requires = ">=22.22.2"
-node_target = "24"
+node_target = "26"
 # Derived, not chosen: the floor is whichever release provides Python >= 3.12.
 # Ubuntu 24.04 LTS ships 3.12; 22.04 ships 3.10 and cannot meet the floor with
 # its system interpreter. The one-line installer sidesteps this entirely by

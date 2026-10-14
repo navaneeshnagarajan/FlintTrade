@@ -20,7 +20,7 @@ const SOURCE_BOOTSTRAP_FILES = [
   "checksums/node-v26.11.1-SHASUMS256.txt",
   "checksums/node-v26.11.1-SHASUMS256.txt.sig",
   "checksums/pnpm-12.11.2-assets.json",
-  "checksums/uv-0.13.0-sha256.sum",
+  "checksums/uv-0.13.1-sha256.sum",
   "flinttrade-bootstrap.ps1",
   "flinttrade-bootstrap.sh",
   "flinttrade-safe-rmtree.py",

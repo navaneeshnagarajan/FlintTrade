@@ -9,11 +9,11 @@ import { fileURLToPath } from "node:url";
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const nodeVersion = "26.11.1";
-const uvVersion = "0.13.0";
+const uvVersion = "0.13.1";
 const pnpmVersion = "12.11.2";
 const authoritativeChecksumDigests = Object.freeze({
   node: "75ff0c104acddb008964dd5feb88f58844b652820cb1cb01696f95031372b293",
-  uv: "dc052c54b83ec8a6c04899ce4ee66f9e7fda667bc56145747b78099d23ca22c7",
+  uv: "8804e68a18189ed9750e6330db95c49310f320adb89e66dd429c92058f25e1e1",
   pnpm: "5e7a55df966ff3301e84eccfbd3bd6fe939d07415c1f4e96eed96dfc888fae1d",
 });
 // Node releases are signed by whichever release manager cut them, so the pinned

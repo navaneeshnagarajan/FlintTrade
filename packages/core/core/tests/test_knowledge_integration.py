@@ -96,6 +96,8 @@ def test_scoped_recall_and_adaptation_upgrade_privacy_and_recheck_authority(know
     admission = policy(revision)
     admission["reservation"].update(input_tokens=8192, currency_micros=1000)
     configure(client, identifier, admission)
+    # Freeze only this dispatch clock; no task timeout or authority is widened.
+    app.config["SERVICE_TASK_DISPATCHER"].monotonic = lambda: 10.0
     denied = client.post(BASE + "/tasks", headers=HEADERS, json=task(identifier, revision, context_refs=refs))
     assert denied.json["code"] == "privacy_denied", denied.json
     assert not calls

@@ -46,12 +46,13 @@ _SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
 
 
 @pytest.fixture
-def backend_lease_factory(monkeypatch):
+def backend_lease_factory(monkeypatch, request):
     """Acquire explicit proof after a test has selected its scratch workspace."""
     from flinttrade_core.backend_instance import acquire_backend_instance_lease
     from flinttrade_core.workspace import workspace_dir
 
     leases = {}
+    apps = request.getfixturevalue("owned_flask_apps") if "owned_flask_apps" in request.fixturenames else None
 
     def acquire():
         path = workspace_dir().resolve()
@@ -63,18 +64,21 @@ def backend_lease_factory(monkeypatch):
         yield acquire
     finally:
         monkeypatch.undo()
+        if apps is not None:
+            apps.close()
         for lease in leases.values():
             lease.release()
 
 
 @pytest.fixture
-def backend_lease_proof(monkeypatch):
+def backend_lease_proof(monkeypatch, request):
     """Explicit real ownership for tests constructing a broker runtime.
 
     Proofless factory tests deliberately do not request this fixture.
     """
     from flinttrade_core.backend_instance import acquire_backend_instance_lease
 
+    apps = request.getfixturevalue("owned_flask_apps") if "owned_flask_apps" in request.fixturenames else None
     lease = acquire_backend_instance_lease()
     try:
         yield lease.proof
@@ -82,6 +86,8 @@ def backend_lease_proof(monkeypatch):
         # Some ownership tests deliberately replace os.getpid. Restore that
         # process view before asking the real kernel owner to release.
         monkeypatch.undo()
+        if apps is not None:
+            apps.close()
         lease.release()
 
 
@@ -124,6 +130,22 @@ _TEST_MASTER_PASSWORD = "pytest-master-password"
 # minted, rather than this conftest minting a second one and quietly re-pointing
 # FLINTTRADE_WORKSPACE_DIR at it.
 _scratch_workspace().acquire_workspace()
+
+# Load by a private name: per-package tests may shadow the root tests package.
+def _factory_lifecycle_fixture():
+    import importlib.util
+
+    name = "_flinttrade_test_factory_lifecycle"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, _REPO_ROOT / "tests/flask_app_lifecycle.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].owned_flask_apps
+
+
+owned_flask_apps = _factory_lifecycle_fixture()
+
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001

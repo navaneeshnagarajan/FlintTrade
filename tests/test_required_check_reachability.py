@@ -118,7 +118,12 @@ def test_classifier_outputs_reach_each_required_surface():
 def test_required_python_context_retains_all_packages_and_root_invariants():
     jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
     aggregate = jobs["python-tests"]
-    assert set(aggregate["needs"]) == {"changed-surfaces", "python-invariants", "python-shards"}
+    assert set(aggregate["needs"]) == {
+        "changed-surfaces", "python-invariants", "python-shards",
+        "node-core-tests", "node-widget-tests-1", "node-widget-tests-2a",
+        "node-widget-tests-2b", "node-widget-tests-3", "electron-desktop-tests",
+        "terminal-e2e-infra-self-tests",
+    }
     assert "always()" in aggregate["if"]
     assert "continue-on-error" not in aggregate
     invariants = jobs["python-invariants"]

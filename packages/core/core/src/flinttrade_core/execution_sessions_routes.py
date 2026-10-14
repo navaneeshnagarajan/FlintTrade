@@ -75,7 +75,7 @@ def authorise() -> Any:
             raise ModelControlDenied("execution_scope_required")
         g.execution_actor = who.actor_ref
     except ModelControlDenied as exc:
-        return jsonify(status="error", code=str(exc)), 403
+        return jsonify(status="error", code=exc.public_code), 403
     return None
 
 

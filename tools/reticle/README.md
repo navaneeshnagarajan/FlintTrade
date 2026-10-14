@@ -20,6 +20,38 @@ Qualified package-map SHA-256:
 
 `setup.py` neither fetches dependencies nor installs into the application's node_modules. It refuses nonfresh output, wrong source/compiler/type inputs, changed reconstruction bytes and a changed final package. See `LICENSING.md`: server source/tests remain **FSL-1.1-ALv2**, not Apache-only.
 
+## CI connection
+
+The existing current-runtime browser job prepares a clean exact-head source tree,
+installs the frozen application dependencies at their final paths and obtains the
+lockfile-selected Chromium. Its separate acquisition command is:
+
+```sh
+python -B tools/reticle/acquire.py --output "$SOURCE/.ci-inputs/reticle"
+```
+
+This downloads only the declared primary npm archives and verifies their pinned
+hashes. `build-archives.json` pins the documented compiler/type archives; every
+extracted file still must match `qualification.json`. Acquisition never runs npm
+lifecycle scripts, a compiler or the application. It is not a no-egress exception
+for tests: reconstruction, compilation and acceptance use `tools/acceptance/isolated.py`.
+
+CI runs reconstruction/setup into disposable output, ends that invocation, then
+admits only that fresh output at `tools/reticle/runtime` for a second, read-only
+invocation. The latter runs the unchanged terminal **full `e2e` aggregate** with
+explicit current Python and writable Vite-cache paths. No lane, case, predicate,
+skip policy, package digest or dependency policy is replaced. Failures propagate
+through `terminal-e2e-infra-self-tests` to the existing required `python-tests`
+summary. Floor lanes and their original commands remain independently required.
+
+The Python invariant matrix additionally builds the current ticks crate with
+hash-pinned Maturin, an explicit interpreter and a source-keyed fresh Cargo target.
+It compares before/after source inputs, imports `tick_engine` from the selected
+environment, matches the actual extension bytes to the fresh wheel, checks the
+distribution/interpreter versions and makes a native functional call. Cargo-only
+results and optional binding-test skips cannot satisfy that check. No installer or
+release artifact is produced by these additions.
+
 ## Compiler compatibility
 
 The primary npm registry reports **7.0.2** as latest stable. It is not a drop-in compiler API for this builder: executing its published root yields only `version` and `versionMajorMinor`; `lib/typescript.js` is absent, and actual calls to `transpileModule` and `createProgram` fail. Its `unstable/sync` and `unstable/async` exports are replacement APIs, not the required classic exports. Its CLI does execute successfully as 7.0.2; this carrier-specific API constraint does **not** constrain the application's compiler or claim TypeScript 7 cannot compile these sources through a different builder.
@@ -47,8 +79,16 @@ python tools/reticle/setup.py \
   --typescript "$RETICLE_TYPESCRIPT" \
   --node "$RETICLE_NODE_TYPES" \
   --ws "$RETICLE_WS_TYPES" \
-  --pngjs "$RETICLE_PNGJS_TYPES"
+  --pngjs "$RETICLE_PNGJS_TYPES" \
+  --output /run/test/reticle/package
+```
 
+End that build invocation. Copy only its newly generated `reticle/` directory to
+`tools/reticle/runtime` in the prepared source-only input tree, **outside** the
+execution boundary. Start a new invocation: the source, qualified package and
+consumers are now all read-only inputs. Do not use a writable source overlay.
+
+```sh
 python tools/reticle/run.py controls
 python tools/reticle/run.py collect
 python tools/reticle/run.py infra
@@ -73,3 +113,36 @@ The controller sets up the existing shared-core fixture's normal-factory core, r
 ## Acceptance and evidence
 
 Keep `/run/test/artifacts` private. The runner checks six JUnit cases (including both failure and error nodes), seven accepted packets and owned-port teardown. Final parent acceptance must still reconcile exact bodies/relay/core ledgers, geometry, scope/native transcripts and current source/runtime fingerprints. No setup receipt, source patch, toolkit green, or test collection replaces that readback. R99-S4 optional paging refactoring remains deferred.
+
+### CI publication boundary
+
+Actions artifacts are readable by repository readers, not private custody. The
+maintained CI lane uploads exactly `public-evidence/maintained-summary.json`,
+produced by `scripts/ci_artifact_projection.py`. Its allowlist is schema version,
+validated commit SHA, numeric process exit (or null), boolean isolation status
+(or null), fixed lane completion flags, fixed report IDs and validated numeric
+outcome counts, projection validity, fixed issue codes and
+`acceptance_verified: false`. Missing or inconsistent reports have null counts;
+real failures and errors are retained, never rewritten to zero. This projection
+does not replace any existing acceptance validator or raw evidence join.
+
+No raw labels, test titles, command lines, URLs, tokens, request/response bodies,
+wire fields, traces, screenshots, paths or exception text enter the projection.
+The original raw files and launcher logs remain untouched in runner-local state;
+launcher output is also redirected there rather than echoed to Actions logs.
+Hosted runner-local custody expires when the runner is destroyed. This workflow
+configures no durable private store and does not claim otherwise; durable raw
+retention requires a separately authorised private custodian, never an expanded
+public upload glob.
+
+### Native acceptance preparation is not execution evidence
+
+The existing Python invariant matrix prepares an exact-head source-only tree,
+installs frozen dependencies at its final path and builds/installs the locked
+wheel there. Only then does the unchanged `tools/acceptance/isolated.py` launch
+`scripts/ci_runtime.py native`, with the source, environment, wheel and input
+receipt read-only. Native acceptance reuses the existing guard and requires
+EROFS, selected environment identity, current inputs, installed-wheel byte and
+version correspondence, an actual extension loader and the functional call.
+Inert build/extension dispatch controls do not prove a real ABI. Positive native
+acceptance remains a hosted job obligation, not a local build claim.

@@ -26,6 +26,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 _TEST_API_KEY = "csrf-test-api-key"
 
 

@@ -77,10 +77,16 @@ jobs:
       site: ${{ steps.classify.outputs.site }}
       docs: ${{ steps.classify.outputs.docs }}
       dependencies: ${{ steps.classify.outputs.dependencies }}
+      python-current: ${{ steps.runtimes.outputs.python-current }}
+      node-current: ${{ steps.runtimes.outputs.node-current }}
+      uv-current: ${{ steps.runtimes.outputs.uv-current }}
+      pnpm-current: ${{ steps.runtimes.outputs.pnpm-current }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - id: runtimes
+        run: python scripts/ci_runtime.py versions --github-output >> "$GITHUB_OUTPUT"
       - id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -110,6 +116,12 @@ jobs:
   # order-dependent flakes early.
   # ----------------------------------------------------------------------
   python-invariants:
+    name: ${{ matrix.runtime == 'floor' && 'python-invariants' || 'python-invariants-current' }}
+    needs: changed-surfaces
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     # Repository and documentation contracts run even on docs-only PRs.
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
@@ -126,12 +138,55 @@ jobs:
       NUMEXPR_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Immutable event SHA, never user-controlled shell/ref text.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.12' }
+        id: runtime
+        with:
+          python-version: ${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ needs.changed-surfaces.outputs.uv-current }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          dest: ${{ runner.temp }}/native-tools/pnpm
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
-      - run: uv sync --frozen
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: "1.99.0"
+      - run: uv sync --python "${{ steps.runtime.outputs.python-path }}" --frozen --extra migration
+      - name: Verify actual uv-selected interpreter and installer
+        run: |
+          uv run --no-sync python scripts/ci_runtime.py verify --tool python --expected "${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}"
+          python scripts/ci_runtime.py verify --tool uv --expected "${{ needs.changed-surfaces.outputs.uv-current }}"
+      - name: Build and import current tick_engine
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/ticks-${{ matrix.runtime }}-${{ hashFiles('packages/core/ticks/Cargo.toml', 'packages/core/ticks/Cargo.lock', 'packages/core/ticks/pyproject.toml', 'packages/core/ticks/src/**/*.rs', 'packages/core/ticks/python/**/*.py', 'tools/acceptance/native-build.txt', 'uv.lock') }}
+        run: |
+          set -euo pipefail
+          # Acquisition/build/install are preparation, never ABI acceptance.
+          test -x /usr/bin/bwrap && test -x /usr/sbin/ip
+          source="$RUNNER_TEMP/native-source"
+          state="$RUNNER_TEMP/native-state"
+          mkdir "$source" "$state" "$RUNNER_TEMP/native-assets"
+          git archive HEAD | tar -x -C "$source"
+          cd "$source"
+          uv sync --python "${{ steps.runtime.outputs.python-path }}" --frozen
+          pnpm install --frozen-lockfile
+          mkdir -p .ci-inputs/ticks-wheels
+          .venv/bin/python scripts/ci_runtime.py native-inputs --output "$source/.ci-inputs/ticks-inputs.json"
+          uv build --python "${{ steps.runtime.outputs.python-path }}" --no-cache --wheel --out-dir "$source/.ci-inputs/ticks-wheels" --build-constraints tools/acceptance/native-build.txt --require-build-hashes --config-setting=build-args=--locked packages/core/ticks
+          set -- "$source"/.ci-inputs/ticks-wheels/*.whl
+          test "$#" -eq 1 && test -f "$1"
+          uv pip install --python "$PWD/.venv/bin/python" --no-deps --reinstall "$1"
+          # Same qualified constructor; sources, venv, wheel and receipt are RO.
+          python tools/acceptance/isolated.py --source "$source" --state-root "$state" --assets "$RUNNER_TEMP/native-assets" --node-root "$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" --pnpm "$(readlink -f "$(command -v pnpm)")" --pnpm-root "$RUNNER_TEMP/native-tools/pnpm" --uv "$(readlink -f "$(command -v uv)")" --label native-acceptance --timeout 300 -- "$source/.venv/bin/python" scripts/ci_runtime.py native --expected "${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}" --inputs "$source/.ci-inputs/ticks-inputs.json" --wheel "$1" --output /run/test/artifacts/ticks-binding.json > "$RUNNER_TEMP/native-dispatch.log" 2>&1
       - name: Verify pre-restructure baseline artefacts
         run: |
           uv run python - <<'PY'
@@ -219,6 +274,7 @@ jobs:
   # All package tests are retained. Stable node IDs partition the collected
   # suite once across four runners; xdist still isolates each runner's workers.
   python-shards:
+    name: ${{ format(matrix.runtime == 'floor' && 'python-shards ({0})' || 'python-shards-current ({0})', matrix.shard) }}
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.python == 'true'
     runs-on: ubuntu-26.04
@@ -233,26 +289,35 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3]
+        runtime: [floor, current]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.12' }
+        id: runtime
+        with:
+          python-version: ${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-      - run: uv sync --frozen --extra ml
+        with:
+          version: ${{ needs.changed-surfaces.outputs.uv-current }}
+      - run: uv sync --python "${{ steps.runtime.outputs.python-path }}" --frozen --extra ml --extra migration
+      - name: Verify actual uv-selected interpreter and installer
+        run: |
+          uv run --no-sync python scripts/ci_runtime.py verify --tool python --expected "${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}"
+          python scripts/ci_runtime.py verify --tool uv --expected "${{ needs.changed-surfaces.outputs.uv-current }}"
       - name: Run Python package shard
         run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=4 -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
       - name: Upload Python timing and failure evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: python-shard-${{ matrix.shard }}
+          name: python-shard-${{ matrix.runtime }}-${{ matrix.shard }}
           path: test-results/python-${{ matrix.shard }}.xml
           if-no-files-found: error
 
   # Branch protection requires this exact name. A failed, missing, cancelled
   # or unexpectedly skipped shard must never turn into a green summary.
   python-tests:
-    needs: [changed-surfaces, python-invariants, python-shards]
+    needs: [changed-surfaces, python-invariants, python-shards, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, electron-desktop-tests, terminal-e2e-infra-self-tests]
     if: always() && github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -280,6 +345,32 @@ jobs:
               sys.exit(1)
           print("All selected Python checks passed.")
           PYTHON
+      # Keep an existing required context red when either runtime matrix fails.
+      # New current-version display names alone would not update branch protection.
+      - name: Require every selected Node runtime matrix
+        env:
+          MATRIX_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PYTHON'
+          import json
+          import os
+          import sys
+          needs = json.loads(os.environ["MATRIX_RESULTS"])
+          selections = needs["changed-surfaces"]["outputs"]
+          surfaces = {
+              "node-core-tests": "terminal", "node-widget-tests-1": "terminal",
+              "node-widget-tests-2a": "terminal", "node-widget-tests-2b": "terminal",
+              "node-widget-tests-3": "terminal", "terminal-e2e-infra-self-tests": "terminal",
+              "electron-desktop-tests": "desktop",
+          }
+          for name, surface in surfaces.items():
+              selected = selections.get(surface)
+              expected = "success" if selected == "true" else "skipped"
+              if selected not in {"true", "false"} or needs.get(name, {}).get("result") != expected:
+                  print("Required runtime matrix did not pass:", name)
+                  sys.exit(1)
+          print("All selected floor and current Node matrices passed.")
+          PYTHON
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
   # PR with `continue-on-error: true` (cosmetic — never gated anything). On
@@ -293,6 +384,11 @@ jobs:
 
   # Terminal changes keep their complete core, widget and browser contracts.
   node-core-tests:
+    name: ${{ matrix.runtime == 'floor' && 'node-core-tests' || 'node-core-tests-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-26.04
@@ -301,10 +397,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
         with:
-          node-version: '22'
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
@@ -324,6 +425,11 @@ jobs:
         run: pnpm --dir packages/apps/terminal exec vite build
 
   node-widget-tests-1:
+    name: ${{ matrix.runtime == 'floor' && 'node-widget-tests-1' || 'node-widget-tests-1-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-26.04
@@ -332,10 +438,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
         with:
-          node-version: '22'
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
       # Reuse the lighter trading lane for analysis; keep one jsdom worker.
       - name: Run trading + analysis + utility A-H widget tests
@@ -344,6 +455,11 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2a:
+    name: ${{ matrix.runtime == 'floor' && 'node-widget-tests-2a' || 'node-widget-tests-2a-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-26.04
@@ -352,10 +468,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
         with:
-          node-version: '22'
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
       # Routes previously dominated shard 3 while this lane held two files.
       - name: Run routes + utility widget tests (M-N)
@@ -364,6 +485,11 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2b:
+    name: ${{ matrix.runtime == 'floor' && 'node-widget-tests-2b' || 'node-widget-tests-2b-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-26.04
@@ -372,10 +498,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
         with:
-          node-version: '22'
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
       - name: Run utility widget tests (S-W, one at a time)
         run: |
@@ -404,6 +535,11 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-3:
+    name: ${{ matrix.runtime == 'floor' && 'node-widget-tests-3' || 'node-widget-tests-3-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-26.04
@@ -412,10 +548,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
         with:
-          node-version: '22'
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
       - name: Run tools + chrome + orders/account tests
         run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/tools/ src/chrome/ src/widgets/orders/ src/widgets/account/
@@ -456,6 +597,11 @@ jobs:
   # directory package on every non-draft code change; the weekly workflow
   # covers platform-specific packaging.
   electron-desktop-tests:
+    name: ${{ matrix.runtime == 'floor' && 'electron-desktop-tests' || 'electron-desktop-tests-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.desktop == 'true'
     # ubuntu-24.04, not 22.04. The 22.04 pin was inherited from the retired Tauri
@@ -479,16 +625,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
         with:
-          node-version: '22'
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: backend-python
+        with:
+          python-version: ${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ needs.changed-surfaces.outputs.uv-current }}
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: "1.99.0"
+      - name: Provision frozen Electron backend dependencies
+        run: |
+          uv sync --python "${{ steps.backend-python.outputs.python-path }}" --frozen
+          .venv/bin/python scripts/ci_runtime.py verify --tool python --expected "${{ matrix.runtime == 'floor' && '3.12' || needs.changed-surfaces.outputs.python-current }}"
+          python scripts/ci_runtime.py verify --tool uv --expected "${{ needs.changed-surfaces.outputs.uv-current }}"
       - name: Electron TypeScript strict check
         run: pnpm --filter @flinttrade/desktop typecheck
       - name: Full Electron Vitest suite
         run: pnpm --filter @flinttrade/desktop test:electron
         env:
+          FLINTTRADE_TEST_PYTHON: ${{ github.workspace }}/.venv/bin/python
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Verify bootstrap resource manifest
         run: pnpm --filter @flinttrade/desktop verify:bootstrap-manifest
@@ -502,18 +669,33 @@ jobs:
         run: pnpm --filter @flinttrade/desktop verify:package
 
   terminal-e2e-infra-self-tests:
+    name: ${{ matrix.runtime == 'floor' && 'terminal-e2e-infra-self-tests' || 'terminal-e2e-infra-self-tests-current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [floor, current]
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          dest: ${{ runner.temp }}/acceptance-tools/pnpm
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: runtime
+        with:
+          node-version: ${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Verify selected Node and pnpm before installation
+        run: |
+          python scripts/ci_runtime.py verify --tool node --expected "${{ matrix.runtime == 'floor' && '22' || needs.changed-surfaces.outputs.node-current }}"
+          python scripts/ci_runtime.py verify --tool pnpm --expected "${{ needs.changed-surfaces.outputs.pnpm-current }}"
       - run: pnpm install --frozen-lockfile
       - name: Type-check Playwright infrastructure
         run: pnpm --dir packages/apps/terminal run e2e:infra:typecheck
@@ -537,9 +719,79 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: terminal-e2e-evidence
+          name: terminal-e2e-evidence-${{ matrix.runtime }}
           path: packages/apps/terminal/test-results
           if-no-files-found: ignore
+          retention-days: 7
+
+      # Ordinary acquisition/install first; no host checkout or HOME is mounted.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.runtime == 'current'
+        id: acceptance-python
+        with:
+          python-version: ${{ needs.changed-surfaces.outputs.python-current }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        if: matrix.runtime == 'current'
+        with:
+          version: ${{ needs.changed-surfaces.outputs.uv-current }}
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        if: matrix.runtime == 'current'
+        with:
+          toolchain: "1.99.0"
+      - name: Prepare exact-head source-only acceptance inputs
+        if: matrix.runtime == 'current'
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/bwrap && test -x /usr/sbin/ip
+          source="$RUNNER_TEMP/acceptance-source"
+          mkdir "$source"
+          git archive HEAD | tar -x -C "$source"
+          git rev-parse HEAD > "$RUNNER_TEMP/acceptance-head.txt"
+          cd "$source"
+          uv sync --python "${{ steps.acceptance-python.outputs.python-path }}" --frozen --extra ml
+          .venv/bin/python scripts/ci_runtime.py verify --tool python --expected "${{ needs.changed-surfaces.outputs.python-current }}"
+          python scripts/ci_runtime.py verify --tool uv --expected "${{ needs.changed-surfaces.outputs.uv-current }}"
+          pnpm install --frozen-lockfile
+          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/acceptance-assets/browsers" pnpm --dir packages/apps/terminal exec playwright install chromium
+          python -B tools/reticle/acquire.py --output "$source/.ci-inputs/reticle"
+          printf 'CI_NODE_ROOT=%s\n' "$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" >> "$GITHUB_ENV"
+          printf 'CI_PNPM=%s\n' "$(readlink -f "$(command -v pnpm)")" >> "$GITHUB_ENV"
+          printf 'CI_PNPM_ROOT=%s\n' "$RUNNER_TEMP/acceptance-tools/pnpm" >> "$GITHUB_ENV"
+          printf 'CI_UV=%s\n' "$(readlink -f "$(command -v uv)")" >> "$GITHUB_ENV"
+      - name: Build Reticle then run maintained offline acceptance
+        if: matrix.runtime == 'current'
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/acceptance-source"
+          state="$RUNNER_TEMP/acceptance-state"
+          mkdir "$state"
+          isolated=(python "$source/tools/acceptance/isolated.py" --source "$source" --state-root "$state" --assets "$RUNNER_TEMP/acceptance-assets" --browsers "$RUNNER_TEMP/acceptance-assets/browsers" --node-root "$CI_NODE_ROOT" --pnpm "$CI_PNPM" --pnpm-root "$CI_PNPM_ROOT" --uv "$CI_UV")
+          "${isolated[@]}" --label reticle-build --timeout 300 -- /bin/sh -eu -c '
+            python tools/reticle/reconstruct-pristine.py --archive-dir "$PWD/.ci-inputs/reticle/pristine" --output /run/test/pristine
+            python tools/reticle/setup.py --pristine /run/test/pristine --archives "$PWD/.ci-inputs/reticle/upgrades" --typescript "$PWD/.ci-inputs/reticle/types/typescript" --node "$PWD/.ci-inputs/reticle/types/node" --ws "$PWD/.ci-inputs/reticle/types/ws" --pngjs "$PWD/.ci-inputs/reticle/types/pngjs" --output /run/test/reticle/package
+          ' > "$state/reticle-build-private.log" 2>&1
+          # End the build boundary before admitting generated bytes as RO inputs.
+          set -- "$state"/flinttrade-reticle-build-*/reticle
+          test "$#" -eq 1 && test -d "$1"
+          test ! -e "$source/tools/reticle/runtime"
+          mkdir -p "$source/tools/reticle"
+          cp -a "$1" "$source/tools/reticle/runtime"
+          "${isolated[@]}" --label maintained-acceptance --timeout 1800 -- /bin/sh -eu -c '
+            export FLINTTRADE_E2E_PYTHON="$PWD/.venv/bin/python"
+            export FLINTTRADE_E2E_CACHE_DIR=/run/test/cache/vite
+            npm --prefix packages/apps/terminal run e2e
+          ' > "$state/maintained-acceptance-private.log" 2>&1
+      - name: Project publishable acceptance summary
+        if: always() && matrix.runtime == 'current'
+        run: python scripts/ci_artifact_projection.py --state "$RUNNER_TEMP/acceptance-state" --head "$RUNNER_TEMP/acceptance-head.txt" --output "$RUNNER_TEMP/public-evidence/maintained-summary.json"
+      - name: Upload maintained acceptance evidence
+        if: always() && matrix.runtime == 'current'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maintained-acceptance-current
+          # Public to repository readers. Raw state stays runner-local, never here.
+          path: ${{ runner.temp }}/public-evidence/maintained-summary.json
+          if-no-files-found: error
           retention-days: 7
 
 # No-op marker. A diff that includes this workflow is classified as code so required Test jobs run.
