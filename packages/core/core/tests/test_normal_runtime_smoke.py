@@ -13,7 +13,6 @@ import asyncio
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
 import errno
-import gc
 import hashlib
 import http.client
 import importlib.metadata
@@ -377,21 +376,37 @@ async def test_normal_factory_runtime_with_an_existing_descriptor_owner(
 
     high_descriptors = hasattr(select, "poll")
     normal_factory = app_module.create_flask_app
-    real_server = app_module._run_flask_server
+    listener_sockets: list[socket.socket] = []
+    if high_descriptors:
+        import fcntl
+        from waitress.server import TcpWSGIServer
+
+        create_socket = TcpWSGIServer.create_socket
+
+        def high_listener_socket(server: Any, *args: Any, **kwargs: Any) -> None:
+            create_socket(server, *args, **kwargs)
+            original = server.socket
+            # Unrelated owners can free a low slot after factory construction.
+            # Duplicate the actual unbound listener, never close or overwrite a
+            # foreign descriptor, and transfer its exact open-file description.
+            descriptor = fcntl.fcntl(original.fileno(), fcntl.F_DUPFD_CLOEXEC, 1024)
+            try:
+                replacement = socket.socket(original.family, original.type, original.proto, fileno=descriptor)
+            except BaseException:
+                os.close(descriptor)
+                raise
+            replacement.setblocking(False)
+            server.del_channel()
+            server.set_socket(replacement)
+            original.close()
+            listener_sockets.extend((original, replacement))
+            assert replacement.fileno() >= 1024
+            assert server._map[replacement.fileno()] is server
+            _emit("high-listener-owned", listener_fd=replacement.fileno())
+
+        monkeypatch.setattr(TcpWSGIServer, "create_socket", high_listener_socket)
     descriptors = []
     owned_fds: list[int] = []
-    import flinttrade_core.instrument_lot_master as instrument_master
-
-    refresh_finished = threading.Event()
-    real_refresh = instrument_master.refresh_master_cache_if_due
-
-    def refresh_then_signal(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return real_refresh(*args, **kwargs)
-        finally:
-            refresh_finished.set()
-
-    monkeypatch.setattr(instrument_master, "refresh_master_cache_if_due", refresh_then_signal)
     with ExitStack() as prior_owner:
 
         def hold_descriptor() -> Any:
@@ -399,56 +414,34 @@ async def test_normal_factory_runtime_with_an_existing_descriptor_owner(
             descriptors.append(descriptor)
             return descriptor
 
-        def occupy_select_range() -> None:
-            """Fill every free slot select() can use, after product closes."""
+        hold_descriptor()
+
+        def observe_factory(*args: Any, **kwargs: Any) -> Any:
+            flask_app = normal_factory(*args, **kwargs)
+            # Keep a real competing descriptor owner across startup and stop.
+            # The listener duplication below remains robust to unrelated owners
+            # freeing lower slots after this factory boundary.
+            descriptor = hold_descriptor()
             if high_descriptors:
-                descriptor = hold_descriptor()
                 while descriptor.fileno() < 1024:
                     descriptor = hold_descriptor()
                 assert descriptor.fileno() >= 1024
                 offline_startup["minimum_listener_fd"] = 1024
             owned_fds[:] = [item.fileno() for item in descriptors]
-
-        hold_descriptor()
-
-        def observe_factory(*args: Any, **kwargs: Any) -> Any:
-            flask_app = normal_factory(*args, **kwargs)
-            # Factory construction collects earlier apps and frees low slots.
-            # Fill them here, then again immediately before the listener bind:
-            # the instrument-master worker closes its own files after return.
-            occupy_select_range()
             _emit(
                 "prior-descriptor-owner",
                 high_descriptors=high_descriptors,
-                highest_owned_fd=descriptors[-1].fileno(),
+                highest_owned_fd=descriptor.fileno(),
                 descriptor_count=len(descriptors),
             )
             return flask_app
 
-        def serve_with_range_occupied(*args: Any, **kwargs: Any) -> Any:
-            app = args[0] if args else kwargs.get("app")
-            owner = getattr(app, "config", {}).get("INSTRUMENT_MASTER_REFRESH_OWNER")
-            if owner is None:
-                refresh_finished.set()
-            assert refresh_finished.wait(30), "instrument master refresh did not finish before listener bind"
-            held = list(owned_fds)
-            gc.collect()
-            occupy_select_range()
-            assert [item.fileno() for item in descriptors[: len(held)]] == held
-            enabled = gc.isenabled()
-            gc.disable()
-            try:
-                return real_server(*args, **kwargs)
-            finally:
-                if enabled:
-                    gc.enable()
-
         monkeypatch.setattr(app_module, "create_flask_app", observe_factory)
-        monkeypatch.setattr(app_module, "_run_flask_server", serve_with_range_occupied)
         await test_normal_factory_runtime_readiness_refusal_and_clean_stop(monkeypatch, offline_startup)
         assert [item.fileno() for item in descriptors] == owned_fds
         assert all(item.read(1) == b"" for item in descriptors)
     assert all(item.closed for item in descriptors)
+    assert all(item.fileno() == -1 for item in listener_sockets)
 
 
 @pytest.mark.asyncio

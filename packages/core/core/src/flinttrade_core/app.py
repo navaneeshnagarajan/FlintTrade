@@ -6349,13 +6349,37 @@ class FlintTradeApp:
         """Release shared dependencies only after every acquired owner quiesces."""
         flask_app = getattr(self, "_flask_app", None)
         factory_recovery = getattr(self, "_factory_recovery", None)
+        retained_factory = getattr(self, "_retained_factory_recovery", None)
+        if retained_factory is not None and factory_recovery is not retained_factory:
+            return False
         if factory_recovery is not None:
+            from flinttrade_core.desktop import DesktopBackendShutdownIncomplete  # noqa: PLC0415
+
+            # Keep the worker's owner pinned across attempts, including when
+            # its result is already complete but has not yet been consumed.
+            self._retained_factory_recovery = factory_recovery
+
+            def release_factory() -> bool:
+                if self._factory_recovery is not factory_recovery:
+                    raise RuntimeError("factory recovery owner changed")
+                try:
+                    factory_recovery.release(deadline=deadline.expires_at)
+                except DesktopBackendShutdownIncomplete as exc:
+                    if exc.recovery_owner is not factory_recovery:
+                        raise
+                    # Only this exact owner's bounded refusal may be resumed
+                    # after rejoining a previous attempt, never arbitrary errors.
+                    return False
+                return True
+
             recovered, _ = await self._run_retained_sync_owner(
-                "factory-recovery", lambda: factory_recovery.release(deadline=deadline.expires_at), deadline,
+                "factory-recovery", release_factory, deadline,
+                require_truthy=True, resume_incomplete=True,
             )
-            if not recovered:
+            if not recovered or self._factory_recovery is not factory_recovery:
                 return False
             self._factory_recovery = None
+            self._retained_factory_recovery = None
 
         async def stop_sync(
             key: str,

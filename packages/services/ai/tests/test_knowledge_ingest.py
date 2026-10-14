@@ -69,7 +69,7 @@ def package(workspace, name="learned_procedure", source="skills", body="Full new
 
 
 @pytest.mark.integration
-def test_new_learned_procedure_automatically_validated_reaches_real_private_http_consumer(mounted):
+def test_new_learned_procedure_automatically_validated_reaches_real_private_http_consumer(mounted, monkeypatch):
     app, client, workspace_store, calls = mounted
     runtime = app.config["KNOWLEDGE_RUNTIME"]
     scope = KnowledgeScope("synthetic:private-a", "paper", "run-a")
@@ -99,12 +99,12 @@ def test_new_learned_procedure_automatically_validated_reaches_real_private_http
     revision = client.get(BASE, headers=HEADERS).headers["ETag"]
     admission = policy(revision)
     configure(client, identifier, admission)
+    # This is a lineage/privacy/consumer contract, not a host-speed benchmark.
+    # Scope elapsed time to this dispatcher; retain real HTTP/auth and ledgers.
+    monkeypatch.setattr(app.config["SERVICE_TASK_DISPATCHER"], "monotonic", lambda: 10.0)
     request = task(identifier, revision, context_refs=["skill:learned_procedure"])
     assert client.post(BASE + "/tasks", headers=HEADERS, json=request).json["code"] == "privacy_denied"
     assert not calls
-    # The product deadline stays 2s. Freeze the dispatcher clock so runner
-    # latency cannot turn a completed private read into deadline_exceeded.
-    app.config["SERVICE_TASK_DISPATCHER"].monotonic = lambda: 0.0
     admission["privacy"]["classifications"] = ["public", "private"]
     assert client.put(BASE + f"/{identifier}/admission", headers={**HEADERS, "If-Match": '"1"'},
                       json=admission).status_code == 200
@@ -119,6 +119,50 @@ def test_new_learned_procedure_automatically_validated_reaches_real_private_http
     app.config["KNOWLEDGE_SCOPE_RESOLVER"] = lambda actor: KnowledgeScope("synthetic:private-b", "paper", "run-a")
     assert client.get("/v1/knowledge/versions/" + candidate, headers=HEADERS).status_code == 403
     assert len(calls) == 1
+
+
+@pytest.mark.integration
+def test_private_knowledge_consumer_enforces_real_elapsed_deadline(mounted, monkeypatch):
+    import time
+
+    app, client, workspace_store, calls = mounted
+    runtime = app.config["KNOWLEDGE_RUNTIME"]
+    scope = KnowledgeScope("synthetic:private-a", "paper", "run-a")
+    app.config["KNOWLEDGE_SCOPE_RESOLVER"] = lambda actor: scope
+    package(workspace_store.workspace_dir)
+    candidate = runtime.ingest_skill("learned_procedure", source="skills", scope=scope, rights=rights())
+    runtime.store.validate(candidate, validator="synthetic-independent", evidence_ref="synthetic:suite-passed")
+    runtime.store.promote(candidate, expected=None)
+    identifier = create(client)
+    revision = client.get(BASE, headers=HEADERS).headers["ETag"]
+    admission = policy(revision)
+    admission["privacy"]["classifications"] = ["public", "private"]
+    configure(client, identifier, admission)
+    owner = app.config["SERVICE_TASK_DISPATCHER"]
+    assert owner.monotonic is time.monotonic  # independent of the positive test's clock
+    resolve = owner.context_resolver.resolve
+
+    def delayed_resolve(**kwargs):
+        contexts = resolve(**kwargs)
+        time.sleep(2.05)
+        return contexts
+
+    monkeypatch.setattr(owner.context_resolver, "resolve", delayed_resolve)
+    request = task(identifier, revision, context_refs=["skill:learned_procedure"])
+    assert request["deadline_ms"] == 2000
+    response = client.post(BASE + "/tasks", headers=HEADERS, json=request)
+    result = response.get_json()
+    assert response.status_code == 200
+    assert result["outcome"] == "refused" and result["code"] == "deadline_exceeded", result
+    assert result["latency_ms"] >= request["deadline_ms"]
+    assert "output" not in result
+    assert result["context"][0]["version"] == candidate
+    assert not calls
+    attempt = result["attempts"][0]
+    assert attempt["state"] == "CANCELLED"
+    assert not any(attempt["charged"].values())
+    persisted = client.get(BASE + "/tasks/" + request["request_id"], headers=HEADERS).get_json()
+    assert persisted["code"] == "deadline_exceeded"
 
 
 @pytest.mark.integration

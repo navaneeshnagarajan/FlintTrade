@@ -52,8 +52,8 @@ def _install_diagnostic_producers(state: Any) -> None:
 def system_diagnostics() -> tuple[Any, int]:
     """Return passive observations, including explicit unmeasured capabilities."""
     from flinttrade_core.diagnostics import diagnostics_snapshot
-
     from flinttrade_core.incident_routes import scoped_read
+
     return scoped_read({"status": "success", "data": diagnostics_snapshot(current_app, get_health_aggregator())})
 
 # IST timezone offset

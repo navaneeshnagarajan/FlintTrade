@@ -185,9 +185,8 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
         for owner in tuple(module._RETAINED_FAILED_LEASES):
             if owner not in retained_before:
                 module.release_retained_backend_instance_lease(owner)
-        for descriptor in descriptors:
-            with suppress(OSError):
-                os.close(descriptor)
+        # Recorded descriptor integers are observations, not cleanup authority.
+        # Released slots may already belong to unrelated resources.
 
 
 @pytest.mark.parametrize("stage", ["ContractManager", "create_owned_registry", "_initialise_rag_runtime"])

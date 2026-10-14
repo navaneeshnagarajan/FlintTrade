@@ -499,6 +499,57 @@ def test_real_session_read_holds_factory_dependencies_until_response_closes(owne
     asyncio.run(exercise())
 
 
+@pytest.mark.asyncio
+async def test_request_drain_retry_rechecks_completed_false_worker(owned_factory, monkeypatch):
+    """A previous deadline's False is not this attempt's drain result."""
+    import asyncio
+    import threading
+    from packages.core.core.tests.test_runtime_lifecycle import _runtime_app
+
+    app, headers = owned_factory
+    sessions = app.config["EXECUTION_SESSIONS"]
+    tracker = app.config["RUNTIME_REQUEST_TRACKER"]
+    runtime = _runtime_app()
+    runtime._flask_app = app
+    admission = tracker.try_admit()
+    assert admission is not None
+    returned_false, publish_result = threading.Event(), threading.Event()
+    real_wait = tracker.wait_for_idle
+    results = []
+
+    def held_result(timeout):
+        result = real_wait(timeout)
+        results.append(result)
+        if len(results) == 1:
+            returned_false.set()
+            assert publish_result.wait(5)
+        return result
+
+    monkeypatch.setattr(tracker, "wait_for_idle", held_result)
+    app.config["RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS"] = 0
+    try:
+        with pytest.raises(RuntimeError, match="active requests"):
+            await runtime.stop(timeout=0.15)
+        assert returned_false.is_set()
+        worker = runtime._shutdown_sync_workers["request-drain"]
+        assert not sessions.closed
+        with app.test_client().get("/api/v1/execution-sessions", headers=headers) as rejected:
+            assert rejected.status_code == 503
+        publish_result.set()
+        await asyncio.to_thread(worker._thread.join, 3)
+        assert not worker._thread.is_alive()
+        assert worker.outcome() == (False, None)
+        admission.release()
+        await runtime.stop(timeout=8)
+        assert results == [False, True]
+        assert sessions.closed
+    finally:
+        publish_result.set()
+        admission.release()
+        # Explicit retry also cleans up the RED's consumed stale worker.
+        await runtime.stop(timeout=8)
+
+
 @pytest.mark.parametrize("kind", ["desktop", "async"])
 def test_execution_shutdown_substitution_does_not_dispose_original_or_dependencies(owned_factory, monkeypatch, kind):
     import asyncio
@@ -633,11 +684,15 @@ async def test_async_prefactory_failure_retains_partial_app_before_borrowed_root
     finish, entered = threading.Event(), threading.Event()
     register, close = Flask.register_blueprint, DataRuntime.close
     observed = []
+    rollback_started = None
 
     def fail_after_owners(app, blueprint, **kwargs):
+        nonlocal rollback_started
         if blueprint.name == "ai":
             app.config.update(RUNTIME_FACTORY_ROLLBACK_TIMEOUT_SECONDS=0.1, RUNTIME_STARTUP_ROLLBACK_TIMEOUT_SECONDS=0.1)
             observed.append(app)
+            # These budgets start at failure, not during normal factory setup.
+            rollback_started = time.monotonic()
             raise RuntimeError("synthetic async prefactory failure")
         return register(app, blueprint, **kwargs)
 
@@ -649,10 +704,10 @@ async def test_async_prefactory_failure_retains_partial_app_before_borrowed_root
     monkeypatch.setattr(Flask, "register_blueprint", fail_after_owners)
     monkeypatch.setattr(DataRuntime, "close", held_close)
     try:
-        before = time.monotonic()
         with pytest.raises(RuntimeError, match="synthetic async prefactory failure"):
             await runtime.start()
-        assert time.monotonic() - before < 5, "startup ignored the partial factory's remaining rollback budget"
+        assert rollback_started is not None
+        assert time.monotonic() - rollback_started < 5, "startup ignored the partial factory's remaining rollback budget"
         assert entered.is_set() and runtime._startup_recovery_pending
         assert runtime._factory_recovery is observed[0].extensions["flinttrade.factory_recovery"]
         assert not runtime.client._closed

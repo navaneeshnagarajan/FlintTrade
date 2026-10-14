@@ -1467,6 +1467,8 @@ def _module_provider_rebindings(tree: ast.Module, relative: str) -> set[str]:
         )
         if not token.startswith("self.")
     }
+    if not approved_bare:
+        return rebound
 
     def record_target(
         target: ast.AST,
@@ -1724,6 +1726,8 @@ def _class_provider_rebindings(tree: ast.Module, relative: str) -> set[str]:
         if token.startswith("self.")
     }
     rebound: set[str] = set()
+    if not approved_self:
+        return rebound
     parents = _parent_nodes(tree)
 
     def functions_in_class(class_node: ast.ClassDef) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -5374,3 +5378,58 @@ def test_broker_mcp_surface_is_metadata_only():
 def test_retired_broker_adapter_and_session_wrapper_are_absent():
     assert not (_GATEWAY_SRC / "brokers" / "openalgo.py").exists()
     assert not (_GATEWAY_SRC / "session.py").exists()
+
+
+@pytest.mark.parametrize("detector", [_module_provider_rebindings, _class_provider_rebindings])
+def test_empty_provider_set_needs_no_ast_traversal(detector, monkeypatch) -> None:
+    """An empty approved set makes rebinding analysis an exact empty result."""
+    tree = ast.parse(
+        "import sys\n"
+        "gather_safety_state = forged\n"
+        "class Owner:\n"
+        "    def check(self):\n"
+        "        globals().update(payload)\n"
+        "        self.__dict__.update(payload)\n"
+    )
+    visits = 0
+    original = ast.iter_child_nodes
+
+    def counted(node):
+        nonlocal visits
+        visits += 1
+        yield from original(node)
+
+    monkeypatch.setattr(ast, "iter_child_nodes", counted)
+    assert detector(tree, "packages/example/src/unapproved.py") == set()
+    assert visits == 0, "Rebinding an empty approved set must not walk the AST"
+
+
+@pytest.mark.parametrize("table_name", ["_STATE_PROVIDERS_BY_FILE", "_STATE_WRAPPERS_BY_FILE"])
+@pytest.mark.parametrize("kind", ["module", "class"])
+def test_provider_scan_uses_current_policy_and_tree(table_name, kind, monkeypatch) -> None:
+    """An early empty result must not become a cache across policy/tree edits."""
+    relative = "packages/example/src/owner.py"
+    table = globals()[table_name]
+    detector = _module_provider_rebindings if kind == "module" else _class_provider_rebindings
+    token = "gather_safety_state" if kind == "module" else "self._portfolio_state_provider"
+    changed_name = token.removeprefix("self.")
+    source = (
+        "gather_safety_state = forged\n"
+        if kind == "module"
+        else "class Owner:\n    def check(self):\n        self._portfolio_state_provider = forged\n"
+    )
+    tree = ast.parse(source)
+    before = ast.dump(tree, include_attributes=True)
+    assert detector(tree, relative) == set()
+    monkeypatch.setitem(table, relative, frozenset({token}))
+    assert detector(tree, relative) == {changed_name}
+    assert ast.dump(tree, include_attributes=True) == before
+    # Another file must not inherit the first file's approved providers.
+    assert detector(tree, relative + ".other") == set()
+    # Mutating the same tree must be observed without stale, shared AST state.
+    tree.body.clear()
+    assert detector(tree, relative) == set()
+    tree.body.extend(ast.parse(source).body)
+    assert detector(tree, relative) == {changed_name}
+    monkeypatch.setitem(table, relative, frozenset())
+    assert detector(tree, relative) == set()

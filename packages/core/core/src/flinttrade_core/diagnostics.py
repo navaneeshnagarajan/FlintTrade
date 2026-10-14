@@ -53,7 +53,7 @@ def install_diagnostics(app: Flask) -> None:
             if owner is not None and (response.status_code >= 400 or critical) and getattr(g, "_runtime_request_admission", None):
                 try:
                     owner.observe_http(request_id, response.status_code, (time.perf_counter() - started) * 1000,
-                                       critical=critical, operation=request.endpoint or 'unmatched_route')
+                                       critical=critical, operation=request.endpoint or "unmatched_route")
                 except Exception:
                     # Preserve the original response and expose storage failure,
                     # never acknowledge persistence that did not happen.
