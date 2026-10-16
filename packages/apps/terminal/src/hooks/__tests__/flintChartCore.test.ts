@@ -203,7 +203,7 @@ describe("core Flint Lightweight Charts factory", () => {
     expect(runtime.createChart).toHaveBeenCalledWith(
       container,
       expect.objectContaining({
-        layout: expect.objectContaining({ textColor: "#a0a0b0" }),
+        layout: expect.objectContaining({ textColor: "#a0a0b0", fontSize: 13 }),
         handleScale: expect.objectContaining({ mouseWheel: true }),
         handleScroll: expect.objectContaining({ horzTouchDrag: true }),
       }),
@@ -231,6 +231,12 @@ describe("core Flint Lightweight Charts factory", () => {
 
     flintChart.applyTheme(theme);
     expect(chart.applyOptions).toHaveBeenCalled();
+    const themed = chart.applyOptions.mock.calls.at(-1)?.[0] as {
+      layout?: { fontSize?: number };
+      timeScale?: { barSpacing?: number };
+    };
+    expect(themed.layout?.fontSize).toBe(13);
+    expect(themed.timeScale?.barSpacing).toBeUndefined();
     expect(candleSeries.applyOptions).toHaveBeenCalledWith(
       expect.objectContaining({ upColor: "#22c55e" }),
     );

@@ -7,7 +7,8 @@
 /* ---------- Typography roles ----------
    One class per role so page chrome shares a single type scale:
    page title 20/28, section title 16/24, card title 14/20, prose 14/22,
-   caption 12/16, overline 11/16. Readable copy never goes below 11px. */
+   body (text-xs) 13px, caption 12/16, overline 11/16. Body copy stays at
+   least 13px on the default font scale. */
 @utility ft-text-page-title {
   font-family: var(--font-heading);
   font-size: 1.25rem;
@@ -79,7 +80,7 @@
        chrome keep their fixed scale. Line heights stay proportional because
        Tailwind v4 line-height tokens are unitless ratios. */
     --ft-font-scale: 1;
-    --text-xs: calc(0.75rem * var(--ft-font-scale, 1));
+    --text-xs: calc(0.8125rem * var(--ft-font-scale, 1));
     --text-sm: calc(0.875rem * var(--ft-font-scale, 1));
     --text-base: calc(1rem * var(--ft-font-scale, 1));
 

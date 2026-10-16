@@ -369,12 +369,27 @@ export function splitFlintChartTheme(theme: FlintLightweightChartTheme): {
   }
 }
 
+const TIME_SCALE_ZOOM_KEYS = [
+  "barSpacing",
+  "minBarSpacing",
+  "maxBarSpacing",
+  "rightOffset",
+  "rightOffsetPixels",
+] as const
+
 export function applyFlintChartTheme<TChart extends FlintRuntimeChartLike>(
   chart: TChart,
   theme: FlintLightweightChartTheme,
   options: FlintChartShellOptions = {},
 ): void {
-  chart.applyOptions(createFlintChartOptions(theme, options))
+  const chartOptions = createFlintChartOptions(theme, options)
+  // A theme refresh repaints colours and type. Re-applying bar spacing
+  // pins the series back to the 7px default and leaves a wide plot mostly empty.
+  const timeScale = chartOptions.timeScale
+  if (isRecord(timeScale)) {
+    for (const key of TIME_SCALE_ZOOM_KEYS) delete timeScale[key]
+  }
+  chart.applyOptions(chartOptions)
 }
 
 export function applyFlintCandlestickTheme<

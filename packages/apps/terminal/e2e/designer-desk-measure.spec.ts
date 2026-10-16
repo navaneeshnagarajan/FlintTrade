@@ -184,6 +184,57 @@ async function measure(page: Page) {
       })(),
       niftyLabels: [...document.querySelectorAll("[aria-label^='NIFTY 50:']")].map(el => el.getAttribute("aria-label") ?? ""),
       exampleChip: document.querySelector("[data-testid='feed-freshness-chip']")?.textContent?.trim() ?? "",
+      devicePixelRatio: window.devicePixelRatio,
+      candleFill: (() => {
+        const workspace = document.querySelector("[data-tour-target='chart']");
+        const canvases = [...(workspace?.querySelectorAll("canvas") ?? [])];
+        const canvas = canvases.sort((a, b) => (b.width * b.height) - (a.width * a.height))[0];
+        if (!canvas) return { ratio: 0, span: 0, width: 0 };
+        const ctx = canvas.getContext("2d");
+        if (!ctx || canvas.width < 8 || canvas.height < 8) return { ratio: 0, span: 0, width: canvas.width };
+        const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const columns = new Uint16Array(width);
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const i = (y * width + x) * 4;
+            const r = data[i] ?? 0;
+            const g = data[i + 1] ?? 0;
+            const b = data[i + 2] ?? 0;
+            const green = g > r + 25 && g > b + 15 && g > 70;
+            const red = r > g + 25 && r > b + 15 && r > 80;
+            if (green || red) columns[x] += 1;
+          }
+        }
+        let min = -1;
+        let max = -1;
+        for (let x = 0; x < width; x += 1) {
+          if ((columns[x] ?? 0) < 2) continue;
+          if (min < 0) min = x;
+          max = x;
+        }
+        const span = min < 0 ? 0 : max - min + 1;
+        return { ratio: width > 0 ? span / width : 0, span, width };
+      })(),
+      bodySmall: (() => {
+        const root = document.querySelector("[data-testid='app-layout']") ?? document.body;
+        const small: { text: string; fontSize: number; className: string }[] = [];
+        for (const el of root.querySelectorAll("*")) {
+          if (el.closest("[data-testid='ticker-strip'], [data-testid='feed-freshness-chip'], .ft-text-overline, .text-xxs, .sr-only, svg")) continue;
+          const direct = [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim());
+          if (!direct) continue;
+          const cs = getComputedStyle(el);
+          if (cs.display === "none" || cs.visibility === "hidden") continue;
+          const fontSize = Number.parseFloat(cs.fontSize);
+          if (fontSize >= 13) continue;
+          small.push({
+            text: (el.textContent ?? "").trim().slice(0, 40),
+            fontSize,
+            className: typeof el.className === "string" ? el.className.slice(0, 80) : "",
+          });
+          if (small.length >= 30) break;
+        }
+        return small;
+      })(),
       host: (() => {
         const host = document.querySelector("[data-testid='app-layout']");
         const box = host?.getBoundingClientRect();
@@ -203,7 +254,10 @@ for (const width of [1440, 2560] as const) {
       registerPracticeOrderPadReads(syntheticApi);
       await page.goto("/terminal");
       await expect(page.getByRole("tab", { name: "Chart" })).toBeVisible({ timeout: 20_000 });
-      await page.waitForTimeout(500);
+      await expect.poll(async () => {
+        const report = await measure(page);
+        return report.candleFill.ratio;
+      }, { timeout: 15_000 }).toBeGreaterThanOrEqual(0.85);
       const report = await measure(page);
       await testInfo.attach("measure", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
       await page.screenshot({ path: testInfo.outputPath(`desk-${width}-${theme}.png`), fullPage: false });
@@ -226,6 +280,9 @@ for (const width of [1440, 2560] as const) {
       expect(report.exampleChip, "Example chip").toBe("Example");
       expect(report.niftyLabels.length, "NIFTY is on the tape").toBeGreaterThan(0);
       expect(report.niftyLabels.every(label => /^NIFTY 50: \d/.test(label)), `ticker price missing: ${report.niftyLabels.join(" | ")}`).toBe(true);
+      expect(report.devicePixelRatio, "desk is at 100% scaling").toBe(1);
+      expect(report.candleFill.ratio, `candles fill ${report.candleFill.span}/${report.candleFill.width}`).toBeGreaterThanOrEqual(0.85);
+      expect(report.bodySmall, "body text below 13px").toEqual([]);
       const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
       const axeReport = {
         theme,

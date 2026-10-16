@@ -144,7 +144,8 @@ export function createFlintLightweightChartTheme(
   const density = options.density ?? "standard";
   const compact = density === "compact";
   const pro = density === "pro";
-  const textSize = compact ? 10 : 11;
+  // Axis labels are body copy on the owner's desk. 11px sits under the 13px floor.
+  const textSize = 13;
   const barSpacing = compact ? 5 : pro ? 8 : 7;
 
   return {

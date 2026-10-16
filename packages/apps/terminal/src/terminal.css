@@ -107,8 +107,8 @@ html.density-compact {
    runtime theme changes — no JS re-resolution needed. */
 .flexlayout__theme_dark .flexlayout__layout.flexlayout__layout,
 .flexlayout__theme_light .flexlayout__layout.flexlayout__layout {
-  /* Slim tab bar — less chrome, more content */
-  --font-size: 11px;
+  /* Panel titles are body copy on a 2560 desk, not 11px chrome. */
+  --font-size: 13px;
   --font-family: inherit;
   --splitter-size: 4px;
   --splitter-active-size: 8px;
