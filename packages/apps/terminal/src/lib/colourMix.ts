@@ -54,9 +54,10 @@ export const PRACTICE_CHIP_ON_DARK = "#ffb900";
 
 /**
  * Practice chip ink on the light amber wash.
- * Amber-400 on #feefd9 is about 1.52:1. Amber-800 clears 4.5:1.
+ * #8a5a00 on #feefd9 is about 5.2:1, and it stays above 4.5:1 on the
+ * 15% and 25% amber washes. Dark chrome keeps #ffb900.
  */
-export const PRACTICE_CHIP_ON_LIGHT = "#973c00";
+export const PRACTICE_CHIP_ON_LIGHT = "#8a5a00";
 
 /** Tailwind amber-500. The Practice chip washes the chrome with this at 15% and 25%. */
 export const PRACTICE_CHIP_WASH = "#fe9a00";

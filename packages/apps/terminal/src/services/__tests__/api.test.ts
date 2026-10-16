@@ -2431,6 +2431,8 @@ describe("Native FlintTrade API client (api.ts)", () => {
       exchange: "NFO",
       instrumenttype: "FUTIDX",
       lotsize: 65,
+      freezeQty: 3510,
+      freeze_qty: 3510,
     }));
 
     mockModeState.mode = "practice";
@@ -2442,6 +2444,8 @@ describe("Native FlintTrade API client (api.ts)", () => {
       exchange: "NFO",
       instrumenttype: "OPTIDX",
       lotsize: 30,
+      freezeQty: 1440,
+      freeze_qty: 1440,
     }));
     const searched = await searchSymbol("BANKNIFTY", "NFO");
     expect(searched).toEqual(expect.arrayContaining([

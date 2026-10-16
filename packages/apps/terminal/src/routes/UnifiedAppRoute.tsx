@@ -1,4 +1,4 @@
-import { Activity, useCallback, useEffect, useRef, useState } from "react";
+import { Activity, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Actions, Layout, Model, type TabNode, type IJsonModel } from "flexlayout-react";
 import "flexlayout-react/style/combined.css";
@@ -62,6 +62,9 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const [compact, setCompact] = useState(false);
   const [revision, setRevision] = useState(0);
   const host = useRef<HTMLDivElement>(null);
+  // Search + Enter closes the catalogue. Focus must not return to "+ Widget"
+  // while that Enter is still down, or the trigger opens the dialog again.
+  const closeFromSearchRef = useRef(false);
 
   const persist = useCallback((current: Model) => {
     try { saveAppLayout(app, "Current", wideJson(current)); setError(""); }
@@ -166,6 +169,21 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     const parent = model.getNodeById(id)?.getParent();
     if (compact && parent) model.doAction(Actions.maximizeToggle(parent.getId()));
   }
+  const catalogue = widgetsForApp(app).filter((widget) =>
+    `${widget.name} ${widget.description}`.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+  function addFromSearch(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || search.trim().length === 0 || catalogue.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeFromSearchRef.current = true;
+    add({ widgetId: catalogue[0].id });
+  }
+  function keepFocusOffTrigger(event: Event) {
+    if (!closeFromSearchRef.current) return;
+    closeFromSearchRef.current = false;
+    event.preventDefault();
+  }
   return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app">
     <Activity mode={active ? "visible" : "hidden"}>
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-default bg-surface-base px-3 py-2">
@@ -194,10 +212,10 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     <Activity mode={active ? "visible" : "hidden"}>
     {app === "terminal" && <KillSwitchPill />}
     </Activity>
-    {active && picker ? <Dialog open onOpenChange={next => { if (!next) setPicker(false); }}><DialogContent className="max-h-[80dvh] overflow-y-auto"><DialogTitle>{meta.name} widgets</DialogTitle>
-      <Input aria-label="Search widgets" value={search} onChange={e => setSearch(e.target.value)} />
+    {active && picker ? <Dialog open onOpenChange={next => { if (!next) setPicker(false); }}><DialogContent className="max-h-[80dvh] overflow-y-auto" onCloseAutoFocus={keepFocusOffTrigger}><DialogTitle>{meta.name} widgets</DialogTitle>
+      <Input aria-label="Search widgets" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={addFromSearch} />
       <p className="text-xs text-text-muted">Tools for this app. Availability still depends on source, account and qualification.</p>
-      <div className="grid gap-2">{widgetsForApp(app).filter(w => `${w.name} ${w.description}`.toLowerCase().includes(search.toLowerCase())).map(w => <Button key={w.id} type="button" variant="outline" className="h-auto justify-start whitespace-normal p-3 text-left" aria-label={`Add ${w.name}`} onClick={() => add({ widgetId: w.id })}><span><strong className="block text-sm">{w.name}</strong><span className="text-xs text-text-muted">{w.description}</span></span></Button>)}</div>
+      <div className="grid gap-2">{catalogue.map(w => <Button key={w.id} type="button" variant="outline" className="h-auto justify-start whitespace-normal p-3 text-left" aria-label={`Add ${w.name}`} onClick={() => add({ widgetId: w.id })}><span><strong className="block text-sm">{w.name}</strong><span className="text-xs text-text-muted">{w.description}</span></span></Button>)}</div>
       <Button type="button" variant="ghost" onClick={() => setPicker(false)} aria-label="Close widget catalogue">Close</Button>
     </DialogContent></Dialog> : null}
   </section>;

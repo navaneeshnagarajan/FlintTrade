@@ -497,6 +497,8 @@ function OrderPadWidget(props: WidgetProps) {
   // Whether the lot size was actually confirmed by a symbol lookup. Derivative
   // exchanges (NFO/BFO/MCX/CDS) refuse to submit while this is false.
   const [lotSizeKnown, setLotSizeKnown] = useState(false);
+  // Freeze from the selected contract. Null falls back to the NSE index table.
+  const [brokerFreezeQty, setBrokerFreezeQty] = useState<number | null>(null);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -611,7 +613,7 @@ function OrderPadWidget(props: WidgetProps) {
   useEffect(() => {
     const quantity = Number(qty);
     const message = checkOrderQuantityLimit(exchange, quantity)
-      ?? checkFreezeQuantity(symbol, quantity);
+      ?? checkFreezeQuantity(symbol, quantity, brokerFreezeQty);
     const current = errors.qty;
     if (message) {
       if (current?.type === "validate" && current.message === message) return;
@@ -626,7 +628,7 @@ function OrderPadWidget(props: WidgetProps) {
     ) {
       clearErrors("qty");
     }
-  }, [clearErrors, errors.qty, exchange, qty, setError, symbol]);
+  }, [brokerFreezeQty, clearErrors, errors.qty, exchange, qty, setError, symbol]);
   const appMode = useModeStore((s) => s.mode);
   const selectedNativeBroker = useBrokerStore((s) => {
     const selected = findBrokerAccountMatch(s.accounts, s.activeAccountId);
@@ -712,10 +714,14 @@ function OrderPadWidget(props: WidgetProps) {
   // Re-read on selection changes; an underlying-cache refresh is not evidence
   // of a change to this selected contract's metadata.
   useEffect(() => {
-    if (!symbol || !exchange) return;
+    if (!symbol || !exchange) {
+      setBrokerFreezeQty(null);
+      return;
+    }
     let cancelled = false;
     setLotSize(0);
     setLotSizeKnown(false);
+    setBrokerFreezeQty(null);
     const result = getSymbol(symbol, exchange);
     if (!result || typeof result.then !== "function") return;
     result.then((info) => {
@@ -729,6 +735,9 @@ function OrderPadWidget(props: WidgetProps) {
           setLotSizeKnown(true);
           setValue("qty", ls, { shouldValidate: true });
         }
+        const rawFreeze = info.freezeQty ?? info.freeze_qty;
+        const freeze = typeof rawFreeze === "number" ? rawFreeze : Number(rawFreeze);
+        if (Number.isInteger(freeze) && freeze > 0) setBrokerFreezeQty(freeze);
       })
       .catch(() => {
         // Symbol not found or API unavailable — lot size stays unknown, and
@@ -1133,7 +1142,7 @@ function OrderPadWidget(props: WidgetProps) {
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
     const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
-      ?? checkFreezeQuantity(values.symbol, values.qty);
+      ?? checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty);
     if (qtyRefusal) {
       setError("qty", { type: "validate", message: qtyRefusal });
       return;
@@ -1222,6 +1231,7 @@ function OrderPadWidget(props: WidgetProps) {
       strategy: "FlintOrderPad",
       rationale: admissionRationale(values.note ?? ""),
       ...(lotSizeKnown && lotSize > 0 ? { lotSize } : {}),
+      ...(brokerFreezeQty != null ? { freezeQty: brokerFreezeQty } : {}),
     };
     if (isPracticeOrExplore) {
       // Practice and Explore open a dedicated review stage; no placement call

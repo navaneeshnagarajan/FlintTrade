@@ -170,3 +170,18 @@ it("closes the widget catalogue after a widget is added", async () => {
   });
   expect(within(app).getAllByRole("tab", { name: "Positions" }).length).toBeGreaterThan(0);
 });
+
+it("closes the widget catalogue when Enter adds the first search match", async () => {
+  window.history.replaceState(null, "", "/terminal");
+  render(<BrowserRouter><UnifiedAppsHost /></BrowserRouter>);
+  const app = await screen.findByRole("region", { name: "Terminal app" });
+  fireEvent.click(within(app).getByRole("button", { name: "Add widget" }));
+  const dialog = await screen.findByRole("dialog", { name: "Terminal widgets" });
+  const search = within(dialog).getByRole("textbox", { name: "Search widgets" });
+  fireEvent.change(search, { target: { value: "calculator" } });
+  expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
+  await vi.waitFor(() => {
+    expect(screen.queryByRole("dialog", { name: "Terminal widgets" })).not.toBeInTheDocument();
+  });
+  expect(within(app).getAllByRole("tab", { name: "Calculator" }).length).toBeGreaterThan(0);
+});

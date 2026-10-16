@@ -1,9 +1,10 @@
 /**
  * Offline F&O contracts for Example and Practice.
  *
- * Lot sizes follow the screener fallback table (NIFTY 65, BANKNIFTY 30)
- * so the order pad can refuse a quantity that is not a whole lot without
- * a broker instrument master.
+ * Lot sizes follow the screener fallback table (NIFTY 65, BANKNIFTY 30).
+ * Freeze quantities follow NSE/FAOP/76693 (NIFTY 3510, BANKNIFTY 1440).
+ * The order pad can then refuse both a quantity that is not a whole lot
+ * and a lot multiple above the freeze, without a broker instrument master.
  */
 
 export interface ExampleFoInstrument {
@@ -12,6 +13,8 @@ export interface ExampleFoInstrument {
   exchange: "NFO";
   instrumenttype: "FUTIDX" | "OPTIDX";
   lotsize: number;
+  /** NSE/FAOP/76693 freeze quantity for this underlying. */
+  freezeQty: number;
   tick_size: number;
 }
 
@@ -22,6 +25,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "FUTIDX",
     lotsize: 65,
+    freezeQty: 3510,
     tick_size: 0.05,
   },
   {
@@ -30,6 +34,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 65,
+    freezeQty: 3510,
     tick_size: 0.05,
   },
   {
@@ -38,6 +43,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 65,
+    freezeQty: 3510,
     tick_size: 0.05,
   },
   {
@@ -46,6 +52,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "FUTIDX",
     lotsize: 30,
+    freezeQty: 1440,
     tick_size: 0.05,
   },
   {
@@ -54,6 +61,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 30,
+    freezeQty: 1440,
     tick_size: 0.05,
   },
   {
@@ -62,9 +70,17 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 30,
+    freezeQty: 1440,
     tick_size: 0.05,
   },
 ];
+
+/** Symbol payload with both freeze spellings the pad and admission read. */
+export function exampleFoSymbolPayload(
+  contract: ExampleFoInstrument,
+): ExampleFoInstrument & { freeze_qty: number } {
+  return { ...contract, freeze_qty: contract.freezeQty };
+}
 
 export function findExampleFoInstrument(
   symbol: string,

@@ -11,12 +11,15 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 // Layout store
-const { layoutState } = vi.hoisted(() => ({
+const { layoutState, dialogContentProps } = vi.hoisted(() => ({
   layoutState: {
     workspaceApi: null as null | {
       addPanel: (options: unknown) => void;
       retargetOrderPad: (params: Record<string, unknown>, title?: string) => boolean;
     },
+  },
+  dialogContentProps: {
+    current: {} as { onCloseAutoFocus?: (event: Event) => void },
   },
 }));
 
@@ -47,9 +50,16 @@ vi.mock("@/hooks/useFeatureGate", () => ({
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-content">{children}</div>
-  ),
+  DialogContent: ({
+    children,
+    onCloseAutoFocus,
+  }: {
+    children: React.ReactNode;
+    onCloseAutoFocus?: (event: Event) => void;
+  }) => {
+    dialogContentProps.current = { onCloseAutoFocus };
+    return <div data-testid="dialog-content">{children}</div>;
+  },
   DialogHeader: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
@@ -215,5 +225,29 @@ describe("WidgetPicker", () => {
       title: "Chart",
     }));
     expect(onClose).toHaveBeenCalledTimes(1);
+    const focusEvent = new Event("closeAutoFocus", { cancelable: true });
+    dialogContentProps.current.onCloseAutoFocus?.(focusEvent);
+    expect(focusEvent.defaultPrevented).toBe(false);
+  });
+
+  it("closes the catalogue when Enter adds the first search match", () => {
+    const addPanel = vi.fn();
+    const retargetOrderPad = vi.fn(() => false);
+    layoutState.workspaceApi = { addPanel, retargetOrderPad };
+    const onClose = vi.fn();
+    render(<WidgetPicker isOpen={true} onClose={onClose} />);
+
+    const search = screen.getByRole("searchbox", { name: "Search widgets" });
+    fireEvent.change(search, { target: { value: "chart" } });
+    expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
+
+    expect(addPanel).toHaveBeenCalledWith(expect.objectContaining({
+      component: "chart",
+      title: "Chart",
+    }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const focusEvent = new Event("closeAutoFocus", { cancelable: true });
+    dialogContentProps.current.onCloseAutoFocus?.(focusEvent);
+    expect(focusEvent.defaultPrevented).toBe(true);
   });
 });

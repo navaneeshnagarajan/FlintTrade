@@ -201,7 +201,7 @@
       --color-text-muted: #6b6b74;
       --color-text-disabled: #a1a1aa;
       --color-ticker-venue: #1a1a1e;
-      --color-practice-chip: #973c00;
+      --color-practice-chip: #8a5a00;
       --color-accent: #15803d;
       --color-accent-text: #ffffff;
       /* WCAG AA contrast on white backgrounds — safer contrast margin */
@@ -223,7 +223,7 @@
   html.theme-light {
     --color-info: #0369a1;
     --color-ticker-venue: #1a1a1e;
-    --color-practice-chip: #973c00;
+    --color-practice-chip: #8a5a00;
   }
 
   /* shadcn/ui HSL tokens for light mode (when .dark class is removed) */

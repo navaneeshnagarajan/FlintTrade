@@ -1100,6 +1100,25 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
+  it("uses the selected contract freeze quantity ahead of the index table", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "BANKNIFTY-OCT2026-FUT", name: "BANKNIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 30, tick_size: 0.05, freezeQty: 90,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "BANKNIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 30");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "120" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Max 90 per order for BANKNIFTY-OCT2026-FUT. Place smaller orders.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
   it("shows the same freeze refusal under Quantity in Live", async () => {
     selectedMode.current = "live";
     mockGetSymbol.mockResolvedValue({

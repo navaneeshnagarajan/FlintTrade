@@ -77,7 +77,11 @@ import {
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
 import { OrderPreflightRefusal } from "./orderPreflightRefusal";
 import { mockDataEngine } from "@/services/mockDataEngine";
-import { findExampleFoInstrument, searchExampleFoInstruments } from "@/services/exampleFoInstruments";
+import {
+  exampleFoSymbolPayload,
+  findExampleFoInstrument,
+  searchExampleFoInstruments,
+} from "@/services/exampleFoInstruments";
 import {
   readNativeAccount,
   type NativeReadKind,
@@ -1033,6 +1037,16 @@ function normaliseNativeSearch(value: unknown): NativeSearchResult[] {
   }).filter((row) => row.symbol);
 }
 
+function symbolFreezeFields(
+  row: Record<string, unknown>,
+): { freezeQty: number; freeze_qty: number } | Record<string, never> {
+  const raw = row.freezeQty ?? row.freeze_qty;
+  if (raw == null || raw === "") return {};
+  const freeze = toNumber(raw);
+  if (!Number.isInteger(freeze) || freeze <= 0) return {};
+  return { freezeQty: freeze, freeze_qty: freeze };
+}
+
 function normaliseNativeSymbol(value: unknown): {
   symbol: string;
   name: string;
@@ -1040,6 +1054,8 @@ function normaliseNativeSymbol(value: unknown): {
   instrumenttype: string;
   lotsize: number;
   tick_size: number;
+  freezeQty?: number;
+  freeze_qty?: number;
 } {
   const first = normaliseNativeSearch(value)[0];
   if (!first || !isRecord(first)) {
@@ -1052,6 +1068,7 @@ function normaliseNativeSymbol(value: unknown): {
     instrumenttype: String(first.instrumenttype ?? first.instrument_type ?? first.segment ?? ""),
     lotsize: toNumber(first.lotsize ?? first.lot_size),
     tick_size: toNumber(first.tick_size),
+    ...symbolFreezeFields(first),
   };
 }
 
@@ -2066,7 +2083,7 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
     }
     case "symbol": {
       const contract = findExampleFoInstrument(symbol ?? "", exchange);
-      if (contract) return { ...contract } as T;
+      if (contract) return exampleFoSymbolPayload(contract) as T;
       return {
         symbol: symbol ?? "NIFTY",
         name: symbol ?? "NIFTY",
@@ -3059,7 +3076,16 @@ export async function getSymbol(
   exchange: string,
   signal?: AbortSignal,
   expectedDataScope?: string,
-): Promise<{ symbol: string; name: string; exchange: string; instrumenttype: string; lotsize: number; tick_size: number }> {
+): Promise<{
+  symbol: string;
+  name: string;
+  exchange: string;
+  instrumenttype: string;
+  lotsize: number;
+  tick_size: number;
+  freezeQty?: number;
+  freeze_qty?: number;
+}> {
   try {
     return await post(
       "symbol",
@@ -3075,7 +3101,7 @@ export async function getSymbol(
     if (signal?.aborted) throw error;
     const contract = findExampleFoInstrument(symbol, exchange);
     if (!contract) throw error;
-    return { ...contract };
+    return exampleFoSymbolPayload(contract);
   }
 }
 export const getSyntheticFuture = async (

@@ -346,10 +346,14 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
   const [lockedNotice, setLockedNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Search + Enter closes the catalogue. Focus must not return to "+ Widget"
+  // while that Enter is still down, or the trigger opens the dialog again.
+  const closeFromSearchRef = useRef(false);
 
   // Auto-focus search when dialog opens; clear query when it closes.
   useEffect(() => {
     if (isOpen) {
+      closeFromSearchRef.current = false;
       // Let the dialog animation settle before focusing
       const timer = setTimeout(() => {
         searchInputRef.current?.focus();
@@ -415,16 +419,27 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
 
   // Handle Enter key on search — select the first matching result.
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" && isSearching && searchFiltered.length > 0) {
-      handleAddWidget(searchFiltered[0]);
-    }
+    if (e.key !== "Enter" || !isSearching || searchFiltered.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeFromSearchRef.current = true;
+    handleAddWidget(searchFiltered[0]);
+  }
+
+  function handleCloseAutoFocus(event: Event) {
+    if (!closeFromSearchRef.current) return;
+    closeFromSearchRef.current = false;
+    event.preventDefault();
   }
 
   const matchCount = isSearching ? searchFiltered.length : allowlistFiltered.length;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
+      <DialogContent
+        className="sm:max-w-2xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale"
+        onCloseAutoFocus={handleCloseAutoFocus}
+      >
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border-default">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">

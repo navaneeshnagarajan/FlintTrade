@@ -10,6 +10,8 @@ import {
 
 describe("practice chip colour", () => {
   it("clears 4.5:1 on the light and dark amber washes", () => {
+    expect(PRACTICE_CHIP_ON_LIGHT).toBe("#8a5a00");
+    expect(PRACTICE_CHIP_ON_DARK).toBe("#ffb900");
     expect(practiceChipColour("#ffffff")).toBe(PRACTICE_CHIP_ON_LIGHT);
     expect(practiceChipColour("#0a0a0f")).toBe(PRACTICE_CHIP_ON_DARK);
     // The measured light chip was #ffb900 on #feefd9 (1.52:1).
