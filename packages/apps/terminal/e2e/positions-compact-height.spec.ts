@@ -78,7 +78,7 @@ for (const fixture of unavailableOrders) {
     await page.setViewportSize({ width: 1280, height: 720 });
     // Only the canonical bottom book hosts Positions, never the saved top widget.
     await mountWidget(page, "foreverorders");
-    const surface = page.locator("#trade-bottom-panel-positions");
+    const surface = page.locator("#flexlayout-tab-desk-positions");
     await expect(surface).toHaveAttribute("role", "tabpanel");
     const warning = surface.getByTestId("exit-orders-unavailable");
     await tickUntil(page, warning);
@@ -142,7 +142,7 @@ test("canonical warning and row survive 1024x768 resize and return to 1280x720",
   registerRead(syntheticApi, foreverPath(), { json: { status: "success", data: [] } });
   await page.setViewportSize({ width: 1280, height: 720 });
   await mountWidget(page, "foreverorders");
-  const surface = page.locator("#trade-bottom-panel-positions");
+  const surface = page.locator("#flexlayout-tab-desk-positions");
   await tickUntil(page, surface.getByTestId("exit-orders-unavailable"));
   const retained = surface.getByText("SYNTHETIC-ALPHA", { exact: true });
   const quantity = surface.getByRole("row").filter({ hasText: "SYNTHETIC-ALPHA" })
@@ -185,7 +185,7 @@ test("keyboard reaches the last canonical row while keeping the warning readable
   registerRead(syntheticApi, foreverPath(), { json: { status: "success", data: [] } });
   await page.setViewportSize({ width: 1280, height: 720 });
   await mountWidget(page, "foreverorders");
-  const surface = page.locator("#trade-bottom-panel-positions");
+  const surface = page.locator("#flexlayout-tab-desk-positions");
   const warning = surface.getByTestId("exit-orders-unavailable");
   await tickUntil(page, warning);
   const book = surface.getByRole("region", { name: "Positions book", exact: true });

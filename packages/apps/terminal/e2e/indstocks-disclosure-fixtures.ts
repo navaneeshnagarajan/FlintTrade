@@ -48,6 +48,7 @@ export function registerIndstocksReads(
     // Explore deliberately never hydrates protected account collections. Keep
     // this endpoint unregistered rather than expecting a read the source forbids.
     nativeAccounts: options.mode !== "explore",
+    mode: options.mode,
     marketScopeVisits: options.marketScopeVisits,
   });
   const optional = { minimum: 0, maximum: 2 };
@@ -86,16 +87,14 @@ export async function mountIndstocksPad(
   await page.addInitScript(({ narrow }) => {
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
     localStorage.setItem("flinttrade:tourComplete", "true");
-    localStorage.setItem("flinttrade:layouts", JSON.stringify({ state: {
-      tabs: [{ id: "indstocks-disclosure", name: "Synthetic disclosure only", serializedLayout: {
+    localStorage.setItem("flinttrade:app-layouts:v1:terminal", JSON.stringify({ Current: {
         global: { tabEnableRename: false, tabSetEnableSingleTabStretch: true, tabSetMinWidth: 100, tabSetMinHeight: 80 },
         borders: [], layout: { type: "row", weight: 100, children: [{
           type: "tabset", weight: narrow ? 45 : 100, children: [{
             type: "tab", id: "indstocks-order-pad", component: "orderpad", name: "Order Pad", config: { symbol: "RELIANCE", exchange: "NSE" },
           }],
         }, ...(narrow ? [{ type: "tabset", weight: 55, children: [{ type: "tab", id: "indstocks-sibling-positions", component: "positions", name: "Positions" }] }] : [])] },
-      } }], activeTabId: "indstocks-disclosure",
-    }, version: 0 }));
+    } }));
     const observed = window as Window & { __presentationNotifications?: unknown[] };
     observed.__presentationNotifications = [];
     window.addEventListener("flinttrade:notify", (event) => observed.__presentationNotifications?.push((event as CustomEvent<unknown>).detail));
@@ -110,11 +109,11 @@ export async function mountIndstocksPad(
     auth.useAuthStore.getState().setLoggedIn(token, "synthetic-order-flow-operator", "");
     modes.useModeStore.getState().setMode(mode);
     brokers.useBrokerStore.getState().setActiveAccount(`native:indmoney:${account}`);
-    await Promise.all([importModule("/src/routes/TerminalRoute.tsx"), importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx")]);
+    await Promise.all([importModule("/src/routes/UnifiedAppRoute.tsx"), importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx")]);
     window.history.pushState(null, "", "/trade");
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, { token: LIVE_TOKEN, account: IND_A, mode: options.mode ?? "live" });
-  await expect(page).toHaveURL(/\/trade$/);
+  await expect(page).toHaveURL(/\/terminal$/);
   await tickUntil(page, orderPad(page).getByRole("radio", { name: "MARKET", exact: true }));
   // A prefilled saved widget uses its real FlexLayout config, not a private
   // form mutation. Pin the rendered instrument before testing native bodies.

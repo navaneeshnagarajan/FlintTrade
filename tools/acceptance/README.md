@@ -31,7 +31,10 @@ python tools/acceptance/run.py paper
 ```
 
 - `default` collects the complete public default Playwright inventory, then
-  reconciles two disjoint positive native test lists. Ordinary cases use Vite;
+  reconciles three disjoint native inclusion lists. The exact original no-app
+  identities in `infra-cases.json` execute first under `playwright.infra.config.ts`,
+  without Vite. This includes both registry self-tests and the decoded-read
+  controls that own a test-scoped loopback listener. Ordinary app cases use Vite;
   the two unchanged `schema-csp` cases use a fresh production build and a
   test-scoped anonymous normal factory. Vite is stopped before the factory owns
   its port. No CSP cases are ignored/skipped and no private server path is needed.
@@ -40,6 +43,32 @@ python tools/acceptance/run.py paper
   violation/report and the unchanged registry's fatal rejection. Factory cleanup
   uses the existing request drain and complete lifecycle owner, not a subset of
   ad-hoc close calls. `e2e:default` dispatches this carrier, not bare Playwright.
+  Infrastructure and Vite share the original 1,200-second execution budget;
+  individual test budgets, one worker, zero retries and service-worker blocking
+  remain unchanged. Missing, extra or duplicate infrastructure identities fail
+  collection. Each body executes once. The two original automatic-teardown
+  negative controls must remain failed, with their exact identity, annotation,
+  original guard cause and fixture-evidence attachment; no other failed body is
+  allowed. A passing negative control, unrelated failure or extra guard error
+  is fatal. The current inventory includes the original 163 infrastructure rows
+  plus 22 explicit additive controls: 185 infrastructure + 248 Vite + 2 CSP.
+  No historical-inventory fallback is admitted. Native negative errors must bind
+  ordered, exact owner frames and locations to their entire bounded code frame
+  and rendered error; owner-name substrings and trailing unrelated errors fail.
+  The fixture path must equal the launch checkout's absolute fixture path, and
+  all three owner line/column pairs come from that source's unique call sites.
+  `validate_report(..., fixture_root=...)` and `playwright_counts(...,
+  fixture_root=...)` accept a caller-owned testDir for archived replay; never
+  pass the report's self-declared `config.rootDir` as that authority. Omission
+  binds the parser checkout, while real dispatch supplies its actual testDir.
+  The public CLI uses the CI launcher's fixed `acceptance-source` sibling of
+  `--state`; other launchers must pass `--browser-source` with their trusted
+  checkout. That source must remain available. Missing context is unknown,
+  not a fallback to a report path. These are bounded source checks, not proof
+  of report authenticity; public `acceptance_verified` always remains false.
+  Public projection schema 2 retains raw `failed` counts and separately reports
+  `expected_failed` only for these verified controls. It requires the infrastructure
+  report, exposes no raw evidence and still never claims acceptance verification.
 - `policy` builds the current terminal and executes all **33 original cases** from
   both policy specs in one Chromium invocation, one worker, zero retries. Every
   case owns a normal-factory process/workspace; backend replacement stops and

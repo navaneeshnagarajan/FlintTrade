@@ -810,8 +810,10 @@ export function registerOperatorStatusProbes(
     expectedCalls?: SyntheticHandlerRegistration["expectedCalls"];
     pingCalls?: SyntheticHandlerRegistration["expectedCalls"];
     includeLlmConfig?: boolean;
-    /** Heartbeat the desk paints on the Laya row. Omitted leaves that row Down. */
+    /** Live-facing heartbeat. Omission does not imply readiness. */
     laya?: "ready" | "degraded" | "down";
+    /** Independent sidecar heartbeat selected by Practice and Explore. */
+    layaPractice?: "ready" | "degraded" | "down";
   } = {},
 ): void {
   const expectedCalls = options.expectedCalls ?? OPERATOR_PROBE_CALLS;
@@ -842,9 +844,11 @@ export function registerOperatorStatusProbes(
       assertReadOnlyProbe(request);
       expect(request.headers()["authorization"]).toBeUndefined();
       return {
-        json: options.laya === undefined
-          ? { status: "ok" }
-          : { status: "ok", laya: options.laya },
+        json: {
+          status: "ok",
+          ...(options.laya === undefined ? {} : { laya: options.laya }),
+          ...(options.layaPractice === undefined ? {} : { laya_practice: options.layaPractice }),
+        },
       };
     },
   });

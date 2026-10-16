@@ -120,6 +120,16 @@
     --color-accent: #22c55e;
     --color-accent-text: #ffffff;
     --color-profit: #22c55e;
+    /* Scoped opaque action defaults before theme hydration. State mixes move
+       away from the stable foreground, unlike alpha/brightness on the control. */
+    --color-profit-action: var(--color-profit);
+    --color-profit-foreground: #0a0a0f;
+    --color-profit-hover: color-mix(in srgb, var(--color-profit-action) 90%, #ffffff);
+    --color-profit-pressed: color-mix(in srgb, var(--color-profit-action) 80%, #ffffff);
+    --color-confirmation: var(--color-accent);
+    --color-confirmation-foreground: #0a0a0f;
+    --color-confirmation-hover: color-mix(in srgb, var(--color-confirmation) 90%, #ffffff);
+    --color-confirmation-pressed: color-mix(in srgb, var(--color-confirmation) 80%, #ffffff);
     --color-loss: #ef4444;
     --color-warning: #eab308;
     --color-bullish-bg: rgba(34, 197, 94, 0.10);
@@ -189,6 +199,12 @@
       --color-accent-text: #ffffff;
       /* WCAG AA contrast on white backgrounds — safer contrast margin */
       --color-profit: #15803d;
+      --color-profit-foreground: #ffffff;
+      --color-profit-hover: color-mix(in srgb, var(--color-profit-action) 90%, #0a0a0f);
+      --color-profit-pressed: color-mix(in srgb, var(--color-profit-action) 80%, #0a0a0f);
+      --color-confirmation-foreground: #ffffff;
+      --color-confirmation-hover: color-mix(in srgb, var(--color-confirmation) 90%, #0a0a0f);
+      --color-confirmation-pressed: color-mix(in srgb, var(--color-confirmation) 80%, #0a0a0f);
       --color-loss: #b91c1c;
       --color-surface-floating: #ffffff;
       --shadow-raised: 0 1px 3px rgba(0,0,0,0.08);
@@ -283,6 +299,14 @@
 
   /* --- Trading semantic colors (read from :root, themeable) --- */
   --color-profit: var(--color-profit);
+  --color-profit-action: var(--color-profit-action);
+  --color-profit-foreground: var(--color-profit-foreground);
+  --color-profit-hover: var(--color-profit-hover);
+  --color-profit-pressed: var(--color-profit-pressed);
+  --color-confirmation: var(--color-confirmation);
+  --color-confirmation-foreground: var(--color-confirmation-foreground);
+  --color-confirmation-hover: var(--color-confirmation-hover);
+  --color-confirmation-pressed: var(--color-confirmation-pressed);
   --color-loss: var(--color-loss);
   --color-warning: var(--color-warning);
   --color-info: var(--color-info);

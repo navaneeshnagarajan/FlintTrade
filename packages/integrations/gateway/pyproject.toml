@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
     "flinttrade-engine",
-    "pydantic==2.14.0",
+    "pydantic==2.14.1",
     "httpx==0.28.1",
     "websockets==17.2",
     "cryptography==50.0.2",

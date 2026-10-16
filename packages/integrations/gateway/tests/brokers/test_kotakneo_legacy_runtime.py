@@ -159,8 +159,8 @@ def test_installed_kotak_pin_and_request_chain_match_distribution_record(record_
     assert isinstance(metadata, str)
     source = json.loads(metadata)
     assert dist.version == "3.0.9"
-    assert source["vcs_info"]["commit_id"] == "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
-    assert source["vcs_info"]["requested_revision"] == "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
+    assert source["vcs_info"]["commit_id"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
+    assert source["vcs_info"]["requested_revision"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
     module_path = neo_api_client.__file__
     assert isinstance(module_path, str)
     assert Path(module_path).parent.samefile(str(dist.locate_file("neo_api_client")))
@@ -384,3 +384,13 @@ def test_pinned_actual_http_failure_cannot_be_hidden_by_a_positive_native_ack(ru
     assert raised.value.broker_code == str(http_status)
     assert not isinstance(raised.value, OrderRejectedByBroker)
     assert len(requests) == 1
+
+
+def test_installed_kotak_rejects_retired_same_version_source():
+    from flinttrade_core import broker_sdk_attest as attest
+
+    root = Path(__file__).resolve().parents[5]
+    pin = next(row for row in attest.load_pins(root / "brokers.lock") if row["name"] == "kotakneoapi")
+    assert attest._attest_source(pin) == ("3.0.9", attest.STATUS_OK)
+    retired = dict(pin, source_commit="a3233062095ad9eee574f6e5696e1f9f3aa7c0c8")
+    assert attest._attest_source(retired) == ("3.0.9", attest.STATUS_PROVENANCE_MISMATCH)

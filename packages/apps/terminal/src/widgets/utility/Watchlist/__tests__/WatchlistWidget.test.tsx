@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -107,6 +107,30 @@ describe("WatchlistWidget", () => {
     mockGetMultiQuotes.mockResolvedValue([]);
     useModeStore.setState({ mode: "explore" });
   });
+
+  for (const key of ['{Enter}', ' ']) {
+    for (const action of ['Duplicate', 'Delete']) {
+      it(`restores focus after keyboard ${key === ' ' ? 'Space' : 'Enter'} ${action}`, async () => {
+        renderWidget();
+        const original = screen.getByRole('tab', {name: 'Watchlist 1'});
+        if (action === 'Delete') await userEvent.click(screen.getByRole('button', {name: 'Add watchlist tab'}));
+        const invoker = action === 'Delete' ? screen.getByRole('tab', {name: 'Watchlist 2'}) : original;
+        invoker.focus();
+        fireEvent.keyDown(invoker, {key: 'ContextMenu'});
+        await userEvent.keyboard(action === 'Delete' ? '{End}' : '{ArrowDown}');
+        expect(screen.getByRole('menuitem', {name: action})).toHaveFocus();
+        await userEvent.keyboard(key);
+        const survivor = action === 'Duplicate' ? screen.getByRole('tab', {name: 'Watchlist 1 (copy)'}) : original;
+        expect(survivor).toHaveFocus();
+        expect(survivor).toHaveAttribute('aria-selected', 'true');
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        if (action === 'Delete') expect(invoker).not.toBeInTheDocument();
+        const stored = JSON.parse(mockLocalStorage['flinttrade:watchlists']);
+        expect(stored.map((tab: {name: string}) => tab.name)).toEqual(action === 'Duplicate' ? ['Watchlist 1', 'Watchlist 1 (copy)'] : ['Watchlist 1']);
+        if (action === 'Duplicate') expect(stored[1].symbols).toEqual(stored[0].symbols);
+      });
+    }
+  }
 
   // --- Existing tests preserved ---
 
@@ -577,8 +601,8 @@ describe("WatchlistWidget", () => {
       prevClose: 1660,
     });
 
-    expect(await screen.findByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "% change" })).toBeInTheDocument();
+    expect(await within(screen.getByRole("group", { name: "Watchlist columns" })).findByText("LTP", { exact: true })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("% change", { exact: true })).toBeInTheDocument();
     expect(await screen.findByLabelText("NIFTY LTP")).toHaveTextContent("24,150.00");
     expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("+0.63%");
     expect(screen.getByLabelText("BANKNIFTY LTP")).toHaveTextContent("51,200.00");
@@ -591,8 +615,8 @@ describe("WatchlistWidget", () => {
   it("shows an honest em dash when LTP is checked but no quote is available", async () => {
     renderWidget();
 
-    expect(await screen.findByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "% change" })).toBeInTheDocument();
+    expect(await within(screen.getByRole("group", { name: "Watchlist columns" })).findByText("LTP", { exact: true })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("% change", { exact: true })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByLabelText("NIFTY LTP")).toHaveTextContent("—");
       expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("—");
@@ -602,23 +626,23 @@ describe("WatchlistWidget", () => {
   it("hides LTP and % change when those columns are unchecked, and restores them when checked", async () => {
     renderWidget();
 
-    expect(await screen.findByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
+    expect(await within(screen.getByRole("group", { name: "Watchlist columns" })).findByText("LTP", { exact: true })).toBeInTheDocument();
 
     await userEvent.click(screen.getByLabelText("More options"));
     await userEvent.click(screen.getByRole("menuitem", { name: /manage columns/i }));
     await userEvent.click(screen.getByRole("checkbox", { name: "LTP column" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "% change column" }));
 
-    expect(screen.queryByRole("columnheader", { name: "LTP" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "% change" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Watchlist columns" })).queryByText("LTP", { exact: true })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Watchlist columns" })).queryByText("% change", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("NIFTY LTP")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("NIFTY % change")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("checkbox", { name: "LTP column" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "% change column" }));
 
-    expect(screen.getByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "% change" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("LTP", { exact: true })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("% change", { exact: true })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByLabelText("NIFTY LTP")).toHaveTextContent("—");
       expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("—");

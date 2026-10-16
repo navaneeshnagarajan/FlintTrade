@@ -22,9 +22,13 @@ import type {
   IJsonTabNode,
   IJsonTabSetNode,
   ITabRenderValues,
+  ITabSetRenderValues,
+  TabSetNode,
+  BorderNode,
   TabNode,
 } from "flexlayout-react";
 import { useStore } from "jotai";
+import { useLayoutEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import type { WidgetPanelApi, WidgetProps } from "@/types/widgets";
 import {
@@ -212,8 +216,41 @@ const CHANNEL_CYCLE: ReadonlyArray<UserChannelId | null> = [
   null,
 ];
 
+const channelSlots = new WeakMap<TabNode, HTMLSpanElement>();
+
 function WorkspaceChannelDot({ node }: { node: TabNode }) {
   const store = useStore();
+  const clipRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const measureRef = useRef<() => void>(() => {});
+
+  // The public sibling toolbar does not inherit the tab strip's scroll/clip.
+  // Mirror that real viewport in an owned overflow container, not a hidden
+  // action or a portal into the library's DOM. Only our own boxes are written.
+  useLayoutEffect(() => {
+    const slot = channelSlots.get(node);
+    const strip = slot?.closest<HTMLElement>('.flexlayout__tabset_tabbar_inner');
+    const clip = clipRef.current;
+    const button = buttonRef.current;
+    if (!slot || !strip || !clip || !button) return;
+    const measure = () => {
+      const bounds = strip.getBoundingClientRect();
+      const target = slot.getBoundingClientRect();
+      Object.assign(clip.style, { left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px` });
+      Object.assign(button.style, { left: `${target.left - bounds.left}px`, top: `${target.top - bounds.top}px` });
+    };
+    measureRef.current = measure;
+    const observer = new ResizeObserver(measure);
+    // Splitters may move a strip without resizing its own rectangle.
+    for (let parent: HTMLElement | null = slot; parent; parent = parent.parentElement) observer.observe(parent);
+    strip.ownerDocument.addEventListener('scroll', measure, true);
+    measure();
+    return () => {
+      observer.disconnect();
+      strip.ownerDocument.removeEventListener('scroll', measure, true);
+      measureRef.current = () => {};
+    };
+  });
   const renderConfig = (node.getConfig() as Record<string, unknown> | undefined) ?? undefined;
   // Live membership — the widget follows the SAME atom, so a change here
   // reaches it instantly even in a hidden tab FlexLayout will not
@@ -247,7 +284,9 @@ function WorkspaceChannelDot({ node }: { node: TabNode }) {
   };
 
   return (
+    <div ref={clipRef} style={{ position: "fixed", overflow: "clip", pointerEvents: "none" }}>
     <Button
+      ref={buttonRef}
       key="fdc3-channel"
       type="button"
       variant="ghost"
@@ -255,15 +294,24 @@ function WorkspaceChannelDot({ node }: { node: TabNode }) {
       className="h-4 w-4 shrink-0 rounded-full p-0 hover:bg-transparent"
       aria-label={label}
       title={label}
-      // Keep the dot inert for tab selection/activation. (Tab DRAGS use the
-      // HTML5 draggable attribute on the tab element, which pointer-event
-      // propagation cannot suppress — a press-and-move on the dot still
-      // drags the tab, same as the library's own close affordance.)
+      style={{ position: "absolute", pointerEvents: "auto" }}
+      onFocus={() => {
+        // Reveal the original strip slot, without selecting its desk or
+        // changing channel ownership. Native focus remains on this button.
+        channelSlots.get(node)?.scrollIntoView({ block: "nearest", inline: "center", behavior: "instant" });
+        measureRef.current();
+      }}
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
-      // FlexLayout's tab button preventDefaults Enter/Space on keydown,
-      // which would swallow keyboard activation of this nested button —
-      // stop propagation so native activation fires onClick.
+      onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onContextMenu={(e) => {
+        e.stopPropagation();
+        // Preserve the library's per-tab callback, including native fallback.
+        const allowed = channelSlots.get(node)?.closest('[role="tab"]')?.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+        }));
+        if (allowed === false) e.preventDefault();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") e.stopPropagation();
       }}
@@ -284,6 +332,7 @@ function WorkspaceChannelDot({ node }: { node: TabNode }) {
         style={meta ? { backgroundColor: meta.colour } : undefined}
       />
     </Button>
+    </div>
   );
 }
 
@@ -293,7 +342,15 @@ function WorkspaceChannelDot({ node }: { node: TabNode }) {
  * atoms in services/fdc3 — no host redraw is needed.
  */
 export function renderWorkspaceTabExtras(node: TabNode, renderValues: ITabRenderValues): void {
-  renderValues.buttons.push(<WorkspaceChannelDot key="fdc3-channel" node={node} />);
+  renderValues.buttons.push(<span key="fdc3-channel-slot" aria-hidden="true" className="inline-flex h-4 w-4 shrink-0"
+    ref={(element) => { if (element) channelSlots.set(node, element); else channelSlots.delete(node); }} />);
+}
+
+/** Keep every per-tab action in the library's public sibling toolbar slot. */
+export function renderWorkspaceTabSetExtras(node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues): void {
+  for (const tab of node.getTabNodes()) {
+    renderValues.buttons.push(<WorkspaceChannelDot key={`fdc3-channel-${tab.getId()}`} node={tab} />);
+  }
 }
 
 export interface AddPanelOptions {

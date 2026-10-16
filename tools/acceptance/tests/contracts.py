@@ -158,7 +158,7 @@ class Registrations(unittest.TestCase):
         app = config('tsconfig.json')
         infra = config('tsconfig.e2e-infra.json')
         expected_app = {'e2e/incidents/fixture.tsx', 'e2e/service-oauth-handoff.fixture.tsx', 'e2e/service-oauth-handoff.entry.ts'}
-        expected_infra = {'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts'}
+        expected_infra = {'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts'}
         self.assertFalse(expected_app - set(app['include']), 'Missing app fixture typecheck registration: ' + str(expected_app - set(app['include'])))
         self.assertFalse(expected_infra - set(infra['include']), 'Missing infra typecheck registration: ' + str(expected_infra - set(infra['include'])))
         self.assertIs(app['compilerOptions']['allowImportingTsExtensions'], True)
@@ -257,15 +257,16 @@ class CspCarrier(unittest.TestCase):
 
     def test_default_partition_preserves_every_identity_without_skips(self):
         module = self.load_carrier()
-        cases = [{'file':'ordinary.spec.ts','title':'ordinary','project':'chromium'}, *module.CSP_CASES]
+        cases = [{'file':'ordinary.spec.ts','title':'ordinary','project':'chromium'}, *module.CSP_CASES, *module.INFRA_CASES]
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp)
-            generic, csp = module.partition(cases, out)
+            infra, generic, csp = module.partition(cases, out)
+            self.assertEqual(infra, module.INFRA_CASES)
             self.assertEqual(generic, cases[:1])
             self.assertEqual(csp, module.CSP_CASES)
             self.assertEqual((out/'vite-test-list.txt').read_text(), '[chromium] › ordinary.spec.ts › ordinary\n')
             self.assertEqual((out/'csp-test-list.txt').read_text().splitlines(), [f"[chromium] › {row['file']} › {row['title']}" for row in csp])
-            for bad in [cases[:-1], cases+[cases[-1]], cases+[dict(cases[-1],title='unexpected CSP case')]]:
+            for bad in [cases[:2]+cases[3:], cases+[cases[1]], cases+[dict(cases[1],title='unexpected CSP case')]]:
                 with self.assertRaisesRegex(ValueError,'CSP identities'):
                     module.partition(bad,out)
 
@@ -317,6 +318,178 @@ class CspCarrier(unittest.TestCase):
         result=subprocess.run([sys.executable,'-O',str(source)],capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn('optimisation refused',result.stderr)
+
+class BrowserRoles(unittest.TestCase):
+    load_carrier = CspCarrier.load_carrier
+
+    def setUp(self):
+        from report_fixtures import infra_report
+        self.module = self.load_carrier()
+        self.report = infra_report(self.module)
+
+    def test_known_negative_failures_are_required_not_converted_to_passes(self):
+        self.module.validate_report(self.report, self.module.INFRA_CASES, role='infra')
+        with self.assertRaises(ValueError):
+            self.module.validate_report(self.report, self.module.INFRA_CASES)
+
+    def test_negative_controls_bind_original_identity_and_exact_cause(self):
+        for index, spec in enumerate(self.report['suites'][0]['specs']):
+            if spec['tests'][0]['expectedStatus'] != 'failed':
+                continue
+            for mutation in ['pass', 'skip', 'timeout', 'retry', 'duplicate-result', 'no-result',
+                             'wrong-error', 'extra-error', 'no-error', 'no-attachment', 'wrong-attachment',
+                             'duplicate-attachment', 'wrong-origin', 'wrong-owner', 'wrong-annotation',
+                             'extra-annotation', 'wrong-identity', 'wrong-project', 'missing-control',
+                             'wrong-rendered-error']:
+                with self.subTest(control=spec['title'], mutation=mutation):
+                    changed = deepcopy(self.report)
+                    item = changed['suites'][0]['specs'][index]
+                    test = item['tests'][0]
+                    result = test['results'][0]
+                    if mutation == 'pass': result['status'] = 'passed'
+                    elif mutation == 'skip': result['status'] = 'skipped'
+                    elif mutation == 'timeout': result['status'] = 'timedOut'
+                    elif mutation == 'retry': result['retry'] = 1
+                    elif mutation == 'duplicate-result': test['results'] *= 2
+                    elif mutation == 'no-result': test['results'] = []
+                    elif mutation == 'wrong-error': result['error']['message'] = 'Error: EADDRINUSE'
+                    elif mutation == 'extra-error': result['errors'].append({'message': 'extra guard failure'})
+                    elif mutation == 'no-error': result['errors'] = []
+                    elif mutation == 'no-attachment': result['attachments'] = []
+                    elif mutation == 'wrong-attachment': result['attachments'][0]['body'] = 'd3Jvbmc='
+                    elif mutation == 'duplicate-attachment': result['attachments'] *= 2
+                    elif mutation == 'wrong-origin': result['error']['location']['file'] = '/wrong.ts'
+                    elif mutation == 'wrong-owner': result['error']['stack'] = 'Error: not automatic teardown'
+                    elif mutation == 'wrong-annotation': test['annotations'][0]['description'] = 'wrong cause'
+                    elif mutation == 'extra-annotation': test['annotations'].append({'type':'fail','description':'extra'})
+                    elif mutation == 'wrong-identity': item['title'] += ' unknown'
+                    elif mutation == 'wrong-project': test['projectName'] = 'other'
+                    elif mutation == 'missing-control': changed['suites'][0]['specs'].pop(index)
+                    elif mutation == 'wrong-rendered-error': result['errors'][0]['message'] += '\nextra failure'
+                    with self.assertRaises(ValueError):
+                        self.module.validate_report(changed, self.module.INFRA_CASES, role='infra')
+
+    def test_native_frame_and_rendered_error_correspondence(self):
+        for index, spec in enumerate(self.report['suites'][0]['specs']):
+            if spec['tests'][0]['expectedStatus'] != 'failed':
+                continue
+            for mutation in ['owner-substrings', 'extra-rendered-error', 'wrong-frame-path',
+                             'wrong-frame-owner', 'reordered-frames', 'extra-frame',
+                             'rendered-stack-mismatch', 'location-mismatch', 'snippet-suffix']:
+                with self.subTest(control=spec['title'], mutation=mutation):
+                    changed = deepcopy(self.report)
+                    result = changed['suites'][0]['specs'][index]['tests'][0]['results'][0]
+                    primary, rendered = result['error'], result['errors'][0]
+                    if mutation == 'owner-substrings':
+                        primary['stack'] = 'Not a stack: FailClosedSyntheticFixtureRegistry.disposeOnce Object.baseTest.extend.syntheticApi.auto'
+                        rendered['message'] = primary['message']
+                    elif mutation == 'extra-rendered-error': rendered['message'] += '\nUNEXPECTED EXTRA FAILURE'
+                    elif mutation == 'wrong-frame-path': primary['stack'] = primary['stack'].replace(str(self.module.TERM / 'e2e'), '/unrelated')
+                    elif mutation == 'wrong-frame-owner': primary['stack'] = primary['stack'].replace('at Object.', 'at ForgedObject.')
+                    elif mutation == 'reordered-frames':
+                        lines = primary['stack'].splitlines(); lines[-2:] = reversed(lines[-2:]); primary['stack'] = '\n'.join(lines)
+                    elif mutation == 'extra-frame': primary['stack'] += '\n    at unrelated (/unrelated.ts:1:1)'
+                    elif mutation == 'rendered-stack-mismatch': rendered['message'] = rendered['message'].replace(':537:33)', ':538:33)')
+                    elif mutation == 'location-mismatch': rendered['location'] = dict(rendered['location'], line=640)
+                    elif mutation == 'snippet-suffix':
+                        primary['snippet'] += '\nUNEXPECTED EXTRA FAILURE'
+                        rendered['message'] = primary['message'] + '\n\n' + primary['snippet'] + primary['stack'][len(primary['message']):]
+                    with self.assertRaises(ValueError):
+                        self.module.validate_report(changed, self.module.INFRA_CASES, role='infra')
+
+    def test_native_fixture_paths_and_positions_bind_source_not_report(self):
+        import re
+        for mutation in ['foreign-path', 'foreign-root-and-path', 'teardown-position', 'auto-position']:
+            with self.subTest(mutation=mutation):
+                changed = deepcopy(self.report)
+                for _, test in self.module.report_rows(changed):
+                    if test['expectedStatus'] != 'failed':
+                        continue
+                    result = test['results'][0]
+                    old = result['error']['location']['file']
+                    for error in [result['error'], *result['errors']]:
+                        if mutation.startswith('foreign'):
+                            error['location']['file'] = '/foreign/e2e/fixture-registry.ts'
+                            for key in ['stack', 'message']:
+                                if key in error: error[key] = error[key].replace(old, '/foreign/e2e/fixture-registry.ts')
+                        else:
+                            owner = 'FailClosedSyntheticFixtureRegistry.disposeOnce' if mutation == 'teardown-position' else 'Object.baseTest.extend.syntheticApi.auto'
+                            for key in ['stack', 'message']:
+                                if key in error:
+                                    error[key] = re.sub(r'(    at ' + re.escape(owner) + r' \([^\n]+):[0-9]+:[0-9]+\)', r'\1:1:1)', error[key])
+                if mutation == 'foreign-root-and-path': changed['config'] = {'rootDir': '/foreign/e2e'}
+                with self.assertRaises(ValueError):
+                    self.module.validate_report(changed, self.module.INFRA_CASES, role='infra')
+
+    def test_unknown_expected_failures_and_extra_controls_refused(self):
+        changed = deepcopy(self.report)
+        specs = changed['suites'][0]['specs']
+        positive = next(s for s in specs if s['tests'][0]['expectedStatus'] == 'passed')
+        negative = next(s for s in specs if s['tests'][0]['expectedStatus'] == 'failed')
+        positive['tests'] = deepcopy(negative['tests'])
+        with self.assertRaises(ValueError):
+            self.module.validate_report(changed, self.module.INFRA_CASES, role='infra')
+        changed = deepcopy(self.report)
+        changed['suites'][0]['specs'].append(deepcopy(negative))
+        with self.assertRaises(ValueError):
+            self.module.validate_report(changed, self.module.INFRA_CASES, role='infra')
+
+    def test_positive_infra_remains_pass_once_only(self):
+        for value in ['failed','skipped','timedOut','interrupted']:
+            with self.subTest(status=value):
+                changed=deepcopy(self.report)
+                changed['suites'][0]['specs'][0]['tests'][0]['results'][0]['status']=value
+                with self.assertRaises(ValueError):
+                    self.module.validate_report(changed,self.module.INFRA_CASES,role='infra')
+
+    def test_infrastructure_inventory_cannot_drop_or_add_cases(self):
+        module=self.module
+        rows=[*module.INFRA_CASES,*module.CSP_CASES,{'file':'app.spec.ts','title':'app','project':'chromium'}]
+        with tempfile.TemporaryDirectory() as temp:
+            out=Path(temp)
+            roles=module.partition(rows,out)
+            self.assertEqual(sum((module.identities(role) for role in roles), __import__('collections').Counter()), module.identities(rows))
+            for changed in [rows[1:], rows+[rows[0]], [dict(rows[0],title='unknown'),*rows[1:]]]:
+                with self.assertRaises(ValueError): module.partition(changed,out)
+
+    def test_dispatch_shares_original_budget_and_stops_on_every_role_failure(self):
+        from unittest.mock import patch
+        module=self.module
+        app=[{'file':'app.spec.ts','title':'app','project':'chromium'}]
+        with tempfile.TemporaryDirectory() as temp, patch.object(module,'OUT',Path(temp)), patch.object(module,'require_free_port') as free:
+            for failed in [None,'default-infra','default-vite']:
+                calls=[]
+                def execute(argv,name,timeout,env):
+                    calls.append((argv,name,timeout))
+                    if name==failed: return 37
+                    report=self.report if name=='default-infra' else {'suites':[{'specs':[{'file':'app.spec.ts','title':'app','tests':[{'projectName':'chromium','expectedStatus':'passed','status':'expected','results':[{'status':'passed','retry':0}]}]}]}]}
+                    Path(env['PLAYWRIGHT_JSON_OUTPUT_FILE']).write_text(json.dumps(report))
+                    return 0
+                with patch.object(module.time,'monotonic',side_effect=[10,12,110]):
+                    if failed:
+                        with self.assertRaises(RuntimeError): module.run_browser_roles({},execute,module.INFRA_CASES,app)
+                    else: module.run_browser_roles({},execute,module.INFRA_CASES,app)
+                self.assertEqual([c[1] for c in calls],['default-infra'] if failed=='default-infra' else ['default-infra','default-vite'])
+                self.assertEqual([c[2] for c in calls],[1198] if failed=='default-infra' else [1198,1100])
+                for argv,_,_ in calls:
+                    self.assertIn('--workers=1',argv); self.assertIn('--retries=0',argv)
+                self.assertIn('playwright.infra.config.ts',str(calls[0][0]))
+            self.assertGreaterEqual(free.call_count,10)
+
+    def test_role_collection_mismatch_stops_before_any_body(self):
+        from unittest.mock import patch
+        module=self.module
+        all_report=deepcopy(self.report)
+        for row in [*module.CSP_CASES,{'file':'app.spec.ts','title':'app','project':'chromium'}]:
+            all_report['suites'][0]['specs'].append({'file':row['file'],'title':row['title'],'tests':[{'projectName':row['project']}]})
+        with tempfile.TemporaryDirectory() as temp, patch.object(module,'OUT',Path(temp)):
+            calls=[]
+            def execute(argv,name,timeout,env):
+                calls.append(name)
+                Path(env['PLAYWRIGHT_JSON_OUTPUT_FILE']).write_text(json.dumps(all_report))
+                return 0
+            with self.assertRaises(ValueError): module.collect({},execute)
+            self.assertEqual(calls,['default-collection','default-infra-collection'])
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

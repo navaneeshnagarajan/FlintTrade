@@ -3,6 +3,7 @@ import { OrderApiError } from "@/services/api";
 import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { NATIVE_TARGET_NOT_READY_MESSAGE } from "@/services/brokerTargets";
 import type { PlaceOrderParams } from "@/types/api";
+import type { NotificationOriginDisclosure } from "@/components/NotificationCentre/notificationStore";
 
 const boundedText = z.string().min(1).max(256)
   .regex(/^[^\u0000-\u001f\u007f-\u009f\p{Bidi_Control}]+$/u);
@@ -42,6 +43,14 @@ export interface OrderErrorOrigin {
 export interface OrderErrorPresentation {
   title: string;
   body: string;
+  originDisclosure: NotificationOriginDisclosure;
+}
+
+/** Authorise disclosure from the immutable complete submission, never response/routing data. */
+export function capturedOrderOriginDisclosure(origin: OrderErrorOrigin): NotificationOriginDisclosure {
+  return originText(origin)
+    ? { version: 1, kind: "captured", account: `live:native:${origin.broker}:${origin.accountId}` }
+    : { version: 1, kind: "none" };
 }
 
 function originText(origin: OrderErrorOrigin): string {
@@ -58,6 +67,7 @@ function originText(origin: OrderErrorOrigin): string {
 export function nativeOrderErrorPresentation(error: unknown, origin: OrderErrorOrigin): OrderErrorPresentation | null {
   const unknown = (): OrderErrorPresentation => ({
     title: capturedOrderTitle("Order outcome unknown", origin.params),
+    originDisclosure: capturedOrderOriginDisclosure(origin),
     body: `Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.${originText(origin)}`,
   });
   if (!(error instanceof OrderApiError)) {
@@ -88,6 +98,7 @@ export function nativeOrderErrorPresentation(error: unknown, origin: OrderErrorO
     const summary = boundedText.safeParse(body?.message);
     return {
       title: capturedOrderTitle("Order refused", params),
+      originDisclosure: capturedOrderOriginDisclosure(origin),
       body: `Order refused before dispatch. No order was sent. No automatic retry.${originText(origin)}${summary.success ? ` Refusal: ${summary.data}.` : ""}${observations}`,
     };
   }

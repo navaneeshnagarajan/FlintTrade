@@ -1,8 +1,9 @@
 import type { Page } from "@playwright/test";
+import type { QueryClient } from "@tanstack/react-query";
 
-import { expect, test } from "./fixture-registry";
+import { expect, test, registerOperatorStatusProbes, type SyntheticFixtureRegistry, type SyntheticHandlerRegistration } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
-import { registerAuthStatus, registerExampleDeskReads, registerPracticeOrderPadReads } from "./visual/desk-mocks";
+import { registerAuthStatus, registerExampleDeskReads, registerPracticeOrderPadReads, registerSystemDiagnosticsRead } from "./visual/desk-mocks";
 import {
   GREETED_TODAY,
   RENDERED_LAYA_LABELS,
@@ -119,6 +120,15 @@ function tradingDeskLayout(): Record<string, unknown> {
 async function seedLayout(page: Page, storage: string): Promise<void> {
   await page.addInitScript((raw) => {
     localStorage.setItem("flinttrade:layouts", raw);
+    // /trade is a compatibility entry to the canonical Terminal owner. Seed
+    // its current presentation envelope with the same exact FlexLayout JSON;
+    // the retired workspace key above is deliberately not migrated by the app.
+    const saved = JSON.parse(raw) as {
+      state: { activeTabId: string; tabs: { id: string; serializedLayout: Record<string, unknown> }[] };
+    };
+    const active = saved.state.tabs.find(tab => tab.id === saved.state.activeTabId);
+    if (!active) throw new Error("visual layout has no active tab");
+    localStorage.setItem("flinttrade:app-layouts:v1:terminal", JSON.stringify({ Current: active.serializedLayout }));
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
     localStorage.setItem("flinttrade:tourComplete", "true");
   }, storage);
@@ -137,20 +147,26 @@ function screenKey(name: string, viewport: Viewport): string {
   return `${name}@${viewport.width}`;
 }
 
+async function statusScreenReady(page: Page): Promise<boolean> {
+  // Shared chrome mounts before the lazy default Terminal bodies. Keep the
+  // original Status prerequisite, but do not capture an empty tabpanel shell.
+  const required = [
+    page.getByTestId("system-status-btn"),
+    page.getByRole("tabpanel", { name: "Watchlist", exact: true })
+      .getByRole("button", { name: "Add symbol", exact: true }),
+    page.getByRole("tabpanel", { name: "Chart", exact: true })
+      .getByRole("button", { name: "Open chart display settings", exact: true }),
+    page.getByRole("tabpanel", { name: "Positions", exact: true })
+      .getByRole("region", { name: "Positions book", exact: true }),
+  ];
+  return (await Promise.all(required.map(locator => locator.isVisible()))).every(Boolean);
+}
+
 for (const viewport of VIEWPORTS) {
   test.describe(`visual ${viewport.width}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test("home", async ({ page, syntheticApi }) => {
-      await installDeterminism(page);
-      await seedExploreDemoSession(page);
-      registerExampleDeskReads(syntheticApi);
-      await page.goto("/home");
-      await settle(page, () => page.getByTestId("orders-card").getByText("BANKNIFTY").isVisible());
-      await reviewScreen(page, screenKey("home", viewport), `home-${viewport.width}`);
-    });
-
-    test("dashboard", async ({ page, syntheticApi }) => {
+    test("dashboard", async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       await seedExploreDemoSession(page);
       await seedLayout(
@@ -164,27 +180,27 @@ for (const viewport of VIEWPORTS) {
         const risk = await page.getByText("Risk", { exact: true }).first().isVisible();
         return positions && risk;
       });
-      await reviewScreen(page, screenKey("dashboard", viewport), `dashboard-${viewport.width}`);
+      await reviewScreen(page, screenKey("dashboard", viewport), `dashboard-${viewport.width}`, testInfo);
     });
 
-    test("status menu", async ({ page, syntheticApi }) => {
+    test("status menu", async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       await seedExploreDemoSession(page);
       registerExampleDeskReads(syntheticApi);
       await page.goto("/home");
-      await settle(page, () => page.getByTestId("system-status-btn").isVisible());
+      await settle(page, () => statusScreenReady(page));
       await page.getByTestId("system-status-btn").click();
       await settle(page, () => page.getByTestId("system-status-panel").isVisible());
-      await reviewScreen(page, screenKey("status-menu", viewport), `status-menu-${viewport.width}`);
+      await reviewScreen(page, screenKey("status-menu", viewport), `status-menu-${viewport.width}`, testInfo);
     });
 
     for (const status of ["ready", "down", "degraded"] as const) {
-      test(`laya ${status}`, async ({ page, syntheticApi }) => {
+      test(`laya ${status}`, async ({ page, syntheticApi }, testInfo) => {
         await installDeterminism(page);
         await seedExploreDemoSession(page);
         registerExampleDeskReads(syntheticApi, { laya: status });
         await page.goto("/home");
-        await settle(page, () => page.getByTestId("system-status-btn").isVisible());
+        await settle(page, () => statusScreenReady(page));
         await page.getByTestId("system-status-btn").click();
         await settle(page, () => page.getByTestId("system-status-panel").isVisible());
         await expectLaya(page, status);
@@ -192,6 +208,7 @@ for (const viewport of VIEWPORTS) {
           page,
           screenKey(`laya-${status}`, viewport),
           `laya-${status}-${viewport.width}`,
+          testInfo,
         );
       });
     }
@@ -229,17 +246,19 @@ async function openPracticeOrderPad(page: Page): Promise<void> {
 
 test.describe("order pad before a refusal", () => {
   for (const viewport of VIEWPORTS) {
-    test(`order pad before ${viewport.width}`, async ({ page, syntheticApi }) => {
+    test(`order pad before ${viewport.width}`, async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       await seedLayout(page, persistLayout("Practice Order Pad", "visual-order-pad", orderPadLayout()));
       registerExampleDeskReads(syntheticApi);
       registerPracticeOrderPadReads(syntheticApi);
+      registerSystemDiagnosticsRead(syntheticApi, LIVE_AUTHORITY_TOKEN);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await openPracticeOrderPad(page);
       await reviewScreen(
         page,
         screenKey("order-pad-before", viewport),
         `order-pad-before-${viewport.width}`,
+        testInfo,
       );
     });
   }
@@ -257,11 +276,12 @@ test.describe("order pad after a refusal", () => {
   });
 
   for (const viewport of VIEWPORTS) {
-    test(`order pad after ${viewport.width}`, async ({ page, syntheticApi }) => {
+    test(`order pad after ${viewport.width}`, async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       await seedLayout(page, persistLayout("Practice Order Pad", "visual-order-pad", orderPadLayout()));
       registerExampleDeskReads(syntheticApi);
       registerPracticeOrderPadReads(syntheticApi);
+      registerSystemDiagnosticsRead(syntheticApi, LIVE_AUTHORITY_TOKEN);
       syntheticApi.register({
         name: "reject Practice placement under Live JWT authority",
         method: "POST",
@@ -292,6 +312,7 @@ test.describe("order pad after a refusal", () => {
         page,
         screenKey("order-pad-after", viewport),
         `order-pad-after-${viewport.width}`,
+        testInfo,
       );
     });
   }
@@ -299,7 +320,7 @@ test.describe("order pad after a refusal", () => {
 
 test.describe("signed-out screens", () => {
   for (const viewport of VIEWPORTS) {
-    test(`sign-in ${viewport.width}`, async ({ page, syntheticApi }) => {
+    test(`sign-in ${viewport.width}`, async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       await page.addInitScript((today) => {
         sessionStorage.setItem("flinttrade:greeted-today", today);
@@ -314,10 +335,10 @@ test.describe("signed-out screens", () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto("/welcome");
       await settle(page, () => page.getByRole("heading", { name: "Welcome Back" }).isVisible());
-      await reviewScreen(page, screenKey("sign-in", viewport), `sign-in-${viewport.width}`);
+      await reviewScreen(page, screenKey("sign-in", viewport), `sign-in-${viewport.width}`, testInfo);
     });
 
-    test(`setup ${viewport.width}`, async ({ page, syntheticApi }) => {
+    test(`setup ${viewport.width}`, async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       registerAuthStatus(syntheticApi, {
         is_setup: false,
@@ -331,10 +352,10 @@ test.describe("signed-out screens", () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto("/setup");
       await settle(page, () => page.getByRole("heading", { name: "Set up FlintTrade" }).isVisible());
-      await reviewScreen(page, screenKey("setup", viewport), `setup-${viewport.width}`);
+      await reviewScreen(page, screenKey("setup", viewport), `setup-${viewport.width}`, testInfo);
     });
 
-    test(`two-operator ${viewport.width}`, async ({ page, syntheticApi }) => {
+    test(`two-operator ${viewport.width}`, async ({ page, syntheticApi }, testInfo) => {
       await installDeterminism(page);
       await page.addInitScript(() => {
         sessionStorage.setItem("flinttrade:auth-session", JSON.stringify({
@@ -355,7 +376,60 @@ test.describe("signed-out screens", () => {
       await settle(page, () => page.getByRole("heading", {
         name: "FlintTrade couldn't finish updating",
       }).isVisible());
-      await reviewScreen(page, screenKey("two-operator", viewport), `two-operator-${viewport.width}`);
+      await reviewScreen(page, screenKey("two-operator", viewport), `two-operator-${viewport.width}`, testInfo);
     });
   }
 });
+
+for (const [live, practice] of [["ready", "down"], ["down", "ready"]] as const) {
+  test(`R161 Explore rejects Live ${live} as the Practice ${practice} chip source`, async ({ page, syntheticApi }, info) => {
+    await installDeterminism(page);
+    await seedExploreDemoSession(page);
+    const declarations: SyntheticHandlerRegistration[] = [];
+    const observer: SyntheticFixtureRegistry = {
+      name: "independent heartbeat producer", register: registration => declarations.push(registration),
+      callCount: (method, path) => syntheticApi.callCount(method, path),
+      assertSatisfied: () => syntheticApi.assertSatisfied(), dispose: () => syntheticApi.dispose(),
+    };
+    registerOperatorStatusProbes(observer, { expectedCalls: { minimum: 1, maximum: 16 }, laya: live, layaPractice: practice });
+    const ping = declarations.find(registration => registration.path === "/ft-api/api/v1/ping");
+    expect(ping).toBeDefined();
+    registerExampleDeskReads({ ...observer, register: registration => syntheticApi.register(registration.path === "/ft-api/api/v1/ping" ? ping! : registration) });
+    const completedPing = page.waitForResponse(response => response.request().method() === "GET"
+      && new URL(response.url()).pathname === "/ft-api/api/v1/ping" && response.status() === 200);
+    await page.goto("/home");
+    await settle(page, () => page.getByTestId("system-status-btn").isVisible());
+    await page.getByTestId("system-status-btn").click();
+    const response = await completedPing;
+    expect(await response.finished()).toBeNull();
+    const deliveredHeartbeat: unknown = await response.json();
+    const chip = page.getByTestId("laya-surface");
+    let application: unknown;
+    await settle(page, async () => {
+      application = await page.evaluate(async () => {
+        // Constant read-only module paths; no data is interpolated into code.
+        const importModule = new Function("path", "return import(path)") as (path: string) => Promise<Record<string, unknown>>;
+        const { queryClient } = await importModule("/src/providers/QueryProvider.tsx") as { queryClient: QueryClient };
+        const { useOperatorSignalStore } = await importModule("/src/stores/operatorSignalStore.ts") as {
+          useOperatorSignalStore: { getState: () => { localPing: string; decisionStatus: string | null; layaPracticeStatus: string | null; layaEpoch: number } };
+        };
+        const query = queryClient.getQueryState<{ probe: { localPing: string; laya?: string | null; layaPractice?: string | null }; epoch: number }>(["operator", "ping"]);
+        const signals = useOperatorSignalStore.getState();
+        const sample = query?.data;
+        return { query, signals, applied: query?.status === "success" && query.fetchStatus === "idle"
+          && query.dataUpdatedAt > 0 && sample?.epoch === signals.layaEpoch
+          && sample.probe.localPing === "ok" && signals.localPing === sample.probe.localPing
+          && signals.decisionStatus === sample.probe.laya
+          && signals.layaPracticeStatus === sample.probe.layaPractice };
+      });
+      // Down is also the initial value. Require actual completed-query application
+      // before accepting the unchanged rendered claim; never assign derived state.
+      return (application as { applied: boolean }).applied;
+    });
+    await info.attach("completed-heartbeat-application", { body: JSON.stringify({ deliveredHeartbeat, application, expected: RENDERED_LAYA_LABELS[practice], rendered: await chip.innerText(), pingCalls: syntheticApi.callCount("GET", "/ft-api/api/v1/ping") }), contentType: "application/json" });
+    await expect(chip).toHaveText(RENDERED_LAYA_LABELS[practice]);
+    await expect(chip).not.toHaveText(RENDERED_LAYA_LABELS[live]);
+    expect(syntheticApi.callCount("GET", "/ft-api/api/v1/system/diagnostics")).toBe(0);
+    await info.attach("independent-heartbeat-selector", { body: JSON.stringify({ live, practice, mode: "explore", rendered: await chip.innerText(), diagnostics: syntheticApi.callCount("GET", "/ft-api/api/v1/system/diagnostics") }), contentType: "application/json" });
+  });
+}

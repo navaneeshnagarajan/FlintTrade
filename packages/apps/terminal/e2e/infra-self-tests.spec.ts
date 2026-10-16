@@ -1346,3 +1346,113 @@ journeyTest("the client-error guard is automatic even when syntheticApi is not r
   await page.evaluate(() => console.error("automatic guard evidence"));
   await consoleError;
 });
+
+// R161: producer-contract tracer bullets. Registrations run through the native
+// registry, then only the named endpoint is isolated for this contract seam.
+import { LIVE_TOKEN as DIAGNOSTIC_TOKEN, registerDeskReads as registerDiagnosticDeskReads } from "./order-flow-fixtures";
+import { registerExampleDeskReads as registerDiagnosticExampleReads, registerSystemDiagnosticsRead } from "./visual/desk-mocks";
+import normalFactoryDiagnostics from "./visual/system-diagnostics.normal-factory.json" with { type: "json" };
+
+const DIAGNOSTIC_PATH = "/ft-api/api/v1/system/diagnostics";
+
+async function isolatedRegistration(page: Page, install: (registry: SyntheticFixtureRegistry) => void, path: string) {
+  const registry = await createSyntheticFixtureRegistry(page, { name: "producer contract", frontendOrigin: FRONTEND_ORIGIN });
+  const declarations: SyntheticHandlerRegistration[] = [];
+  install({
+    name: "declaration observer", register: registration => declarations.push(registration),
+    callCount: (method, target) => registry.callCount(method, target),
+    assertSatisfied: () => registry.assertSatisfied(), dispose: () => registry.dispose(),
+  });
+  const selected = declarations.filter(registration => registration.path === path);
+  expect(selected, `exact producer declaration for ${path}`).toHaveLength(1);
+  registry.register(selected[0]!);
+  return registry;
+}
+
+async function fetchDiagnostic(page: Page, options: { method?: string; suffix?: string; token?: string; apiKey?: string } = {}) {
+  return page.evaluate(async ({ url, options }) => {
+    const headers: Record<string, string> = { authorization: `Bearer ${options.token}` };
+    if (options.apiKey) headers["x-api-key"] = options.apiKey;
+    const response = await fetch(url, { method: options.method ?? "GET", headers, ...(options.method === "POST" ? { body: "{}" } : {}) });
+    return response.json();
+  }, { url: `${FRONTEND_ORIGIN}${DIAGNOSTIC_PATH}${options.suffix ?? ""}`, options: { ...options, token: options.token ?? DIAGNOSTIC_TOKEN } });
+}
+
+baseTest("R161 owning authenticated desk registers current exact diagnostics", async ({ page }) => {
+  const registry = await isolatedRegistration(page, registry => registerDiagnosticDeskReads(registry), DIAGNOSTIC_PATH);
+  try {
+    expect(await fetchDiagnostic(page)).toEqual(normalFactoryDiagnostics);
+    expect(await registry.retireRead(DIAGNOSTIC_PATH)).toEqual({ calls: 1, completed: 1, cancelled: 0, pending: 0, failed: 0 });
+  } finally { await registry.dispose(); }
+});
+
+baseTest("R161 Example heartbeat targets Practice without granting Live readiness", async ({ page }) => {
+  const registry = await isolatedRegistration(page, registry => registerDiagnosticExampleReads(registry, { laya: "ready" }), "/ft-api/api/v1/ping");
+  try {
+    expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", laya: "down", laya_practice: "ready" });
+  } finally { await registry.dispose(); }
+});
+
+baseTest("R161 diagnostics rejects unused registration", async ({ page }) => {
+  const registry = await createRegistry(page, "unused current diagnostic");
+  registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+  await expect(registry.dispose()).rejects.toThrow(/read phase usage mismatch|unused|usage mismatch/);
+});
+
+baseTest("R161 diagnostics missing registration remains fatal", async ({ page }) => {
+  const registry = await createRegistry(page, "missing current diagnostic");
+  await expect(fetchDiagnostic(page)).rejects.toThrow();
+  await expect(registry.dispose()).rejects.toThrow(/unexpected request|path mismatch/);
+});
+
+baseTest("R161 diagnostics rejects a second fulfilled startup GET", async ({ page }) => {
+  const registry = await createSyntheticFixtureRegistry(page, { name: "extra current diagnostic", frontendOrigin: FRONTEND_ORIGIN });
+  registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+  expect(await fetchDiagnostic(page)).toEqual(normalFactoryDiagnostics);
+  expect(await fetchDiagnostic(page)).toEqual(normalFactoryDiagnostics);
+  await expect(registry.retireRead(DIAGNOSTIC_PATH)).rejects.toThrow(/read phase usage mismatch/);
+  await expect(registry.dispose()).rejects.toThrow(/read phase usage mismatch/);
+});
+
+for (const [name, options] of [
+  ["POST with body", { method: "POST" }],
+  ["query suffix", { suffix: "?account_id=foreign" }],
+  ["wrong Bearer", { token: "synthetic-wrong-authority" }],
+  ["API key", { apiKey: "synthetic-forbidden-key" }],
+] as const) {
+  baseTest(`R161 diagnostics rejects ${name}`, async ({ page }) => {
+    const registry = await createRegistry(page, name);
+    registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+    await expect(fetchDiagnostic(page, options)).rejects.toThrow();
+    await expect(registry.dispose()).rejects.toThrow(/method mismatch|path mismatch|handler error/);
+  });
+}
+
+baseTest("R161 diagnostics retirement grants no recovery allowance", async ({ page }) => {
+  const registry = await createSyntheticFixtureRegistry(page, { name: "retired diagnostic", frontendOrigin: FRONTEND_ORIGIN });
+  registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+  await fetchDiagnostic(page);
+  await registry.retireRead(DIAGNOSTIC_PATH);
+  await expect(fetchDiagnostic(page)).rejects.toThrow();
+  await expect(registry.dispose()).rejects.toThrow(/unexpected request|path mismatch/);
+});
+
+for (const live of ["ready", "degraded", "down"] as const) {
+  for (const practice of ["ready", "degraded", "down"] as const) {
+    baseTest(`R161 ping keeps Live ${live} independent of Practice ${practice}`, async ({ page }) => {
+      const registry = await isolatedRegistration(page, registry => registerOperatorStatusProbes(registry, { expectedCalls: 1, laya: live, layaPractice: practice }), "/ft-api/api/v1/ping");
+      try {
+        expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", laya: live, laya_practice: practice });
+      } finally { await registry.dispose(); }
+    });
+  }
+}
+
+for (const options of [{}, { laya: "ready" as const }, { layaPractice: "degraded" as const }]) {
+  baseTest(`R161 ping does not invent an omitted field ${JSON.stringify(options)}`, async ({ page }) => {
+    const registry = await isolatedRegistration(page, registry => registerOperatorStatusProbes(registry, { expectedCalls: 1, ...options }), "/ft-api/api/v1/ping");
+    try {
+      expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", ...(options.laya ? { laya: options.laya } : {}), ...(options.layaPractice ? { laya_practice: options.layaPractice } : {}) });
+    } finally { await registry.dispose(); }
+  });
+}

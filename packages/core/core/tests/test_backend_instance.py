@@ -670,6 +670,7 @@ finally:
 
 
 _FORKED_PRELOADED_WSGI_REQUEST = """
+import atexit
 import os
 import sys
 from pathlib import Path
@@ -688,37 +689,62 @@ def probe():
     route_calls.append(os.getpid())
     return "served"
 
-app_module._APP_CACHE = None
-app_module._APP_CACHE_PID = None
-app_module._WSGI_BACKEND_LEASE = None
-app_module.create_flask_app = lambda **kwargs: flask_app
-preloaded_app = app_module._get_wsgi_app(shutdown_callback=lambda: None)
-owner_response = preloaded_app.test_client().get("/probe")
-if owner_response.status_code != 200 or route_calls != [os.getpid()]:
-    app_module._WSGI_BACKEND_LEASE.release()
-    raise SystemExit(40)
-route_calls.clear()
-child_pid = os.fork()
+def create_app(*, backend_lease_proof):
+    flask_app.config["BACKEND_LEASE_PROOF"] = backend_lease_proof
+    return flask_app
 
-if child_pid == 0:
-    try:
-        response = preloaded_app.test_client().get("/probe")
-        if response.status_code != 503:
-            os._exit(41)
-        if b"inherited WSGI app" not in response.data:
-            os._exit(42)
-        if route_calls:
-            os._exit(43)
-    except BaseException:
-        os._exit(44)
-    os._exit(0)
+# Retain the real entrypoint's shutdown, not just its underlying lock.
+shutdown_callbacks = []
+register = atexit.register
 
-_, status = os.waitpid(child_pid, 0)
+def record_shutdown(callback, *args, **kwargs):
+    result = register(callback, *args, **kwargs)
+    if callback.__name__ == "stop_at_exit":
+        shutdown_callbacks.append(callback)
+    return result
+
+app_module.create_flask_app = create_app
+atexit.register = record_shutdown
 try:
+    preloaded_app = app_module._get_wsgi_app(shutdown_callback=lambda: None)
+finally:
+    atexit.register = register
+
+try:
+    assert len(shutdown_callbacks) == 1
+    owner_response = preloaded_app.test_client().get("/probe")
+    if owner_response.status_code != 200 or route_calls != [os.getpid()]:
+        raise SystemExit(40)
+    route_calls.clear()
+    child_pid = os.fork()
+
+    if child_pid == 0:
+        try:
+            response = preloaded_app.test_client().get("/probe")
+            if response.status_code != 503:
+                os._exit(41)
+            if b"inherited WSGI app" not in response.data:
+                os._exit(42)
+            if route_calls:
+                os._exit(43)
+        except BaseException:
+            os._exit(44)
+        os._exit(0)
+
+    _, status = os.waitpid(child_pid, 0)
     if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
         raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 45)
 finally:
-    app_module._WSGI_BACKEND_LEASE.release()
+    # Drain the watcher and all owners while the lease proof is still live.
+    # Only retire this exact atexit registration after its real cleanup succeeds.
+    for shutdown in shutdown_callbacks:
+        shutdown()
+        # Recovery releases custody before the managed host-notification tail.
+        worker = preloaded_app.extensions.get("flinttrade.wsgi_stop_thread")
+        if worker is not None:
+            worker.join(5)
+            assert not worker.is_alive(), "managed WSGI shutdown did not finish"
+        atexit.unregister(shutdown)
 """
 
 
@@ -1215,7 +1241,12 @@ def test_preloaded_wsgi_callable_rejects_a_real_forked_request(tmp_path: Path) -
         check=False,
     )
 
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "Exception ignored in atexit" not in result.stderr
+    assert "Exception in thread" not in result.stderr
+    assert "Fatal Python error" not in result.stderr
 
 
 @pytest.mark.unit
@@ -1332,3 +1363,180 @@ def test_desktop_serve_retains_lease_when_shutdown_is_incomplete(
         desktop.serve(5100)
 
     assert events == ["acquire", "serve", "retain"]
+
+
+_FORKED_WSGI_LIFECYCLE_OBSERVER = r"""
+import atexit
+import hashlib
+import json
+import sys
+import threading
+from pathlib import Path
+
+import flinttrade_core.app as core
+from flinttrade_core.backend_instance import require_backend_lease_proof
+
+source, workspace, fail_body = sys.argv[1:]
+sys.argv = ["fork-lifecycle", workspace]
+callbacks = []
+register = atexit.register
+
+def record_registration(callback, *args, **kwargs):
+    registered = register(callback, *args, **kwargs)
+    if callback.__name__ == "stop_at_exit":
+        callbacks.append(callback)
+    return registered
+
+atexit.register = record_registration
+get_app = core._get_wsgi_app
+state = {}
+events = []
+release_request = threading.Event()
+request_released = threading.Event()
+canonical_entered = threading.Event()
+managed_tail_entered = threading.Event()
+fixture_join_entered = threading.Event()
+retry = core._WSGIStartupRecovery.retry_recovery
+
+def observe_retry(owner, **kwargs):
+    if threading.current_thread() is threading.main_thread() and owner._candidate is state.get("app"):
+        # Start the real managed worker with live custody, then hold its real
+        # request drain until the canonical fixture shutdown enters recovery.
+        state["watch"]._on_revoked()
+        assert release_request.wait(5)
+        assert state["lease"].recovery_owner is owner
+        worker = state["app"].extensions["flinttrade.wsgi_stop_thread"]
+        join = worker.join
+
+        def observe_join(timeout=None):
+            # Signal the actual fixture wait; never supply that wait ourselves.
+            fixture_join_entered.set()
+            return join(timeout)
+
+        worker.join = observe_join
+        canonical_entered.set()
+        retry(owner, **kwargs)
+        assert managed_tail_entered.wait(5)
+        assert worker.is_alive(), "held host-notification tail must still be live"
+    else:
+        retry(owner, **kwargs)
+
+core._WSGIStartupRecovery.retry_recovery = observe_retry
+
+def observe_app(**kwargs):
+    shutdown = kwargs["shutdown_callback"]
+    def stopped():
+        managed_tail_entered.set()
+        assert fixture_join_entered.wait(5)
+        events.append("managed-worker-stopped")
+        shutdown()
+    kwargs["shutdown_callback"] = stopped
+    app = get_app(**kwargs)
+    lease = core._WSGI_BACKEND_LEASE
+    proof = lease.proof
+    watch = app.extensions["flinttrade.backend_lease_watch"]
+    tracker = core._RuntimeRequestTracker()
+    admission = tracker.try_admit()
+    assert admission is not None
+    app.config["RUNTIME_REQUEST_TRACKER"] = tracker
+    wait = tracker._condition.wait
+
+    def observe_wait(timeout=None):
+        assert require_backend_lease_proof(proof) is proof
+        assert not lease._released
+        assert not watch._thread.is_alive()
+        events.append("live-proof-at-request-drain")
+        release_request.set()
+        return wait(timeout)
+
+    tracker._condition.wait = observe_wait
+
+    def finish_request():
+        if canonical_entered.wait(5):
+            with tracker._condition:
+                admission.release()
+                request_released.set()
+
+    request = threading.Thread(target=finish_request, name="fork-fixture-request")
+    request.start()
+    release = lease.release
+
+    def guarded_release():
+        assert not watch._thread.is_alive(), "fixture released lease before watcher drain"
+        assert request_released.is_set(), "fixture released lease before request drain"
+        assert "live-proof-at-request-drain" in events
+        assert require_backend_lease_proof(proof) is proof
+        owner = app.extensions["flinttrade.wsgi_shutdown_owner"]
+        assert all(worker._thread is None or not worker._thread.is_alive()
+                   for worker in owner._workers.values())
+        events.append("owners-drained-before-lease-release")
+        release()
+
+    lease.release = guarded_release
+    state.update(app=app, lease=lease, watch=watch, admission=admission, request=request,
+                 original_release=release)
+    return app
+
+core._get_wsgi_app = observe_app
+body_failed = False
+try:
+    if fail_body == "yes":
+        source = source.replace("route_calls.clear()", "raise AssertionError('injected body assertion')", 1)
+    try:
+        exec(compile(source, "<preloaded-wsgi-fixture>", "exec"), {"__name__": "__main__"})
+    except AssertionError as error:
+        if str(error) != "injected body assertion":
+            raise
+        body_failed = True
+    assert body_failed == (fail_body == "yes")
+    assert state["lease"]._released
+    assert not state["watch"]._thread.is_alive()
+    worker = state["app"].extensions.get("flinttrade.wsgi_stop_thread")
+    assert worker is not None and not worker.is_alive(), "fixture returned before managed shutdown completed"
+    assert fixture_join_entered.is_set()
+    assert events == ["live-proof-at-request-drain", "owners-drained-before-lease-release", "managed-worker-stopped"]
+    print(json.dumps({"lifecycle": events, "body_failed": body_failed,
+                      "app": core.__file__, "app_sha256": hashlib.sha256(Path(core.__file__).read_bytes()).hexdigest(),
+                      "fixture_sha256": hashlib.sha256(source.encode()).hexdigest()}), flush=True)
+finally:
+    # The negative control must also release its real request and join its owner.
+    canonical_entered.set()
+    fixture_join_entered.set()
+    if state:
+        state["admission"].release()
+        state["request"].join(5)
+        assert not state["request"].is_alive()
+        if not state["lease"]._released:
+            state["lease"].release = state["original_release"]
+            retry(core._WSGIStartupRecovery(state["app"], state["lease"]), timeout=5)
+        worker = state["app"].extensions.get("flinttrade.wsgi_stop_thread")
+        if worker is not None:
+            worker.join(5)
+            assert not worker.is_alive()
+        for callback in callbacks:
+            # Rescue completed before retiring the exact registration.
+            atexit.unregister(callback)
+    atexit.register = register
+"""
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork semantics")
+@pytest.mark.parametrize("fail_body", [False, True])
+def test_preloaded_wsgi_fixture_drains_before_releasing_lease(tmp_path: Path, fail_body: bool) -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", _FORKED_WSGI_LIFECYCLE_OBSERVER,
+         _FORKED_PRELOADED_WSGI_REQUEST, str(tmp_path), "yes" if fail_body else "no"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "owners-drained-before-lease-release" in result.stdout
+    assert "Exception ignored in atexit" not in result.stderr
+    assert "Exception in thread" not in result.stderr
+    assert "Fatal Python error" not in result.stderr

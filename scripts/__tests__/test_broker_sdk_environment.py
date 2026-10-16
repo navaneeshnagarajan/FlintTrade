@@ -40,7 +40,7 @@ def test_pin_rejects_nonofficial_repository(tmp_path: Path, monkeypatch: pytest.
         "[[broker]]\n"
         'name = "kotakneoapi"\n'
         'version = "3.0.9"\n'
-        'source_commit = "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"\n'
+        'source_commit = "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"\n'
         'homepage = "https://example.invalid/Kotak-Neo/kotak-neo-python"\n',
         encoding="utf-8",
     )
@@ -94,13 +94,13 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(
             return subprocess.CompletedProcess(argv, 0, "", "")
         assert argv[5:9] == ["--break-system-packages", "--no-build-isolation", "--no-deps", "--reinstall"]
         assert argv[9:] == [
-            ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@a3233062095ad9eee574f6e5696e1f9f3aa7c0c8")
+            ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3")
         ]
         state["kotakneoapi"] = {
             "version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True,
             "direct_url": {
                 "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-                "vcs_info": {"vcs": "git", "commit_id": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8", "requested_revision": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"},
+                "vcs_info": {"vcs": "git", "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"},
             },
         }
         state["namespace_owners"] = ["kotakneoapi"]
@@ -163,7 +163,7 @@ def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pyt
                             "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
                             "vcs_info": {
                                 "vcs": "git",
-                                "commit_id": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8", "requested_revision": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8",
+                                "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3",
                             },
                         },
                     },
@@ -204,7 +204,7 @@ def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pyt
         "--no-build-isolation",
         "--no-deps",
         "--force-reinstall",
-        ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"),
+        ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"),
     ]
 
 
@@ -304,7 +304,7 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypat
         json.dumps(
             {
                 "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-                "vcs_info": {"vcs": "git", "commit_id": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8", "requested_revision": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"},
+                "vcs_info": {"vcs": "git", "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"},
             }
         )
     )
@@ -313,7 +313,7 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypat
     from scripts import broker_sdk_environment as sdk_environment
 
     # Synthetic complete source identity; namespace evidence remains RECORD-only.
-    pin = {"version": "3.0.9", "source_commit": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8",
+    pin = {"version": "3.0.9", "source_commit": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3",
            "source_url": sdk_environment.KOTAK_REPO, "build_files": {
                "neo_api_client/__init__.py": hashlib.sha256((package / "__init__.py").read_bytes()).hexdigest()}}
     monkeypatch.setattr(sdk_environment, "_pins", lambda _names: {"kotakneoapi": pin})
@@ -375,7 +375,7 @@ def test_repair_refuses_unproven_namespace_ownership() -> None:
 
     valid_provenance = {
         "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-        "vcs_info": {"vcs": "git", "commit_id": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8", "requested_revision": "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"},
+        "vcs_info": {"vcs": "git", "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"},
     }
     state = {"kotakneoapi": {"version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": valid_provenance}}
 

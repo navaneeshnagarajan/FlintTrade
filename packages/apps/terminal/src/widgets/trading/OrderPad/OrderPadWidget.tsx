@@ -50,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { searchSymbol, placeOrder, getSymbol, OrderApiError } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
+import { capturedOrderOriginDisclosure } from "@/lib/orderErrorPresentation";
 import { useMargin } from "@/hooks/useMargin";
 import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
@@ -958,6 +959,9 @@ function OrderPadWidget(props: WidgetProps) {
       emitNotification({
         category: "order",
         accountScopeKey: submissionScope,
+        ...(submissionMode === "live" ? { originDisclosure: capturedOrderOriginDisclosure({
+          broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
+        }) } : {}),
         ...(scopeStillCurrent ? {} : { skipAccountRefresh: true }),
         title: exitWhileDown
           ? exitWhileDownText
@@ -983,6 +987,7 @@ function OrderPadWidget(props: WidgetProps) {
       if (!isOperatorIncidentScopeCurrent(incidentScope) || submissionScope !== resolveDataScope({ ...useBrokerStore.getState(), mode: useModeStore.getState().mode })) {
         emitNotification({
           category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true,
+          originDisclosure: presentation?.originDisclosure ?? { version: 1, kind: "none" },
           title: presentation?.title ?? capturedOrderTitle("Order response", params),
           body: presentation?.body ?? "Order response unavailable. Reconcile the original account.",
         });
@@ -1035,6 +1040,7 @@ function OrderPadWidget(props: WidgetProps) {
       emitNotification({
         category: "order",
         ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+        ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
         title: capturedOrderTitle("Order failed", params),
         body: msg,
         // A retryable failure (timeout, transient connection) sends the operator
@@ -1315,7 +1321,7 @@ function OrderPadWidget(props: WidgetProps) {
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
   const btnColor = isBuy
-    ? "bg-profit hover:bg-profit/85 active:bg-profit/70 text-white"
+    ? "bg-profit-action enabled:hover:bg-profit-hover enabled:active:bg-profit-pressed text-profit-foreground motion-reduce:transition-none"
     : "bg-loss hover:bg-loss/85 active:bg-loss/70 text-white";
 
   return (

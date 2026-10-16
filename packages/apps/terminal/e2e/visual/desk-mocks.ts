@@ -79,7 +79,9 @@ export function registerExampleDeskReads(
 ): void {
   registerOperatorStatusProbes(registry, {
     expectedCalls: { minimum: 1, maximum: 16 },
-    laya: options.laya,
+    // Example is Explore: paint its Practice sidecar, never grant Live readiness.
+    laya: options.laya === undefined ? undefined : "down",
+    layaPractice: options.laya,
   });
   registerExploreAdvisorStatusProbe(registry, { expectedCalls: { minimum: 1, maximum: 16 } });
   registerAuthStatus(registry, { ...AUTH_READY }, "Mode menu Live-arm status");

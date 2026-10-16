@@ -149,13 +149,13 @@ def test_repo_kotak_pin_is_the_reviewed_runtime_and_release() -> None:
 
     assert neo["version"] == "3.0.9"
     assert neo["release_version"] == "3.0.7"
-    assert neo["source_commit"] == "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
-    assert neo["source_tree"] == "bf140dfeedf886b0269d627460a4d08cb62d8fe2"
+    assert neo["source_commit"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
+    assert neo["source_tree"] == "b4a597ca4fb3a2c1a591907e00e80e35a7ee1533"
     assert neo["release_tag"] == "v3.0.7"
     assert neo["release_commit"] == "53cccc45fe56a193b30ffce3c03c71c5c0378538"
     assert runtime["source"]["git"] == (
         "https://github.com/Kotak-Neo/kotak-neo-python.git?rev="
-        "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8#a3233062095ad9eee574f6e5696e1f9f3aa7c0c8"
+        "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3#0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
     )
 
 

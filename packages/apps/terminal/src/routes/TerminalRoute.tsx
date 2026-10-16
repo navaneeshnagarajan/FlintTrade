@@ -35,6 +35,7 @@ import {
   detachedPanelProps,
   emptyWorkspaceJson,
   renderWorkspaceTabExtras,
+  renderWorkspaceTabSetExtras,
   tryCreateWorkspaceModel,
 } from "@/layout/flexLayoutAdapter";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
@@ -952,6 +953,7 @@ export default function TerminalRoute() {
                       model={model}
                       factory={flexLayoutFactory}
                       onRenderTab={renderWorkspaceTabExtras}
+                      onRenderTabSet={renderWorkspaceTabSetExtras}
                       realtimeResize
                     />
                   )}

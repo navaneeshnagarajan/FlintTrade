@@ -18,12 +18,13 @@ import {
   getChannelMembership,
 } from "@/services/fdc3/channels";
 import { Model } from "flexlayout-react";
-import type { IJsonModel, ITabRenderValues, TabNode } from "flexlayout-react";
+import type { IJsonModel, ITabRenderValues, ITabSetRenderValues, TabSetNode, TabNode } from "flexlayout-react";
 
 import {
   countTabs,
   createWorkspaceApi,
   renderWorkspaceTabExtras,
+  renderWorkspaceTabSetExtras,
   createWorkspaceModel,
   detachedPanelProps,
   emptyWorkspaceJson,
@@ -240,7 +241,10 @@ describe("renderWorkspaceTabExtras (channel dot)", () => {
     const renderValues: ITabRenderValues = { leading: null, content: "Chart", buttons: [] };
     renderWorkspaceTabExtras(tab, renderValues);
     expect(renderValues.buttons).toHaveLength(1);
-    render(<Provider store={store}>{renderValues.buttons}</Provider>);
+    const tabsetValues: ITabSetRenderValues = { leading: null, buttons: [], stickyButtons: [], overflowPosition: undefined };
+    renderWorkspaceTabSetExtras(tab.getParent() as TabSetNode, tabsetValues);
+    expect(tabsetValues.buttons).toHaveLength(1);
+    render(<Provider store={store}>{renderValues.buttons}{tabsetValues.buttons}</Provider>);
     return { model, tab, store, panelId };
   }
 

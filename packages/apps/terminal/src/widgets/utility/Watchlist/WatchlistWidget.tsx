@@ -24,7 +24,7 @@
  *   SymbolRow.tsx     — individual watchlist row
  */
 
-import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, memo } from "react";
 import { Plus, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
@@ -72,6 +72,29 @@ function WatchlistWidget({ params, api }: WidgetProps) {
   const [renamingIdx, setRenamingIdx] = useState<number | null>(null);
   const [viewSettings, setViewSettings] = useState(() => loadViewSettings());
   const menuRef                       = useRef<HTMLDivElement | null>(null);
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const renameReturn = useRef<string | null>(null);
+  const focusAfterTabAction = useRef(false);
+  const tabId = (id: string) => `${api.id}-watchlist-tab-${id}`;
+  const panelId = `${api.id}-watchlist-panel`;
+
+  useEffect(() => {
+    if (renamingIdx === null && renameReturn.current) {
+      tabRefs.current.get(renameReturn.current)?.focus();
+      renameReturn.current = null;
+    }
+  }, [renamingIdx]);
+
+  useLayoutEffect(() => {
+    if (!focusAfterTabAction.current) return;
+    // Wait for React to attach the committed duplicate/survivor's owned ref.
+    // The deleted menu invoker is deliberately never the return target.
+    const target = tabRefs.current.get(tabs[activeTabIdx]?.id);
+    if (target) {
+      target.focus();
+      focusAfterTabAction.current = false;
+    }
+  }, [tabs, activeTabIdx]);
 
   // FDC3 channel membership: seeded from panel config (no `channel` key
   // means the default red channel — exactly what the legacy
@@ -131,6 +154,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
 
   const handleDuplicateTab = useCallback((idx: number) => {
     if (tabs.length >= MAX_TABS) return;
+    focusAfterTabAction.current = true;
     setTabs((prev) => {
       const src = prev[idx];
       if (!src) return prev;
@@ -149,6 +173,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
 
   const handleDeleteTab = useCallback((idx: number) => {
     if (tabs.length <= 1) return;
+    focusAfterTabAction.current = true;
     setTabs((prev) => prev.filter((_, i) => i !== idx));
     setActiveTabIdx((prev) => Math.min(prev, tabs.length - 2));
     setTabCtxMenu(null);
@@ -444,23 +469,33 @@ function WatchlistWidget({ params, api }: WidgetProps) {
       {/* TAB BAR */}
       <div
         className="flex items-center gap-1 px-2 py-1 border-b border-border-default bg-surface-card shrink-0 overflow-x-auto scrollbar-none"
-        role="tablist"
-        aria-label="Watchlist tabs"
       >
-        {tabs.map((tab, idx) => (
-          <div key={tab.id} className="shrink-0 flex items-center">
-            {renamingIdx === idx ? (
-              <RenameInput
-                initialValue={tab.name}
-                onConfirm={(name) => handleRenameTab(idx, name)}
-                onCancel={() => setRenamingIdx(null)}
-              />
-            ) : (
+        <div role="tablist" aria-label="Watchlist tabs" className="contents">
+        {tabs.map((tab, idx) => renamingIdx === idx ? null : (
+          <div key={tab.id} className="shrink-0 flex items-center" style={{ order: idx }}>
               <button
+                type="button"
+                id={tabId(tab.id)}
+                ref={(element) => { if (element) tabRefs.current.set(tab.id, element); else tabRefs.current.delete(tab.id); }}
                 role="tab"
                 aria-selected={idx === activeTabIdx}
+                aria-controls={panelId}
+                tabIndex={idx === activeTabIdx ? 0 : -1}
                 onClick={() => setActiveTabIdx(idx)}
                 onContextMenu={(e) => openTabCtxMenu(e, idx)}
+                onKeyDown={(e) => {
+                  const next = e.key === "ArrowRight" ? (idx + 1) % tabs.length
+                    : e.key === "ArrowLeft" ? (idx + tabs.length - 1) % tabs.length
+                    : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
+                  if (next !== null) {
+                    e.preventDefault();
+                    tabRefs.current.get(tabs[next].id)?.focus();
+                  } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTabCtxMenu({ x: rect.left, y: rect.bottom, idx });
+                  }
+                }}
                 className={`text-xs px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
                   idx === activeTabIdx
                     ? "bg-accent/20 text-accent border border-accent/40"
@@ -470,15 +505,27 @@ function WatchlistWidget({ params, api }: WidgetProps) {
               >
                 {tab.name}
               </button>
-            )}
           </div>
         ))}
+        </div>
+
+        {renamingIdx !== null && tabs[renamingIdx] && (
+          <div className="shrink-0 flex items-center" style={{ order: renamingIdx }}>
+          <RenameInput
+            label={`Rename ${tabs[renamingIdx].name}`}
+            initialValue={tabs[renamingIdx].name}
+            onConfirm={(name) => handleRenameTab(renamingIdx, name)}
+            onCancel={() => setRenamingIdx(null)}
+          />
+          </div>
+        )}
 
         {tabs.length < MAX_TABS && (
           <button
             onClick={handleAddTab}
             title="New watchlist"
             aria-label="Add watchlist tab"
+            style={{ order: tabs.length }}
             className="shrink-0 w-5 h-5 flex items-center justify-center text-text-muted hover:text-accent hover:bg-surface-hover rounded transition-colors border border-transparent hover:border-accent/30"
           >
             <Plus size={10} />
@@ -487,7 +534,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
       </div>
 
       {/* SYMBOL LIST */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" role="tabpanel" id={panelId} aria-labelledby={activeTab ? tabId(activeTab.id) : undefined}>
         {watchlist.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-3 px-4">
             <TrendingUp size={24} className="text-text-muted" />
@@ -508,47 +555,49 @@ function WatchlistWidget({ params, api }: WidgetProps) {
         ) : (
           <>
             <div
-              role="row"
+              role="group"
+              aria-label="Watchlist columns"
               className="flex items-center gap-2 px-2 py-1 border-b border-border-default bg-surface-card shrink-0"
             >
-              <span role="columnheader" className="min-w-0 flex-1 text-xxs uppercase tracking-wider text-text-muted">
+              <span className="min-w-0 flex-1 text-xxs uppercase tracking-wider text-text-muted">
                 Symbol
               </span>
               {visible.has("sparkline") && (
-                <span role="columnheader" className="w-10 shrink-0 text-center text-xxs uppercase tracking-wider text-text-muted">
+                <span className="w-10 shrink-0 text-center text-xxs uppercase tracking-wider text-text-muted">
                   Sparkline
                 </span>
               )}
               {visible.has("volume") && (
-                <span role="columnheader" className="hidden min-w-12 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted sm:block">
+                <span className="hidden min-w-12 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted sm:block">
                   Volume
                 </span>
               )}
               {visible.has("changeAbs") && (
-                <span role="columnheader" className="hidden min-w-14 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted md:block">
+                <span className="hidden min-w-14 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted md:block">
                   Net change
                 </span>
               )}
               {visible.has("formula") && (
-                <span role="columnheader" className="hidden min-w-16 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted lg:block">
+                <span className="hidden min-w-16 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted lg:block">
                   Formula
                 </span>
               )}
               {(visible.has("price") || visible.has("changePct")) && (
                 <div className="flex min-w-16 shrink-0 flex-col items-end">
                   {visible.has("price") && (
-                    <span role="columnheader" className="text-xxs uppercase tracking-wider text-text-muted">
+                    <span className="text-xxs uppercase tracking-wider text-text-muted">
                       LTP
                     </span>
                   )}
                   {visible.has("changePct") && (
-                    <span role="columnheader" className="text-xxs uppercase tracking-wider text-text-muted">
+                    <span className="text-xxs uppercase tracking-wider text-text-muted">
                       % change
                     </span>
                   )}
                 </div>
               )}
             </div>
+            <div role="list" aria-label={`${activeTab.name} symbols`} className="contents">
             {watchlist.map((item) => {
               const key = `${item.symbol}:${item.exchange}`;
               return (
@@ -567,6 +616,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
                 />
               );
             })}
+            </div>
           </>
         )}
       </div>
@@ -597,10 +647,11 @@ function WatchlistWidget({ params, api }: WidgetProps) {
           y={tabCtxMenu.y}
           tabName={tabs[tabCtxMenu.idx]?.name ?? ""}
           canDelete={tabs.length > 1}
-          onRename={() => { setRenamingIdx(tabCtxMenu.idx); setTabCtxMenu(null); }}
+          onRename={() => { renameReturn.current = tabs[tabCtxMenu.idx].id; setRenamingIdx(tabCtxMenu.idx); setTabCtxMenu(null); }}
           onDuplicate={() => handleDuplicateTab(tabCtxMenu.idx)}
           onDelete={() => handleDeleteTab(tabCtxMenu.idx)}
           onClose={() => setTabCtxMenu(null)}
+          onReturnFocus={() => tabRefs.current.get(tabs[tabCtxMenu.idx].id)?.focus()}
         />
       )}
     </div>

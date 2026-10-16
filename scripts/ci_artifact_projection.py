@@ -7,18 +7,21 @@ Missing/invalid evidence is unknown (null), not zero or a successful execution.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 LANES = ("e2e:maintained:contracts", "e2e:infra:typecheck", "e2e:infra:lint",
          "e2e:maintained:collect", "e2e:reticle:collect", "e2e:default",
          "e2e:public-demo", "e2e:incidents", "e2e:oauth", "e2e:reticle:controls",
          "e2e:reticle", "e2e:policy", "e2e:paper")
-# Only these exact files are read. No traces, logs, bodies, wire, names or URLs.
-REPORTS = (("default-vite", "e2e:default", "default-vite-results.json"),
+# Only these exact report files are read. No raw fields are ever projected.
+REPORTS = (("default-infra", "e2e:default", "default-infra-results.json"),
+           ("default-vite", "e2e:default", "default-vite-results.json"),
            ("default-csp", "e2e:default", "csp-results.json"),
            ("incidents", "e2e:incidents", "incidents/report.xml"),
            ("oauth", "e2e:oauth", "oauth.xml"),
@@ -90,7 +93,22 @@ def junit_counts(raw):
             "failed": failed, "errors": errors, "skipped": skipped}
 
 
-def playwright_counts(report):
+def playwright_counts(
+    report: dict[str, Any], *, infrastructure: bool = False, fixture_root: Path | None = None
+) -> dict[str, int]:
+    """Project numeric outcomes only after report consistency checks.
+
+    Args:
+        report: Parsed native Playwright report.
+        infrastructure: Require the literal infrastructure inventory and controls.
+        fixture_root: Independently selected launch testDir, not report data.
+
+    Returns:
+        Numeric counts, not an acceptance assertion.
+
+    Raises:
+        ValueError: Evidence is contradictory or incomplete.
+    """
     require(isinstance(report, dict) and isinstance(report.get("suites"), list))
     tests = []
     def visit(suite):
@@ -103,6 +121,30 @@ def playwright_counts(report):
     for suite in report["suites"]:
         visit(suite)
     require(bool(tests) and isinstance(report.get("errors"), list))
+    expected_failed = 0
+    if infrastructure:
+        # Reuse the private admission contract; never copy names, errors or
+        # attachments to this numeric projection. Missing/wrong controls are
+        # unknown, not an invented zero or a general expected-failure allowance.
+        source = Path(__file__).resolve().parents[1] / "tools/acceptance/csp.py"
+        spec = importlib.util.spec_from_file_location("browser_report_contract", source)
+        if spec is None or spec.loader is None:
+            raise ValueError("Missing browser report contract")
+        carrier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(carrier)
+        fixture_root = carrier.validate_fixture_root(report, fixture_root)
+        rows = carrier.report_rows(report)
+        require(carrier.identities([row for row, _ in rows]) == carrier.identities(carrier.INFRA_CASES))
+        for row, test in rows:
+            identity = (row["file"], row["title"], row["project"])
+            if identity in carrier.NEGATIVE_CONTROLS:
+                carrier.validate_negative(row, test, fixture_root=fixture_root)
+                expected_failed += 1
+            else:
+                require(test.get("expectedStatus") == "passed")
+        require(expected_failed == len(carrier.NEGATIVE_CONTROLS))
+    else:
+        require(not any(test.get("expectedStatus") == "failed" for test in tests))
     outcomes = Counter()
     categories = Counter()
     for test in tests:
@@ -112,6 +154,8 @@ def playwright_counts(report):
         require(type(result.get("retry")) is int and result["retry"] == 0)
         status = result.get("status")
         require(status in {"passed", "failed", "timedOut", "interrupted", "skipped"})
+        if status == "passed":
+            require(not result.get("error") and not result.get("errors"))
         category = test.get("status")
         require(category in {"expected", "unexpected", "flaky", "skipped"})
         categories[category] += 1
@@ -121,11 +165,15 @@ def playwright_counts(report):
         require(integer(report["stats"].get(key)) == categories[key])
     return {"tests": len(tests), "passed": outcomes["passed"],
             "failed": sum(outcomes[k] for k in ("failed", "timedOut", "interrupted")),
+            "expected_failed": expected_failed,
             "errors": len(report["errors"]), "skipped": outcomes["skipped"]}
 
 
-def project(state, head):
-    result = {"schema": 1, "head": None, "exit_code": None, "isolation_guard_passed": None,
+def project(state, head, *, browser_source: Path | None = None):
+    # The CI launcher archives into this fixed sibling, mounted at the same
+    # absolute path. This is caller-owned context, not a report/receipt claim.
+    source = state.parent / "acceptance-source" if browser_source is None else browser_source
+    result = {"schema": 2, "head": None, "exit_code": None, "isolation_guard_passed": None,
               "lanes": [], "reports": [], "projection_valid": False,
               "acceptance_verified": False, "issues": []}
     issues = result["issues"]
@@ -179,9 +227,14 @@ def project(state, head):
             if not path.exists():
                 raise FileNotFoundError
             raw = text(state, path)
-            counts = junit_counts(raw) if relative.endswith(".xml") else playwright_counts(json.loads(raw, object_pairs_hook=object_pairs))
+            counts = junit_counts(raw) if relative.endswith(".xml") else playwright_counts(
+                json.loads(raw, object_pairs_hook=object_pairs), infrastructure=name == "default-infra",
+                fixture_root=source / "packages/apps/terminal/e2e",
+            )
             row.update(status="present", counts=counts)
-            if result["exit_code"] == 0 and any(counts[k] for k in ("failed", "errors", "skipped")):
+            if result["exit_code"] == 0 and (
+                counts["failed"] != counts.get("expected_failed", 0) or counts["errors"] or counts["skipped"]
+            ):
                 issues.append("successful-exit-with-nonpassing-report")
         except FileNotFoundError:
             issues.append("report-missing")
@@ -197,8 +250,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("state", "head", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--browser-source", type=Path, help="Trusted launch checkout; defaults to state's acceptance-source sibling")
     args = parser.parse_args()
-    summary = project(args.state.absolute(), args.head.absolute())
+    summary = project(args.state.absolute(), args.head.absolute(), browser_source=args.browser_source)
     # Output lives separately: no raw file or previous summary can be overwritten.
     require(not args.output.absolute().is_relative_to(args.state.absolute()))
     args.output.parent.mkdir(parents=True, exist_ok=True)

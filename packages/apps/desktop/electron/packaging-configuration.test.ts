@@ -38,9 +38,9 @@ describe("packaging configuration integrity", () => {
       expect(published[filename]).toMatch(/^[a-f0-9]{64}$/);
       return [filename, published[filename]];
     }));
-    // force:false discriminates ElectronGetOptions in app-builder-lib 26.15.3.
-    // checksums alone takes its legacy branch; mirrorOptions takes the other
-    // lossy branch in ElectronFramework.createDownloadOpts. Neither is safe.
+    // app-builder-lib 26.17.0 also recognises checksums as modern options.
+    // Retain explicit force:false for cache-preserving intent; mirrorOptions
+    // still takes the lossy branch in ElectronFramework.createDownloadOpts.
     expect(config.electronDownload).toEqual({ force: false, checksums });
     expect(config.electronDist).toBeUndefined();
     await validateConfiguration(config, new DebugLogger(false));

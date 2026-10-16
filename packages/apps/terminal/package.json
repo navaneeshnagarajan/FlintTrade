@@ -23,7 +23,7 @@
     "e2e:infra": "playwright test --config=playwright.infra.config.ts --project=chromium --workers=1 --retries=0",
     "e2e:public-demo": "playwright test --config=playwright.public-demo.config.ts --project=chromium --workers=1 --retries=0",
     "e2e:infra:typecheck": "tsc --project tsconfig.e2e-infra.json --noEmit",
-    "e2e:infra:lint": "eslint vite.config.ts e2e/shared-core-integrated.spec.ts e2e/run-policy-integrated.spec.ts e2e/run-policy-core-fixture.ts e2e/run-policy-remaining.spec.ts e2e/run-policy-negative-seams.ts e2e/run-policy-negative-seams.spec.ts e2e/schema-csp.spec.ts e2e/foundation-transport-failure.spec.ts e2e/foundation-truth-fixtures.ts e2e/foundation-truth.spec.ts e2e/foundation-truth.fixture.tsx e2e/order-flow-fixtures.ts e2e/order-flow-presentation.spec.ts e2e/operator-error-fixtures.ts e2e/operator-error.spec.ts e2e/positions-compact-height.spec.ts e2e/compact-startup-phase.spec.ts e2e/indstocks-disclosure-fixtures.ts e2e/indstocks-disclosure.spec.ts e2e/account-action-retry.spec.ts playwright.order-flow.config.ts e2e/fixture-registry.ts e2e/about-versions.spec.ts e2e/infra-self-tests.spec.ts e2e/workspace-lifecycle.spec.ts e2e/public-demo-presets.spec.ts e2e/start-public-demo.ts e2e/order-pad-practice.spec.ts e2e/agent-practice.spec.ts e2e/learn-ai-polish.spec.ts e2e/visual-a11y.spec.ts e2e/visual/support.ts e2e/visual/desk-mocks.ts playwright.config.ts playwright.infra.config.ts playwright.public-demo.config.ts playwright.visual.config.ts e2e/incidents/fixture.tsx e2e/service-oauth-handoff.fixture.tsx e2e/service-oauth-handoff.entry.ts playwright.incidents.config.ts playwright.policy.config.ts e2e/incidents/SystemIncidents.spec.ts e2e/incidents/vite.config.ts e2e/service-oauth-handoff.browser.mjs e2e/about-versions.fixture.tsx playwright.reticle.config.ts vite.reticle.config.ts playwright.csp.config.ts e2e/csp/build-probe.mjs e2e/csp/schema-probe.ts e2e/csp/eval-negative.js --max-warnings=0",
+    "e2e:infra:lint": "eslint vite.config.ts e2e/shared-core-integrated.spec.ts e2e/run-policy-integrated.spec.ts e2e/run-policy-core-fixture.ts e2e/run-policy-remaining.spec.ts e2e/run-policy-negative-seams.ts e2e/run-policy-negative-seams.spec.ts e2e/schema-csp.spec.ts e2e/foundation-transport-failure.spec.ts e2e/foundation-truth-fixtures.ts e2e/foundation-truth.spec.ts e2e/foundation-truth.fixture.tsx e2e/order-flow-fixtures.ts e2e/order-flow-presentation.spec.ts e2e/notification-disclosure.spec.ts e2e/operator-error-fixtures.ts e2e/operator-error.spec.ts e2e/positions-compact-height.spec.ts e2e/compact-startup-phase.spec.ts e2e/indstocks-disclosure-fixtures.ts e2e/indstocks-disclosure.spec.ts e2e/account-action-retry.spec.ts playwright.order-flow.config.ts e2e/fixture-registry.ts e2e/about-versions.spec.ts e2e/infra-self-tests.spec.ts e2e/workspace-lifecycle.spec.ts e2e/public-demo-presets.spec.ts e2e/start-public-demo.ts e2e/order-pad-practice.spec.ts e2e/agent-practice.spec.ts e2e/learn-ai-polish.spec.ts e2e/visual-a11y.spec.ts e2e/visual/support.ts e2e/visual/desk-mocks.ts playwright.config.ts playwright.infra.config.ts playwright.public-demo.config.ts playwright.visual.config.ts e2e/incidents/fixture.tsx e2e/service-oauth-handoff.fixture.tsx e2e/service-oauth-handoff.entry.ts playwright.incidents.config.ts playwright.policy.config.ts e2e/incidents/SystemIncidents.spec.ts e2e/incidents/vite.config.ts e2e/service-oauth-handoff.browser.mjs e2e/about-versions.fixture.tsx playwright.reticle.config.ts vite.reticle.config.ts playwright.csp.config.ts e2e/csp/build-probe.mjs e2e/csp/schema-probe.ts e2e/csp/eval-negative.js e2e/accessibility-overflow.spec.ts e2e/structural-accessibility.spec.ts e2e/structural-accessibility.ts e2e/workspace-interactions.ts e2e/observed-registry.ts --max-warnings=0",
     "e2e:visual": "playwright test --config=playwright.visual.config.ts --project=chromium --workers=1 --retries=0",
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
@@ -70,12 +70,12 @@
     "radix-ui": "1.7.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-hook-form": "7.89.0",
+    "react-hook-form": "7.90.0",
     "react-resizable-panels": "4.14.4",
     "react-router": "8.4.0",
     "tailwind-merge": "3.7.0",
     "three": "0.186.0",
-    "zod": "4.6.5",
+    "zod": "4.6.7",
     "zustand": "5.0.15"
   },
   "devDependencies": {

@@ -5,7 +5,7 @@ import "flexlayout-react/style/combined.css";
 import { APPS, APP_WIDGETS, widgetAllowed, widgetsForApp, type AppId } from "@/layout/appCatalog";
 import { APP_PRESETS, buildAppPreset, readAppLayouts, saveAppLayout, validateAppLayout } from "@/layout/appLayouts";
 import { appWidgetFactory } from "@/layout/appWidgetFactory";
-import { createWorkspaceApi, renderWorkspaceTabExtras } from "@/layout/flexLayoutAdapter";
+import { createWorkspaceApi, renderWorkspaceTabExtras, renderWorkspaceTabSetExtras } from "@/layout/flexLayoutAdapter";
 import { useThemeStore } from "@/stores/themeStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -184,7 +184,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     {compact && <label className="shrink-0 px-3 py-1 text-xs">Panel <select aria-label="Compact panel" className="max-w-full bg-surface-card p-1" onChange={e => selectPanel(e.target.value)} value={model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? ""}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</select></label>}
     </Activity>
     <div ref={host} className={`relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
-      <Layout model={model} factory={factory} onRenderTab={renderWorkspaceTabExtras} realtimeResize />
+      <Layout model={model} factory={factory} onRenderTab={renderWorkspaceTabExtras} onRenderTabSet={renderWorkspaceTabSetExtras} realtimeResize />
       {!tabs.length && <div className="absolute inset-0 grid place-items-center"><Button onClick={() => setPicker(true)}>Add your first widget</Button></div>}
     </div>
     <Activity mode={active ? "visible" : "hidden"}>

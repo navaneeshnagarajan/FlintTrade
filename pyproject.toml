@@ -50,7 +50,7 @@ dev = [
 [tool.uv.sources]
 upstox-python-sdk = { git = "https://github.com/upstox/upstox-python.git", rev = "d88a12ef5738a4c8d71f3b88eb7b79a359277c9d" }
 
-kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "a3233062095ad9eee574f6e5696e1f9f3aa7c0c8" }
+kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3" }
 flinttrade-ai = { workspace = true }
 flinttrade-automation = { workspace = true }
 flinttrade-backtest = { workspace = true }

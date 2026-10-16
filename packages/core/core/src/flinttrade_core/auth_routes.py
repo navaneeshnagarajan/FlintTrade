@@ -30,6 +30,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from typing import Any
 
 import jwt
@@ -236,7 +237,8 @@ def install_auth_rate_limits(app: Any) -> int:
 
 
 # JWT config
-_JWT_SECRET_KEY = ""  # Set from env or generated at startup
+_JWT_SECRET_KEY = ""  # Loaded from the workspace or generated on first use.
+_JWT_SECRET_LOCK = Lock()
 _JWT_ALGORITHM = "HS256"
 
 # IST timezone offset
@@ -258,30 +260,33 @@ def _get_jwt_secret() -> str:
     operator's real home.
     """
     global _JWT_SECRET_KEY
-    if _JWT_SECRET_KEY:
+    # First callers must not mint under different keys while persistence
+    # releases the GIL. Publish one signing authority for this process.
+    with _JWT_SECRET_LOCK:
+        if _JWT_SECRET_KEY:
+            return _JWT_SECRET_KEY
+
+        from .secure_file import write_secret_text  # noqa: PLC0415
+        from .workspace import workspace_dir  # noqa: PLC0415
+
+        key_file = workspace_dir() / "jwt_secret"
+        try:
+            if key_file.exists():
+                stored = key_file.read_text().strip()
+                if stored:
+                    _JWT_SECRET_KEY = stored
+                    return _JWT_SECRET_KEY
+        except OSError:
+            pass
+
+        new_secret = secrets.token_urlsafe(64)
+        try:
+            write_secret_text(key_file, new_secret)  # SC-04: icacls/0600 owner-only
+        except OSError as exc:
+            logger.warning("Could not persist JWT key file at %s: %s", key_file, exc)
+
+        _JWT_SECRET_KEY = new_secret
         return _JWT_SECRET_KEY
-
-    from .secure_file import write_secret_text  # noqa: PLC0415
-    from .workspace import workspace_dir  # noqa: PLC0415
-
-    key_file = workspace_dir() / "jwt_secret"
-    try:
-        if key_file.exists():
-            stored = key_file.read_text().strip()
-            if stored:
-                _JWT_SECRET_KEY = stored
-                return _JWT_SECRET_KEY
-    except OSError:
-        pass
-
-    new_secret = secrets.token_urlsafe(64)
-    try:
-        write_secret_text(key_file, new_secret)  # SC-04: icacls/0600 owner-only
-    except OSError as exc:
-        logger.warning("Could not persist JWT key file at %s: %s", key_file, exc)
-
-    _JWT_SECRET_KEY = new_secret
-    return _JWT_SECRET_KEY
 
 
 def _next_8am_ist() -> datetime:

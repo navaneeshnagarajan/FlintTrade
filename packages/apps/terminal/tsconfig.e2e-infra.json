@@ -40,6 +40,7 @@
     "e2e/foundation-truth.spec.ts",
     "e2e/order-flow-fixtures.ts",
     "e2e/order-flow-presentation.spec.ts",
+    "e2e/notification-disclosure.spec.ts",
     "e2e/operator-error-fixtures.ts",
     "e2e/operator-error.spec.ts",
     "e2e/positions-compact-height.spec.ts",
@@ -67,6 +68,11 @@
     "e2e/visual/support.ts",
     "e2e/visual/desk-mocks.ts",
     "playwright.csp.config.ts",
-    "e2e/csp/schema-probe.ts"
+    "e2e/csp/schema-probe.ts",
+    "e2e/accessibility-overflow.spec.ts",
+    "e2e/structural-accessibility.spec.ts",
+    "e2e/structural-accessibility.ts",
+    "e2e/workspace-interactions.ts",
+    "e2e/observed-registry.ts"
   ]
 }

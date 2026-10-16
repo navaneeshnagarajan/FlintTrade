@@ -307,9 +307,24 @@ Practice place is admitted before the Practice fill path and does not enter
 those Live layers. A named contract must be a positive multiple of its lot
 from the broker instrument master; a missing lot is refused before the fill.
 Practice square-off is place. That book cancels and modifies; it does not
-place. `cancel-all` only cancels. Explore remains `mode_blocked` and does
+place. `cancel-all` only cancels. Example data remains `mode_blocked` and does
 not enter `Laya.admit`. Other Live write verbs still reach SafetySystem
-without this admission. See
+without this admission. On Live, a reduce-only close qualifies only when the
+position book and the broker order book are both readable, the order is the
+opposite side of the same contract, and the quantity is no larger than the
+open quantity minus pending exits. An unreadable broker order book refuses
+a reduce-only close, and the order takes the full check. `POST /api/v1/positions/exit-all` requires that reducing proof
+before it requests exits. Unavailable position evidence returns HTTP 503
+`Position evidence unavailable; no square-off was sent.` Ambiguous position
+evidence returns HTTP 409 `Position evidence is ambiguous; no square-off was sent.`
+Neither response sends a square-off. A second exit on the same broker account,
+while one of this desk's exits on that contract is still unfilled, is HTTP 409
+`exit_pending` when the broker order book can be read:
+`Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.`
+When a retained exit exists and broker orders are unavailable, the code is
+`exit_orders_unreadable` and the message is
+`Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.`
+The label is the symbol, or `this contract` when the symbol is empty. See
 [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 `_check_order_locked` fail-fasts in this runtime order (not L1–L5
@@ -430,9 +445,10 @@ never enters SafetySystem or `BrokerRouter`. Other Practice verbs skip
 runs the safety layers and the gated broker router, and routes through a
 native broker adapter. Other Live
 writes still go from the mode guard to SafetySystem without `Laya.admit`.
-Fills come back through the tick stream and reconcile with the REST
-cache via
-`packages/services/engine/src/flinttrade_engine/reconciliation.py`.
+Order acknowledgements stay on the submission path. Authoritative native fill
+ingestion is not connected. `packages/services/engine/src/flinttrade_engine/reconciliation.py`
+compares native broker snapshots with local observations and leaves positions
+and orders unchanged.
 
 ---
 

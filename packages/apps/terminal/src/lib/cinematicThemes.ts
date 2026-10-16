@@ -72,6 +72,10 @@ export interface ThemeVariant {
     warning: "#f59e0b";
     /** WCAG-safe profit text on light surfaces (green-700) */
     profitText: string;
+    /** Stable label on the mode-resolved profit action background, not profit text.
+     * Optional only for persisted pre-contract custom themes; applyTheme supplies
+     * the mode fallback and bounds unsafe custom action pairs independently. */
+    profitForeground?: string;
     /** WCAG-safe loss text (same in both modes) */
     lossText: string;
     /** WCAG-safe warning text */
@@ -176,6 +180,7 @@ const TRADING_DARK: ThemeVariant["trading"] = {
   loss:        "#ef4444",
   warning:     "#f59e0b",
   profitText:  "#22c55e",  // green-500 passes 4.5:1 on dark surfaces
+  profitForeground: "#0a0a0f",
   lossText:    "#ef4444",
   warningText: "#f59e0b",
 };
@@ -185,6 +190,7 @@ const TRADING_LIGHT: ThemeVariant["trading"] = {
   loss:        "#ef4444",
   warning:     "#f59e0b",
   profitText:  "#166534",  // green-800 — safe on white and pale green tints
+  profitForeground: "#ffffff",
   lossText:    "#991b1b",  // red-800 — safe on white and pale red tints
   warningText: "#92400e",  // amber-800 — safe on white and pale amber tints
 };

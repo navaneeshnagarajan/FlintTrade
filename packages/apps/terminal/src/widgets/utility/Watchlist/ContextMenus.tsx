@@ -69,12 +69,17 @@ export interface TabContextMenuProps {
   onDuplicate: () => void;
   onDelete:    () => void;
   onClose:     () => void;
+  onReturnFocus: () => void;
 }
 
 export function TabContextMenu({
-  x, y, tabName, canDelete, onRename, onDuplicate, onDelete, onClose,
+  x, y, tabName, canDelete, onRename, onDuplicate, onDelete, onClose, onReturnFocus,
 }: TabContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+  }, []);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -89,6 +94,23 @@ export function TabContextMenu({
       ref={menuRef}
       role="menu"
       aria-label={`Tab actions for ${tabName}`}
+      onKeyDown={(event) => {
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+        const index = items.indexOf(event.target as HTMLButtonElement);
+        const next = event.key === "ArrowDown" ? (index + 1) % items.length
+          : event.key === "ArrowUp" ? (index + items.length - 1) % items.length
+          : event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : null;
+        if (next !== null) {
+          event.preventDefault();
+          event.stopPropagation();
+          items[next]?.focus();
+        } else if (event.key === "Escape" || event.key === "Tab") {
+          if (event.key === "Escape") event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          onReturnFocus();
+        }
+      }}
       className="fixed z-50 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40"
       style={{ top: y, left: x }}
     >
@@ -98,6 +120,7 @@ export function TabContextMenu({
       <button
         role="menuitem"
         onClick={onRename}
+        tabIndex={-1}
         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
       >
         <Pencil size={10} />
@@ -106,6 +129,7 @@ export function TabContextMenu({
       <button
         role="menuitem"
         onClick={onDuplicate}
+        tabIndex={-1}
         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
       >
         <Copy size={10} />
@@ -117,6 +141,7 @@ export function TabContextMenu({
           <button
             role="menuitem"
             onClick={onDelete}
+            tabIndex={-1}
             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 transition-colors"
           >
             <Trash2 size={10} />
@@ -133,12 +158,13 @@ export function TabContextMenu({
 // ---------------------------------------------------------------------------
 
 export interface RenameInputProps {
+  label:       string;
   initialValue: string;
   onConfirm:    (name: string) => void;
   onCancel:     () => void;
 }
 
-export function RenameInput({ initialValue, onConfirm, onCancel }: RenameInputProps) {
+export function RenameInput({ label, initialValue, onConfirm, onCancel }: RenameInputProps) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -162,6 +188,7 @@ export function RenameInput({ initialValue, onConfirm, onCancel }: RenameInputPr
     <input
       ref={inputRef}
       type="text"
+      aria-label={label}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={commit}

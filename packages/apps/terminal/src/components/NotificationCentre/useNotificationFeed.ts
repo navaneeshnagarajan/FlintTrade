@@ -128,6 +128,7 @@ export function useNotificationFeed(): void {
         category,
         title: detail.title,
         body: detail.body,
+        ...(Object.hasOwn(detail, "originDisclosure") ? { originDisclosure: detail.originDisclosure } : {}),
         ...(typeof detail.accountScopeKey === "string" && detail.accountScopeKey.trim()
           ? { accountScopeKey: detail.accountScopeKey }
           : {}),

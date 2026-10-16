@@ -4,9 +4,9 @@
 
 ## Pinned acquisition contract
 
-The installed `app-builder-lib` 26.15.3 accepts `ElectronGetOptions`. Configure `electronDownload` with **`force: false` and `checksums`**, with **no `mirrorOptions` property**:
+The installed `app-builder-lib` 26.17.0 accepts `ElectronGetOptions`. Configure `electronDownload` with **`force: false` and `checksums`**, with **no `mirrorOptions` property**:
 
-- `force: false` selects the modern options branch in `buildElectronArtifactConfig` while retaining cache reads. `checksums` alone is schema-valid but the legacy runtime branch drops it.
+- `force: false` explicitly retains cache reads. In 26.17.0, `checksums` also selects the modern options branch in `buildElectronArtifactConfig`; removing `force` no longer drops validation. Keep the configured `force: false` unchanged.
 - `ElectronFramework.createDownloadOpts` passes these fields through when `mirrorOptions` is absent. Adding even an empty `mirrorOptions` selects a different branch that drops the checksums.
 - `@electron/get` 3.1.0 validates a cache hit. Without explicit hashes, it bypasses the checksum-file cache and attempts a fresh request. Pinning hashes prevents that request; it does not disable validation.
 
@@ -36,7 +36,7 @@ Cases and required observations:
 | `corrupt` | 1 | A one-byte-corrupted independent cached ZIP produces the real library's `ChecksumMismatchError`; fallback acquisition is refused. |
 | `mismatch` | 1 | An intentionally wrong expected hash produces `ChecksumMismatchError`; fallback acquisition is refused. |
 | `missing-entry` | 1 | Missing filename produces `NoChecksumFoundError`; fallback acquisition is refused. |
-| `without-force` | 1 | Removing the discriminator exposes the legacy branch and loses offline validation. |
+| `without-force` | 0 | Checksums alone now selects the modern options branch: the real cached ZIP is returned with the published digest. Independently corrupting that cache without force must still emit `ChecksumMismatchError` and refuse fallback acquisition. |
 | `mirror-options` | 1 | Adding empty mirror options loses hashes through the actual framework consumer. |
 | `launcher` | 0 | Real target/helper output is saved as `original.desktop` and `corrected.desktop`: `Exec=AppRun --no-sandbox %U` versus `Exec=AppRun %U`. |
 

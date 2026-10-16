@@ -13,7 +13,7 @@ test.beforeEach(async ({ page, syntheticApi }) => {
   registerExampleDeskReads(syntheticApi);
 });
 
-test("Learn teaches built-in Practice and its Trade link preserves the selected mode", async ({ page }) => {
+test("Learn teaches built-in Practice and its Trade link preserves the selected mode", async ({ page }, info) => {
   await page.goto("/learn");
   await expect(page.getByRole("region", { name: "Learn app", exact: true }).getByRole("heading", { level: 1, name: "Learn", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Practice Trading" }).click();
@@ -21,7 +21,7 @@ test("Learn teaches built-in Practice and its Trade link preserves the selected 
   await expect(practice).toContainText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.");
   await expect(practice).not.toContainText(/sandbox|Kotak|funded unlock/i);
   await expect(practice.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
-  await page.screenshot({ path: "test-results/learn-practice.png", fullPage: true });
+  await page.screenshot({ path: info.outputPath("learn-practice.png"), fullPage: true });
   await practice.getByRole("link", { name: "Open Trade desk" }).click();
   await expect(page).toHaveURL(/\/terminal$/);
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
@@ -51,7 +51,7 @@ test("Learn teaches built-in Practice and its Trade link preserves the selected 
   await expect(page.getByRole("region", { name: "Learn app", exact: true }).getByRole("heading", { level: 1, name: "Learn", exact: true })).toBeVisible();
 });
 
-test("Schedules uses human names and keeps Explore controls disabled", async ({ page }) => {
+test("Schedules uses human names and keeps Explore controls disabled", async ({ page }, info) => {
   await page.goto("/automate#schedules");
   await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 1, name: "Automate", exact: true })).toBeVisible();
   await expect(page.getByText("Pre-market screener", { exact: true })).toBeVisible();
@@ -61,7 +61,7 @@ test("Schedules uses human names and keeps Explore controls disabled", async ({ 
     await expect(pause).toBeDisabled();
   }
   await page.getByRole("checkbox", { name: "Show system jobs" }).uncheck();
-  await page.screenshot({ path: "test-results/schedules.png", fullPage: true });
+  await page.screenshot({ path: info.outputPath("schedules.png"), fullPage: true });
 });
 
 test("a retired automation deep link preserves schedules and monitors without flow traffic", async ({ page, syntheticApi }) => {
