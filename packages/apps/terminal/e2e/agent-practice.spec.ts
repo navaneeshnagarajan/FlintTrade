@@ -109,6 +109,24 @@ async function openPracticeAgent(page: Page, registry: SyntheticFixtureRegistry)
   registerExampleDeskReads(registry);
   registerPracticeOrderPadReads(registry);
   registerSystemDiagnosticsRead(registry, TOKEN);
+  // /ai is the automation app. Its default layout mounts Run control, which
+  // reads these catalogues once the panel loads. The agent dialog does not
+  // issue them; the bounded range covers a late mount without a refetch storm.
+  for (const [name, path, json] of [
+    ["run-control schedules", "/ft-api/api/v1/cron/jobs", { jobs: [] }],
+    ["run-control running strategies", "/ft-api/api/v1/backtest/strategies/running", { strategies: [] }],
+    ["run-control uploaded strategies", "/ft-api/api/v1/backtest/strategies/uploaded", { strategies: [] }],
+  ] as const) {
+    registry.register({
+      name, method: "GET", path,
+      expectedCalls: { minimum: 0, maximum: 4 },
+      handler: (request) => {
+        expectPracticeAuthority(request);
+        expect(request.postData()).toBeNull();
+        return { json };
+      },
+    });
+  }
   registry.register({
     name: "read-only AI signal stream", method: "GET", path: "/ft-api/api/v1/signals/stream",
     expectedCalls: READ_CALLS,
