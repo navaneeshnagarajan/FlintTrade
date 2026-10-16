@@ -73,7 +73,7 @@ jobs:
   node-release-key:
     name: Pinned Node release key is currently valid
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     # Import a key, list it, verify one detached signature. Seconds of work; the
     # cap is the runaway guard, not a budget.
     timeout-minutes: 10
