@@ -25,7 +25,7 @@ export default function FeedFreshnessChip({ className }: { className?: string })
       aria-label={`Feed source: ${freshness.label}${ageHint}`}
       title={`Feed source · ${freshness.chipText} (not execution mode)`}
       className={cn(
-        "inline-flex items-center px-1.5 py-0.5 text-xxs font-medium border rounded shrink-0 whitespace-nowrap tabular-nums",
+        "inline-flex items-center px-1.5 py-0.5 text-xs font-medium border rounded shrink-0 whitespace-nowrap tabular-nums",
         TONE[freshness.state],
         className,
       )}

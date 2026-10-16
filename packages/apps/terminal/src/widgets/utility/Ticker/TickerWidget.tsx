@@ -102,7 +102,7 @@ function PriceChip({ instrument }: PriceChipProps) {
 
       {/* Change% with icon */}
       {pct != null && (
-        <span className={`flex items-center gap-0.5 text-xxs font-mono tabular-nums whitespace-nowrap ${priceColor}`}>
+        <span className={`flex items-center gap-0.5 text-xs font-mono tabular-nums whitespace-nowrap ${priceColor}`}>
           {isUp === true ? (
             <TrendingUp size={8} />
           ) : (
@@ -114,7 +114,7 @@ function PriceChip({ instrument }: PriceChipProps) {
 
       {/* No data indicator */}
       {ltp == null && (
-        <span className="text-xxs text-text-muted">–</span>
+        <span className="text-xs text-text-muted">–</span>
       )}
     </div>
   );
@@ -170,7 +170,7 @@ function TickerWidget({ node: _node }: TickerWidgetProps) {
 
         {/* HEADER */}
         <div className="flex items-center gap-2 px-2 py-0.5 border-b border-border-default bg-surface-card shrink-0">
-          <span className="font-heading font-semibold text-xxs text-text-muted uppercase tracking-widest">
+          <span className="font-heading font-semibold text-xs text-text-muted uppercase tracking-widest">
             Live Prices
           </span>
         </div>

@@ -158,7 +158,7 @@ def _sandbox_flat(app: Any, *, sandbox: Any = None) -> bool:
     """Prove no exposure and no pending orders, including orders from prior days."""
     sandbox = sandbox if sandbox is not None else app.config.get("DATA_SANDBOX_ENGINE")
     if sandbox is None:
-        raise RuntimeError("Practice sandbox is unavailable")
+        raise RuntimeError("Practice is unavailable")
     positions = sandbox.get_positions()
     orders = sandbox.get_all_orders()
     if type(positions) is not list or type(orders) is not list:
@@ -694,7 +694,7 @@ class PracticeAgentSupervisor:
             if row["status"] != "reconciliation_required":
                 raise RuntimeError("Only a run requiring reconciliation can be resolved")
             if not _sandbox_flat(self.app, sandbox=self.sandbox):
-                raise RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving")
+                raise RuntimeError("Practice positions or pending orders remain; inspect the Practice book before resolving")
             snapshot = {
                 **row["snapshot"],
                 "status": "stopped",
@@ -784,7 +784,7 @@ class PracticeAgentSupervisor:
         if not await run.trader._finish_square_off(reason):  # noqa: SLF001 - reuse the engine's authoritative exit logic
             raise RuntimeError("Practice square-off incomplete")
         if not _sandbox_flat(self.app, sandbox=self.sandbox) or run.adapter.reconciliation_required:
-            raise RuntimeError("Practice sandbox requires reconciliation")
+            raise RuntimeError("Practice requires reconciliation")
         self._event(run, "session_flat", {"daily_pnl": run.trader.state.daily_pnl})
         # Canonical local evidence has no inference budget. Its separate core
         # learning client applies any remote consent/reservation at the wire.
@@ -1263,7 +1263,7 @@ def resolve_practice_run(run_id: str) -> tuple[Any, int]:
                 "The worker has not finished; reconciliation cannot release it": "The worker has not finished; reconciliation cannot release it",
                 "Practice resources have not closed; reconciliation cannot release them": "Practice resources have not closed; reconciliation cannot release them",
                 "Only a run requiring reconciliation can be resolved": "Only a run requiring reconciliation can be resolved",
-                "Practice positions or pending orders remain; inspect the sandbox before resolving": "Practice positions or pending orders remain; inspect the sandbox before resolving",
+                "Practice positions or pending orders remain; inspect the Practice book before resolving": "Practice positions or pending orders remain; inspect the Practice book before resolving",
             },
             409,
             "Practice reconciliation could not be verified",

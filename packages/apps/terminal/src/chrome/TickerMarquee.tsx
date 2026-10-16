@@ -119,7 +119,7 @@ const TickerChip = memo(function TickerChip({ name, data }: TickerChipProps) {
       ? "text-profit"
       : pct <= -0.1
         ? "text-loss"
-        : "text-amber-400";
+        : "text-[var(--color-warning-text,var(--color-warning))]";
 
   return (
     <span
@@ -157,7 +157,7 @@ const TickerChip = memo(function TickerChip({ name, data }: TickerChipProps) {
       ) : null}
 
       {/* Divider dot */}
-      <span className="text-border-default/60 text-xs" aria-hidden="true">·</span>
+      <span className="text-text-muted text-xs" aria-hidden="true">·</span>
     </span>
   );
 });

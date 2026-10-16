@@ -1960,7 +1960,7 @@ async function readPracticeAccountData<T>(
     return { status: order?.status ?? "not found" } as T;
   }
 
-  throw new Error(`${endpoint} is not available from the Practice sandbox.`);
+  throw new Error(`${endpoint} is not available in Practice.`);
 }
 
 function expectedNativeScope(brokerType: string, accountId: string): string {
@@ -1995,7 +1995,7 @@ async function readAccountSnapshot<T>(
     }
     const value = await readPracticeAccountData<T>(endpoint, extra, "practice", signal);
     if (value !== undefined) return value;
-    throw new Error(`${endpoint} is not available from the Practice sandbox.`);
+    throw new Error(`${endpoint} is not available in Practice.`);
   }
 
   if (identity.mode !== "live") {

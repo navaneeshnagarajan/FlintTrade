@@ -14,10 +14,10 @@ import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 function VenueBadge({ badge }: { badge: TickerVenueBadge }) {
   return (
     <span
-      className={`text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
+      className={`text-xs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
         badge.open
-          ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
-          : "text-text-disabled border-border-default"
+          ? "text-[var(--color-warning-text,var(--color-warning))] border-amber-500/40 bg-amber-500/10"
+          : "text-text-secondary border-border-default"
       }`}
       title={badge.title}
       aria-label={badge.label}
@@ -88,7 +88,7 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
           >
             {venueStrip.kind === "unavailable" ? (
               <span
-                className="text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-disabled border-border-default"
+                className="text-xs font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-secondary border-border-default"
                 aria-label="Venues unavailable"
               >
                 Unavailable
@@ -103,7 +103,7 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
 
         {mode === "marquee" && reducedMotion && (
           <span
-            className="text-xxs text-text-muted px-2 shrink-0 select-none"
+            className="text-xs text-text-muted px-2 shrink-0 select-none"
             data-testid="ticker-reduced-motion"
             title="Scrolling is paused because reduced motion is on"
           >

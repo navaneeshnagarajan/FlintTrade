@@ -33,7 +33,7 @@ const MODE_NOTIFICATIONS: Record<AppMode, { title: string; body: string }> = {
   },
   practice: {
     title: "Practice mode active",
-    body: "Orders run against the native sandbox with virtual capital. No real money is at risk.",
+    body: "Orders run in Practice with virtual capital. No real money is at risk.",
   },
   live: {
     title: "Live trading mode selected",

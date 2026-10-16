@@ -700,7 +700,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
     await expect(
       getMargin(PRACTICE_READ_CONTEXT, "INFY", "NSE", 10, "MIS", "BUY", controller.signal),
-    ).rejects.toThrow("margin is not available from the Practice sandbox");
+    ).rejects.toThrow("margin is not available in Practice");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
