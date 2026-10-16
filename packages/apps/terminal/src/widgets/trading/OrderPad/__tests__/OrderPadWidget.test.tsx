@@ -979,7 +979,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const messages = await screen.findAllByText(/positive multiple of the lot size \(75\)/i);
+    const messages = await screen.findAllByText("Quantity must be a multiple of the lot size (75).");
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -1045,7 +1045,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(qtyInput).toHaveValue(65);
     fireEvent.change(qtyInput, { target: { value: "75" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    expect((await screen.findAllByText(/positive multiple of the lot size \(65\)/i)).length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("Quantity must be a multiple of the lot size (65).")).length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -1090,9 +1090,26 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "3525" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Quantity 3525 exceeds the freeze quantity of 3510 for NIFTY. The order was not split.",
+      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows the same freeze refusal under Quantity in Live", async () => {
+    selectedMode.current = "live";
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot: 75");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3525" } });
+    fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+    );
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 

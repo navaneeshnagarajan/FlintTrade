@@ -446,19 +446,16 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
 
     assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3510, lot_size=65) is None
     message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3575, lot_size=65)
-    assert message == (
-        "Quantity 3575 exceeds the freeze quantity of 3510 for NIFTY. The order was not split."
-    )
-    assert "split into" not in (message or "")
+    assert message == "Max 3510 per order for NIFTY 24500 CE. Place smaller orders."
     assert quantity_admission_refusal("BANKNIFTY", "NFO", 1455, lot_size=15) == (
-        "Quantity 1455 exceeds the freeze quantity of 1440 for BANKNIFTY. The order was not split."
+        "Max 1440 per order for BANKNIFTY. Place smaller orders."
     )
     assert quantity_admission_refusal("NIFTYNXT50", "NFO", 1126) == (
-        "Quantity 1126 exceeds the freeze quantity of 1125 for NIFTYNXT50. The order was not split."
+        "Max 1125 per order for NIFTYNXT50. Place smaller orders."
     )
     assert quantity_admission_refusal("FINNIFTY-OCT2026-FUT", "NFO", 3240) is None
     assert quantity_admission_refusal("MIDCPNIFTY", "NFO", 5761) == (
-        "Quantity 5761 exceeds the freeze quantity of 5760 for MIDCPNIFTY. The order was not split."
+        "Max 5760 per order for MIDCPNIFTY. Place smaller orders."
     )
     assert quantity_admission_refusal("NIFTYFPI", "NFO", 53900) is None
 
@@ -473,9 +470,7 @@ def test_admission_prefers_broker_freeze_qty() -> None:
         lot_size=65,
         broker_freeze_qty=100,
     )
-    assert message == (
-        "Quantity 130 exceeds the freeze quantity of 100 for NIFTY. The order was not split."
-    )
+    assert message == "Max 100 per order for NIFTY 24500 CE. Place smaller orders."
     assert quantity_admission_refusal(
         "RELIANCE",
         "NSE",
@@ -489,6 +484,6 @@ def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
     from flinttrade_engine.qty_freeze import quantity_admission_refusal
 
     assert quantity_admission_refusal("NIFTY", "NFO", 100, lot_size=65) == (
-        "Quantity must be a positive multiple of the lot size (65) for NFO."
+        "Quantity must be a multiple of the lot size (65)."
     )
     assert quantity_admission_refusal("SBIN", "NSE", 7) is None

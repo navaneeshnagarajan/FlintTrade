@@ -260,24 +260,36 @@ export function indexUnderlying(symbol: string): string | null {
   return null;
 }
 
+/** Symbol named in the freeze refusal. */
+export function orderSymbolLabel(symbol: string): string {
+  const text = symbol.trim().replace(/\s+/g, " ");
+  return text || "this contract";
+}
+
+/** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
+export function lotMultipleRefusal(lotSize: number): string {
+  return `Quantity must be a multiple of the lot size (${lotSize}).`;
+}
+
+/** Same freeze sentence as order admission. The number is the broker freeze when one was sent. */
+export function freezeQuantityRefusal(symbol: string, freeze: number): string {
+  return `Max ${freeze} per order for ${orderSymbolLabel(symbol)}. Place smaller orders.`;
+}
+
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE index circular for this symbol.
+ * NSE/FAOP/76693 index table.
  */
 export function resolveFreezeQuantity(
   symbol: string,
   brokerFreezeQty?: number | null,
-): { limit: number; label: string } | null {
+): number | null {
   if (typeof brokerFreezeQty === "number" && Number.isInteger(brokerFreezeQty) && brokerFreezeQty > 0) {
-    const underlying = indexUnderlying(symbol);
-    const label = underlying || symbol.trim().toUpperCase() || "this contract";
-    return { limit: brokerFreezeQty, label };
+    return brokerFreezeQty;
   }
   const underlying = indexUnderlying(symbol);
   if (!underlying) return null;
-  const limit = NSE_INDEX_FREEZE_QUANTITY[underlying];
-  if (limit == null) return null;
-  return { limit, label: underlying };
+  return NSE_INDEX_FREEZE_QUANTITY[underlying] ?? null;
 }
 
 /**
@@ -292,12 +304,9 @@ export function checkFreezeQuantity(
   brokerFreezeQty?: number | null,
 ): string | null {
   if (!Number.isInteger(quantity) || quantity < 1) return null;
-  const resolved = resolveFreezeQuantity(symbol, brokerFreezeQty);
-  if (!resolved || resolved.limit == null || quantity <= resolved.limit) return null;
-  return (
-    `Quantity ${quantity} exceeds the freeze quantity of ${resolved.limit} for ${resolved.label}. `
-    + "The order was not split."
-  );
+  const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (limit == null || quantity <= limit) return null;
+  return freezeQuantityRefusal(symbol, limit);
 }
 
 // ---------------------------------------------------------------------------

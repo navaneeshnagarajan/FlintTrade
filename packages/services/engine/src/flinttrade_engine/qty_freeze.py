@@ -149,25 +149,30 @@ def _positive_int(value: object) -> int | None:
     return value if value > 0 else None
 
 
-def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> tuple[int, str] | None:
-    """Broker ``freeze_qty`` wins. Otherwise use the NSE index circular.
+def order_symbol_label(symbol: str) -> str:
+    """Symbol named in the freeze refusal. Blank input uses a neutral label."""
+    text = " ".join(str(symbol).split())
+    return text or "this contract"
+
+
+def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
+    """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/76693 index table.
 
     Returns:
-        ``(limit, label)`` or ``None`` when this order has no freeze quantity.
+        The maximum quantity for one order, or ``None`` when no freeze applies.
     """
     supplied = _positive_int(broker_freeze_qty)
-    underlying = index_underlying(symbol)
     if supplied is not None:
-        label = underlying or " ".join(str(symbol).upper().split()) or "this contract"
-        return supplied, label
+        return supplied
+    underlying = index_underlying(symbol)
     if underlying is None:
         return None
-    return _NSE_INDEX_FREEZE[underlying], underlying
+    return _NSE_INDEX_FREEZE[underlying]
 
 
 def quantity_admission_refusal(
     symbol: str,
-    exchange: str,
+    _exchange: str,
     quantity: int,
     *,
     lot_size: int | None = None,
@@ -176,7 +181,11 @@ def quantity_admission_refusal(
     """Refuse a quantity that is not a lot multiple or is above the freeze quantity.
 
     A missing lot size skips the multiple check. A missing freeze quantity
-    skips the freeze check. Nothing here splits the order into smaller slices.
+    skips the freeze check. The sentences are the same for Practice and Live.
+    Nothing here splits the order into smaller slices.
+
+    Args:
+        _exchange: Order segment. The visible lot sentence does not name it.
 
     Returns:
         An operator sentence, or ``None`` when the quantity may continue.
@@ -185,18 +194,11 @@ def quantity_admission_refusal(
         return None
     lot = _positive_int(lot_size)
     if lot is not None and quantity % lot != 0:
-        segment = str(exchange).strip().upper() or exchange
-        return f"Quantity must be a positive multiple of the lot size ({lot}) for {segment}."
-    resolved = resolve_freeze_quantity(symbol, broker_freeze_qty)
-    if resolved is None:
+        return f"Quantity must be a multiple of the lot size ({lot})."
+    limit = resolve_freeze_quantity(symbol, broker_freeze_qty)
+    if limit is None or quantity <= limit:
         return None
-    limit, label = resolved
-    if quantity <= limit:
-        return None
-    return (
-        f"Quantity {quantity} exceeds the freeze quantity of {limit} for {label}. "
-        "The order was not split."
-    )
+    return f"Max {limit} per order for {order_symbol_label(symbol)}. Place smaller orders."
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,7 @@ import {
   checkOrderEntryMode,
   checkFreezeQuantity,
   checkOrderQuantityLimit,
+  lotMultipleRefusal,
   checkPriceForOrderType,
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
@@ -621,7 +622,7 @@ function OrderPadWidget(props: WidgetProps) {
       current?.type === "validate"
       && typeof current.message === "string"
       && current.message.includes(" exceeds ")
-      && (current.message.includes(" limit of ") || current.message.includes("freeze quantity"))
+      && (current.message.includes(" limit of ") || current.message.includes("per order for"))
     ) {
       clearErrors("qty");
     }
@@ -1168,7 +1169,7 @@ function OrderPadWidget(props: WidgetProps) {
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
         ? missingLotRefusal(deskContractName(values.symbol))
-        : lotRefusal;
+        : lotMultipleRefusal(lotSize);
       setError("qty", { type: "validate", message: msg });
       showToast("error", msg, 6000);
       return;
