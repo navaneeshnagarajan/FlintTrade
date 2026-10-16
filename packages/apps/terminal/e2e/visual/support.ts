@@ -6,6 +6,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 
 import { expect } from "../fixture-registry";
+import { verifyHelpKeyboard, verifyHelpPlacement } from "./help-placement";
 
 /**
  * Fixed clock for every visual check. The runner timezone is UTC, matching
@@ -208,6 +209,7 @@ export async function reviewScreen(
   testInfo: TestInfo,
   target: Page | Locator = page,
 ): Promise<void> {
+  await verifyHelpPlacement(page, screenKey, testInfo);
   // Axe needs live timers. The clock stays paused for the screenshot so a
   // widescreen frame can settle.
   await page.clock.resume();
@@ -234,4 +236,5 @@ export async function reviewScreen(
     caret: "hide",
     mask: dynamicMasks(page),
   });
+  await verifyHelpKeyboard(page, screenKey);
 }

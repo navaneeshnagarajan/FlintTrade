@@ -257,7 +257,8 @@ def validate_report(
 
 
 def partition(
-    rows: list[dict[str, str]], out: Path
+    rows: list[dict[str, str]], out: Path,
+    registration_files: dict[tuple[str, str, str], str] | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
     infra = [row for row in rows if row["file"] in INFRA_FILES]
     csp = [row for row in rows if row["file"] == "schema-csp.spec.ts"]
@@ -271,8 +272,17 @@ def partition(
     if identities(infra + vite + csp) != identities(rows):
         raise ValueError("Browser role union differs from the complete default inventory")
     for label, cases in [("infra", infra), ("vite", vite), ("csp", csp)]:
+        selectors = []
+        for row in cases:
+            selectors.append(row)
+            if registration_files is not None:
+                owner = registration_files[(row['file'], row['title'], row['project'])]
+                if owner != row['file']:
+                    # Playwright uses the same list for two distinct predicates:
+                    # registration-file discovery and definition-file identity.
+                    selectors.append(dict(row, file=owner))
         (out / (label + "-test-list.txt")).write_text(
-            "".join(f"[{row['project']}] › {row['file']} › {row['title']}\n" for row in cases)
+            "".join(f"[{row['project']}] › {row['file']} › {row['title']}\n" for row in selectors)
         )
     return infra, vite, csp
 
@@ -304,7 +314,14 @@ def collect(
 
     report = listing("playwright.config.ts", "default-collection")
     rows = [row for row, _ in report_rows(report)]
-    infra, vite, csp = partition(rows, OUT)
+    # CLI selection uses the registering spec, while native identity retains the
+    # definition file (which can be an imported helper). Never rename that identity.
+    registration_files = {
+        (row['file'], row['title'], row['project']): suite['file']
+        for suite in report['suites']
+        for row, _ in report_rows({'suites': [suite]})
+    }
+    infra, vite, csp = partition(rows, OUT, registration_files)
     validate_report(
         listing("playwright.infra.config.ts", "default-infra-collection", ["--test-list=" + str(OUT / "infra-test-list.txt")]),
         infra,

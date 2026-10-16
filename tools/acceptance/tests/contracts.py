@@ -158,7 +158,7 @@ class Registrations(unittest.TestCase):
         app = config('tsconfig.json')
         infra = config('tsconfig.e2e-infra.json')
         expected_app = {'e2e/incidents/fixture.tsx', 'e2e/service-oauth-handoff.fixture.tsx', 'e2e/service-oauth-handoff.entry.ts'}
-        expected_infra = {'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts'}
+        expected_infra = {'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts', 'e2e/visual/help-placement.ts'}
         self.assertFalse(expected_app - set(app['include']), 'Missing app fixture typecheck registration: ' + str(expected_app - set(app['include'])))
         self.assertFalse(expected_infra - set(infra['include']), 'Missing infra typecheck registration: ' + str(expected_infra - set(infra['include'])))
         self.assertIs(app['compilerOptions']['allowImportingTsExtensions'], True)
@@ -269,6 +269,22 @@ class CspCarrier(unittest.TestCase):
             for bad in [cases[:2]+cases[3:], cases+[cases[1]], cases+[dict(cases[1],title='unexpected CSP case')]]:
                 with self.assertRaisesRegex(ValueError,'CSP identities'):
                     module.partition(bad,out)
+
+    def test_helper_definition_keeps_identity_but_selects_registration_file(self):
+        module = self.load_carrier()
+        helper = {'file':'structure.ts','title':'structure › keyboard','project':'chromium'}
+        cases = [helper, *module.CSP_CASES, *module.INFRA_CASES]
+        owners = {(r['file'],r['title'],r['project']):r['file'] for r in cases}
+        owners[('structure.ts','structure › keyboard','chromium')] = 'structure.spec.ts'
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            infra, vite, csp = module.partition(cases, out, owners)
+            self.assertEqual(vite, [helper])
+            self.assertEqual((out/'vite-test-list.txt').read_text().splitlines(), [
+                '[chromium] › structure.ts › structure › keyboard',
+                '[chromium] › structure.spec.ts › structure › keyboard',
+            ])
+            self.assertEqual(module.identities(infra+vite+csp), module.identities(cases))
 
     def test_csp_report_requires_actual_successful_bodies(self):
         module = self.load_carrier()
@@ -482,6 +498,9 @@ class BrowserRoles(unittest.TestCase):
         all_report=deepcopy(self.report)
         for row in [*module.CSP_CASES,{'file':'app.spec.ts','title':'app','project':'chromium'}]:
             all_report['suites'][0]['specs'].append({'file':row['file'],'title':row['title'],'tests':[{'projectName':row['project']}]})
+        # Native reports group definitions under their registering spec file.
+        all_report['suites'] = [{'file': spec['file'], 'specs': [spec]}
+                                for spec in all_report['suites'][0]['specs']]
         with tempfile.TemporaryDirectory() as temp, patch.object(module,'OUT',Path(temp)):
             calls=[]
             def execute(argv,name,timeout,env):
