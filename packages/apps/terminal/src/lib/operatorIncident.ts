@@ -60,8 +60,17 @@ export type FailureClass = (typeof FAILURE_CLASSES)[number];
 export const LAYA_DOWN_REFUSAL =
   "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
 
-/** Success copy when a close fills and Laya is not Ready. */
-export const LAYA_EXIT_WHILE_DOWN = "Closed. Exits are allowed while Laya is Down.";
+/**
+ * Reduce-only exit acknowledgement while Laya is not Ready.
+ * Positions, the Practice Order Pad and the Live Order Pad share this sentence.
+ * A request is not a fill.
+ */
+export const EXIT_REQUESTED =
+  "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.";
+
+/** Exit-all acknowledgement. A request is not a fill. */
+export const EXIT_ALL_REQUESTED =
+  "Exit-all requested. Check positions and orders for the outcome.";
 
 export type OperatorStripLevel = "info" | "degraded" | "blocked";
 

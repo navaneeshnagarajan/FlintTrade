@@ -66,8 +66,8 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect.poll(async () => (await layouts())["Current"]).toEqual((await layouts())[name]);
   };
   const anonymous = async () => {
-    await expect(page.getByTestId("public-preview-header")).toHaveText(/Sandbox · frozen simulation.*No accounts, sign-in, provider connections or real orders\./);
-    await expect(app.getByTestId("app-execution-scope")).toHaveText("Sandbox · No execution account selected · Linking changes selections, never execution authority.");
+    await expect(page.getByTestId("public-preview-header")).toHaveText(/Example · frozen simulation.*No accounts, sign-in, provider connections or real orders\./);
+    await expect(app.getByTestId("app-execution-scope")).toHaveText("Example · No execution account selected · Linking changes selections, never execution authority.");
     expect(await page.evaluate(() => ({ session: sessionStorage.getItem("flinttrade:auth-session"), local: localStorage.getItem("flinttrade:auth-session"), mode: JSON.parse(localStorage.getItem("flinttrade:mode") ?? "null") }))).toEqual({ session: null, local: null, mode: { state: { mode: "explore" }, version: 2 } });
     await expect(page.getByRole("dialog", { name: "Manage workspaces", exact: true })).toHaveCount(0);
   };

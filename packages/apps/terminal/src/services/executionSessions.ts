@@ -9,7 +9,7 @@ export const executionSessionSchema = z.looseObject({
   kind: z.enum(["practice", "strategy"]), config: RecordValue, generation: z.number().int().nonnegative(),
   entries_armed: z.boolean(), state: z.string().min(1), uncertain: z.boolean(), protection: z.string(), native_ready: z.literal(false),
   books: z.object({ positions: z.array(RecordValue), orders: z.array(RecordValue), trades: z.array(RecordValue), pnl: RecordValue }).nullable(),
-}).refine(row => row.environment !== "paper" || row.account === `paper:run:${row.run_id}`, "Paper identity mismatch");
+}).refine(row => row.environment !== "paper" || row.account === `paper:run:${row.run_id}`, "Practice identity mismatch");
 export type ExecutionSessionRecord = z.infer<typeof executionSessionSchema>;
 export type SessionOperation = "start" | "stop" | "rearm" | "close";
 export class ExecutionSessionError extends Error {

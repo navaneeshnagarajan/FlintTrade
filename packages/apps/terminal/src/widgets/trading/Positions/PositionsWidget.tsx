@@ -84,6 +84,7 @@ import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
+import { EXIT_ALL_REQUESTED, EXIT_REQUESTED } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
@@ -191,8 +192,6 @@ interface PositionsPanelParams {
 
 /** Position products supported by the convert and square-off verbs. */
 const PRODUCTS = ["MIS", "CNC", "NRML"] as const;
-const EXIT_REQUESTED_WHILE_DOWN = "Exit requested. Exits are allowed while Laya is Down.";
-const EXIT_ALL_ACKNOWLEDGED = "Exit-all requested. Check positions and orders for the outcome.";
 
 interface PositionActionIntent {
   position: PositionRow;
@@ -438,9 +437,9 @@ function SquareOffDialog({
       const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
         category: "order",
-        title: exitWhileDown ? EXIT_REQUESTED_WHILE_DOWN : "Square-off submitted",
+        title: exitWhileDown ? EXIT_REQUESTED : "Square-off submitted",
         body: exitWhileDown
-          ? EXIT_REQUESTED_WHILE_DOWN
+          ? EXIT_REQUESTED
           : `Exit requested: ${exitAction} ${exitQty} ${position.symbol} at market. Check positions and orders for the outcome.`,
       });
       onSquaredOff(mutationIdentity);
@@ -664,8 +663,8 @@ function ExitAllDialog({
         const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
         emitNotification({
           category: "system",
-          title: exitWhileDown ? EXIT_REQUESTED_WHILE_DOWN : "Exit-all submitted",
-          body: EXIT_ALL_ACKNOWLEDGED,
+          title: exitWhileDown ? EXIT_REQUESTED : "Exit-all submitted",
+          body: EXIT_ALL_REQUESTED,
         });
         close(false);
         return;
@@ -686,7 +685,7 @@ function ExitAllDialog({
       emitNotification({
         category: "system",
         title: "Exit-all submitted",
-        body: EXIT_ALL_ACKNOWLEDGED,
+        body: EXIT_ALL_REQUESTED,
       });
       onExited(mutationIdentity);
       close(false);
@@ -1103,9 +1102,9 @@ function PositionsWidget(props: WidgetProps) {
       const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
         category: "order",
-        title: exitWhileDown ? EXIT_REQUESTED_WHILE_DOWN : "Square-off submitted",
+        title: exitWhileDown ? EXIT_REQUESTED : "Square-off submitted",
         body: exitWhileDown
-          ? EXIT_REQUESTED_WHILE_DOWN
+          ? EXIT_REQUESTED
           : `Exit requested: ${exitAction} ${exitQty} ${position.symbol} at market. Check positions and orders for the outcome.`,
       });
       refreshPositions(identity, getCurrentReadIdentity);

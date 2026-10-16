@@ -97,7 +97,7 @@ it("mounts policy from an actual run and confirms captured access with exact rea
     failures.push(`${init?.method} ${path}`); throw new Error("Unregistered transport");
   }));
   mount();
-  const run = await screen.findByRole("region", { name: "Paper run r29-run" });
+  const run = await screen.findByRole("region", { name: "Practice run r29-run" });
   fireEvent.click(within(run).getByRole("button", { name: "Configure run policy" }));
   const policy = await screen.findByRole("region", { name: "Run policy r29-run" });
   await screen.findByText(/Authoritative scope/);

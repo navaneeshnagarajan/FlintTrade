@@ -12,7 +12,7 @@ export function createPreviewFetch(transport: typeof fetch, origin: string): typ
     const url = new URL(request ? request.url : String(input), origin);
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
     const asset = url.pathname.startsWith("/demo-app/assets/") || url.pathname.startsWith("/demo-app/docs/");
-    if (url.origin !== origin || method !== "GET" || !asset) return Promise.reject(new Error("Public Sandbox is a build-frozen preview; backend and provider requests are unavailable."));
+    if (url.origin !== origin || method !== "GET" || !asset) return Promise.reject(new Error("Public preview is a build-frozen preview; backend and provider requests are unavailable."));
     return transport(input, init);
   };
 }

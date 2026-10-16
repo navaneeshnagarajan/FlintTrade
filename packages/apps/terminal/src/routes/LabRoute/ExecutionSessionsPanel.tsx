@@ -51,16 +51,16 @@ export function ExecutionSessionsPanel() {
   });
   return <section className="space-y-4 min-w-0" aria-label="Execution sessions">
     <header>
-      <h3 className="text-lg font-semibold">Paper forward runs</h3>
+      <h3 className="text-lg font-semibold">Practice forward runs</h3>
       <p className="text-sm text-text-secondary">Independent run books. Terminal’s Live account and mode remain unchanged.</p>
       <p className="text-xs text-text-muted">Runs belong to the backend and continue across app switches and UI closure. Logout retires entries; restart requires reconciliation and explicit rearm. Native Live execution remains unavailable.</p>
     </header>
     <div className="grid gap-3 sm:grid-cols-2 rounded border border-border-default p-4">
       <div><Label htmlFor="paper-symbols">Symbols</Label><Input id="paper-symbols" value={symbols} onChange={event => setSymbols(event.target.value)} placeholder="Exact symbols, comma-separated" /></div>
       <div><Label htmlFor="paper-exchange">Exchange</Label><Input id="paper-exchange" value={exchange} onChange={event => setExchange(event.target.value)} /></div>
-      <div className="sm:col-span-2"><Label htmlFor="paper-strategy">Registered strategy (optional)</Label><Input id="paper-strategy" value={strategy} onChange={event => setStrategy(event.target.value)} placeholder="Exact core-registered Paper strategy; blank uses Practice agent" /></div>
-      <p className="text-xs text-text-muted sm:col-span-2">A strategy requires an explicit Paper execution contract in the core. Otherwise uses the existing Practice agent’s configured model and risk rules. Unavailable inputs block entries; no market data is invented. Every start creates a new run identity, even for the same strategy.</p>
-      <Button disabled={!enabled || command.isPending || !symbols.trim()} onClick={() => command.mutate({})}>Start Paper run</Button>
+      <div className="sm:col-span-2"><Label htmlFor="paper-strategy">Registered strategy (optional)</Label><Input id="paper-strategy" value={strategy} onChange={event => setStrategy(event.target.value)} placeholder="Exact core-registered Practice strategy; blank uses Practice agent" /></div>
+      <p className="text-xs text-text-muted sm:col-span-2">A strategy requires an explicit Practice execution contract in the core. Otherwise uses the existing Practice agent’s configured model and risk rules. Unavailable inputs block entries; no market data is invented. Every start creates a new run identity, even for the same strategy.</p>
+      <Button disabled={!enabled || command.isPending || !symbols.trim()} onClick={() => command.mutate({})}>Start Practice run</Button>
       <Button variant="outline" disabled={!enabled || query.isFetching} onClick={() => void query.refetch()}>Refresh runs</Button>
     </div>
     {!enabled ? <p>Installed operator session required. Preview does not create runs.</p> : null}
@@ -69,7 +69,7 @@ export function ExecutionSessionsPanel() {
     {query.isError ? <p role="alert">Run census unavailable — this is not an empty or stopped book.</p> : null}
     {query.isLoading ? <p role="status">Reading run identities…</p> : null}
     {!query.isError && query.data?.length === 0 ? <p>No registered runs for this operator. Historical custody may still require reconciliation.</p> : null}
-    {(query.data ?? []).map(row => <section key={row.run_id} aria-label={`${row.environment === "paper" ? "Paper" : "Live"} run ${row.run_id}`} className="rounded border border-border-default p-4 space-y-3 min-w-0">
+    {(query.data ?? []).map(row => <section key={row.run_id} aria-label={`${row.environment === "paper" ? "Practice" : "Live"} run ${row.run_id}`} className="rounded border border-border-default p-4 space-y-3 min-w-0">
       <div className="flex flex-wrap gap-2 items-center"><h4 className="font-mono break-all">{row.run_id}</h4><span>{row.state}</span></div>
       <p className="text-xs break-all">{row.account} · {row.environment} · generation {row.generation} · {row.entries_armed ? "Entries armed" : "Entries retired"}</p>
       <p className="text-xs">Protection: {row.protection}. Stop entries does not cancel working orders or close positions.</p>

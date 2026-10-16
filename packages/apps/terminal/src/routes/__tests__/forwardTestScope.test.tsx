@@ -19,7 +19,7 @@ function row(id: string, generation = 1, armed = true) {
     books: { positions: [], orders: [], trades: [], pnl: {} } };
 }
 
-it("owns two Paper runs beside unchanged Live selection and captures pending exact Stop", async () => {
+it("owns two Practice runs beside unchanged Live selection and captures pending exact Stop", async () => {
   const first = row("paper-one");
   const second = row("paper-two");
   const calls: string[] = [];
@@ -47,8 +47,8 @@ it("owns two Paper runs beside unchanged Live selection and captures pending exa
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const mount = () => <QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>;
   const view = render(mount());
-  const one = await screen.findByRole("region", { name: "Paper run paper-one" });
-  expect(screen.getByRole("region", { name: "Paper run paper-two" })).toBeVisible();
+  const one = await screen.findByRole("region", { name: "Practice run paper-one" });
+  expect(screen.getByRole("region", { name: "Practice run paper-two" })).toBeVisible();
   fireEvent.click(within(one).getByRole("button", { name: "Stop entries" }));
   await waitFor(() => expect(release).toBeTypeOf("function"));
   act(() => useBrokerStore.getState().setActiveAccount("native:upstox:another-live"));
@@ -56,14 +56,14 @@ it("owns two Paper runs beside unchanged Live selection and captures pending exa
   await act(async () => { release?.(); });
   render(mount());
   expect(await screen.findByText("entries_stopped")).toBeVisible();
-  expect(within(screen.getByRole("region", { name: "Paper run paper-two" })).getByText("running")).toBeVisible();
+  expect(within(screen.getByRole("region", { name: "Practice run paper-two" })).getByText("running")).toBeVisible();
   expect(useModeStore.getState().mode).toBe("live");
   expect(useBrokerStore.getState().activeAccountId).toBe("native:upstox:another-live");
   expect(calls.filter(call => call.startsWith("POST"))).toEqual(["POST /api/v1/execution-sessions/paper-one/stop"]);
   expect(failures).toEqual([]);
 });
 
-it.each(["practice", "strategy"])("starts a new %s Paper run with immutable identity and readback, never name-only dispatch", async (kind) => {
+it.each(["practice", "strategy"])("starts a new %s Practice run with immutable identity and readback, never name-only dispatch", async (kind) => {
   const failures: unknown[] = [];
   let created: ReturnType<typeof row> | undefined;
   const posts: string[] = [];
@@ -92,7 +92,7 @@ it.each(["practice", "strategy"])("starts a new %s Paper run with immutable iden
   render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
   fireEvent.change(screen.getByLabelText("Symbols"), { target: { value: "RELIANCE" } });
   if (kind === "strategy") fireEvent.change(screen.getByLabelText("Registered strategy (optional)"), { target: { value: "registered-strategy" } });
-  fireEvent.click(screen.getByRole("button", { name: "Start Paper run" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start Practice run" }));
   expect(await screen.findByText("running")).toBeVisible();
   expect(posts).toHaveLength(2);
   expect(useModeStore.getState().mode).toBe("live");

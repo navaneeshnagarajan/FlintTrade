@@ -18,7 +18,7 @@ export function LocalHelp() {
     <Button variant="outline" size="sm" className="fixed bottom-12 right-4 z-30" aria-label="Open local help" onClick={() => setOpen(true)}><BookOpen size={14} />Help</Button>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogTitle>Local help · not an AI response</DialogTitle><DialogDescription>No model is ready. Navigation, documentation and manual safety controls remain available without AI.</DialogDescription>
       {app && <p className="text-sm">{app.name}: {app.description}.</p>}
-      <p className="text-xs text-text-secondary">App switching and instrument linking never arm trading or change execution accounts. Testing must use its own Paper run. Unknown order outcomes require reconciliation, not retry.</p>
+      <p className="text-xs text-text-secondary">App switching and instrument linking never arm trading or change execution accounts. Testing must use its own Practice run. Unknown order outcomes require reconciliation, not retry.</p>
       <nav aria-label="Local help destinations" className="grid grid-cols-3 gap-2">{APPS.map(item => <Link className="rounded border border-border-default p-2 text-sm" key={item.id} to={item.path} onClick={() => setOpen(false)}>{item.name}</Link>)}</nav>
       <Link to="/automation" state={{ openWidget: { widgetId: "model-routing" } }} onClick={() => setOpen(false)}>Core model connections and tasks</Link>
       <Link to="/settings#llm" onClick={() => setOpen(false)}>Configure AI</Link>

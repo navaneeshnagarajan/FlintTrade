@@ -120,11 +120,11 @@ class MaintenanceHistory:
                 raise MaintenanceRefused("legacy strategy ownership remains unresolved")
         manual = app.config.get("DATA_SANDBOX_ENGINE")
         if type(manual) is not SandboxEngine or Path(manual._db_path) != self.workspace / "sandbox/state.sqlite":
-            raise MaintenanceRefused("manual Paper book ownership unavailable")
+            raise MaintenanceRefused("manual Practice book ownership unavailable")
         with manual._lock:
             manual.verify_existing_book()
             if manual.get_positions() or manual.get_all_orders() or manual.get_trades():
-                raise MaintenanceRefused("manual Paper execution history requires reconciliation")
+                raise MaintenanceRefused("manual Practice execution history requires reconciliation")
         actual_legacy = app.config.get("PRACTICE_AGENT_RUN_STORE")
         if (type(actual_legacy) is not AgentRunStore
                 or Path(actual_legacy.database_path) != self.workspace / "practice_agent_runs.sqlite"

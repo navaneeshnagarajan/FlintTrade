@@ -21,7 +21,7 @@ async function openPolicy(page: Page, core: Core, sessionReads = 1) {
   await core.finish();
   await page.clock.pauseAt(new Date());
   await page.getByRole("tab", { name: "Forward Test", exact: true }).click();
-  const row = page.getByRole("region", { name: "Paper run r46-paper-a", exact: true });
+  const row = page.getByRole("region", { name: "Practice run r46-paper-a", exact: true });
   await paint(page, () => expect(row).toBeVisible({ timeout: 100 }));
   await row.getByRole("button", { name: "Configure run policy", exact: true }).click();
   const panel = page.getByRole("region", { name: "Run policy r46-paper-a", exact: true });
@@ -73,7 +73,7 @@ for (const mode of ["live", "practice"] as const) test(`R46 access grant revoke 
   await page.clock.pauseAt(new Date());
   await observePolicyTiming(page, "clock-owned-from-before-startup");
   await page.getByRole("tab", { name: "Forward Test", exact: true }).click();
-  const row = page.getByRole("region", { name: "Paper run r46-paper-a", exact: true });
+  const row = page.getByRole("region", { name: "Practice run r46-paper-a", exact: true });
   await paint(page, () => expect(row).toBeVisible({ timeout: 100 }));
   await row.getByRole("button", { name: "Configure run policy", exact: true }).click();
   const panel = page.getByRole("region", { name: "Run policy r46-paper-a", exact: true });
@@ -328,7 +328,7 @@ for (const stage of ["preview", "ack", "readback"] as const) for (const retireme
       await expect.poll(async()=>{await page.clock.runFor(25);return entered;},{timeout:8000}).toBe(true);
       let replacement:Locator;
       if(retirement==="run"){
-        await page.getByRole("region",{name:"Paper run r46-paper-b",exact:true}).getByRole("button",{name:"Configure run policy",exact:true}).click();
+        await page.getByRole("region",{name:"Practice run r46-paper-b",exact:true}).getByRole("button",{name:"Configure run policy",exact:true}).click();
         replacement=page.getByRole("region",{name:"Run policy r46-paper-b",exact:true});
       }else{
         await page.getByRole("navigation",{name:"Apps",exact:true}).getByRole("link",{name:"Learn",exact:true}).click();
@@ -380,7 +380,7 @@ for (const fault of [false,true]) {
     const core=await setup(page,syntheticApi,info);core.registerRead(policyURL,1);
     const url="/api/v1/protection/grants/r46-paper-a";core.registerRead(url,1);
     await openPolicy(page,core);
-    const run=page.getByRole("region",{name:"Paper run r46-paper-a",exact:true});
+    const run=page.getByRole("region",{name:"Practice run r46-paper-a",exact:true});
     await run.getByRole("button",{name:"Hide run policy",exact:true}).click();
     await run.getByRole("button",{name:"Protection policy",exact:true}).click();
     const panel=page.getByRole("region",{name:"Protection policy r46-paper-a",exact:true});

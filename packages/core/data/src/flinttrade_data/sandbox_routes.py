@@ -166,7 +166,7 @@ def get_status() -> Response:
         data["trades_count"] = len(trades)
     except Exception:
         logger.warning("Sandbox status unavailable")
-        return jsonify({"status": "error", "message": "Sandbox status unavailable; no balance was inferred."}), 503
+        return jsonify({"status": "error", "message": "Practice status unavailable; no balance was inferred."}), 503
 
     return jsonify(
         {
@@ -380,7 +380,7 @@ def reset_sandbox() -> Response:
         {
             "status": "success",
             "data": {
-                "message": "Sandbox reset — all paper trades cleared",
+                "message": "Practice reset — all Practice trades cleared",
                 "backup": backup,
             },
         }

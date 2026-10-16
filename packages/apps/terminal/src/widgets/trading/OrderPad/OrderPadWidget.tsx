@@ -89,7 +89,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { LAYA_EXIT_WHILE_DOWN, liveWritesMuted } from "@/lib/operatorIncident";
+import { EXIT_REQUESTED, liveWritesMuted } from "@/lib/operatorIncident";
 import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
@@ -118,7 +118,6 @@ const DEBOUNCE_MS = 300;
 // Documentation describes native behaviour, not a quote or a readiness grant.
 const INDSTOCKS_MARKET_NOTICE = "INDstocks documents MARKET requests converting to LIMIT orders at the broker’s live price. The effective limit price is unknown until the broker reports it. Execution is not guaranteed.";
 const INDSTOCKS_GTT_UNAVAILABLE = "GTT creation is unavailable in this Order Pad. INDstocks currently ignores trailing-stop fields; active trailing requests are refused, not treated as protection.";
-const NATIVE_CLOSE_WHILE_DOWN = "Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.";
 
 function contractToken(value: string | undefined): string {
   return (value ?? "").trim().toUpperCase();
@@ -949,7 +948,7 @@ function OrderPadWidget(props: WidgetProps) {
         ? visiblePracticeFill(result as PracticeFillResult)
         : "";
       const nativeAck = `${options?.exit ? "Close" : "Order"} requested${orderId ? ` · ID: ${orderId}` : ""}`;
-      const exitWhileDownText = placedMode === "live" ? NATIVE_CLOSE_WHILE_DOWN : LAYA_EXIT_WHILE_DOWN;
+      const exitWhileDownText = EXIT_REQUESTED;
       const successText = exitWhileDown
         ? exitWhileDownText
         : placedMode === "live" ? nativeAck : practiceFill || orderSuccessToast(placedMode, orderId);

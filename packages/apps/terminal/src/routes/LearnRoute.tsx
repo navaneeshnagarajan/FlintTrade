@@ -597,7 +597,7 @@ function StrategiesTab() {
   );
 }
 
-function PaperTradingTab() {
+function PracticeTradingTab() {
   return (
     <div data-testid="practice-trading" className="min-w-0 max-w-full space-y-6 animate-fade-in">
       <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
@@ -809,7 +809,7 @@ export default function LearnRoute() {
     basics:     <BasicsTab />,
     glossary:   <GlossaryTab />,
     strategies: <StrategiesTab />,
-    paper:      <PaperTradingTab />,
+    paper:      <PracticeTradingTab />,
     resources:  <ResourceHubTab selectedDoc={selectedDoc} />,
   }), [selectedDoc]);
 

@@ -3,7 +3,7 @@ import { HOME_WIDGET_CATALOG } from "@/routes/home/homeWidgetRegistry";
 
 export const APPS = [
   { id: "terminal", name: "Terminal", path: "/terminal", description: "Markets, account overview and manual trading" },
-  { id: "testing", name: "Testing", path: "/testing", description: "Strategy research, Paper forward tests and datasets" },
+  { id: "testing", name: "Testing", path: "/testing", description: "Strategy research, Practice forward tests and datasets" },
   { id: "portfolio", name: "Portfolio", path: "/portfolio", description: "Investments, holdings, allocation and goals" },
   { id: "automation", name: "Automation", path: "/automation", description: "Strategies, schedules, AI runs and approvals" },
   { id: "reports", name: "Reports", path: "/reports", description: "Journal, performance, notes and coaching" },

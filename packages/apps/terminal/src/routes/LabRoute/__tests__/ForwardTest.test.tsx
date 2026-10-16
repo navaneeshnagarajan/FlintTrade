@@ -50,14 +50,14 @@ describe("ForwardTestSection", () => {
     }));
     const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><ForwardTestSection /></QueryClientProvider>);
-    const alice = await screen.findByRole("region", { name: "Paper run paper-alice" });
+    const alice = await screen.findByRole("region", { name: "Practice run paper-alice" });
     await act(async () => {
       fireEvent.click(within(alice).getByRole("button", { name: "Stop entries" }));
       await readEntered.promise; // Prove the held trade/P&L read belongs to Alice's accepted exact Stop.
     });
     try {
     act(() => useAuthStore.setState({ token: "token-2", username: "bob", sessionGeneration: 8 }));
-    const bob = await screen.findByRole("region", { name: "Paper run paper-bob" });
+    const bob = await screen.findByRole("region", { name: "Practice run paper-bob" });
     expect(screen.queryByText(/Pending exact run: paper-alice/)).not.toBeInTheDocument();
     await act(async () => { pendingTrades.resolve(response(row("paper-alice", "alice", true))); await pendingTrades.promise; });
     await waitFor(() => expect(within(bob).getByRole("button", { name: "Stop entries" })).toBeEnabled());
@@ -65,7 +65,7 @@ describe("ForwardTestSection", () => {
     expect(screen.queryByText("Session Summary")).not.toBeInTheDocument();
     expect(screen.queryByText("entries_stopped")).not.toBeInTheDocument();
     expect(screen.queryByText(/ALICE-PRIVATE-FILL/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Paper run paper-alice" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Practice run paper-alice" })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(calls.filter(call => call.startsWith("POST"))).toEqual(["POST /api/v1/execution-sessions/paper-alice/stop Bearer token-1"]);
     expect(calls.filter(call => call.endsWith("Bearer token-2"))).toEqual(["GET /api/v1/execution-sessions Bearer token-2"]);

@@ -174,7 +174,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     </div>
     <details className="shrink-0 border-b border-border-default px-3 py-1 text-xs"><summary className="cursor-pointer">Layout actions</summary><div className="flex flex-wrap items-center gap-2 py-2"><Button size="sm" variant="outline" onClick={exportLayout}>Export layout</Button><label>Import layout <input aria-label="Import app layout" type="file" accept="application/json,.json" onChange={event => void importLayout(event.target.files?.[0])} /></label><Button size="sm" variant="ghost" onClick={() => setModel(Model.fromJson(buildAppPreset(app, "default")))}>Reset app layout</Button><span className="text-text-muted">Presentation only. Saved named layouts and all non-layout records are retained.</span></div></details>
     <p className="shrink-0 border-b border-border-default px-3 py-1 text-xs text-text-secondary" data-testid="app-execution-scope">
-      {app === "testing" ? "Testing · Paper research scope only. Terminal account and Live authority are unchanged." : `${mode === "live" ? "Live" : "Sandbox"} · ${account || "No execution account selected"}`}
+      {app === "testing" ? "Testing · Practice research scope only. Terminal account and Live authority are unchanged." : `${mode === "live" ? "Live" : mode === "practice" ? "Practice" : "Example"} · ${account || "No execution account selected"}`}
       {app === "terminal" ? " · Linking changes selections, never execution authority." : ""}
     </p>
     <InstrumentLinks app={app} />

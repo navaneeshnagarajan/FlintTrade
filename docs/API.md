@@ -64,10 +64,8 @@ label is the symbol, or `this contract` when the symbol is empty.
 While Laya is Down, a new order is paused and a qualifying close is still
 admitted. Live still runs SafetySystem after that record. The desk line is
 `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
-While Laya is not Ready, Positions shows `Exit requested. Exits are allowed while Laya is Down.`
-A Live Order Pad close shows `Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.`
+While Laya is not Ready, Positions, the Practice Order Pad and the Live Order Pad show `Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.`
 Exit-all shows `Exit-all requested. Check positions and orders for the outcome.`
-A Practice Order Pad close shows `Closed. Exits are allowed while Laya is Down.`
 
 A position whose sign flips after the broker book has loaded keeps its
 row, tagged **Unexpected**, and the Positions book shows
@@ -646,7 +644,7 @@ Sandbox response shape — the handler returns the sandbox dict as-is
 {
   "order_id": "sandbox-...",
   "status": "COMPLETE",
-  "message": "Paper order executed: BUY 50 NIFTY @ 0.00"
+  "message": "Practice order executed: BUY 50 NIFTY @ 0.00"
 }
 ```
 

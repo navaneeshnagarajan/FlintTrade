@@ -79,10 +79,10 @@ class ExecutionStrategyOwner:
             raise ValueError("exact single-instrument strategy scope required")
         factory = self.app.config.get("EXECUTION_STRATEGY_FACTORIES", {}).get(config["strategy"])
         if not callable(factory):
-            raise ValueError("registered Paper strategy factory unavailable")
+            raise ValueError("registered Practice strategy factory unavailable")
         strategy = factory(scope, dict(config))
         if not isinstance(strategy, BaseStrategy) or strategy.require_execution_contract().mode != StrategyExecutionMode.PRACTICE:
-            raise ValueError("explicit Paper strategy execution contract required")
+            raise ValueError("explicit Practice strategy execution contract required")
         if str(strategy.exchange) != config["exchange"] or str(strategy.product) != config["product"]:
             raise ValueError("strategy scope mismatch")
         with self.execution_binding.registry.lock:

@@ -105,7 +105,8 @@ describe("ModeIndicator", () => {
       render(<ModeIndicator />);
 
       const chip = screen.getByTestId("execution-mode");
-      expect(chip).toHaveTextContent("Sandbox · Paper");
+      expect(chip).toHaveTextContent("Practice");
+      expect(chip).not.toHaveTextContent(/Paper|Sandbox/);
       expect(chip).not.toHaveTextContent(/explore/i);
       expect(screen.queryByText("EXPLORE")).not.toBeInTheDocument();
     });
@@ -116,7 +117,7 @@ describe("ModeIndicator", () => {
 
       await openMenu();
 
-      expect(screen.getByRole("menuitem", { name: "Sandbox (Paper)" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Practice" })).toBeInTheDocument();
       expect(screen.getByRole("menuitem", { name: /Connected \(read\)/ })).toHaveTextContent(
         "Connect a broker first",
       );
@@ -255,7 +256,7 @@ describe("ModeIndicator", () => {
 
       render(<ModeIndicator />);
       const user = await openMenu();
-      await user.click(screen.getByRole("menuitem", { name: "Sandbox (Paper)" }));
+      await user.click(screen.getByRole("menuitem", { name: "Practice" }));
 
       await waitFor(() => expect(useModeStore.getState().mode).toBe("practice"));
       expect(fetchSpy).toHaveBeenCalledWith(
@@ -275,7 +276,7 @@ describe("ModeIndicator", () => {
 
       render(<ModeIndicator />);
       const user = await openMenu();
-      await user.click(screen.getByRole("menuitem", { name: "Sandbox (Paper)" }));
+      await user.click(screen.getByRole("menuitem", { name: "Practice" }));
 
       await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
       expect(useModeStore.getState().mode).toBe("explore");
@@ -289,7 +290,7 @@ describe("ModeIndicator", () => {
       render(<ModeIndicator />);
 
       const user = await openMenu();
-      await user.click(screen.getByRole("menuitem", { name: "Sandbox (Paper)" }));
+      await user.click(screen.getByRole("menuitem", { name: "Practice" }));
 
       expect(useModeStore.getState().mode).toBe("explore");
       expect(listener).toHaveBeenCalledTimes(1);
@@ -477,7 +478,7 @@ describe("ModeIndicator", () => {
 
       expect(screen.getByTestId("execution-mode")).toHaveTextContent("Live");
       const user = await openMenu();
-      await user.click(screen.getByRole("menuitem", { name: "Sandbox (Paper)" }));
+      await user.click(screen.getByRole("menuitem", { name: "Practice" }));
 
       await waitFor(() => expect(useModeStore.getState().mode).toBe("practice"));
       expect(useAuthStore.getState().token).toBe("fresh-practice-jwt");
@@ -505,7 +506,7 @@ describe("ModeIndicator", () => {
       });
       render(<ModeIndicator />);
       const user = await openMenu();
-      await user.click(screen.getByRole("menuitem", { name: "Sandbox (Paper)" }));
+      await user.click(screen.getByRole("menuitem", { name: "Practice" }));
       await waitFor(() => expect(finishRequest).toBeTypeOf("function"));
 
       act(() => useAuthStore.getState().setLoggedOut());
@@ -535,7 +536,7 @@ describe("ModeIndicator", () => {
       });
       render(<ModeIndicator />);
       const user = await openMenu();
-      await user.click(screen.getByRole("menuitem", { name: "Sandbox (Paper)" }));
+      await user.click(screen.getByRole("menuitem", { name: "Practice" }));
 
       expect(await screen.findByRole("alert")).toBeInTheDocument();
       expect(useModeStore.getState().mode).toBe("live");

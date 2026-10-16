@@ -110,7 +110,7 @@ def sessions() -> Any:
             raise ValueError("exact registered strategy required")
         strategy = requested["strategy"]
         if strategy not in current_app.config.get("EXECUTION_STRATEGY_FACTORIES", {}):
-            raise ValueError("registered Paper strategy unavailable")
+            raise ValueError("registered Practice strategy unavailable")
         accepted = {"symbols", "exchange", "product", "max_position_size", "cycle_interval_sec"}
         if set(requested) - accepted - {"strategy"}:
             raise ValueError("unsupported strategy parameters")

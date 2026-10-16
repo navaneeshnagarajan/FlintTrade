@@ -78,7 +78,7 @@ it("does not expose editable invented policy or zero capital when the real reads
   expect(screen.queryByLabelText("Starting capital")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Save Policy" })).not.toBeInTheDocument();
   expect(await screen.findByText(/Practice policy unavailable/)).toBeVisible();
-  expect(await screen.findByText(/Sandbox balance and P&L unavailable/)).toBeVisible();
+  expect(await screen.findByText(/Practice balance and P&L unavailable/)).toBeVisible();
   expect(screen.queryByText("₹0.00")).not.toBeInTheDocument();
   expect(requests.filter(key => key === "GET /ft-api/v1/sandbox/status")).toHaveLength(2);
   expect(requests.filter(key => key === "GET /ft-api/v1/sandbox/config")).toHaveLength(2);
@@ -86,7 +86,7 @@ it("does not expose editable invented policy or zero capital when the real reads
 
 it("refuses a malformed successful status instead of publishing a zero balance", async () => {
   mountReads(() => response({ ...validStatus, data: {} }), () => response(validPolicy));
-  expect(await screen.findByText(/Sandbox balance and P&L unavailable/, {}, { timeout: 2500 })).toBeVisible();
+  expect(await screen.findByText(/Practice balance and P&L unavailable/, {}, { timeout: 2500 })).toBeVisible();
   expect(screen.queryByText("₹0.00")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Starting capital")).toHaveValue(policy.starting_capital);
   expect(requests.filter(key => key === "GET /ft-api/v1/sandbox/status")).toHaveLength(2);
@@ -105,7 +105,7 @@ it.each([
   { name: "fractional trade count", body: { ...validStatus, data: { ...validStatus.data, trades_count: 0.5 } } },
 ])("refuses $name without replacing unavailable evidence with zero", async ({ body }) => {
   mountReads(() => response(body), () => response(validPolicy));
-  expect(await screen.findByText(/Sandbox balance and P&L unavailable/, {}, { timeout: 2500 })).toBeVisible();
+  expect(await screen.findByText(/Practice balance and P&L unavailable/, {}, { timeout: 2500 })).toBeVisible();
   expect(screen.queryByText("₹0.00")).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/P&L:/)).not.toBeInTheDocument();
   expect(requests.filter(key => key === "GET /ft-api/v1/sandbox/status")).toHaveLength(2);
@@ -115,7 +115,7 @@ it("renders a genuine complete zero balance and zero P&L without an unavailable 
   mountReads(() => response({ ...validStatus, data: { ...validStatus.data, capital: 0 } }), () => response(validPolicy));
   expect(await screen.findByText("₹0.00")).toBeVisible();
   expect(screen.getByLabelText("P&L: +₹0.00")).toBeVisible();
-  expect(screen.queryByText(/Sandbox balance and P&L unavailable/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Practice balance and P&L unavailable/)).not.toBeInTheDocument();
   expect(await screen.findByLabelText("Starting capital")).toHaveValue(policy.starting_capital);
   expect(requests).toEqual(["GET /ft-api/v1/sandbox/status", "GET /ft-api/v1/sandbox/config"]);
 });

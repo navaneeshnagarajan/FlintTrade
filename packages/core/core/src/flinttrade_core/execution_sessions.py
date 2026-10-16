@@ -116,7 +116,7 @@ class ExecutionSessions:
             if scope.environment == "paper":
                 template = self.app.config.get("DATA_SANDBOX_ENGINE")
                 if not isinstance(template, SandboxEngine):
-                    raise ValueError("configured Paper policy unavailable")
+                    raise ValueError("configured Practice policy unavailable")
                 with template._lock:
                     policy = replace(template.config)
             with self.db.transaction() as db:

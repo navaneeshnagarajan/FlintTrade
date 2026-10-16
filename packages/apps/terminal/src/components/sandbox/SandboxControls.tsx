@@ -318,7 +318,7 @@ export default function SandboxControls() {
 
         {isLoading ? (
           <div className="h-8 w-40 rounded bg-surface-hover animate-pulse" aria-label="Loading capital..." />
-        ) : !status || statusError ? <p role="alert">Sandbox balance and P&L unavailable; no zero balance is inferred.</p> : (
+        ) : !status || statusError ? <p role="alert">Practice balance and P&L unavailable; no zero balance is inferred.</p> : (
           <div className="space-y-0.5">
             <p className="font-mono font-bold text-2xl text-text-primary">
               ₹{formatInr(status?.capital ?? 0)}

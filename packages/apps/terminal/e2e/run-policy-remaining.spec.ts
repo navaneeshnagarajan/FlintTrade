@@ -20,7 +20,7 @@ async function open(page: Page, core: Core) {
   await expect(page.getByRole("tab", {name:"Forward Test",exact:true})).toBeVisible();
   await core.finish(); await page.clock.pauseAt(new Date());
   await page.getByRole("tab", {name:"Forward Test",exact:true}).click();
-  const run=page.getByRole("region",{name:"Paper run r46-paper-a",exact:true});
+  const run=page.getByRole("region",{name:"Practice run r46-paper-a",exact:true});
   await paint(page,()=>expect(run).toBeVisible({timeout:100}));
   await run.getByRole("button",{name:"Configure run policy",exact:true}).click();
   const panel=page.getByRole("region",{name:"Run policy r46-paper-a",exact:true});
@@ -111,7 +111,7 @@ for(const phase of ["selected", "confirmed"] as const) for(const retirement of [
     expect((JSON.parse(before.originalText!) as {exact_control:{revision:number}}).exact_control.revision).toBe(phase==="confirmed"?1:0);
     let replacement:Locator;
     if(retirement==="run") {
-      await page.getByRole("region",{name:"Paper run r46-paper-b",exact:true}).getByRole("button",{name:"Configure run policy",exact:true}).click();
+      await page.getByRole("region",{name:"Practice run r46-paper-b",exact:true}).getByRole("button",{name:"Configure run policy",exact:true}).click();
       replacement=page.getByRole("region",{name:"Run policy r46-paper-b",exact:true});
     } else {
       await page.getByRole("navigation",{name:"Apps",exact:true}).getByRole("link",{name:"Learn",exact:true}).click();
@@ -211,7 +211,7 @@ for (const replacement of ["issued auth", "backend"] as const) test(`R62 genuine
   await page.clock.pauseAt((await page.evaluate(()=>Date.now()))+100);
   await page.getByRole("tab",{name:"Forward Test",exact:true}).click();
   await core.completedBodies("GET","/api/v1/execution-sessions",2);
-  const run=page.getByRole("region",{name:"Paper run r46-paper-a",exact:true});
+  const run=page.getByRole("region",{name:"Practice run r46-paper-a",exact:true});
   await paint(page,()=>expect(run).toBeVisible({timeout:100}));
   if(await run.getByRole("button",{name:"Configure run policy",exact:true}).isVisible())await run.getByRole("button",{name:"Configure run policy",exact:true}).click();
   await paint(page,()=>expect(panel.getByLabel("Policy workflow")).toBeVisible({timeout:100}));
@@ -230,7 +230,7 @@ test("R62 protection requires canonical owned entry negative not positive qualif
   const value={policy_revision:"r62-missing-entry-negative",valid_until:core.bootstrap.times.valid_until,position:{symbol:"RELIANCE",exchange:"NSE",product:"MIS",entry_order_ids:["r62-not-an-owned-entry"],quantity:1},hedge_scope:[],risk_policy:"unhedged-cash-reduction-only",max_quantity:1,max_notional:100,read:{selector:"dhan:synthetic-unavailable",valid_until:core.bootstrap.times.valid_until,max_reads:2,max_age_seconds:30}};
   core.register("POST","/api/v1/protection/grants",1,request=>expect(request.postDataJSON()).toEqual({run_id:"r46-paper-a",expected_revision:0,policy:value}));
   await open(page,core);
-  const run=page.getByRole("region",{name:"Paper run r46-paper-a",exact:true});
+  const run=page.getByRole("region",{name:"Practice run r46-paper-a",exact:true});
   await run.getByRole("button",{name:"Hide run policy",exact:true}).click();await run.getByRole("button",{name:"Protection policy",exact:true}).click();
   const panel=page.getByRole("region",{name:"Protection policy r46-paper-a",exact:true});
   await core.completedBodies("GET",url,1);

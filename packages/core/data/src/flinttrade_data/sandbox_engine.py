@@ -755,9 +755,9 @@ class SandboxEngine:
             status,
         )
         message = (
-            f"Paper order executed: {action} {quantity} {symbol} @ {price:.2f}"
+            f"Practice order executed: {action} {quantity} {symbol} @ {price:.2f}"
             if status == "COMPLETE"
-            else f"Paper {order_type} order is pending a matching live tick"
+            else f"Practice {order_type} order is pending a matching live tick"
         )
         if status == "COMPLETE" and stored_source == "last_close" and stored_age is not None:
             from flinttrade_data.practice_price import last_close_fill_label
@@ -1455,7 +1455,7 @@ class SandboxEngine:
         if config_data is not None and not isinstance(config_data, dict):
             raise ValueError("'config' must be a JSON object")
         if any(not isinstance(row, dict) for row in positions_data + orders_data + trades_data + pnl_data):
-            raise ValueError("Sandbox import rows must be JSON objects")
+            raise ValueError("Practice import rows must be JSON objects")
 
         now = time.time()
         initial = float(capital_data.get("initial", self._initial_capital))

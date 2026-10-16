@@ -620,7 +620,38 @@ describe("OrderPadWidget", () => {
     );
     const acknowledgement = await screen.findByRole("alert");
     expect(acknowledgement).toHaveTextContent(
-      "Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+    );
+    expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
+  });
+
+  it("uses the shared requested exit line on Practice while Laya is Down", async () => {
+    selectedMode.current = "practice";
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE-PRACTICE" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
+
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 4 }),
+      { mode: "practice" },
+      { exit: true },
+    );
+    const acknowledgement = await screen.findByRole("alert");
+    expect(acknowledgement).toHaveTextContent(
+      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
     );
     expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
   });
@@ -827,7 +858,7 @@ describe("OrderPadWidget options premium prefill", () => {
     renderOptionsPad();
 
     expect(screen.getByText("Option Premium")).toBeInTheDocument();
-    expect(screen.getByText(/Sandbox premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Practice premium ₹623.45/)).toBeInTheDocument();
   });
 
   it("labels Explore option premium as sample, not Live", () => {

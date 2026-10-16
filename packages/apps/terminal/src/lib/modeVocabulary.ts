@@ -77,8 +77,8 @@ export function optionPremiumHint(mode: AppMode, ltp: number): string {
   }
   if (mode === "practice") {
     return ltp > 0
-      ? `Sandbox premium ₹${amount} — prefills the LIMIT/SL price field.`
-      : "Sandbox premium unavailable — enter the limit price manually.";
+      ? `Practice premium ₹${amount} — prefills the LIMIT/SL price field.`
+      : "Practice premium unavailable — enter the limit price manually.";
   }
   return ltp > 0
     ? `Live premium ₹${amount} — prefills the LIMIT/SL price field.`
