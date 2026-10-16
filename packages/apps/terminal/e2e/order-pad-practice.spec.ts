@@ -278,6 +278,8 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
         rationale: "",
         order_type: "LIMIT",
         trigger_price: 0,
+        lotSize: 1,
+        lot_size: 1,
       });
       return {
         status: 403,
@@ -336,6 +338,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       hasText: "X-FlintTrade-Mode does not match the authenticated mode",
     }),
   ).toBeVisible();
-  await expect(review).toBeVisible();
+  // A 403 closes the review so the refusal is readable on the pad.
+  await expect(review).toBeHidden();
   await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);
 });

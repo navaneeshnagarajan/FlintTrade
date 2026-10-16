@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
@@ -131,6 +132,7 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     descriptors = []
+    opened_identity = []
     original_open = os.open
     original_stat = Path.stat
     retained_before = tuple(module._RETAINED_FAILED_LEASES)
@@ -139,6 +141,7 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
         descriptor = original_open(*args, **kwargs)
         if str(args[0]).endswith("backend_instance.lock"):
             descriptors.append(descriptor)
+            opened_identity.append(os.fstat(descriptor))
         return descriptor
 
     def fail_stat(path, *args, **kwargs):
@@ -177,8 +180,20 @@ def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
                 module.acquire_backend_instance_lease()
             module.release_retained_backend_instance_lease(retained[0])
         else:
-            with pytest.raises(OSError):
-                os.fstat(descriptors[0])
+            # Closing the owner frees the integer. Another open in this
+            # process can reuse it before fstat, so a live descriptor is not
+            # proof the lock is still held. EBADF means it was closed. A
+            # different inode means the number now names something else.
+            assert len(opened_identity) == 1
+            try:
+                still_open = os.fstat(descriptors[0])
+            except OSError as exc:
+                assert exc.errno == errno.EBADF
+            else:
+                assert (still_open.st_dev, still_open.st_ino) != (
+                    opened_identity[0].st_dev,
+                    opened_identity[0].st_ino,
+                )
         successor = module.acquire_backend_instance_lease()
         successor.release()
     finally:
