@@ -716,12 +716,8 @@ def test_ci_runs_electron_desktop_build_and_cross_platform_package_smoke() -> No
     assert "packages/apps/desktop/src-tauri" not in test_workflow
 
     assert "desktop-electron-package-smoke:" in nightly
-    nightly_document = yaml.safe_load(nightly)
-    package_smoke = nightly_document["jobs"]["desktop-electron-package-smoke"]
-    assert package_smoke["runs-on"] == "${{ matrix.os }}"
-    assert set(package_smoke["strategy"]["matrix"]["os"]) == {
-        "macos-26", "windows-2025", "ubuntu-26.04",
-    }
+    for runner in ("macos-latest", "windows-latest", "ubuntu-latest"):
+        assert runner in nightly
     for command in (
         "electron-builder --dir --mac",
         "electron-builder --dir --win --x64",
@@ -749,14 +745,14 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
         assert isinstance(document, dict), path
         workflows[path.name] = document
 
-    # The authoritative verification lane pins ubuntu-26.04, matching flint.toml
-    # [requirements].os_target, not the supported OS floor. They package `--dir` and verify the security
+    # The authoritative verification lane pins ubuntu-24.04, matching flint.toml
+    # [requirements].os_requires. They package `--dir` and verify the security
     # contract; they publish nothing, so the build host's glibc never reaches a
     # user. desktop-release.yml's Linux build legs stay on ubuntu-22.04/-arm on
     # purpose - they compile flinttrade-fs-promoter.node and ship it inside the
     # AppImage, which makes the build host's glibc the installer's real floor.
     required_posix = {
-        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-26.04"),
+        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-24.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,

@@ -118,6 +118,7 @@ describe("OrderPad INDstocks execution disclosure", () => {
       symbol: "RELIANCE", exchange: "NSE", action: "BUY", product: "MIS", orderType: "MARKET",
       quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "",
       order_type: "MARKET", trigger_price: 0, broker: "indmoney", account_id: "IND-OFFLINE",
+      lotSize: 1, lot_size: 1,
     });
     expect(request?.headers).toMatchObject({ "X-FlintTrade-Mode": "live" });
     expect(screen.getByText(MARKET_NOTICE)).toBeInTheDocument();
@@ -153,6 +154,7 @@ describe("OrderPad INDstocks execution disclosure", () => {
       symbol: "RELIANCE", exchange: "NSE", action: "BUY", product: "MIS", orderType: "LIMIT",
       quantity: 1, price: 73.55, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "",
       order_type: "LIMIT", trigger_price: 0, broker: "indmoney", account_id: "IND-OFFLINE",
+      lotSize: 1, lot_size: 1,
     });
   });
 

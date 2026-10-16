@@ -625,37 +625,6 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     return () => controller.abort();
   }, [optionLegUnderlying, optionLegType, dataScope]);
 
-  useEffect(() => {
-    const node = workspaceRef.current;
-    if (!node) return;
-
-    const updateWidth = (width?: number) => {
-      const nextWidth = width ?? node.getBoundingClientRect().width;
-      if (Number.isFinite(nextWidth)) {
-        setWorkspaceWidth((current) =>
-          Math.abs(current - nextWidth) < 1 ? current : nextWidth,
-        );
-      }
-      const chart = chartRef.current;
-      const count = barsRef.current.length;
-      if (chart && count > 0) applyCandleSpan(chart.timeScale(), count);
-    };
-
-    updateWidth();
-
-    if (typeof ResizeObserver === "undefined") {
-      const handleResize = () => updateWidth();
-      window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
-    }
-
-    const observer = new ResizeObserver(([entry]) => {
-      updateWidth(entry?.contentRect.width);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
   const [initialIndicatorSettings] = useState(() => loadSavedIndicatorSettings(panelId));
   const [chartDisplaySettings, setChartDisplaySettings] = useState(() => loadSavedDisplaySettings(panelId));
   const [indicators, setIndicators] = useState<IndicatorState>(() => ({ ...initialIndicatorSettings.indicators }));
@@ -749,6 +718,37 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   // Initialise chart (once)
   const { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef } =
     useChartInit(setLegend);
+
+  useEffect(() => {
+    const node = workspaceRef.current;
+    if (!node) return;
+
+    const updateWidth = (width?: number) => {
+      const nextWidth = width ?? node.getBoundingClientRect().width;
+      if (Number.isFinite(nextWidth)) {
+        setWorkspaceWidth((current) =>
+          Math.abs(current - nextWidth) < 1 ? current : nextWidth,
+        );
+      }
+      const chart = chartRef.current;
+      const count = barsRef.current.length;
+      if (chart && count > 0) applyCandleSpan(chart.timeScale(), count);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateWidth();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      updateWidth(entry?.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [chartRef]);
 
   useEffect(() => {
     if (fitNewSeriesRangeRef.current) {

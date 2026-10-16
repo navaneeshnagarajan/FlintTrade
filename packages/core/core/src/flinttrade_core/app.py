@@ -7157,6 +7157,10 @@ class FlintTradeApp:
                 ),
                 require_truthy=True,
                 require_live_deadline_for_success=True,
+                # A short earlier attempt can finish False after its budget
+                # expires. The next stop has a fresh deadline and must run the
+                # same owner again instead of republishing that False.
+                resume_incomplete=True,
             )
 
         request_tracker = None

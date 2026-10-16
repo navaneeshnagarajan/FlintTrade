@@ -237,9 +237,12 @@ def test_held_directory_rejects_links_and_hardlinked_members(tmp_path):
 @pytest.mark.skipif(_IS_WIN, reason="POSIX owner and fd checks")
 def test_held_directory_owner_failure_closes_descriptor(tmp_path, monkeypatch):
     descriptors = []
+    identity = tmp_path.stat()
 
-    def reject(descriptor, _stat):
-        descriptors.append(descriptor)
+    def reject(descriptor, path_stat):
+        # Shard workers are multi-threaded. Only this directory's check counts.
+        if (path_stat.st_dev, path_stat.st_ino) == (identity.st_dev, identity.st_ino):
+            descriptors.append(descriptor)
         raise PermissionError("foreign owner")
 
     monkeypatch.setattr(secure_file, "_assert_current_user_owns", reject)
