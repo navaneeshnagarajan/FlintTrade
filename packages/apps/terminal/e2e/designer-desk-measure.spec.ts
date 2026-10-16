@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 import { registerExampleDeskReads, registerPracticeOrderPadReads } from "./visual/desk-mocks";
@@ -171,6 +172,18 @@ async function measure(page: Page) {
       clipped,
       panels: ["Chart", "Order Pad", "Positions"].map(panel),
       compact: Boolean(document.querySelector("[aria-label='Compact panel']")),
+      help: (() => {
+        const button = document.querySelector("[aria-label='Open local help']");
+        const footer = document.querySelector("[data-testid='system-status-bar']");
+        if (!button) return { present: false, inFooter: true, fixed: false };
+        return {
+          present: true,
+          inFooter: Boolean(footer?.contains(button)),
+          fixed: getComputedStyle(button).position === "fixed",
+        };
+      })(),
+      niftyLabels: [...document.querySelectorAll("[aria-label^='NIFTY 50:']")].map(el => el.getAttribute("aria-label") ?? ""),
+      exampleChip: document.querySelector("[data-testid='feed-freshness-chip']")?.textContent?.trim() ?? "",
       host: (() => {
         const host = document.querySelector("[data-testid='app-layout']");
         const box = host?.getBoundingClientRect();
@@ -208,6 +221,23 @@ for (const width of [1440, 2560] as const) {
       const faint = report.tickerText.filter(item => item.ratio < 4.5);
       expect(small, "ticker text below 12px").toEqual([]);
       expect(faint, "ticker text below 4.5:1").toEqual([]);
+      expect(report.help.inFooter, "Help covers the desk instead of sitting in the footer").toBe(true);
+      expect(report.help.fixed, "Help is still position fixed").toBe(false);
+      expect(report.exampleChip, "Example chip").toBe("Example");
+      expect(report.niftyLabels.length, "NIFTY is on the tape").toBeGreaterThan(0);
+      expect(report.niftyLabels.every(label => /^NIFTY 50: \d/.test(label)), `ticker price missing: ${report.niftyLabels.join(" | ")}`).toBe(true);
+      const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+      const axeReport = {
+        theme,
+        width,
+        violations: axe.violations.map(violation => ({
+          id: violation.id,
+          impact: violation.impact,
+          help: violation.help,
+          nodes: violation.nodes.slice(0, 8).map(node => node.target.join(" ")),
+        })),
+      };
+      await testInfo.attach(`axe-${width}-${theme}`, { body: JSON.stringify(axeReport, null, 2), contentType: "application/json" });
     });
   }
 }

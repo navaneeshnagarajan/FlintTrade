@@ -19,6 +19,8 @@ import { useAtomValue } from "jotai";
 import { memo, useRef, useEffect, useState } from "react";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import type { WsTick } from "@/types/api";
+import { useModeStore } from "@/stores/modeStore";
+import { withExampleTickerPrices } from "./exampleTickerPrices";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 // ---------------------------------------------------------------------------
@@ -190,7 +192,8 @@ export default function TickerMarquee({
 }: TickerMarqueeProps) {
   // Fall back to Jotai atom when no symbols prop provided
   const atomSymbols = useAtomValue(indicesSummaryAtom);
-  const symbols: TickerSymbol[] = propSymbols ?? atomSymbols;
+  const example = useModeStore((state) => state.mode === "explore");
+  const symbols: TickerSymbol[] = withExampleTickerPrices(propSymbols ?? atomSymbols, example);
   const reducedMotion = usePrefersReducedMotion();
 
   // Counter bumped every 30 s to force aria-live re-announcement of current prices

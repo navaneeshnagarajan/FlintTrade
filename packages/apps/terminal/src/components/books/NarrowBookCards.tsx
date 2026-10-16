@@ -57,7 +57,7 @@ export function NarrowBookCards({
             )}
           >
             <div className="text-xs font-semibold">{row.pnl}</div>
-            <div className="text-xxs opacity-75">{row.pnlPercent}</div>
+            <div className="text-xs">{row.pnlPercent}</div>
           </div>
         </li>
       ))}

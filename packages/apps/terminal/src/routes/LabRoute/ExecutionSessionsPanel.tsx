@@ -60,7 +60,7 @@ export function ExecutionSessionsPanel() {
       <div><Label htmlFor="paper-exchange">Exchange</Label><Input id="paper-exchange" value={exchange} onChange={event => setExchange(event.target.value)} /></div>
       <div className="sm:col-span-2"><Label htmlFor="paper-strategy">Registered strategy (optional)</Label><Input id="paper-strategy" value={strategy} onChange={event => setStrategy(event.target.value)} placeholder="Exact core-registered Practice strategy; blank uses Practice agent" /></div>
       <p className="text-xs text-text-muted sm:col-span-2">A strategy requires an explicit Practice execution contract in the core. Otherwise uses the existing Practice agent’s configured model and risk rules. Unavailable inputs block entries; no market data is invented. Every start creates a new run identity, even for the same strategy.</p>
-      <Button disabled={!enabled || command.isPending || !symbols.trim()} onClick={() => command.mutate({})}>Start Practice run</Button>
+      <Button disabled={!enabled || command.isPending || !symbols.trim()} onClick={() => command.mutate({})}>Start practice run</Button>
       <Button variant="outline" disabled={!enabled || query.isFetching} onClick={() => void query.refetch()}>Refresh runs</Button>
     </div>
     {!enabled ? <p>Installed operator session required. Preview does not create runs.</p> : null}

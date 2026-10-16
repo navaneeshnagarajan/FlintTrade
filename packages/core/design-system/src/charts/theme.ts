@@ -108,6 +108,8 @@ export interface FlintLightweightChartTheme {
     priceFormat: { type: "volume" };
     priceScaleId: string;
     color: string;
+    lastValueVisible: boolean;
+    priceLineVisible: boolean;
   };
 }
 
@@ -191,7 +193,9 @@ export function createFlintLightweightChartTheme(
       minimumWidth: compact ? 60 : 72,
       ensureEdgeTickMarksVisible: true,
       tickMarkDensity: compact ? 3 : 2.5,
-      scaleMargins: { top: 0.08, bottom: 0.14 },
+      // Bottom margin stays above the volume band (top 0.85) so the lowest
+      // price label does not share the axis with the volume histogram.
+      scaleMargins: { top: 0.08, bottom: 0.2 },
     },
     timeScale: {
       borderVisible: true,
@@ -238,6 +242,8 @@ export function createFlintLightweightChartTheme(
       priceFormat: { type: "volume" },
       priceScaleId: "vol",
       color: withAlpha(palette.muted, 0.28),
+      lastValueVisible: false,
+      priceLineVisible: false,
     },
   };
 }

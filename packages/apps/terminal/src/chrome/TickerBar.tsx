@@ -8,6 +8,7 @@ import { isMarketHours, operatorMarketLabel } from "@/lib/market";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import TickerMarquee, { type TickerMode } from "./TickerMarquee";
+import { withExampleTickerPrices } from "./exampleTickerPrices";
 import { deriveTickerVenueStrip, type TickerVenueBadge } from "./tickerVenues";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
@@ -41,10 +42,13 @@ export interface TickerBarProps {
  * when an F&O symbol feeds). A venue that is not on the tape is omitted.
  */
 export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
-  const indices = useAtomValue(indicesSummaryAtom);
+  const deskMode = useModeStore((s) => s.mode);
+  const indices = withExampleTickerPrices(
+    useAtomValue(indicesSummaryAtom),
+    deskMode === "explore",
+  );
   const reducedMotion = usePrefersReducedMotion();
   const session = useOperatorMarketSession();
-  const deskMode = useModeStore((s) => s.mode);
   const liveFeedConnected = useConnectionStore((s) => s.wsConnected);
   const freshness = useFeedFreshness();
   // A disconnected socket is when the REST fallback can still be fresh.

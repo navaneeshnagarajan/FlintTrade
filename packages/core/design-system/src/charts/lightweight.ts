@@ -167,12 +167,18 @@ export interface FlintHistogramChart<
 
 export const FLINT_VOLUME_SCALE_OPTIONS = {
   scaleMargins: { top: 0.85, bottom: 0 },
+  // Volume magnitude stays in the histogram. Axis ticks would sit on the
+  // same edge as the lowest price.
+  ticksVisible: false,
+  borderVisible: false,
 }
 
 export const FLINT_DEFAULT_VOLUME_OPTIONS = {
   priceFormat: { type: "volume" },
   priceScaleId: "vol",
   color: "rgba(107, 107, 120, 0.28)",
+  lastValueVisible: false,
+  priceLineVisible: false,
 } as const
 
 export const FLINT_TRANSPARENT_CHART_LAYOUT = {

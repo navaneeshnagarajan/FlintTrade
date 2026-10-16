@@ -103,6 +103,7 @@ vi.mock("jotai", async () => {
 
 import OrderPadWidget from "../OrderPadWidget";
 import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/api";
+import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
@@ -1279,7 +1280,25 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/mode changed/i);
+    expect(screen.getByRole("alert").closest("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("closes the review and shows a placement mode mismatch on the pad", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderPreflightRefusal(
+      "Order blocked: mode changed from Practice to Live before submission.",
+    ));
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm simulated practice order/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Order blocked: mode changed from Practice to Live before submission.");
+    expect(alert.closest("[role='dialog']")).toBeNull();
   });
 
   it("pins Practice authority into placeOrder so a mid-flight mode flip cannot retarget Live", async () => {

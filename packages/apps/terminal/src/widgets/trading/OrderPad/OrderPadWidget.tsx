@@ -994,6 +994,7 @@ function OrderPadWidget(props: WidgetProps) {
       }
       if (presentation) {
         setAdmission(null);
+        if (/mode changed/i.test(presentation.body)) setPracticeReview(null);
         // Reconciliation guidance and native reason observations are not
         // broker-health evidence. Do not classify generated "check broker"
         // copy as a broker outage or change readiness from its wording.
@@ -1030,6 +1031,7 @@ function OrderPadWidget(props: WidgetProps) {
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
       ), getValues("symbol"));
+      if (/mode changed/i.test(msg)) setPracticeReview(null);
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;

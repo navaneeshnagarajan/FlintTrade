@@ -162,7 +162,7 @@ const RECTIFY: Record<FailureClass, string> = {
     "The broker reports maintenance. Wait, then check the broker status page. Live orders stay closed. FlintTrade cannot file a dispute.",
   llm_provider:
     "Chat is unavailable. Retest or switch provider under Settings. Trading does not use Chat to place orders.",
-  laya: `${LAYA_DOWN_REFUSAL} Kill All stays available.`,
+  laya: "Kill All stays available.",
   host_unhealthy:
     "Free disk space and restart the desk, then read the desk health detail. Live orders stay closed until the desk and broker trust are back. A restart does not recover broker fills. FlintTrade does not hold funds.",
   backend_unreachable:

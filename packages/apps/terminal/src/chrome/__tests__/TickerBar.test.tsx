@@ -106,6 +106,27 @@ describe("TickerBar", () => {
     useConnectionStore.setState({ wsConnected: false });
   });
 
+  it("feeds the chart's Example prices into an empty tape and keeps the Example chip", () => {
+    useModeStore.setState({ mode: "explore" });
+    setIndices([
+      { name: "NIFTY 50", venue: "NSE", exchange: "NSE_INDEX", data: null },
+    ]);
+    renderTickerBar();
+    expect(screen.getByTestId("feed-freshness-chip")).toHaveTextContent("Example");
+    expect(screen.getAllByLabelText(/NIFTY 50: 24,150\.00/).length).toBeGreaterThan(0);
+  });
+
+  it("does not invent Example prices when the tape is empty in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    setIndices([
+      { name: "NIFTY 50", venue: "NSE", exchange: "NSE_INDEX", data: null },
+    ]);
+    renderTickerBar();
+    expect(screen.getAllByLabelText("NIFTY 50: no data").length).toBeGreaterThan(0);
+    expect(screen.queryByText("24,150.00")).not.toBeInTheDocument();
+    expect(screen.getByTestId("feed-freshness-chip")).not.toHaveTextContent("Example");
+  });
+
   it("renders without crashing", () => {
     setIndices([]);
     const { container } = renderTickerBar();

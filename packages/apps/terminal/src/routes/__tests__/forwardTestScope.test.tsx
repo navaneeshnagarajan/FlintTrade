@@ -92,7 +92,7 @@ it.each(["practice", "strategy"])("starts a new %s Practice run with immutable i
   render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
   fireEvent.change(screen.getByLabelText("Symbols"), { target: { value: "RELIANCE" } });
   if (kind === "strategy") fireEvent.change(screen.getByLabelText("Registered strategy (optional)"), { target: { value: "registered-strategy" } });
-  fireEvent.click(screen.getByRole("button", { name: "Start Practice run" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start practice run" }));
   expect(await screen.findByText("running")).toBeVisible();
   expect(posts).toHaveLength(2);
   expect(useModeStore.getState().mode).toBe("live");

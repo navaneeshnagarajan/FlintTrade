@@ -214,9 +214,17 @@ describe("core Flint Lightweight Charts factory", () => {
     );
     expect(runtime.addHistogramSeries).toHaveBeenCalledWith(
       chart,
-      expect.objectContaining({ priceScaleId: "vol" }),
+      expect.objectContaining({
+        priceScaleId: "vol",
+        lastValueVisible: false,
+        priceLineVisible: false,
+      }),
     );
     expect(priceScaleApplyOptions).toHaveBeenCalledWith(FLINT_VOLUME_SCALE_OPTIONS);
+    expect(FLINT_VOLUME_SCALE_OPTIONS.ticksVisible).toBe(false);
+    expect(theme.rightPriceScale.scaleMargins.bottom).toBeGreaterThan(
+      1 - FLINT_VOLUME_SCALE_OPTIONS.scaleMargins.top,
+    );
     expect(runtime.createSeriesMarkers).toHaveBeenCalledWith(candleSeries, []);
     expect(canvas.getAttribute("role")).toBe("img");
     expect(canvas.getAttribute("aria-label")).toBe("NIFTY price chart");
