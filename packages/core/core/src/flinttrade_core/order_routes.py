@@ -10,9 +10,10 @@ client-controlled header) and routes accordingly:
 - ``live``     → gated BrokerRouter execution for supported writes; fail closed otherwise
 
 The ``mode`` claim is set at login/PIN-verify time and cannot be forged
-without the JWT secret.  The legacy ``X-FlintTrade-Mode`` header is still
-read as a *hint* for logging/debugging purposes only — it is never trusted
-for routing decisions.
+without the JWT secret.  Routing follows that signed claim.  A supplied
+``X-FlintTrade-Mode`` header does not choose the route.  When the header
+is present and disagrees with the signed mode, the request is rejected
+with HTTP 403.
 
 Any ambiguity defaults to rejection rather than accidental live execution.
 
@@ -2307,8 +2308,9 @@ def _dispatch_live_cancel(
 def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     """Core dispatch logic shared by all order endpoint handlers.
 
-    Reads the ``X-FlintTrade-Mode`` header, validates it, then routes to the
-    correct execution path (explore / practice / live).
+    Reads the signed JWT ``mode`` claim and routes to the execution path
+    (explore / practice / live).  A supplied ``X-FlintTrade-Mode`` header
+    that disagrees with that claim is rejected with HTTP 403 before dispatch.
 
     Args:
         ft_action: The FlintTrade action key (belongs to ``_ORDER_ACTIONS``), e.g.

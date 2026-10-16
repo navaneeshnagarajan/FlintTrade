@@ -95,8 +95,8 @@ describe("ModeIndicator", () => {
       render(<ModeIndicator />);
 
       const chip = screen.getByTestId("execution-mode");
-      expect(chip).toHaveTextContent("Example");
-      expect(chip).not.toHaveTextContent("Practice");
+      expect(chip).toHaveTextContent(/^Example$/);
+      expect(chip).not.toHaveTextContent(/Practice|Sandbox|Paper/);
       expect(chip).not.toHaveTextContent(/explore/i);
     });
 

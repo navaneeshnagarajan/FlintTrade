@@ -221,6 +221,14 @@ class TestPlaceBuyOrder:
         result = engine.place_order("RELIANCE", "NSE", "BUY", 10, 2800.0)
         assert result["status"] == "COMPLETE"
         assert result["order_id"] != ""
+        assert result["message"] == "Practice order executed: BUY 10 RELIANCE @ 2800.00"
+        assert "Paper" not in result["message"]
+
+    def test_pending_limit_message_says_practice(self, engine: SandboxEngine) -> None:
+        result = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert result["status"] == "PENDING"
+        assert result["message"] == "Practice LIMIT order is pending a matching live tick"
+        assert "Paper" not in result["message"]
 
     def test_buy_order_increases_used_margin(self, engine: SandboxEngine) -> None:
         # 10 lots at 450 = ₹4,500 — well within default ₹10,00,000 capital
