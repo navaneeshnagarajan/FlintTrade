@@ -55,9 +55,10 @@ import {
   resolveMarketDataScope,
   resolveBrokerCapabilityScope,
   resolveNativeDataAccount,
+  MarketDataAuthorityChangedError,
   type AccountAuthorityIdentity,
 } from "@/hooks/useDataScope";
-export { MarketDataAuthorityChangedError } from "@/hooks/useDataScope";
+export { MarketDataAuthorityChangedError };
 import {
   assertNativeWriteTargetReadyOrThrow,
   NATIVE_TARGET_NOT_READY_MESSAGE,
@@ -2943,7 +2944,7 @@ export async function getExpiry(
     ),
   );
 }
-export function searchSymbol(
+export async function searchSymbol(
   query: string,
   exchange?: string,
   signal?: AbortSignal,
@@ -2956,12 +2957,26 @@ export function searchSymbol(
   }
   const body: Record<string, string> = { query: sanitized };
   if (exchange) body.exchange = exchange;
-  return post<Array<{ symbol: string; exchange: string }>>(
-    "search",
-    body,
-    signal,
-    expectedDataScope,
-  );
+  const mode = useModeStore.getState().mode;
+  const sample = mode === "explore" || mode === "practice";
+  try {
+    const rows = await post<Array<{ symbol: string; exchange: string }>>(
+      "search",
+      body,
+      signal,
+      expectedDataScope,
+    );
+    // Practice has no broker search until an account is connected, and an
+    // empty native result must still resolve Example catalogue names such
+    // as SBIN. Live keeps the broker result, including an empty list.
+    if (sample && rows.length === 0) return makeMockSearch(sanitized, exchange);
+    return rows;
+  } catch (error) {
+    if (!sample) throw error;
+    if (error instanceof MarketDataAuthorityChangedError) throw error;
+    if (signal?.aborted) throw error;
+    return makeMockSearch(sanitized, exchange);
+  }
 }
 export const getIntervals = async (signal?: AbortSignal, expectedDataScope?: string) => {
   const scope = captureMarketDataScope(expectedDataScope);

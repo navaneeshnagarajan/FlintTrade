@@ -1201,6 +1201,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyjwt" },
     { name = "pyotp" },
+    { name = "pyrage" },
     { name = "python-dotenv" },
     { name = "qrcode" },
     { name = "sentry-sdk", extra = ["flask"] },
@@ -1213,7 +1214,6 @@ dependencies = [
 migration = [
     { name = "duckdb" },
     { name = "pyarrow" },
-    { name = "pyrage" },
 ]
 
 [package.metadata]
@@ -1233,7 +1233,7 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.14.1" },
     { name = "pyjwt", specifier = "==2.15.1" },
     { name = "pyotp", specifier = "==2.10.0" },
-    { name = "pyrage", marker = "extra == 'migration'", specifier = "==1.4.0" },
+    { name = "pyrage", specifier = "==1.4.0" },
     { name = "python-dotenv", specifier = "==1.2.4" },
     { name = "qrcode", extras = ["svg"], specifier = "==8.2" },
     { name = "sentry-sdk", extras = ["flask"], specifier = "==2.71.0" },

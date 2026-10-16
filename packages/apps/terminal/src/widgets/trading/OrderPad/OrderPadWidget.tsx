@@ -65,6 +65,7 @@ import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErr
 import {
   checkLotMultiple,
   checkOrderEntryMode,
+  checkOrderQuantityLimit,
   checkPriceForOrderType,
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
@@ -89,7 +90,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { EXIT_REQUESTED, liveWritesMuted } from "@/lib/operatorIncident";
+import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, liveWritesMuted } from "@/lib/operatorIncident";
 import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
@@ -601,6 +602,26 @@ function OrderPadWidget(props: WidgetProps) {
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
   const note = watch("note");
+
+  // L1 quantity ceiling. Shown on the field so a huge qty is refused before
+  // the Practice review opens, with the same sentence the server uses.
+  useEffect(() => {
+    const message = checkOrderQuantityLimit(exchange, Number(qty));
+    const current = errors.qty;
+    if (message) {
+      if (current?.type === "validate" && current.message === message) return;
+      setError("qty", { type: "validate", message });
+      return;
+    }
+    if (
+      current?.type === "validate"
+      && typeof current.message === "string"
+      && current.message.includes(" exceeds ")
+      && current.message.includes(" limit of ")
+    ) {
+      clearErrors("qty");
+    }
+  }, [clearErrors, errors.qty, exchange, qty, setError]);
   const appMode = useModeStore((s) => s.mode);
   const selectedNativeBroker = useBrokerStore((s) => {
     const selected = findBrokerAccountMatch(s.accounts, s.activeAccountId);
@@ -851,12 +872,12 @@ function OrderPadWidget(props: WidgetProps) {
     setSearchMiss(null);
   }, []);
 
-  const commitTypedSymbol = useCallback(async () => {
+  const commitTypedSymbol = useCallback(async (): Promise<boolean> => {
     const q = query.trim().toUpperCase();
     if (!q || q === symbol.trim().toUpperCase()) {
       setSearchMiss(null);
       setSearchOpen(false);
-      return;
+      return q.length > 0;
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     let list = suggestions;
@@ -878,10 +899,11 @@ function OrderPadWidget(props: WidgetProps) {
     if (exact) {
       handleSelect(exact);
       setSearchMiss(null);
-      return;
+      return true;
     }
     setSearchOpen(false);
     setSearchMiss(q);
+    return false;
   }, [handleSelect, query, suggestions, symbol]);
 
   const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
@@ -1056,6 +1078,7 @@ function OrderPadWidget(props: WidgetProps) {
 
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
+  const layaPracticeStatus = useOperatorSignalStore((s) => s.layaPracticeStatus);
   // A denial belongs to the status and mode that produced it. When either
   // changes, the control is retryable. A clamp stays until the ticket changes.
   useEffect(() => {
@@ -1063,6 +1086,9 @@ function OrderPadWidget(props: WidgetProps) {
   }, [decisionStatus, appMode]);
   const liveMuted = appMode === "live" && liveWritesMuted(operatorIncident);
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
+  const showPracticeLayaDown = isPracticeOrExplore
+    && layaPracticeStatus !== "ready"
+    && layaPracticeStatus !== "degraded";
   const currentIntentIdentity = practiceOrderIntentIdentity({
     symbol,
     exchange,
@@ -1094,6 +1120,11 @@ function OrderPadWidget(props: WidgetProps) {
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
+    const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty);
+    if (qtyRefusal) {
+      setError("qty", { type: "validate", message: qtyRefusal });
+      return;
+    }
 
     // Live-intent surfaces still use checkOrderEntryMode to refuse Explore.
     // Order Pad's Practice Buy is the paper path: Explore records a sample
@@ -1355,7 +1386,10 @@ function OrderPadWidget(props: WidgetProps) {
           const typed = query.trim().toUpperCase();
           if (typed && typed !== symbol.trim().toUpperCase()) {
             e.preventDefault();
-            void commitTypedSymbol();
+            void (async () => {
+              const committed = await commitTypedSymbol();
+              if (committed) void handleSubmit(onSubmit)();
+            })();
             return;
           }
           void handleSubmit(onSubmit)(e);
@@ -1901,6 +1935,11 @@ function OrderPadWidget(props: WidgetProps) {
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
+        {showPracticeLayaDown ? (
+          <p role="status" data-testid="laya-down-notice" className="text-xs text-loss">
+            {LAYA_DOWN_REFUSAL}
+          </p>
+        ) : null}
         {liveMuted && operatorIncident ? (
           <p className="text-xs text-loss" data-testid="live-write-rectify">
             {operatorIncident.failureClass === "laya" ? operatorIncident.headline : operatorIncident.rectify}

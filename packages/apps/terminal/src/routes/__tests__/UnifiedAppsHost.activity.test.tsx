@@ -157,3 +157,16 @@ it("uses exclusive display utilities on the same retained app wrapper", async ()
   expect(wrapper).not.toHaveClass("hidden");
   expect(wrapper).not.toHaveAttribute("style");
 });
+
+it("closes the widget catalogue after a widget is added", async () => {
+  window.history.replaceState(null, "", "/terminal");
+  render(<BrowserRouter><UnifiedAppsHost /></BrowserRouter>);
+  const app = await screen.findByRole("region", { name: "Terminal app" });
+  fireEvent.click(within(app).getByRole("button", { name: "Add widget" }));
+  expect(await screen.findByRole("dialog", { name: "Terminal widgets" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Add Positions" }));
+  await vi.waitFor(() => {
+    expect(screen.queryByRole("dialog", { name: "Terminal widgets" })).not.toBeInTheDocument();
+  });
+  expect(within(app).getAllByRole("tab", { name: "Positions" }).length).toBeGreaterThan(0);
+});

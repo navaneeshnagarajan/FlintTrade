@@ -134,7 +134,7 @@ describe("OrderPadWidget", () => {
     selectedMode.current = "practice";
     mockOpenPositions.rows = [];
     mockOpenOrders.rows = [];
-    useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
     mockGetSymbol.mockReset();
@@ -278,6 +278,7 @@ describe("OrderPadWidget", () => {
     await waitFor(() => expect(screen.getByDisplayValue("INFY")).toBeInTheDocument());
     expect(mockPlaceOrder).not.toHaveBeenCalled();
     expect(screen.queryByText(/No match for INFY/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
   });
 
   it("Enter shows no match and does not submit the previous symbol", async () => {
@@ -297,6 +298,52 @@ describe("OrderPadWidget", () => {
     expect(await screen.findByText("No match for ZZZNOT")).toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue("ZZZNOT")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+  });
+
+  it("Practice Buy after typing SBIN opens the review and does not place yet", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "SBIN", exchange: "NSE" }]);
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Search symbol…"), { target: { value: "SBIN" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const review = await screen.findByRole("dialog", { name: /review practice order/i });
+    expect(within(review).getByText(/SBIN/)).toBeInTheDocument();
+    expect(screen.queryByText(/No match for SBIN/)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(within(review).getByRole("button", { name: /confirm simulated practice order/i }));
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "SBIN", exchange: "NSE", action: "BUY" }),
+      expect.objectContaining({ mode: "practice" }),
+    ));
+  });
+
+  it("refuses a quantity above the NSE ceiling before opening a review", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    const qty = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qty, { target: { value: "9999999" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Quantity 9999999 exceeds NSE limit of 50000",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows the Laya Down notice on the Practice pad without blocking the review", async () => {
+    useOperatorSignalStore.setState({ layaPracticeStatus: "down" });
+    render(<OrderPadWidget {...defaultProps} />);
+
+    expect(screen.getByTestId("laya-down-notice")).toHaveTextContent(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.getByTestId("laya-down-notice")).toBeInTheDocument();
   });
 
   it("has order type pills (MARKET, LIMIT, SL, SL-M)", () => {
@@ -478,7 +525,7 @@ describe("OrderPadWidget", () => {
     expect(confirm).toBeDisabled();
 
     act(() => {
-      useOperatorSignalStore.setState({ decisionStatus: "ready" });
+      useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     });
 
     expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
@@ -1160,7 +1207,7 @@ describe("OrderPadWidget shared pre-trade guards", () => {
 // ---------------------------------------------------------------------------
 describe("OrderPadWidget Practice review/confirm stage", () => {
   beforeEach(() => {
-    useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "PRAC001" });
     mockGetSymbol.mockReset();

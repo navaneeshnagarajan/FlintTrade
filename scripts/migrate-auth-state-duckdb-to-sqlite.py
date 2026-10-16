@@ -4,8 +4,8 @@
 Publication requires real AuthState/webhook readers, exact typed data and
 verified encrypted custody. Standalone webhook authorities are never discarded.
 
-AGE requires the declared pyrage migration dependency. Missing crypto or reader
-support is a failure, never skipped work. Passwords enter only through a TTY or
+AGE requires pyrage, a flinttrade-core dependency (not an optional extra).
+Missing crypto or reader support is a failure, never skipped work. Passwords enter only through a TTY or
 --master-password-fd; auth.db password/MFA material is not changed by this tool.
 """
 from __future__ import annotations

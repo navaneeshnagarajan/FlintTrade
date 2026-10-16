@@ -68,6 +68,9 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     catch (problem) { setError(String(problem)); }
   }, [app]);
   useEffect(() => {
+    if (!active) setPicker(false);
+  }, [active]);
+  useEffect(() => {
     if (!active) return;
     // Replacing/restoring a model is itself a presentation change. The old
     // effect's cleanup flushes its model; publish the replacement afterwards
@@ -100,11 +103,16 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     const current = modelRef.current;
     const api = createWorkspaceApi(() => current, setModel);
     const meta = APP_WIDGETS.find(w => w.id === id)!;
-    if (id === "orderpad" && api.retargetOrderPad(request.props ?? {}, request.title)) return;
+    if (id === "orderpad" && api.retargetOrderPad(request.props ?? {}, request.title)) {
+      setPicker(false);
+      return;
+    }
     // Protect configuration/security and complete route forms from duplicate owners.
     const existing = panels(current).find(tab => tab.getComponent() === id);
     if (existing && ["preferences", "research", "investments", "learning", "run-control", "broker-roles", "ai-centre"].includes(id)) {
-      current.doAction(Actions.selectTab(existing.getId())); return;
+      current.doAction(Actions.selectTab(existing.getId()));
+      setPicker(false);
+      return;
     }
     api.addPanel({ id: `${app}:${id}:${crypto.randomUUID()}`, component: id, title: request.title ?? meta.name, params: { channel: "none", ...request.props } });
     setPicker(false);
@@ -189,12 +197,12 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     </div>
     <Activity mode={active ? "visible" : "hidden"}>
     {app === "terminal" && <KillSwitchPill />}
-    <Dialog open={picker} onOpenChange={setPicker}><DialogContent className="max-h-[80dvh] overflow-y-auto"><DialogTitle>{meta.name} widgets</DialogTitle>
+    </Activity>
+    <Dialog open={active && picker} onOpenChange={setPicker}><DialogContent className="max-h-[80dvh] overflow-y-auto"><DialogTitle>{meta.name} widgets</DialogTitle>
       <Input aria-label="Search widgets" value={search} onChange={e => setSearch(e.target.value)} />
       <p className="text-xs text-text-muted">Tools for this app. Availability still depends on source, account and qualification.</p>
-      <div className="grid gap-2">{widgetsForApp(app).filter(w => `${w.name} ${w.description}`.toLowerCase().includes(search.toLowerCase())).map(w => <Button key={w.id} variant="outline" className="h-auto justify-start whitespace-normal p-3 text-left" aria-label={`Add ${w.name}`} onClick={() => add({ widgetId: w.id })}><span><strong className="block text-sm">{w.name}</strong><span className="text-xs text-text-muted">{w.description}</span></span></Button>)}</div>
-      <Button variant="ghost" onClick={() => setPicker(false)} aria-label="Close widget catalogue">Close</Button>
+      <div className="grid gap-2">{widgetsForApp(app).filter(w => `${w.name} ${w.description}`.toLowerCase().includes(search.toLowerCase())).map(w => <Button key={w.id} type="button" variant="outline" className="h-auto justify-start whitespace-normal p-3 text-left" aria-label={`Add ${w.name}`} onClick={() => add({ widgetId: w.id })}><span><strong className="block text-sm">{w.name}</strong><span className="text-xs text-text-muted">{w.description}</span></span></Button>)}</div>
+      <Button type="button" variant="ghost" onClick={() => setPicker(false)} aria-label="Close widget catalogue">Close</Button>
     </DialogContent></Dialog>
-    </Activity>
   </section>;
 }

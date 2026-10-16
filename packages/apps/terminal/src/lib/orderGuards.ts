@@ -190,6 +190,46 @@ export function checkPriceForOrderType(
   return null;
 }
 
+/**
+ * Single-order quantity ceilings.
+ *
+ * These match SafetySystem L1 `_DEFAULT_QTY_LIMITS`. An unknown exchange uses
+ * the same 50,000 fallback as the server. The refusal sentence matches L1 so
+ * the pad and the gate tell the operator the same thing.
+ */
+export const ORDER_QUANTITY_LIMITS: Readonly<Record<string, number>> = {
+  NSE: 50_000,
+  BSE: 50_000,
+  NFO: 5_000,
+  BFO: 5_000,
+  MCX: 1_000,
+  CDS: 10_000,
+  BCD: 10_000,
+  NCDEX: 5_000,
+  NCO: 5_000,
+};
+
+const DEFAULT_ORDER_QUANTITY_LIMIT = 50_000;
+
+/** Exchange ceiling, or the L1 default when the segment is not listed. */
+export function orderQuantityLimit(exchange: string): number {
+  return ORDER_QUANTITY_LIMITS[exchange.trim().toUpperCase()] ?? DEFAULT_ORDER_QUANTITY_LIMIT;
+}
+
+/**
+ * Refuse a quantity above the exchange ceiling.
+ *
+ * Returns null for non-positive values so the existing minimum check owns
+ * that sentence. The visible message is the L1 sentence.
+ */
+export function checkOrderQuantityLimit(exchange: string, quantity: number): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  const limit = orderQuantityLimit(exchange);
+  if (quantity <= limit) return null;
+  const label = exchange.trim().toUpperCase() || exchange;
+  return `Quantity ${quantity} exceeds ${label} limit of ${limit}`;
+}
+
 // ---------------------------------------------------------------------------
 // Strict numeric parsers
 // ---------------------------------------------------------------------------

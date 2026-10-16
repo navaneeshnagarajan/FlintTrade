@@ -28,6 +28,10 @@ dependencies = [
     # Official Ollama Linux archives are .tar.zst. Keep decompression in-process
     # so a first-run install does not depend on a system `zstd`/`tar` binary.
     "zstandard==0.25.0",
+    # The auth DuckDB→SQLite CLI imports pyrage while migrating. It is not
+    # optional: a missing install exits 2 as ModuleNotFoundError. pyarrow
+    # stays in the migration extra.
+    "pyrage==1.4.0",
 ]
 
 [project.scripts]
@@ -43,7 +47,6 @@ flinttrade-desktop-backend = "flinttrade_core.desktop:main"
 migration = [
     "duckdb==1.5.6",
     "pyarrow==26.0.0",
-    "pyrage==1.4.0",
 ]
 
 [build-system]

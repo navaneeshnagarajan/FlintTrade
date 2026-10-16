@@ -2418,6 +2418,25 @@ describe("Native FlintTrade API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("resolves Practice symbol search from the Example catalogue when native search is unavailable", async () => {
+    mockModeState.mode = "practice";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+
+    const results = await searchSymbol("SBIN");
+    expect(results).toEqual([
+      expect.objectContaining({ symbol: "SBIN", exchange: "NSE" }),
+    ]);
+  });
+
+  it("does not replace a Live search failure with Example symbols", async () => {
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+
+    await expect(searchSymbol("SBIN")).rejects.toThrow();
+  });
+
   it("reads Practice funds from the order-execution sandbox, never a real account", async () => {
     mockConnectionState.apiKey = "configured-live-key";
     mockModeState.mode = "practice";

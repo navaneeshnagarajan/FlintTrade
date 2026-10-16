@@ -15,10 +15,10 @@ import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 function VenueBadge({ badge }: { badge: TickerVenueBadge }) {
   return (
     <span
-      className={`text-xs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
+      className={`text-[12px] leading-4 font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-primary ${
         badge.open
-          ? "text-[var(--color-warning-text,var(--color-warning))] border-amber-500/40 bg-amber-500/10"
-          : "text-text-secondary border-border-default"
+          ? "border-amber-500/70 bg-amber-500/10"
+          : "border-border-default"
       }`}
       title={badge.title}
       aria-label={badge.label}
@@ -92,7 +92,7 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
           >
             {venueStrip.kind === "unavailable" ? (
               <span
-                className="text-xs font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-secondary border-border-default"
+                className="text-[12px] leading-4 font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-primary border-border-default"
                 aria-label="Venues unavailable"
               >
                 Unavailable
@@ -107,7 +107,7 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
 
         {mode === "marquee" && reducedMotion && (
           <span
-            className="text-xs text-text-muted px-2 shrink-0 select-none"
+            className="text-[12px] leading-4 text-text-primary px-2 shrink-0 select-none"
             data-testid="ticker-reduced-motion"
             title="Scrolling is paused because reduced motion is on"
           >
@@ -139,10 +139,10 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
       {showLastClose ? (
         <p
           data-testid="ticker-last-close"
-          className="px-2 pb-1 text-xs text-text-secondary"
+          className="px-2 pb-1 text-[12px] leading-4 text-text-primary"
         >
           Last close prices ·{" "}
-          <Link to="/settings#brokers" className="text-text-secondary underline-offset-2 hover:underline">
+          <Link to="/settings#brokers" className="text-text-primary underline-offset-2 hover:underline">
             Connect a broker for live prices →
           </Link>
         </p>

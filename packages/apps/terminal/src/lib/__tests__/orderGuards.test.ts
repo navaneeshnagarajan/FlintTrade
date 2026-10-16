@@ -6,7 +6,9 @@ import {
   checkLotSizeVerified,
   checkLotMultiple,
   resolveLotQuantity,
+  checkOrderQuantityLimit,
   checkPriceForOrderType,
+  orderQuantityLimit,
   parseWholeNumber,
   parsePriceValue,
   extractBrokerOrderId,
@@ -147,6 +149,31 @@ describe("checkPriceForOrderType", () => {
 
   it("imposes no price rule on MARKET orders", () => {
     expect(checkPriceForOrderType("MARKET", 0, 0)).toBeNull();
+  });
+});
+
+describe("checkOrderQuantityLimit", () => {
+  it("matches the L1 ceilings", () => {
+    expect(orderQuantityLimit("NSE")).toBe(50_000);
+    expect(orderQuantityLimit("nse")).toBe(50_000);
+    expect(orderQuantityLimit("MCX")).toBe(1_000);
+    expect(orderQuantityLimit("NFO")).toBe(5_000);
+    expect(orderQuantityLimit("UNKNOWN")).toBe(50_000);
+  });
+
+  it("refuses a quantity above the exchange ceiling", () => {
+    expect(checkOrderQuantityLimit("NSE", 9999999)).toBe(
+      "Quantity 9999999 exceeds NSE limit of 50000",
+    );
+    expect(checkOrderQuantityLimit("MCX", 1001)).toBe(
+      "Quantity 1001 exceeds MCX limit of 1000",
+    );
+  });
+
+  it("accepts a quantity on the ceiling and leaves minimum checks alone", () => {
+    expect(checkOrderQuantityLimit("NSE", 50_000)).toBeNull();
+    expect(checkOrderQuantityLimit("NSE", 1)).toBeNull();
+    expect(checkOrderQuantityLimit("NSE", 0)).toBeNull();
   });
 });
 

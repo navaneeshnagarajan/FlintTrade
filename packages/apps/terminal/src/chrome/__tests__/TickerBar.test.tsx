@@ -195,7 +195,7 @@ describe("TickerBar", () => {
 
     const line = screen.getByTestId("ticker-last-close");
     expect(line).toHaveTextContent(LAST_CLOSE_LINE);
-    expect(line).toHaveClass("text-text-secondary");
+    expect(line).toHaveClass("text-[12px]", "text-text-primary");
     expect(screen.getAllByTestId("ticker-last-close")).toHaveLength(1);
     const link = screen.getByRole("link", { name: "Connect a broker for live prices →" });
     expect(link).toHaveAttribute("href", "/settings#brokers");
@@ -250,7 +250,9 @@ describe("TickerBar", () => {
     expect(screen.queryByTestId("ticker-last-close")).not.toBeInTheDocument();
     expect(screen.queryByText(/Last close/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Market closed/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText("NSE closed")).toBeInTheDocument();
+    const nse = screen.getByLabelText("NSE closed");
+    expect(nse).toBeInTheDocument();
+    expect(nse).toHaveClass("text-[12px]", "text-text-primary");
   });
 
   it("does not show connect prompt when live data exists", () => {
@@ -316,6 +318,7 @@ describe("TickerBar", () => {
 
       const badge = screen.getByLabelText("MCX open");
       expect(badge).toBeInTheDocument();
+      expect(badge).toHaveClass("text-[12px]", "text-text-primary");
       expect(badge).toHaveAttribute("title", "MCX session is open (09:00–23:30 IST)");
     });
 
