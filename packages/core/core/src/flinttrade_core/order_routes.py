@@ -674,6 +674,47 @@ def _record_reduce_only(body: Mapping[str, Any], mode: str) -> None:
     process_laya().admit_reduce_only(proposal)
 
 
+def _optional_positive_int(raw: object) -> int | None:
+    """Positive integer from a JSON field. Strings of digits are accepted."""
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw if raw > 0 else None
+    if isinstance(raw, str) and raw.strip().isdigit():
+        value = int(raw.strip())
+        return value if value > 0 else None
+    return None
+
+
+def _quantity_admission_response(body: Mapping[str, Any]) -> tuple[Any, int] | None:
+    """Refuse a lot-size or freeze-quantity breach before Laya or a write.
+
+    The broker's ``freeze_qty`` is used when the body carries one. Otherwise
+    the NSE index limits in ``qty_freeze`` apply. The order is not split.
+    """
+    from flinttrade_engine.qty_freeze import quantity_admission_refusal  # noqa: PLC0415
+
+    quantity = _quantity_from_body(body)
+    if quantity < 1:
+        return None
+    message = quantity_admission_refusal(
+        str(body.get("symbol") or ""),
+        str(body.get("exchange") or ""),
+        quantity,
+        lot_size=_optional_positive_int(body.get("lot_size")),
+        broker_freeze_qty=_optional_positive_int(body.get("freeze_qty")),
+    )
+    if message is None:
+        return None
+    return jsonify(
+        {
+            "status": "error",
+            "code": "quantity_admission",
+            "message": message,
+        }
+    ), 400
+
+
 def _admit_place(
     body: dict[str, Any],
     *,
@@ -688,8 +729,12 @@ def _admit_place(
 
     Returns ``(response, qualified)``. ``reduce_only`` on the request body
     is ignored. ``qualified`` is true only when this call recorded a
-    reduce-only exit.
+    reduce-only exit. A quantity that breaks the lot size or the freeze
+    quantity stops here and is not split into smaller orders.
     """
+    refused = _quantity_admission_response(body)
+    if refused is not None:
+        return refused, False
     from flinttrade_engine.reduce_only import classify_reduce_only  # noqa: PLC0415
 
     decision = classify_reduce_only(

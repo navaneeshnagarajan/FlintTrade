@@ -253,6 +253,8 @@ function normaliseOrderBody(body: object): Record<string, unknown> {
   copyField("positionSize", "position_size");
   copyField("disclosedQuantity", "disclosed_quantity");
   copyField("priceBasis", "price_basis");
+  copyField("lotSize", "lot_size");
+  copyField("freezeQty", "freeze_qty");
 
   return normalised;
 }

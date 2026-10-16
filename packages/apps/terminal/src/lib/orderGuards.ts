@@ -230,6 +230,76 @@ export function checkOrderQuantityLimit(exchange: string, quantity: number): str
   return `Quantity ${quantity} exceeds ${label} limit of ${limit}`;
 }
 
+/**
+ * NSE index quantity freeze limits.
+ *
+ * NSE/FAOP/76693 (1 October 2026, effective 5 October 2026). These apply
+ * when the broker does not send `freeze_qty`. An order above the limit is
+ * refused whole. It is not split.
+ */
+export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+  NIFTY: 3510,
+  BANKNIFTY: 1440,
+  FINNIFTY: 3240,
+  MIDCPNIFTY: 5760,
+  NIFTYNXT50: 1125,
+  NIFTYFPI: 53900,
+};
+
+const INDEX_FREEZE_NAMES = Object.keys(NSE_INDEX_FREEZE_QUANTITY).sort(
+  (left, right) => right.length - left.length,
+);
+
+/** Index name inside a contract symbol. Longer names win over `NIFTY`. */
+export function indexUnderlying(symbol: string): string | null {
+  const compact = symbol.toUpperCase().replace(/\s+/g, "");
+  if (!compact) return null;
+  for (const name of INDEX_FREEZE_NAMES) {
+    if (compact === name || compact.startsWith(name)) return name;
+  }
+  return null;
+}
+
+/**
+ * Broker freeze quantity when it is a positive whole number, otherwise the
+ * NSE index circular for this symbol.
+ */
+export function resolveFreezeQuantity(
+  symbol: string,
+  brokerFreezeQty?: number | null,
+): { limit: number; label: string } | null {
+  if (typeof brokerFreezeQty === "number" && Number.isInteger(brokerFreezeQty) && brokerFreezeQty > 0) {
+    const underlying = indexUnderlying(symbol);
+    const label = underlying || symbol.trim().toUpperCase() || "this contract";
+    return { limit: brokerFreezeQty, label };
+  }
+  const underlying = indexUnderlying(symbol);
+  if (!underlying) return null;
+  const limit = NSE_INDEX_FREEZE_QUANTITY[underlying];
+  if (limit == null) return null;
+  return { limit, label: underlying };
+}
+
+/**
+ * Refuse a quantity above the freeze quantity.
+ *
+ * Returns null for non-positive values so the minimum check owns that
+ * sentence. The visible message matches order admission.
+ */
+export function checkFreezeQuantity(
+  symbol: string,
+  quantity: number,
+  brokerFreezeQty?: number | null,
+): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  const resolved = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (!resolved || resolved.limit == null || quantity <= resolved.limit) return null;
+  return (
+    `Quantity ${quantity} exceeds the freeze quantity of ${resolved.limit} for ${resolved.label}. `
+    + "The order was not split."
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Strict numeric parsers
 // ---------------------------------------------------------------------------

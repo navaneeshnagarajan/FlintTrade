@@ -65,6 +65,7 @@ import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErr
 import {
   checkLotMultiple,
   checkOrderEntryMode,
+  checkFreezeQuantity,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   isDerivativeExchange,
@@ -603,10 +604,13 @@ function OrderPadWidget(props: WidgetProps) {
   const discQty = watch("discQty");
   const note = watch("note");
 
-  // L1 quantity ceiling. Shown on the field so a huge qty is refused before
-  // the Practice review opens, with the same sentence the server uses.
+  // Quantity ceiling and freeze limit. Shown on the field so a huge qty is
+  // refused before the Practice review opens, with the same sentence the
+  // server uses. An over-freeze order is not split.
   useEffect(() => {
-    const message = checkOrderQuantityLimit(exchange, Number(qty));
+    const quantity = Number(qty);
+    const message = checkOrderQuantityLimit(exchange, quantity)
+      ?? checkFreezeQuantity(symbol, quantity);
     const current = errors.qty;
     if (message) {
       if (current?.type === "validate" && current.message === message) return;
@@ -617,11 +621,11 @@ function OrderPadWidget(props: WidgetProps) {
       current?.type === "validate"
       && typeof current.message === "string"
       && current.message.includes(" exceeds ")
-      && current.message.includes(" limit of ")
+      && (current.message.includes(" limit of ") || current.message.includes("freeze quantity"))
     ) {
       clearErrors("qty");
     }
-  }, [clearErrors, errors.qty, exchange, qty, setError]);
+  }, [clearErrors, errors.qty, exchange, qty, setError, symbol]);
   const appMode = useModeStore((s) => s.mode);
   const selectedNativeBroker = useBrokerStore((s) => {
     const selected = findBrokerAccountMatch(s.accounts, s.activeAccountId);
@@ -1053,7 +1057,12 @@ function OrderPadWidget(props: WidgetProps) {
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
       ), getValues("symbol"));
-      if (/mode changed/i.test(msg)) setPracticeReview(null);
+      if (/mode changed/i.test(msg) || code === "quantity_admission") {
+        setPracticeReview(null);
+        if (code === "quantity_admission") {
+          setError("qty", { type: "validate", message: msg });
+        }
+      }
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
@@ -1074,7 +1083,7 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [getValues, setValue, showToast]);
+  }, [getValues, setError, setValue, showToast]);
 
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
@@ -1120,7 +1129,8 @@ function OrderPadWidget(props: WidgetProps) {
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
-    const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty);
+    const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
+      ?? checkFreezeQuantity(values.symbol, values.qty);
     if (qtyRefusal) {
       setError("qty", { type: "validate", message: qtyRefusal });
       return;
@@ -1208,6 +1218,7 @@ function OrderPadWidget(props: WidgetProps) {
         : {}),
       strategy: "FlintOrderPad",
       rationale: admissionRationale(values.note ?? ""),
+      ...(lotSizeKnown && lotSize > 0 ? { lotSize } : {}),
     };
     if (isPracticeOrExplore) {
       // Practice and Explore open a dedicated review stage; no placement call

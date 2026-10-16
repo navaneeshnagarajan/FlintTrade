@@ -1079,6 +1079,23 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
+  it("shows the freeze-quantity refusal on the pad and does not open a review", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot: 75");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3525" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Quantity 3525 exceeds the freeze quantity of 3510 for NIFTY. The order was not split.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
   it("submits when the quantity is an exact lot multiple", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",

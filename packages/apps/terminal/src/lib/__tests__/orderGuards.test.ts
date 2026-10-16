@@ -6,6 +6,7 @@ import {
   checkLotSizeVerified,
   checkLotMultiple,
   resolveLotQuantity,
+  checkFreezeQuantity,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   orderQuantityLimit,
@@ -174,6 +175,26 @@ describe("checkOrderQuantityLimit", () => {
     expect(checkOrderQuantityLimit("NSE", 50_000)).toBeNull();
     expect(checkOrderQuantityLimit("NSE", 1)).toBeNull();
     expect(checkOrderQuantityLimit("NSE", 0)).toBeNull();
+  });
+});
+
+describe("checkFreezeQuantity", () => {
+  it("uses NSE/FAOP/76693 when the broker does not send a freeze quantity", () => {
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 3510)).toBeNull();
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 3575)).toBe(
+      "Quantity 3575 exceeds the freeze quantity of 3510 for NIFTY. The order was not split.",
+    );
+    expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 1126)).toBe(
+      "Quantity 1126 exceeds the freeze quantity of 1125 for NIFTYNXT50. The order was not split.",
+    );
+    expect(checkFreezeQuantity("BANKNIFTY", 1440)).toBeNull();
+    expect(checkFreezeQuantity("SBIN", 100)).toBeNull();
+  });
+
+  it("uses the broker freeze quantity ahead of the circular", () => {
+    expect(checkFreezeQuantity("NIFTY", 130, 100)).toBe(
+      "Quantity 130 exceeds the freeze quantity of 100 for NIFTY. The order was not split.",
+    );
   });
 });
 

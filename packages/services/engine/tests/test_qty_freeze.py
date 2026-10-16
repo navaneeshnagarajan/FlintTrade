@@ -238,8 +238,13 @@ def test_load_from_csv_updates_existing_limits(mgr: QuantityFreezeManager, tmp_p
 
 def test_nse_defaults_seeded_on_fresh_db(tmp_path: Path) -> None:
     mgr = QuantityFreezeManager(db_path=tmp_path / "defaults.duckdb")
-    assert mgr.get_limit("NIFTY", "NFO") == 1800
-    assert mgr.get_limit("BANKNIFTY", "NFO") == 900
+    assert mgr.get_limit("NIFTY", "NFO") == 3510
+    assert mgr.get_limit("BANKNIFTY", "NFO") == 1440
+    assert mgr.get_limit("FINNIFTY", "NFO") == 3240
+    assert mgr.get_limit("MIDCPNIFTY", "NFO") == 5760
+    assert mgr.get_limit("NIFTYNXT50", "NFO") == 1125
+    assert mgr.get_limit("NIFTYFPI", "NFO") == 53900
+    assert mgr.get_limit("SENSEX", "BFO") == 500
     mgr.close()
 
 
@@ -434,3 +439,56 @@ class TestWorkspaceResolution:
         finally:
             instance.close()
         assert not (workspace / "qty_freeze.duckdb").exists()
+
+
+def test_admission_uses_circular_limits_and_does_not_split() -> None:
+    from flinttrade_engine.qty_freeze import quantity_admission_refusal
+
+    assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3510, lot_size=65) is None
+    message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3575, lot_size=65)
+    assert message == (
+        "Quantity 3575 exceeds the freeze quantity of 3510 for NIFTY. The order was not split."
+    )
+    assert "split into" not in (message or "")
+    assert quantity_admission_refusal("BANKNIFTY", "NFO", 1455, lot_size=15) == (
+        "Quantity 1455 exceeds the freeze quantity of 1440 for BANKNIFTY. The order was not split."
+    )
+    assert quantity_admission_refusal("NIFTYNXT50", "NFO", 1126) == (
+        "Quantity 1126 exceeds the freeze quantity of 1125 for NIFTYNXT50. The order was not split."
+    )
+    assert quantity_admission_refusal("FINNIFTY-OCT2026-FUT", "NFO", 3240) is None
+    assert quantity_admission_refusal("MIDCPNIFTY", "NFO", 5761) == (
+        "Quantity 5761 exceeds the freeze quantity of 5760 for MIDCPNIFTY. The order was not split."
+    )
+    assert quantity_admission_refusal("NIFTYFPI", "NFO", 53900) is None
+
+
+def test_admission_prefers_broker_freeze_qty() -> None:
+    from flinttrade_engine.qty_freeze import quantity_admission_refusal
+
+    message = quantity_admission_refusal(
+        "NIFTY 24500 CE",
+        "NFO",
+        130,
+        lot_size=65,
+        broker_freeze_qty=100,
+    )
+    assert message == (
+        "Quantity 130 exceeds the freeze quantity of 100 for NIFTY. The order was not split."
+    )
+    assert quantity_admission_refusal(
+        "RELIANCE",
+        "NSE",
+        40,
+        lot_size=1,
+        broker_freeze_qty=50,
+    ) is None
+
+
+def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
+    from flinttrade_engine.qty_freeze import quantity_admission_refusal
+
+    assert quantity_admission_refusal("NIFTY", "NFO", 100, lot_size=65) == (
+        "Quantity must be a positive multiple of the lot size (65) for NFO."
+    )
+    assert quantity_admission_refusal("SBIN", "NSE", 7) is None
