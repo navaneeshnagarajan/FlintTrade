@@ -143,7 +143,7 @@ describe("AgentPanel", () => {
 
     await waitFor(() =>
       expect(screen.getByText(
-        "Example cannot run an agent. Switch to Practice or Live to start a session.",
+        "Example data cannot run an agent. Switch to Practice or Live to start a session.",
       )).toBeInTheDocument(),
     );
     expect(screen.getByRole("status")).toHaveTextContent("Example");

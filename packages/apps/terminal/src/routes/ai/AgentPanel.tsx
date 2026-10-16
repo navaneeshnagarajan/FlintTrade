@@ -236,7 +236,7 @@ function AgentModePanel({ appMode }: { appMode: AppMode }) {
         Practice · simulated money. Uses Practice fills and configured market data; results do not establish Live readiness.
       </p>}
       {isLive && <p className="text-xs text-warning">Live · real money. Existing PIN, account authorisation and approval requirements still apply.</p>}
-      {!enabledMode && <p className="text-xs text-text-muted">Example cannot run an agent. Switch to Practice or Live to start a session.</p>}
+      {!enabledMode && <p className="text-xs text-text-muted">Example data cannot run an agent. Switch to Practice or Live to start a session.</p>}
       {snap && !snap.enabled && <p className="text-xs text-warning bg-warning/10 border border-warning/30 rounded px-2.5 py-1.5">
         The autonomous agent is disabled. Enable it deliberately via <code className="font-mono">ai.autonomous_agent.enabled</code> in workspace.json.
         {isLive && <> Grant the <code className="font-mono">autonomous-trader</code> actor access in <code className="font-mono">brokers.account_acls</code>.</>}

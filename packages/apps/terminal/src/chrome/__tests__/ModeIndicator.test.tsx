@@ -105,7 +105,7 @@ describe("ModeIndicator", () => {
       render(<ModeIndicator />);
 
       const chip = screen.getByTestId("execution-mode");
-      expect(chip).toHaveTextContent("Practice");
+      expect(chip).toHaveTextContent(/^Practice$/);
       expect(chip).not.toHaveTextContent(/Paper|Sandbox/);
       expect(chip).not.toHaveTextContent(/explore/i);
       expect(screen.queryByText("EXPLORE")).not.toBeInTheDocument();
@@ -155,7 +155,8 @@ describe("ModeIndicator", () => {
 
       await user.click(connected);
 
-      expect(screen.getByTestId("execution-mode")).toHaveTextContent("Connected (read)");
+      expect(screen.getByTestId("execution-mode")).toHaveTextContent(/^Connected \(read\)$/);
+      expect(screen.getByTestId("execution-mode")).not.toHaveTextContent(/Sandbox/);
       expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
       expect(useModeStore.getState().mode).toBe("practice");
     });
@@ -476,7 +477,8 @@ describe("ModeIndicator", () => {
       useAuthStore.setState({ token: "stale-live-jwt" });
       render(<ModeIndicator />);
 
-      expect(screen.getByTestId("execution-mode")).toHaveTextContent("Live");
+      expect(screen.getByTestId("execution-mode")).toHaveTextContent(/^Live$/);
+      expect(screen.getByTestId("execution-mode")).not.toHaveTextContent(/Sandbox/);
       const user = await openMenu();
       await user.click(screen.getByRole("menuitem", { name: "Practice" }));
 

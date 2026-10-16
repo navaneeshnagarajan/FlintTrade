@@ -517,7 +517,7 @@ class TestOrderRateLimiting:
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-RL",
             "status": "COMPLETE",
-            "message": "Practice order executed",
+            "message": "Practice order filled",
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
@@ -561,7 +561,7 @@ class TestPracticeMode:
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-001",
             "status": "COMPLETE",
-            "message": "Practice order executed",
+            "message": "Practice order filled",
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
@@ -648,7 +648,7 @@ class TestPracticeMode:
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-LTP",
             "status": "COMPLETE",
-            "message": "Practice order executed",
+            "message": "Practice order filled",
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
@@ -686,7 +686,7 @@ class TestPracticeMode:
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-CLOSE",
             "status": "COMPLETE",
-            "message": "Practice order executed",
+            "message": "Practice order filled",
         }
         monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
 

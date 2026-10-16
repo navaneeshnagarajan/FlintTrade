@@ -755,7 +755,7 @@ class SandboxEngine:
             status,
         )
         message = (
-            f"Practice order executed: {action} {quantity} {symbol} @ {price:.2f}"
+            f"Practice order filled: {action} {quantity} {symbol} @ {price:.2f}"
             if status == "COMPLETE"
             else f"Practice {order_type} order is pending a matching live tick"
         )
