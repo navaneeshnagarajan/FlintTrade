@@ -157,12 +157,19 @@ def test_native_negative_provenance_uses_independent_source_context(mutation):
             if mutation in {'foreign-path', 'self-declared-root'}:
                 error['location']['file'] = '/foreign/e2e/fixture-registry.ts'
                 for key in ['message', 'stack']:
-                    if key in error: error[key] = error[key].replace(old, '/foreign/e2e/fixture-registry.ts')
+                    if key in error:
+                        error[key] = error[key].replace(old, '/foreign/e2e/fixture-registry.ts')
             else:
                 owner = 'FailClosedSyntheticFixtureRegistry.disposeOnce' if mutation == 'teardown-position' else 'Object.baseTest.extend.syntheticApi.auto'
                 for key in ['message', 'stack']:
-                    if key in error: error[key] = re.sub(r'(    at '+re.escape(owner)+r' \([^\n]+):[0-9]+:[0-9]+\)', r'\1:1:1)', error[key])
-    if mutation == 'self-declared-root': report['config']['rootDir'] = '/foreign/e2e'
+                    if key in error:
+                        error[key] = re.sub(
+                            r'(    at ' + re.escape(owner) + r' \([^\n]+):[0-9]+:[0-9]+\)',
+                            r'\1:1:1)',
+                            error[key],
+                        )
+    if mutation == 'self-declared-root':
+        report['config']['rootDir'] = '/foreign/e2e'
     with pytest.raises(ValueError):
         runpy.run_path(str(SCRIPT))['playwright_counts'](report, infrastructure=True)
 
@@ -193,8 +200,10 @@ def test_ordinary_pass_errors_are_never_projected_as_zero(infrastructure, field)
         report['suites'][0]['specs'] = [s for s in report['suites'][0]['specs'] if s['tests'][0]['expectedStatus'] == 'passed']
         report['stats']['expected'] = len(report['suites'][0]['specs'])
     test = next(s['tests'][0] for s in report['suites'][0]['specs'] if s['tests'][0]['expectedStatus'] == 'passed')
-    if field in {'error', 'both'}: test['results'][0]['error'] = {'message': CANARY}
-    if field in {'errors', 'both'}: test['results'][0]['errors'] = [{'message': CANARY}]
+    if field in {'error', 'both'}:
+        test['results'][0]['error'] = {'message': CANARY}
+    if field in {'errors', 'both'}:
+        test['results'][0]['errors'] = [{'message': CANARY}]
     with pytest.raises(ValueError):
         runpy.run_path(str(SCRIPT))['playwright_counts'](report, infrastructure=infrastructure)
 
@@ -209,22 +218,34 @@ def test_expected_infrastructure_failures_are_not_a_general_failure_allowance(tm
     negative = next(s for s in specs if s['tests'][0]['expectedStatus'] == 'failed')
     test = negative['tests'][0]
     result = test['results'][0]
-    if mutation == 'missing': path.unlink()
-    elif mutation == 'unknown-control': negative['title'] += ' unknown'
-    elif mutation == 'wrong-cause': result['error']['message'] = 'Error: EADDRINUSE'
-    elif mutation == 'extra-error': result['errors'].append({'message':CANARY})
-    elif mutation == 'unexpected-pass': result['status'] = 'passed'
-    elif mutation == 'missing-attachment': result['attachments'] = []
-    elif mutation == 'duplicate': specs.append(negative); report['stats']['expected'] += 1
+    if mutation == 'missing':
+        path.unlink()
+    elif mutation == 'unknown-control':
+        negative['title'] += ' unknown'
+    elif mutation == 'wrong-cause':
+        result['error']['message'] = 'Error: EADDRINUSE'
+    elif mutation == 'extra-error':
+        result['errors'].append({'message': CANARY})
+    elif mutation == 'unexpected-pass':
+        result['status'] = 'passed'
+    elif mutation == 'missing-attachment':
+        result['attachments'] = []
+    elif mutation == 'duplicate':
+        specs.append(negative)
+        report['stats']['expected'] += 1
     elif mutation == 'ordinary-failure':
-        test = next(s for s in specs if s['tests'][0]['expectedStatus']=='passed')['tests'][0]
-        test.update(status='unexpected'); test['results'][0]['status']='failed'
-        report['stats']['expected']-=1; report['stats']['unexpected']+=1
+        test = next(s for s in specs if s['tests'][0]['expectedStatus'] == 'passed')['tests'][0]
+        test.update(status='unexpected')
+        test['results'][0]['status'] = 'failed'
+        report['stats']['expected'] -= 1
+        report['stats']['unexpected'] += 1
     elif mutation == 'app-expected-failure':
-        app=run/'e2e-evidence/e2e:default/default-vite-results.json'
-        value=json.loads(app.read_text()); value['suites'][0]['specs'][0]['tests']=[test]
+        app = run / 'e2e-evidence/e2e:default/default-vite-results.json'
+        value = json.loads(app.read_text())
+        value['suites'][0]['specs'][0]['tests'] = [test]
         app.write_text(json.dumps(value))
-    if mutation != 'missing': path.write_text(json.dumps(report))
+    if mutation != 'missing':
+        path.write_text(json.dumps(report))
     result, summary = invoke(state, head, tmp_path)
     assert result.returncode != 0
     assert summary['projection_valid'] is False
