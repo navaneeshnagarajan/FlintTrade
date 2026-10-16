@@ -182,18 +182,19 @@ export class MockDataEngine {
 
   /** Start generating ticks every `intervalMs` milliseconds (default 1 000 ms). */
   start(intervalMs = 1000): void {
-    const publish = () => {
+    // A frozen public preview has no interval. One snapshot is the whole feed.
+    // A running engine notifies only on each interval, so subscribers see one
+    // callback per tick. The first paint is the caller's current snapshot.
+    if (isPublicDemoBuild()) {
       const snapshot = this.getSnapshot();
       this.listeners.forEach((cb) => cb(snapshot));
-    };
-    // The chart reads this snapshot immediately. Publish once before the
-    // interval so the ticker is not an empty tape for the first second.
-    if (isPublicDemoBuild()) { publish(); return; }
+      return;
+    }
     if (this.intervalId !== null) return; // already running
-    publish();
     this.intervalId = setInterval(() => {
       this._step();
-      publish();
+      const snapshot = this.getSnapshot();
+      this.listeners.forEach((cb) => cb(snapshot));
     }, intervalMs);
   }
 
