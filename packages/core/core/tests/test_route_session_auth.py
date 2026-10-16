@@ -144,6 +144,12 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
         previous_threshold = monitor._auth_ban_threshold
         monitor._auth_ban_threshold = 10**9
         monitor._records.pop("127.0.0.1", None)
+    # Each refused request otherwise opens the incident store and waits on its
+    # delivery lock. That bookkeeping is not the session contract, and under a
+    # shared shard worker it overruns the 60s timeout and kills the worker.
+    incidents = app.config.pop("SYSTEM_INCIDENTS", None)
+    if incidents is not None:
+        incidents.close()
 
     try:
         registered: set[tuple[str, str]] = set()
