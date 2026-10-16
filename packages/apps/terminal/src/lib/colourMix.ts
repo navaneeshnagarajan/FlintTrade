@@ -49,6 +49,18 @@ export const TICKER_VENUE_ON_DARK = "#f4f4f8";
 /** Venue-chip ink on a light ticker. #1a1a1e on #f5f5f7 is above 4.5:1. */
 export const TICKER_VENUE_ON_LIGHT = "#1a1a1e";
 
+/** Practice chip ink on the dark amber wash. Amber-400, #ffb900. */
+export const PRACTICE_CHIP_ON_DARK = "#ffb900";
+
+/**
+ * Practice chip ink on the light amber wash.
+ * Amber-400 on #feefd9 is about 1.52:1. Amber-800 clears 4.5:1.
+ */
+export const PRACTICE_CHIP_ON_LIGHT = "#973c00";
+
+/** Tailwind amber-500. The Practice chip washes the chrome with this at 15% and 25%. */
+export const PRACTICE_CHIP_WASH = "#fe9a00";
+
 /**
  * Chip colour for NSE/MCX venue labels.
  *
@@ -60,6 +72,14 @@ export function tickerVenueColour(background: string): string {
   return relativeLuminance(red, green, blue) > 0.4
     ? TICKER_VENUE_ON_LIGHT
     : TICKER_VENUE_ON_DARK;
+}
+
+/** Practice chip ink. Light chrome needs the dark amber; dark chrome keeps amber-400. */
+export function practiceChipColour(background: string): string {
+  const [red, green, blue] = hexToRgb(background);
+  return relativeLuminance(red, green, blue) > 0.4
+    ? PRACTICE_CHIP_ON_LIGHT
+    : PRACTICE_CHIP_ON_DARK;
 }
 
 /** Elevated tray fill derived from the card surface. */

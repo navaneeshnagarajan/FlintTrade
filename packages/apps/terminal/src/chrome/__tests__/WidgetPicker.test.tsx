@@ -200,4 +200,20 @@ describe("WidgetPicker", () => {
       title: "Order Pad",
     }));
   });
+
+  it("closes the catalogue when a widget is added", () => {
+    const addPanel = vi.fn();
+    const retargetOrderPad = vi.fn(() => false);
+    layoutState.workspaceApi = { addPanel, retargetOrderPad };
+    const onClose = vi.fn();
+    render(<WidgetPicker isOpen={true} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Chart widget" }));
+
+    expect(addPanel).toHaveBeenCalledWith(expect.objectContaining({
+      component: "chart",
+      title: "Chart",
+    }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

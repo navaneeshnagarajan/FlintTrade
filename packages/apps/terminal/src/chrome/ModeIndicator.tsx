@@ -62,7 +62,7 @@ const CHIP_CLASS = {
   example:
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/25 hover:bg-text-muted/25 hover:text-text-secondary",
   practice:
-    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400",
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-[var(--color-practice-chip)] border border-amber-500/30 hover:bg-amber-500/25 hover:text-[var(--color-practice-chip)]",
   connectedRead:
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 hover:text-sky-300",
   live:

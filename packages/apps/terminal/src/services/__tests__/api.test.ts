@@ -2384,6 +2384,10 @@ describe("Native FlintTrade API client (api.ts)", () => {
     expect(results.some((row) => row.symbol === "NIFTY")).toBe(true);
     expect(results.every((row) => row.symbol.toUpperCase().includes("NIFTY"))).toBe(true);
     expect(results.find((row) => row.symbol === "NIFTY")?.exchange).toBe("NSE_INDEX");
+    expect(results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" }),
+      expect.objectContaining({ symbol: "NIFTY 24500 CE", exchange: "NFO" }),
+    ]));
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -2416,6 +2420,34 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
     await expect(searchSymbol("NIFTY", "MCX")).resolves.toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("resolves Example and Practice F&O contracts with offline lot sizes", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+    const explored = await getSymbol("NIFTY-OCT2026-FUT", "NFO");
+    expect(explored).toEqual(expect.objectContaining({
+      symbol: "NIFTY-OCT2026-FUT",
+      exchange: "NFO",
+      instrumenttype: "FUTIDX",
+      lotsize: 65,
+    }));
+
+    mockModeState.mode = "practice";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+    const practised = await getSymbol("BANKNIFTY 52000 CE", "NFO");
+    expect(practised).toEqual(expect.objectContaining({
+      symbol: "BANKNIFTY 52000 CE",
+      exchange: "NFO",
+      instrumenttype: "OPTIDX",
+      lotsize: 30,
+    }));
+    const searched = await searchSymbol("BANKNIFTY", "NFO");
+    expect(searched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "BANKNIFTY-OCT2026-FUT", exchange: "NFO" }),
+    ]));
+    expect(searched.every((row) => row.exchange === "NFO")).toBe(true);
   });
 
   it("resolves Practice symbol search from the Example catalogue when native search is unavailable", async () => {

@@ -76,11 +76,11 @@ def test_charges_and_validation_use_each_contracts_lot() -> None:
     assert near_buy.total + near_sell.total != next_buy.total + next_sell.total
     assert contract_quantity_message("13", 75, rows, as_of=_AS_OF) is None
     assert contract_quantity_message("13", 65, rows, as_of=_AS_OF) == (
-        "Quantity must be a positive multiple of the lot size (75)"
+        "Quantity must be a multiple of the lot size (75)."
     )
     assert contract_quantity_message("14", 65, rows, as_of=_AS_OF) is None
     assert contract_quantity_message("14", 75, rows, as_of=_AS_OF) == (
-        "Quantity must be a positive multiple of the lot size (65)"
+        "Quantity must be a multiple of the lot size (65)."
     )
     assert contract_quantity_message("missing", 75, rows, as_of=_AS_OF, contract="NIFTY 24500 CE") == (
         "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
@@ -335,7 +335,7 @@ def test_ui_label_and_order_check_agree_after_a_revision(
     assert "BANKNIFTY —" in line
     assert "SENSEX —" in line
     assert contract_quantity_message("CACHE-NIFTY", 50) is None
-    assert contract_quantity_message("CACHE-NIFTY", 65) == ("Quantity must be a positive multiple of the lot size (50)")
+    assert contract_quantity_message("CACHE-NIFTY", 65) == ("Quantity must be a multiple of the lot size (50).")
     app = Flask(__name__)
     app.register_blueprint(instrument_lots_bp)
     response = app.test_client().get("/api/v1/instrument-lots")

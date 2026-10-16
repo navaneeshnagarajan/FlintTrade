@@ -1007,6 +1007,9 @@ function OrderPadWidget(props: WidgetProps) {
       });
       return scopeStillCurrent;
     } catch (err) {
+      const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
+        ? err.status
+        : null;
       const presentation = submissionMode === "live" ? nativeOrderErrorPresentation(err, {
         broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
       }) : null;
@@ -1021,7 +1024,7 @@ function OrderPadWidget(props: WidgetProps) {
       }
       if (presentation) {
         setAdmission(null);
-        if (/mode changed/i.test(presentation.body)) setPracticeReview(null);
+        if (httpStatus === 403 || /mode changed/i.test(presentation.body)) setPracticeReview(null);
         // Reconciliation guidance and native reason observations are not
         // broker-health evidence. Do not classify generated "check broker"
         // copy as a broker outage or change readiness from its wording.
@@ -1033,6 +1036,8 @@ function OrderPadWidget(props: WidgetProps) {
         suppressDeny: useModeStore.getState().mode === "live" && liveWritesMuted(readOperatorIncident()),
       });
       if (notice) {
+        // A 403 belongs on the pad. The review overlay would cover that refusal.
+        if (httpStatus === 403) setPracticeReview(null);
         setAdmission(notice);
         if (notice.kind === "clamp" && notice.appliedQuantity != null) {
           const nextQty = notice.appliedQuantity;
@@ -1058,15 +1063,12 @@ function OrderPadWidget(props: WidgetProps) {
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
       ), getValues("symbol"));
-      if (/mode changed/i.test(msg) || code === "quantity_admission") {
+      if (httpStatus === 403 || /mode changed/i.test(msg) || code === "quantity_admission") {
         setPracticeReview(null);
         if (code === "quantity_admission") {
           setError("qty", { type: "validate", message: msg });
         }
       }
-      const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
-        ? err.status
-        : null;
       noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
       const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
       showToast("error", msg, 6000, retryable);

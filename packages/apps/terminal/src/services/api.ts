@@ -77,6 +77,7 @@ import {
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
 import { OrderPreflightRefusal } from "./orderPreflightRefusal";
 import { mockDataEngine } from "@/services/mockDataEngine";
+import { findExampleFoInstrument, searchExampleFoInstruments } from "@/services/exampleFoInstruments";
 import {
   readNativeAccount,
   type NativeReadKind,
@@ -1621,13 +1622,17 @@ function makeMockSearch(
   const needle = query.trim().toUpperCase();
   if (!needle) return [];
   const exchangeFilter = exchange?.trim().toUpperCase();
-  return mockDataEngine.getSnapshot()
+  const listed = mockDataEngine.getSnapshot()
     .filter((tick) => {
       if (!tick.symbol.toUpperCase().includes(needle)) return false;
       if (exchangeFilter && tick.exchange.toUpperCase() !== exchangeFilter) return false;
       return true;
     })
     .map((tick) => ({ symbol: tick.symbol, exchange: tick.exchange }));
+  const seen = new Set(listed.map((row) => `${row.exchange}:${row.symbol}`));
+  const contracts = searchExampleFoInstruments(query, exchange)
+    .filter((row) => !seen.has(`${row.exchange}:${row.symbol}`));
+  return [...listed, ...contracts];
 }
 
 const MOCK_HISTORY_BAR_COUNT = 96;
@@ -2059,7 +2064,9 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
       const query = typeof params.query === "string" ? params.query : "";
       return makeMockSearch(query, exchange) as T;
     }
-    case "symbol":
+    case "symbol": {
+      const contract = findExampleFoInstrument(symbol ?? "", exchange);
+      if (contract) return { ...contract } as T;
       return {
         symbol: symbol ?? "NIFTY",
         name: symbol ?? "NIFTY",
@@ -2068,6 +2075,7 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
         lotsize: 1,
         tick_size: 0.05,
       } as T;
+    }
     case "funds":
       return {
         availableCash: 250_000,
@@ -2481,6 +2489,13 @@ async function post<T>(
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(capturedScope);
   if (nativeRead !== undefined) return nativeRead;
+
+  // Practice has no broker catalogue until an account is connected. The same
+  // offline Example book supplies symbol search and F&O lot sizes.
+  if (useModeStore.getState().mode === "practice" && (endpoint === "symbol" || endpoint === "search")) {
+    const sample = getExplorePostFallback<T>(endpoint, extra);
+    if (sample !== undefined) return sample;
+  }
 
   if (isExploreMode()) {
     const fallback = getExplorePostFallback<T>(endpoint, extra);
@@ -3039,18 +3054,30 @@ export const getOptionSymbol = (
   requireCurrentMarketDataScope(expectedDataScope);
   return Promise.resolve(compactOptionSymbolResult(underlying, exchange, expiry_date, option_type, offset));
 };
-export const getSymbol = (
+export async function getSymbol(
   symbol: string,
   exchange: string,
   signal?: AbortSignal,
   expectedDataScope?: string,
-) =>
-  post<{ symbol: string; name: string; exchange: string; instrumenttype: string; lotsize: number; tick_size: number }>(
-    "symbol",
-    { symbol, exchange },
-    signal,
-    expectedDataScope,
-  );
+): Promise<{ symbol: string; name: string; exchange: string; instrumenttype: string; lotsize: number; tick_size: number }> {
+  try {
+    return await post(
+      "symbol",
+      { symbol, exchange },
+      signal,
+      expectedDataScope,
+    );
+  } catch (error) {
+    // Practice discovery can fail before a broker exists. Known offline
+    // F&O contracts still carry a lot size so quantity limits can be checked.
+    if (useModeStore.getState().mode !== "practice") throw error;
+    if (error instanceof MarketDataAuthorityChangedError) throw error;
+    if (signal?.aborted) throw error;
+    const contract = findExampleFoInstrument(symbol, exchange);
+    if (!contract) throw error;
+    return { ...contract };
+  }
+}
 export const getSyntheticFuture = async (
   symbol: string,
   exchange: string,

@@ -603,9 +603,9 @@ describe("WatchlistWidget", () => {
 
     const columns = await screen.findByRole("group", { name: "Watchlist columns" });
     expect(within(columns).getByText("LTP", { exact: true })).toBeInTheDocument();
-    const sparkline = within(columns).getByText("Sparkline");
-    expect(sparkline.className).toContain("overflow-hidden");
-    expect(sparkline.className).not.toMatch(/uppercase|tracking-wider/);
+    const trend = within(columns).getByText("Trend");
+    expect(trend.className).toContain("whitespace-nowrap");
+    expect(trend.className).not.toMatch(/overflow-wrap|uppercase|tracking-wider/);
     expect(within(columns).getByText("% change", { exact: true })).toBeInTheDocument();
     expect(await screen.findByLabelText("NIFTY LTP")).toHaveTextContent("24,150.00");
     expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("+0.63%");

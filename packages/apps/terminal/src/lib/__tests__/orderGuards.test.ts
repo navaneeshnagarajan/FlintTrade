@@ -52,15 +52,15 @@ describe("checkLotSizeVerified", () => {
   it("fails closed on a derivative with an unverified lot size", () => {
     expect(
       checkLotSizeVerified("NFO", { lotSize: 75, verified: false }, "NIFTY25JUL22000CE"),
-    ).toContain("unverified");
+    ).toBe("Lot size for NIFTY25JUL22000CE isn't verified, so the order wasn't sent.");
   });
 
   it("fails closed when the lot size is missing entirely", () => {
-    expect(checkLotSizeVerified("NFO", { lotSize: null, verified: true }, "X")).toContain(
-      "unverified",
+    expect(checkLotSizeVerified("NFO", { lotSize: null, verified: true }, "X")).toBe(
+      "Lot size for X isn't verified, so the order wasn't sent.",
     );
-    expect(checkLotSizeVerified("NFO", { lotSize: 0, verified: true }, "X")).toContain(
-      "unverified",
+    expect(checkLotSizeVerified("NFO", { lotSize: 0, verified: true }, "X")).toBe(
+      "Lot size for X isn't verified, so the order wasn't sent.",
     );
   });
 
@@ -82,7 +82,9 @@ describe("checkLotMultiple", () => {
   });
 
   it("rejects a non-multiple", () => {
-    expect(checkLotMultiple("NFO", 100, verified, "X")).toContain("multiple of the lot size (75)");
+    expect(checkLotMultiple("NFO", 100, verified, "X")).toBe(
+      "Quantity must be a multiple of the lot size (75).",
+    );
   });
 
   it("rejects a zero or negative quantity", () => {
@@ -91,8 +93,8 @@ describe("checkLotMultiple", () => {
   });
 
   it("reports the unverified lot size before the multiple check", () => {
-    expect(checkLotMultiple("NFO", 100, { lotSize: 75, verified: false }, "X")).toContain(
-      "unverified",
+    expect(checkLotMultiple("NFO", 100, { lotSize: 75, verified: false }, "X")).toBe(
+      "Lot size for X isn't verified, so the order wasn't sent.",
     );
   });
 

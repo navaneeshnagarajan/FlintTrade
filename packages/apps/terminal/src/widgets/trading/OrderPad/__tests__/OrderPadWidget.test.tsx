@@ -479,7 +479,7 @@ describe("OrderPadWidget", () => {
     );
   });
 
-  it("shows Laya denied under the confirm control and leaves it off", async () => {
+  it("closes the review and shows a Laya denial on the pad", async () => {
     mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
       code: "laya_denied",
       reason: "Example cannot place orders.",
@@ -489,15 +489,16 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const confirm = await screen.findByRole("button", {
+    fireEvent.click(await screen.findByRole("button", {
       name: /confirm (simulated practice|example) order/i,
-    });
-    fireEvent.click(confirm);
+    }));
     const denied = await screen.findByTestId("laya-denied");
     expect(denied).toHaveTextContent("Laya denied");
     expect(denied).toHaveTextContent("Example cannot place orders.");
     expect(denied).toHaveTextContent("Max quantity 100.");
-    expect(confirm).toBeDisabled();
+    expect(denied.closest("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
     expect(denied.textContent).not.toMatch(/llm/i);
   });
@@ -522,14 +523,17 @@ describe("OrderPadWidget", () => {
     expect(screen.queryByTestId("laya-limits")).not.toBeInTheDocument();
     expect(screen.queryByText(/Max quantity/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Start the Laya model/)).not.toBeInTheDocument();
-    expect(confirm).toBeDisabled();
+    expect(screen.getByTestId("laya-denied").closest("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
 
     act(() => {
       useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     });
 
     expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
   });
 
   it("shows a clamp and does not place until Place N is clicked", async () => {

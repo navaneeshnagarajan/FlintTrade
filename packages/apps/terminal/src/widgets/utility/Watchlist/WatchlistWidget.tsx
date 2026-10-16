@@ -563,8 +563,8 @@ function WatchlistWidget({ params, api }: WidgetProps) {
                 Symbol
               </span>
               {visible.has("sparkline") && (
-                <span className="w-10 shrink-0 overflow-hidden text-center text-xxs leading-tight text-text-muted [overflow-wrap:anywhere]">
-                  Sparkline
+                <span className="w-10 shrink-0 whitespace-nowrap text-center text-xxs leading-tight text-text-muted">
+                  Trend
                 </span>
               )}
               {visible.has("volume") && (

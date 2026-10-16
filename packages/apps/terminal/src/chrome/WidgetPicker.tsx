@@ -362,17 +362,17 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
 
   const handleAddWidget = useCallback((widget: WidgetMeta) => {
     if (!workspaceApi) return;
-    if (widget.id === "orderpad" && workspaceApi.retargetOrderPad({})) {
+    try {
+      if (widget.id === "orderpad" && workspaceApi.retargetOrderPad({})) return;
+      const panelId = `${widget.id}-${Date.now()}`;
+      workspaceApi.addPanel({
+        id: panelId,
+        component: widget.id,
+        title: widget.name,
+      });
+    } finally {
       onClose();
-      return;
     }
-    const panelId = `${widget.id}-${Date.now()}`;
-    workspaceApi.addPanel({
-      id: panelId,
-      component: widget.id,
-      title: widget.name,
-    });
-    onClose();
   }, [workspaceApi, onClose]);
 
   const handleLocked = (widgetName: string) => {

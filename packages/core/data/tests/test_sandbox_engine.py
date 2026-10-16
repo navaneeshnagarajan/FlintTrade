@@ -639,7 +639,7 @@ class TestPracticeCharges:
             instrument_token="13",
         )
         assert rejected["status"] == "REJECTED"
-        assert rejected["message"] == "Quantity must be a positive multiple of the lot size (75)"
+        assert rejected["message"] == "Quantity must be a multiple of the lot size (75)."
 
         unnamed = engine.place_order(
             "NIFTY 24500 CE",

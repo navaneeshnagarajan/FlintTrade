@@ -98,7 +98,7 @@ export function checkLotSizeVerified(
 ): string | null {
   if (!isDerivativeExchange(exchange)) return null;
   if (!verified || lotSize == null || lotSize <= 0) {
-    return `Lot size for ${symbol} is unverified — order not sent`;
+    return `Lot size for ${symbol} isn't verified, so the order wasn't sent.`;
   }
   return null;
 }
@@ -120,7 +120,7 @@ export function checkLotMultiple(
   if (!isDerivativeExchange(exchange)) return null;
   const lotSize = state.lotSize as number;
   if (!Number.isFinite(quantity) || quantity <= 0 || quantity % lotSize !== 0) {
-    return `Quantity must be a positive multiple of the lot size (${lotSize}) for ${exchange}.`;
+    return lotMultipleRefusal(lotSize);
   }
   return null;
 }
