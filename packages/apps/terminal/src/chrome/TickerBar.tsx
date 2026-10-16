@@ -15,11 +15,12 @@ import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 function VenueBadge({ badge }: { badge: TickerVenueBadge }) {
   return (
     <span
-      className={`text-[12px] leading-4 font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-primary ${
+      className={`ticker-venue-chip text-[12px] leading-4 font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
         badge.open
           ? "border-amber-500/70 bg-amber-500/10"
           : "border-border-default"
       }`}
+      style={{ color: "var(--color-ticker-venue)" }}
       title={badge.title}
       aria-label={badge.label}
     >

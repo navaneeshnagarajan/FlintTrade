@@ -116,6 +116,8 @@
     --color-text-secondary: #a6a6b8;
     --color-text-muted: #8a8aa2;
     --color-text-disabled: #55556e;
+    /* Venue chips. Disabled and warning ink fail 4.5:1 on both Graphite surfaces. */
+    --color-ticker-venue: #f4f4f8;
     /* Brand accent fallback before themeStore.applyTheme() writes the live value. */
     --color-accent: #22c55e;
     --color-accent-text: #ffffff;
@@ -195,6 +197,7 @@
       --color-text-secondary: #52525b;
       --color-text-muted: #6b6b74;
       --color-text-disabled: #a1a1aa;
+      --color-ticker-venue: #1a1a1e;
       --color-accent: #15803d;
       --color-accent-text: #ffffff;
       /* WCAG AA contrast on white backgrounds — safer contrast margin */
@@ -215,6 +218,7 @@
 
   html.theme-light {
     --color-info: #0369a1;
+    --color-ticker-venue: #1a1a1e;
   }
 
   /* shadcn/ui HSL tokens for light mode (when .dark class is removed) */
@@ -296,6 +300,7 @@
   --color-text-secondary: var(--color-text-secondary);
   --color-text-muted: var(--color-text-muted);
   --color-text-disabled: var(--color-text-disabled);
+  --color-ticker-venue: var(--color-ticker-venue);
 
   /* --- Trading semantic colors (read from :root, themeable) --- */
   --color-profit: var(--color-profit);

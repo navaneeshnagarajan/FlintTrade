@@ -31,7 +31,7 @@ import {
   getResolvedVariant,
 } from "@/lib/cinematicThemes";
 import type { CinematicTheme, ColorMode, ThemeDefinition } from "@/lib/cinematicThemes";
-import { elevatedSurfaceColour, unselectedTabColour } from "@/lib/colourMix";
+import { elevatedSurfaceColour, tickerVenueColour, unselectedTabColour } from "@/lib/colourMix";
 import { resolveActionPalette } from "@/lib/actionPalette";
 
 // ---------------------------------------------------------------------------
@@ -451,6 +451,7 @@ const storeImpl: StateCreator<
     style.setProperty("--color-border-strong",    variant.colors.border);
 
     style.setProperty("--color-text-primary",     variant.colors.text);
+    style.setProperty("--color-ticker-venue",     tickerVenueColour(variant.colors.base));
     style.setProperty("--color-text-disabled",    variant.colors.textDisabled);
     style.setProperty(
       "--fl-color-tab-unselected",

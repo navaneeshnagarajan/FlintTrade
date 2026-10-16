@@ -6,7 +6,7 @@
  * gamma-encoded sRGB; the painted pixel is the channel rounded to 8-bit.
  */
 
-import { hexToRgb } from "./contrastUtils";
+import { hexToRgb, relativeLuminance } from "./contrastUtils";
 
 /**
  * Share of primary text in the dark unselected-tab mix.
@@ -41,6 +41,25 @@ export function mixSrgb(colorA: string, weight: number, colorB: string): string 
 /** Dark unselected tray and panel tab text. */
 export function unselectedTabColour(primary: string, secondary: string): string {
   return mixSrgb(primary, UNSELECTED_TAB_PRIMARY_WEIGHT, secondary);
+}
+
+/** Venue-chip ink on a dark ticker. #f4f4f8 on #0a0a0f is above 4.5:1. */
+export const TICKER_VENUE_ON_DARK = "#f4f4f8";
+
+/** Venue-chip ink on a light ticker. #1a1a1e on #f5f5f7 is above 4.5:1. */
+export const TICKER_VENUE_ON_LIGHT = "#1a1a1e";
+
+/**
+ * Chip colour for NSE/MCX venue labels.
+ *
+ * Chosen against the theme surface, not the disabled or warning tokens.
+ * Those fail 4.5:1 on Graphite in both themes.
+ */
+export function tickerVenueColour(background: string): string {
+  const [red, green, blue] = hexToRgb(background);
+  return relativeLuminance(red, green, blue) > 0.4
+    ? TICKER_VENUE_ON_LIGHT
+    : TICKER_VENUE_ON_DARK;
 }
 
 /** Elevated tray fill derived from the card surface. */
