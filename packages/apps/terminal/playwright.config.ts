@@ -10,6 +10,7 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  snapshotPathTemplate: '{testDir}/visual/baselines/{arg}-{projectName}-{platform}.png',
   // These cases run in their required server lanes through the e2e aggregate.
   testIgnore: ['public-demo-presets.spec.ts', '**/incidents/**', 'shared-core-integrated.spec.ts', 'run-policy-integrated.spec.ts', 'run-policy-remaining.spec.ts'],
   timeout: 30_000,

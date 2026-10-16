@@ -14,6 +14,9 @@ import {
   type Viewport,
 } from "./visual/support";
 
+// Keep the default and named visual launchers on the same existing visual locale.
+test.use({ locale: "en-IN", timezoneId: "UTC" });
+
 const LIVE_AUTHORITY_PAYLOAD = {
   sub: "synthetic-order-pad-operator",
   mode: "live",

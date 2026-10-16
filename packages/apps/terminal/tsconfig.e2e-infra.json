@@ -66,6 +66,7 @@
     "e2e/learn-ai-polish.spec.ts",
     "e2e/visual-a11y.spec.ts",
     "e2e/visual/support.ts",
+    "e2e/visual/help-placement.ts",
     "e2e/visual/desk-mocks.ts",
     "playwright.csp.config.ts",
     "e2e/csp/schema-probe.ts",

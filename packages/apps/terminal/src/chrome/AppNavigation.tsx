@@ -4,6 +4,7 @@ import { APPS } from "@/layout/appCatalog";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useDeveloperEnabled } from "./DeveloperPreference";
+import { HelpFooterSlot } from "@/components/help/HelpFooter";
 
 export function AppNavigation() {
   const developer = useDeveloperEnabled();
@@ -21,7 +22,7 @@ export function SystemStatusBar() {
   const health = useSystemDiagnostics();
   const data = authenticated && mode !== "explore" ? health.data?.resources : undefined;
   const metric = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
-  return <footer className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-default bg-surface-base px-3 py-1 text-xs text-text-secondary" data-testid="system-status-bar">
+  return <footer className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-default bg-surface-base px-3 py-0.5 text-xs text-text-secondary" data-testid="system-status-bar">
     <Link className="font-medium text-accent" to="/system">System</Link>
     <span>Core: {data ? health.isError ? "Last known · refresh failed" : String(data.status ?? "Unmeasured") : "Unavailable"}</span>
     <span>Host CPU: {percent(metric(data?.cpu).used_pct, metric(data?.cpu).scope)}</span>
@@ -29,5 +30,6 @@ export function SystemStatusBar() {
     <span>GPU: {percent(metric(data?.gpu).used_pct, metric(data?.gpu).scope)}</span>
     <span title="No measured browser-to-core timing source is connected to this bar">Browser RTT: Unmeasured</span>
     <span className="ml-auto">{data && health.dataUpdatedAt ? `Received ${new Date(health.dataUpdatedAt).toLocaleTimeString()}` : "No host measurement"}</span>
+    <HelpFooterSlot />
   </footer>;
 }
