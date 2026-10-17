@@ -98,7 +98,7 @@ export function checkLotSizeVerified(
 ): string | null {
   if (!isDerivativeExchange(exchange)) return null;
   if (!verified || lotSize == null || lotSize <= 0) {
-    return `Lot size for ${symbol} isn't verified, so the order wasn't sent.`;
+    return `Not placed. The lot size for ${symbol} isn't verified.`;
   }
   return null;
 }

@@ -373,8 +373,7 @@ export function deskContractName(symbol: string): string {
 
 export function missingLotRefusal(contract: string): string {
   return (
-    `Not placed. The lot size for ${contract} isn't in the instrument master, `
-    + "so this order can't be sized."
+    `Not placed. The lot size for ${contract} isn't verified.`
   );
 }
 

@@ -52,15 +52,15 @@ describe("checkLotSizeVerified", () => {
   it("fails closed on a derivative with an unverified lot size", () => {
     expect(
       checkLotSizeVerified("NFO", { lotSize: 75, verified: false }, "NIFTY25JUL22000CE"),
-    ).toBe("Lot size for NIFTY25JUL22000CE isn't verified, so the order wasn't sent.");
+    ).toBe("Not placed. The lot size for NIFTY25JUL22000CE isn't verified.");
   });
 
   it("fails closed when the lot size is missing entirely", () => {
     expect(checkLotSizeVerified("NFO", { lotSize: null, verified: true }, "X")).toBe(
-      "Lot size for X isn't verified, so the order wasn't sent.",
+      "Not placed. The lot size for X isn't verified.",
     );
     expect(checkLotSizeVerified("NFO", { lotSize: 0, verified: true }, "X")).toBe(
-      "Lot size for X isn't verified, so the order wasn't sent.",
+      "Not placed. The lot size for X isn't verified.",
     );
   });
 
@@ -94,7 +94,7 @@ describe("checkLotMultiple", () => {
 
   it("reports the unverified lot size before the multiple check", () => {
     expect(checkLotMultiple("NFO", 100, { lotSize: 75, verified: false }, "X")).toBe(
-      "Lot size for X isn't verified, so the order wasn't sent.",
+      "Not placed. The lot size for X isn't verified.",
     );
   });
 

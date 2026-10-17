@@ -66,7 +66,7 @@ const CHIP_CLASS = {
   connectedRead:
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 hover:text-sky-300",
   live:
-    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit",
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-[var(--color-live-chip)] border border-profit/40 hover:bg-profit/30 hover:text-[var(--color-live-chip)]",
 } as const;
 
 export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorProps = {}) {

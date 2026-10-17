@@ -224,7 +224,7 @@ describe("QuickTradeWidget", () => {
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/is unverified — order not sent/)).toBeInTheDocument();
+      expect(screen.getByText("Not placed. The lot size for BANKNIFTY26JUN56000CE isn't verified.")).toBeInTheDocument();
     });
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });

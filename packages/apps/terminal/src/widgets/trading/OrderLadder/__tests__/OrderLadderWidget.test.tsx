@@ -565,7 +565,7 @@ describe("OrderLadderWidget derivative lot validation", () => {
     fireEvent.click(askBtn as HTMLElement);
 
     expect(
-      await screen.findByText("Lot size for BANKNIFTY isn't verified, so the order wasn't sent."),
+      await screen.findByText("Not placed. The lot size for BANKNIFTY isn't verified."),
     ).toBeTruthy();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });

@@ -322,13 +322,15 @@ describe("OrderPadWidget", () => {
 
   it("refuses a quantity above the NSE ceiling before opening a review", async () => {
     render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
     const qty = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qty, { target: { value: "9999999" } });
+    expect(screen.queryByText(/exceeds NSE limit/)).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Quantity 9999999 exceeds NSE limit of 50000",
     );
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -994,7 +996,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
     const messages = await screen.findAllByText(refusal);
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/lot size unknown/i)).not.toBeInTheDocument();
@@ -1060,7 +1062,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockGetSymbol.mockRejectedValue(new Error("selected contract unavailable"));
     renderNfoPad();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -1077,10 +1079,94 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     renderNfoPad();
     await waitFor(() => expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO"));
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Lot: 75")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("clears a NIFTY lot-multiple refusal when quantity changes, then opens the review", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05, freezeQty: 3510,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 65");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    const lotMessage = "Quantity must be a multiple of the lot size (65).";
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    expect(screen.queryByText(lotMessage)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect((await screen.findAllByText(lotMessage)).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+    fireEvent.change(qtyInput, { target: { value: "130" } });
+    await waitFor(() => expect(screen.queryByText(lotMessage)).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByText(lotMessage)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("clears a freeze refusal when quantity returns to the freeze maximum", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05, freezeQty: 3510,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 65");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    const freezeMessage = "Max 3510 per order for NIFTY-OCT2026-FUT. Place smaller orders.";
+    fireEvent.change(qtyInput, { target: { value: "3575" } });
+    expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(freezeMessage);
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+
+    fireEvent.change(qtyInput, { target: { value: "3510" } });
+    await waitFor(() => expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("clears a quantity-check refusal when the instrument changes", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05, freezeQty: 3510,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 65");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const lotMessage = "Quantity must be a multiple of the lot size (65).";
+    expect((await screen.findAllByText(lotMessage)).length).toBeGreaterThanOrEqual(1);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "test-panel",
+          nonce: "instrument-change",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    await waitFor(() => expect(screen.queryByText(lotMessage)).not.toBeInTheDocument());
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
   });
 
   it("shows the freeze-quantity refusal on the pad and does not open a review", async () => {
@@ -1121,6 +1207,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
   it("shows the same freeze refusal under Quantity in Live", async () => {
     selectedMode.current = "live";
+    useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockGetSymbol.mockResolvedValue({
       symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
       instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
@@ -1129,6 +1216,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await screen.findByText("Lot: 75");
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qtyInput, { target: { value: "3525" } });
+    expect(screen.queryByText(/Max 3510 per order/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",

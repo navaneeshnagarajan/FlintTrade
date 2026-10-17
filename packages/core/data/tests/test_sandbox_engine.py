@@ -651,7 +651,7 @@ class TestPracticeCharges:
         )
         assert unnamed["status"] == "REJECTED"
         assert unnamed["message"] == (
-            "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
+            "Not placed. The lot size for NIFTY 24500 CE isn't verified."
         )
 
         accepted = engine.place_order(

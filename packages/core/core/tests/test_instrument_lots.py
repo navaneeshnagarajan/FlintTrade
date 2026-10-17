@@ -83,10 +83,10 @@ def test_charges_and_validation_use_each_contracts_lot() -> None:
         "Quantity must be a multiple of the lot size (65)."
     )
     assert contract_quantity_message("missing", 75, rows, as_of=_AS_OF, contract="NIFTY 24500 CE") == (
-        "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
+        "Not placed. The lot size for NIFTY 24500 CE isn't verified."
     )
     assert contract_quantity_message("missing", 65, rows, as_of=_AS_OF, contract="NIFTY24APR2524500CE") == (
-        "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
+        "Not placed. The lot size for NIFTY 24500 CE isn't verified."
     )
 
 
@@ -260,7 +260,7 @@ def test_expired_contracts_are_dropped_when_the_date_is_frozen() -> None:
     assert scalper_lot_label("NIFTY", rows, as_of=october) == "65 · Nov expiry"
     assert lot_size_from_master("BANKNIFTY", rows, as_of=date(2026, 9, 25)) is None
     assert contract_quantity_message("13", 75, rows, as_of=october) == (
-        "Not placed. The lot size for NIFTY-OCT2026-FUT isn't in the instrument master, so this order can't be sized."
+        "Not placed. The lot size for NIFTY-OCT2026-FUT isn't verified."
     )
 
 

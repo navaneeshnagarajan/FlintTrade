@@ -30,8 +30,11 @@ test.use({
   ],
 });
 
-async function seedOrderPadWorkspace(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function seedOrderPadWorkspace(
+  page: Page,
+  instrument?: { symbol: string; exchange: string },
+): Promise<void> {
+  await page.addInitScript((tabConfig: { symbol: string; exchange: string } | null) => {
     localStorage.setItem(
       "flinttrade:app-layouts:v1:terminal",
       JSON.stringify({
@@ -47,7 +50,13 @@ async function seedOrderPadWorkspace(page: Page): Promise<void> {
             type: "row", weight: 100,
             children: [{
               type: "tabset", weight: 100,
-              children: [{ type: "tab", id: "practice-order-pad-widget", component: "orderpad", name: "Order Pad" }],
+              children: [{
+                type: "tab",
+                id: "practice-order-pad-widget",
+                component: "orderpad",
+                name: "Order Pad",
+                ...(tabConfig ? { config: tabConfig } : {}),
+              }],
             }],
           },
         },
@@ -55,7 +64,7 @@ async function seedOrderPadWorkspace(page: Page): Promise<void> {
     );
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
     localStorage.setItem("flinttrade:tourComplete", "true");
-  });
+  }, instrument ?? null);
 }
 
 async function installMismatchedPracticeAuthority(page: Page): Promise<void> {
@@ -341,4 +350,183 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   // A 403 closes the review so the refusal is readable on the pad.
   await expect(review).toBeHidden();
   await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);
+});
+
+test.describe("quantity-check refusal clears when quantity changes", () => {
+  test.use({ benignConsoleErrors: [] });
+
+  test("NIFTY qty 100 is refused, then 130 clears the message and Buy opens the review", async ({
+    page,
+    syntheticApi,
+  }) => {
+    const discoveryOutcomes: string[] = [];
+    const isDiscovery = (request: Request) => request.method() === "GET"
+      && request.url() === "http://localhost:5173/ft-api/api/v1/native/accounts";
+    page.on("requestfinished", request => {
+      if (isDiscovery(request)) discoveryOutcomes.push("completed");
+    });
+    page.on("requestfailed", request => {
+      if (isDiscovery(request)) discoveryOutcomes.push(request.failure()?.errorText ?? "unknown failure");
+    });
+    const controlledTime = new Date("2026-08-11T00:00:00.000Z");
+    await page.clock.install({ time: controlledTime });
+    await page.clock.pauseAt(controlledTime);
+    await seedOrderPadWorkspace(page, { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" });
+    registerSystemDiagnosticsRead(syntheticApi, LIVE_AUTHORITY_TOKEN);
+    syntheticApi.register({
+      name: "list native accounts for Practice market-data resolution",
+      method: "GET",
+      path: "/ft-api/api/v1/native/accounts",
+      expectedCalls: 4,
+      handler: (request) => {
+        expectAuthenticatedGet(request);
+        return { json: { accounts: [] } };
+      },
+    });
+    syntheticApi.register({
+      name: "read Practice sandbox funds",
+      method: "GET",
+      path: "/ft-api/v1/sandbox/funds",
+      expectedCalls: 2,
+      handler: (request) => {
+        expectAuthenticatedGet(request);
+        return {
+          json: {
+            status: "success",
+            data: {
+              funds: {
+                starting_capital: 100_000,
+                available_balance: 100_000,
+                used_margin: 0,
+                realized_pnl: 0,
+                current_balance: 100_000,
+                ledger_balance: 100_000,
+                futures_mtm_in_ledger: false,
+              },
+            },
+          },
+        };
+      },
+    });
+    syntheticApi.register({
+      name: "read empty Practice sandbox positions",
+      method: "GET",
+      path: "/ft-api/v1/sandbox/positions",
+      expectedCalls: 2,
+      handler: (request) => {
+        expectAuthenticatedGet(request);
+        return { json: { status: "success", data: { positions: [] } } };
+      },
+    });
+    syntheticApi.register({
+      name: "read empty Practice sandbox orders",
+      method: "GET",
+      path: "/ft-api/v1/sandbox/orders",
+      // This journey never confirms, so it does not rearm the book the way
+      // the Live-authority confirmation does. Two reads is the paused mount.
+      expectedCalls: { minimum: 2, maximum: 4 },
+      handler: (request) => {
+        expectAuthenticatedGet(request);
+        return { json: { status: "success", data: { orders: [] } } };
+      },
+    });
+    registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 6 } });
+    registerOperatorStatusProbes(syntheticApi, { expectedCalls: { minimum: 1, maximum: 4 } });
+    syntheticApi.register({
+      name: "welcome and Mode menu Live-arm status",
+      method: "GET",
+      path: "/ft-api/v1/auth/status",
+      expectedCalls: { minimum: 1, maximum: 4 },
+      handler: (request) => {
+        expect(request.postData()).toBeNull();
+        const authorization = request.headers()["authorization"];
+        if (authorization !== undefined) {
+          expect(authorization).toBe(`Bearer ${LIVE_AUTHORITY_TOKEN}`);
+        }
+        return {
+          json: {
+            status: "success",
+            data: { is_setup: true, is_locked: false, has_pin: false, totp_enabled: false },
+          },
+        };
+      },
+    });
+    syntheticApi.register({
+      name: "read inactive safety configuration",
+      method: "GET",
+      path: "/ft-api/api/v1/safety/config",
+      expectedCalls: 1,
+      handler: (request) => {
+        expectAuthenticatedGet(request);
+        return {
+          json: {
+            status: "success",
+            data: { l1_order: {}, l2_position: {}, l3_portfolio: {}, l4_pnl: {}, l5_kill: {} },
+          },
+        };
+      },
+    });
+    syntheticApi.register({
+      name: "read broker capabilities without a connected account",
+      method: "GET",
+      path: "/ft-api/api/v1/broker/capabilities",
+      expectedCalls: 1,
+      handler: (request) => {
+        expectAuthenticatedGet(request);
+        return {
+          json: {
+            status: "success",
+            data: {
+              broker_name: "Practice",
+              broker_type: "multi",
+              supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
+              features: {},
+            },
+          },
+        };
+      },
+    });
+
+    await page.goto("/welcome");
+    await installMismatchedPracticeAuthority(page);
+    await page.evaluate(async () => {
+      const importModule = new Function("path", "return import(path)") as (
+        path: string,
+      ) => Promise<unknown>;
+      await Promise.all([
+        importModule("/src/routes/UnifiedAppRoute.tsx"),
+        importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"),
+      ]);
+    });
+    await expect(page).toHaveURL(/\/terminal$/);
+    const buy = page.getByRole("button", { name: "Practice Buy" });
+    for (let advanced = 0; advanced < 2_000 && !(await buy.isVisible()); advanced += 100) {
+      await page.clock.runFor(100);
+    }
+    await expect(buy).toBeVisible();
+    await expect.poll(
+      () => syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts"),
+    ).toBe(4);
+    await expect.poll(() => [...discoveryOutcomes].sort()).toEqual([
+      "completed", "completed", "net::ERR_ABORTED", "net::ERR_ABORTED",
+    ]);
+    await expect(page.getByText("Lot: 65", { exact: true })).toBeVisible();
+
+    const refusal = "Quantity must be a multiple of the lot size (65).";
+    const quantity = page.getByRole("spinbutton", { name: "Quantity" });
+    await quantity.fill("100");
+    await expect(page.getByText(refusal)).toHaveCount(0);
+    await buy.click();
+    await expect(page.getByText(refusal).first()).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Review Practice order" })).toHaveCount(0);
+
+    await quantity.fill("130");
+    await expect(page.getByText(refusal)).toHaveCount(0);
+    await buy.click();
+    const review = page.getByRole("dialog", { name: "Review Practice order" });
+    await expect(review).toBeVisible();
+    await expect(review.getByText("NIFTY-OCT2026-FUT · NFO", { exact: true })).toBeVisible();
+    await expect(page.getByText(refusal)).toHaveCount(0);
+    await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);
+  });
 });

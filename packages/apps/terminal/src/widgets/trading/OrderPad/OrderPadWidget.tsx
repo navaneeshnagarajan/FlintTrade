@@ -161,6 +161,9 @@ const orderSchema = z.object({
 
 type OrderFormValues = z.infer<typeof orderSchema>;
 
+/** Lot, freeze, exchange-ceiling, unverified-lot, and server quantity refusals. */
+const QUANTITY_CHECK_ERROR = "quantity-check";
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 interface PillGroupProps {
@@ -338,6 +341,8 @@ interface ToastMsg {
   text: string;
   scopeKey: string;
   retryable?: boolean;
+  /** Set for a quantity-check refusal so an edit can dismiss it without reading the text. */
+  kind?: typeof QUANTITY_CHECK_ERROR;
 }
 
 interface ToastProps {
@@ -607,28 +612,25 @@ function OrderPadWidget(props: WidgetProps) {
   const discQty = watch("discQty");
   const note = watch("note");
 
-  // Quantity ceiling and freeze limit. Shown on the field so a huge qty is
-  // refused before the Practice review opens, with the same sentence the
-  // server uses. An over-freeze order is not split.
+  // Quantity-check refusals (lot multiple, freeze, exchange ceiling, unverified
+  // lot, server admission) are decided on Buy/Sell, not while the operator
+  // types. Any of them clears as soon as the quantity or the instrument
+  // changes; the next press runs the check again.
+  const quantityScopeRef = useRef({ qty, symbol, exchange });
   useEffect(() => {
-    const quantity = Number(qty);
-    const message = checkOrderQuantityLimit(exchange, quantity)
-      ?? checkFreezeQuantity(symbol, quantity, brokerFreezeQty);
-    const current = errors.qty;
-    if (message) {
-      if (current?.type === "validate" && current.message === message) return;
-      setError("qty", { type: "validate", message });
-      return;
-    }
-    if (
-      current?.type === "validate"
-      && typeof current.message === "string"
-      && current.message.includes(" exceeds ")
-      && (current.message.includes(" limit of ") || current.message.includes("per order for"))
-    ) {
-      clearErrors("qty");
-    }
-  }, [brokerFreezeQty, clearErrors, errors.qty, exchange, qty, setError, symbol]);
+    const previous = quantityScopeRef.current;
+    const changed = previous.qty !== qty
+      || previous.symbol !== symbol
+      || previous.exchange !== exchange;
+    quantityScopeRef.current = { qty, symbol, exchange };
+    if (!changed) return;
+    if (errors.qty?.type === QUANTITY_CHECK_ERROR) clearErrors("qty");
+    setToast((current) => {
+      if (current?.kind !== QUANTITY_CHECK_ERROR) return current;
+      clearTimeout(toastTimerRef.current);
+      return null;
+    });
+  }, [clearErrors, errors.qty, exchange, qty, symbol]);
   const appMode = useModeStore((s) => s.mode);
   const selectedNativeBroker = useBrokerStore((s) => {
     const selected = findBrokerAccountMatch(s.accounts, s.activeAccountId);
@@ -920,9 +922,15 @@ function OrderPadWidget(props: WidgetProps) {
     return false;
   }, [handleSelect, query, suggestions, symbol]);
 
-  const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
+  const showToast = useCallback((
+    type: "success" | "error",
+    text: string,
+    ms = 4000,
+    retryable = false,
+    kind?: typeof QUANTITY_CHECK_ERROR,
+  ) => {
     clearTimeout(toastTimerRef.current);
-    setToast({ type, text, retryable, scopeKey: resolveDataScope({
+    setToast({ type, text, retryable, kind, scopeKey: resolveDataScope({
       ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
     }) });
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
@@ -1075,12 +1083,18 @@ function OrderPadWidget(props: WidgetProps) {
       if (httpStatus === 403 || /mode changed/i.test(msg) || code === "quantity_admission") {
         setPracticeReview(null);
         if (code === "quantity_admission") {
-          setError("qty", { type: "validate", message: msg });
+          setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
         }
       }
       noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
       const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
-      showToast("error", msg, 6000, retryable);
+      showToast(
+        "error",
+        msg,
+        6000,
+        retryable,
+        code === "quantity_admission" ? QUANTITY_CHECK_ERROR : undefined,
+      );
       emitNotification({
         category: "order",
         ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
@@ -1144,7 +1158,7 @@ function OrderPadWidget(props: WidgetProps) {
     const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
       ?? checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty);
     if (qtyRefusal) {
-      setError("qty", { type: "validate", message: qtyRefusal });
+      setError("qty", { type: QUANTITY_CHECK_ERROR, message: qtyRefusal });
       return;
     }
 
@@ -1181,8 +1195,8 @@ function OrderPadWidget(props: WidgetProps) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
         ? missingLotRefusal(deskContractName(values.symbol))
         : lotMultipleRefusal(lotSize);
-      setError("qty", { type: "validate", message: msg });
-      showToast("error", msg, 6000);
+      setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
+      showToast("error", msg, 6000, false, QUANTITY_CHECK_ERROR);
       return;
     }
 

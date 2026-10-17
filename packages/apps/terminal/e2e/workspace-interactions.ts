@@ -24,7 +24,7 @@ export async function interactions(page: Page, info: TestInfo) {
   const dot = (name:string) => page.locator('.flexlayout__tabset_tabbar_outer').filter({has:page.getByRole("tab",{name,exact:true})}).getByRole("button",{name:/Link channel/});
   record("initialPaint", await Promise.all([paint(first),paint(add)]));
   expect(await add.evaluate(el=>el.closest('[role="tablist"]'))).toBeNull();
-  await expect(watchlist.getByRole("group",{name:"Watchlist columns"})).toHaveText("SymbolSparklineLTP% change");
+  await expect(watchlist.getByRole("group",{name:"Watchlist columns"})).toHaveText("SymbolTrendLTP% change");
   await expect(list.getByRole("listitem")).toHaveCount(5);
   record("rowOrder",await list.getByRole("listitem").locator(':scope > button:first-child').evaluateAll(els=>els.map(el=>el.getAttribute('aria-label'))));
   expect(evidence["rowOrder"]).toEqual(["NIFTY","BANKNIFTY","SBIN","RELIANCE","HDFCBANK"]);

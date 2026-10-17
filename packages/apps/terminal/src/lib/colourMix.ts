@@ -54,10 +54,10 @@ export const PRACTICE_CHIP_ON_DARK = "#ffb900";
 
 /**
  * Practice chip ink on the light amber wash.
- * #8a5a00 on #feefd9 is about 5.2:1, and it stays above 4.5:1 on the
+ * #6b4500 on #feefd9 is about 7.5:1, and it stays above 4.5:1 on the
  * 15% and 25% amber washes. Dark chrome keeps #ffb900.
  */
-export const PRACTICE_CHIP_ON_LIGHT = "#8a5a00";
+export const PRACTICE_CHIP_ON_LIGHT = "#6b4500";
 
 /** Tailwind amber-500. The Practice chip washes the chrome with this at 15% and 25%. */
 export const PRACTICE_CHIP_WASH = "#fe9a00";
@@ -81,6 +81,23 @@ export function practiceChipColour(background: string): string {
   return relativeLuminance(red, green, blue) > 0.4
     ? PRACTICE_CHIP_ON_LIGHT
     : PRACTICE_CHIP_ON_DARK;
+}
+
+/** Live chip ink on dark chrome. Matches dark profit text, #22c55e. */
+export const LIVE_CHIP_ON_DARK = "#22c55e";
+
+/**
+ * Live chip ink on the light profit wash.
+ * #0f5c2c on the 20% #166534 wash is about 5.9:1. Dark chrome keeps #22c55e.
+ */
+export const LIVE_CHIP_ON_LIGHT = "#0f5c2c";
+
+/** Live chip ink. Light chrome uses the darker green; dark chrome keeps profit green. */
+export function liveChipColour(background: string): string {
+  const [red, green, blue] = hexToRgb(background);
+  return relativeLuminance(red, green, blue) > 0.4
+    ? LIVE_CHIP_ON_LIGHT
+    : LIVE_CHIP_ON_DARK;
 }
 
 /** Elevated tray fill derived from the card surface. */

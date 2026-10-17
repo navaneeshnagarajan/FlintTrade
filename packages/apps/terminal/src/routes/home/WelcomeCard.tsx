@@ -38,7 +38,7 @@ export function WelcomeCard() {
       {isExplore && <DemoBadge />}
       <div className="p-5 h-full flex flex-col justify-between gap-4">
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted mb-1">
+          <p className="text-[12px] font-medium uppercase tracking-widest text-text-muted mb-1">
             Dashboard
           </p>
           <h2 className="font-heading text-xl font-semibold text-text-primary">
@@ -49,7 +49,7 @@ export function WelcomeCard() {
         <div className="flex items-end justify-between gap-4">
           {/* Daily P&L */}
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">
+            <p className="text-[12px] uppercase tracking-wider text-text-muted mb-0.5">
               {isExplore || accountReadsEnabled ? "Today's P&L" : "Broker required"}
             </p>
             <p
@@ -70,7 +70,7 @@ export function WelcomeCard() {
 
           {/* Position count */}
           <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">
+            <p className="text-[12px] uppercase tracking-wider text-text-muted mb-0.5">
               Open Positions
             </p>
             <p className="font-mono text-2xl font-semibold text-text-primary">
@@ -80,11 +80,11 @@ export function WelcomeCard() {
 
           {/* Regime badge */}
           <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5 flex items-center justify-end gap-1.5">
+            <p className="text-[12px] uppercase tracking-wider text-text-muted mb-0.5 flex items-center justify-end gap-1.5">
               Regime
               <ExampleLabel testId="welcome-regime-example" />
             </p>
-            <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-neutral-bg text-text-primary border border-neutral-border">
+            <span className="inline-block px-2 py-0.5 rounded-full text-[12px] font-medium bg-neutral-bg text-text-primary border border-neutral-border">
               Neutral
             </span>
           </div>

@@ -119,8 +119,10 @@
     --color-text-disabled: #55556e;
     /* Venue chips. Disabled and warning ink fail 4.5:1 on both Graphite surfaces. */
     --color-ticker-venue: #f4f4f8;
-    /* Practice chip. Amber-400 fails on the light wash; amber-800 clears 4.5:1. */
+    /* Practice chip. Amber-400 fails on the light wash; the light theme uses a darker amber. */
     --color-practice-chip: #ffb900;
+    /* Live chip. Dark chrome keeps the profit green; light chrome darkens it. */
+    --color-live-chip: #22c55e;
     /* Brand accent fallback before themeStore.applyTheme() writes the live value. */
     --color-accent: #22c55e;
     --color-accent-text: #ffffff;
@@ -201,7 +203,8 @@
       --color-text-muted: #6b6b74;
       --color-text-disabled: #a1a1aa;
       --color-ticker-venue: #1a1a1e;
-      --color-practice-chip: #8a5a00;
+      --color-practice-chip: #6b4500;
+      --color-live-chip: #0f5c2c;
       --color-accent: #15803d;
       --color-accent-text: #ffffff;
       /* WCAG AA contrast on white backgrounds — safer contrast margin */
@@ -223,7 +226,8 @@
   html.theme-light {
     --color-info: #0369a1;
     --color-ticker-venue: #1a1a1e;
-    --color-practice-chip: #8a5a00;
+    --color-practice-chip: #6b4500;
+    --color-live-chip: #0f5c2c;
   }
 
   /* shadcn/ui HSL tokens for light mode (when .dark class is removed) */
@@ -307,6 +311,7 @@
   --color-text-disabled: var(--color-text-disabled);
   --color-ticker-venue: var(--color-ticker-venue);
   --color-practice-chip: var(--color-practice-chip);
+  --color-live-chip: var(--color-live-chip);
 
   /* --- Trading semantic colors (read from :root, themeable) --- */
   --color-profit: var(--color-profit);
