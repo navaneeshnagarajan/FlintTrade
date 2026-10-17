@@ -32,7 +32,7 @@ adjusts virtual capital and square-off times; it does not place.
 |---|---|
 | `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data that calls this route is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` The `/trade` Order Pad records `Example order placed` (id starting `SAMPLE-`) on the client for that click. |
 | `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before admission, including when the variety spelling differs only by case or separators. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
-| `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before the live check, the reduce-only proof, and any broker call. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
+| `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before the live check, the reduce-only proof, and any broker call. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable broker order book cannot qualify a live reduce-only close, so open positions stop here and no square-off is sent. Unavailable position evidence is HTTP 503 `Position evidence unavailable; no square-off was sent.` Ambiguous position evidence is HTTP 409 `Position evidence is ambiguous; no square-off was sent.` Neither sends a square-off. |
 | `POST /api/v1/orders/bracket` | Live, PIN-unlocked. Entry plus exactly one of a stop-loss or a target. Each leg is admitted through Laya, then placed through SafetySystem, `gate_order`, and `BrokerRouter`. Success is HTTP 201. Practice is HTTP 403 `practice_unsupported`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. A broker-held variety is HTTP 422 `broker_held_unsupported` (`Not placed. Broker-held bracket legs aren't supported. Use one stop-loss or one target.`). A stop-loss and a target together are HTTP 422 `oco_unsupported`. A trailing stop is HTTP 422 `trailing_unsupported`. |
 
 `POST /api/v1/orders/cancel-all` cancels open orders. Practice cancels
@@ -42,28 +42,32 @@ verb cannot narrow by strategy.
 
 Reduce-only is decided on the server. A close qualifies when it is the
 same contract, the opposite side, and the quantity is no more than the
-open quantity minus pending exits. On Live, pending exits include the
-broker's open orders on that contract when that book can be read. When
-the broker order book cannot be read, the cap is the open quantity minus
-this desk's own pending exits, and the close can still qualify. When the
-position book cannot be read, the place is not classified as a close.
+open quantity minus pending exits. On Live, the position book and the
+broker order book must both be readable. Pending exits include the
+broker's open orders and this desk's own pending exits. When the broker
+order book cannot be read, a reduce-only close is refused and the order
+takes the full check. There is no unreadable-book fallback. When the position book cannot be read, the
+place is not classified as a close.
 A second exit on the same broker account, while one of this desk's exits
 on that contract is still unfilled, is HTTP 409 `exit_pending`, with
 `message` and `reason` both
-`Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.`
+`Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.`
 Practice uses this code on the Practice book. On Live it is the code when
 the broker order book can be read. The Live hold is for that broker
-account. When that second exit is refused because
-the broker order book cannot be read, the code is `exit_orders_unreadable`, and
+account. When a retained exit exists and the broker order book cannot be
+read, the code is `exit_orders_unreadable`, and
 `message` and `reason` are both
-`Not placed. One exit at a time for <symbol> until your broker's orders load.`
+`Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.`
 The Positions row shows **Exit pending** for the unfilled exit. The
 label is the symbol, or `this contract` when the symbol is empty.
 
 While Laya is Down, a new order is paused and a qualifying close is still
 admitted. Live still runs SafetySystem after that record. The desk line is
 `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
-A filled reducing close can show `Closed. Exits are allowed while Laya is Down.`
+While Laya is not Ready, Positions shows `Exit requested. Exits are allowed while Laya is Down.`
+A Live Order Pad close shows `Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.`
+Exit-all shows `Exit-all requested. Check positions and orders for the outcome.`
+A Practice Order Pad close shows `Closed. Exits are allowed while Laya is Down.`
 
 A position whose sign flips after the broker book has loaded keeps its
 row, tagged **Unexpected**, and the Positions book shows
@@ -407,6 +411,8 @@ The terminal has two development proxy namespaces:
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /api/v1/versions` | Signed-in, read-only version information. Responses use `Cache-Control: no-store`. |
+| `GET /api/v1/versions/ollama` | Signed-in, read-only. Returns `configured`, `reported`, and `status`. It does not start Ollama or run a model. Responses use `Cache-Control: no-store`. |
 | `/api/v1/health` | Aggregated backend health used by the Settings monitoring panel. |
 | `/api/v1/traffic/stats` | Request count, request rate, error rate, average latency, and top paths. |
 | `/api/v1/traffic/recent` | Recent request records for operator forensics. |
@@ -720,7 +726,7 @@ Not every endpoint emits `code`:
 | `laya_unverified` | One decision carried no proof. The chip can stay Ready. This is not a chip reason — HTTP 409. Body: `status: "error"`, `code: "laya_unverified"`, `message` and `reason` both "Not placed. Laya's decision couldn't be verified. Try again." The decision log records `identity_absent` and does not store `proof`. There is no `limits` field. |
 | `laya_clamp` | Operator place was not placed — HTTP 409. The requested quantity is greater than the allowed quantity. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Not placed. Laya allows up to <applied_quantity>.`), `reason`, `limits.max_quantity`, and `applied_quantity`. An empty Practice note that reduces the quantity sets `reason` to "Laya is uncertain. Quantity stays inside the tighter limit." A ceiling clamp can leave `reason` empty. Nothing is placed until the desk sends that quantity through admit again. Place 1 on "Not placed. Laya allows up to 1." is admitted, because that request is already at the allowed quantity. An allow then continues into SafetySystem and gate_order. A request already at the allowed quantity is an allow, including when an uncertain note tightened the ceiling without shrinking the number. Live uncertain, including an empty note, is `laya_denied`, not this code. |
 | `exit_pending` | A second reduce-only exit on the same broker account while one of this desk's exits on that contract is still unfilled — HTTP 409. Practice uses this code on the Practice book. On Live it is the code when the broker order book can be read. The Live hold is for that broker account. `message` and `reason` are `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.` The Positions row shows **Exit pending**. The label is the symbol, or `this contract` when the symbol is empty. |
-| `exit_orders_unreadable` | On Live, that second exit on the same broker account while the broker order book cannot be read — HTTP 409. `message` and `reason` are `Not placed. One exit at a time for <symbol> until your broker's orders load.` The label is the symbol, or `this contract` when the symbol is empty. |
+| `exit_orders_unreadable` | On Live, a retained exit exists and the broker order book cannot be read — HTTP 409. `message` and `reason` are `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. |
 | `gtt_unsupported` | `"variety": "gtt"` (any case or separator spelling) on place, routed place, exit-all, or a bracket — HTTP 422. `message` is `Not placed. GTT orders aren't supported right now.` The refusal is before Laya, SafetySystem, and any broker call. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true`, issued by the Live switch `POST /v1/auth/live`. |

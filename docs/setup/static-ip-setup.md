@@ -19,7 +19,6 @@ it directly in your broker's developer console.
 | Broker | Where to configure | Notes |
 |---|---|---|
 | Dhan | DhanHQ / profile API settings | Dhan API access is typically tied to an API token and IP allow-list. Re-check the broker UI after token rotation. |
-| Zerodha | Kite Connect developer console | Keep app callback URLs and IP entries aligned with the deployed backend. |
 | Upstox | Upstox developer console | Verify whether the app is in sandbox or production before enabling Live mode. |
 | Kotak Neo | Kotak developer console / Neo API onboarding | Follow the broker's current onboarding email or console instructions. Neo has no sandbox — live read / API smoke only until funded unlock. |
 | IndMoney | Broker/API onboarding channel | Confirm production access and IP rules directly with the broker. |

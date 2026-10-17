@@ -34,7 +34,7 @@ describe('site marketing copy after the native HTTP freeze', () => {
   });
 
   it('presents only native adapters with evidence-gated availability', () => {
-    expect(homepage).toMatch(/Five native adapters with evidence-gated availability/);
+    expect(homepage).toMatch(/Six native adapters with evidence-gated availability/);
     expect(homepage).toContain('Native connections remain frozen');
   });
 
