@@ -8,7 +8,7 @@ export const ERROR_A = "KOTAK-OFFLINE";
 export const ERROR_B = "KOTAK-OFFLINE-B";
 export const ERROR_WRITE = "/ft-api/api/v1/orders/kotakneo/place";
 export const ERROR_SCOPE = "live:native:kotakneo:KOTAK-OFFLINE";
-export const ERROR_BODY = { symbol: "INFY", exchange: "NSE", action: "BUY", product: "MIS", orderType: "MARKET", quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "", order_type: "MARKET", trigger_price: 0, broker: ERROR_BROKER, account_id: ERROR_A };
+export const ERROR_BODY = { symbol: "INFY", exchange: "NSE", action: "BUY", product: "MIS", orderType: "MARKET", quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "", order_type: "MARKET", trigger_price: 0, lotSize: 1, lot_size: 1, broker: ERROR_BROKER, account_id: ERROR_A };
 export const errorPath = (kind: string, account = ERROR_A) => nativePath(kind, account, ERROR_BROKER);
 export const errorRaw = (outcome = "unknown_after_dispatch") => ({ status: "error", message: "Order dispatch failed", dispatch_outcome: outcome, retry_safe: false, affected_item: { broker: ERROR_BROKER, account_id: ERROR_A, operation: "place", symbol: "INFY", exchange: "NSE", product: "MIS", action: "BUY" }, broker_code: "1021", broker_message: "Order is completed" });
 export const errorPad = (page: Page): Locator => page.locator('[data-tour-target="order-pad"]').first();
