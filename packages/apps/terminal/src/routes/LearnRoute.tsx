@@ -605,14 +605,14 @@ function PracticeTradingTab() {
           What is Practice Trading?
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4 break-words">
-          Practice is built in. Open the Trade desk and place a simulated order, no broker needed.
+          Practice is built in. Open Terminal and place a simulated order, no broker needed.
         </p>
         <h4 className="font-heading font-semibold text-sm text-text-primary mb-2 break-words">
           How to start Practice Trading:
         </h4>
         <ol className="min-w-0 space-y-2 pl-5 text-sm text-text-secondary list-decimal list-outside break-words">
           <li>Choose Practice from the Mode menu before placing an order.</li>
-          <li>Open the Trade desk and use the Order Pad to place a simulated order.</li>
+          <li>Open Terminal and use the Order Pad to place a simulated order.</li>
           <li>Review your simulated orders, positions and P&amp;L to learn from each trade.</li>
         </ol>
         <p className="mt-4 text-sm text-text-secondary break-words">
@@ -623,7 +623,7 @@ function PracticeTradingTab() {
             asChild
             className="h-auto w-full min-w-0 max-w-full shrink whitespace-normal break-words sm:w-auto"
           >
-            <Link to="/trade">Open Trade desk</Link>
+            <Link to="/terminal">Open Terminal</Link>
           </Button>
         </div>
       </GlassCard>

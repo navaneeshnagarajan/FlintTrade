@@ -172,7 +172,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     await renderSetup();
 
     expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Terminal" })).toBeInTheDocument();
     expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /live/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /explore/i })).not.toBeInTheDocument();
@@ -203,7 +203,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Vault" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Open Practice desk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Terminal" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of [4-9]/)).not.toBeInTheDocument();
   });
 
@@ -215,20 +215,20 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     expect(screen.getByText("Step 1 of 3 - Create operator")).toBeInTheDocument();
     expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Open Practice desk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Terminal" })).not.toBeInTheDocument();
   });
 
   it("upgrades the JWT to practice and opens the Practice desk", async () => {
     mocks.downgradeMode.mockResolvedValue("practice-token");
 
     await renderSetup();
-    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal" }));
 
     await waitFor(() =>
       expect(mocks.downgradeMode).toHaveBeenCalledWith("practice", "setup-explore-token"),
     );
     await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
+      expect(mocks.navigate).toHaveBeenCalledWith("/terminal", { replace: true }),
     );
     expect(useAuthStore.getState().token).toBe("practice-token");
     expect(mocks.completeFlintTradeSetup).toHaveBeenCalledOnce();
@@ -247,7 +247,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     );
 
     await renderSetup();
-    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal" }));
     await waitFor(() => expect(mocks.downgradeMode).toHaveBeenCalledOnce());
 
     act(() => useAuthStore.getState().setLoggedOut());
@@ -285,7 +285,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     await renderSetup(<SetupAccountRoute requestedOptional="totp" />);
 
     expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Terminal" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /set up later/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
     expect(screen.queryByText("Trading defaults")).not.toBeInTheDocument();
@@ -341,10 +341,10 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     expect(screen.queryByRole("button", { name: "Later Two-factor authentication" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Later Broker connect" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal" }));
 
     await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
+      expect(mocks.navigate).toHaveBeenCalledWith("/terminal", { replace: true }),
     );
     expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBe("1");
   });
@@ -353,7 +353,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     mocks.downgradeMode.mockRejectedValue(new Error("mode downgrade to practice failed (503)"));
 
     await renderSetup();
-    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal" }));
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(/Practice mode could not be enabled/i),
@@ -416,9 +416,9 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByRole("button", { name: "Set up Two-factor authentication" })).not.toBeInTheDocument();
 
     mocks.downgradeMode.mockResolvedValue("practice-token");
-    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal" }));
     await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
+      expect(mocks.navigate).toHaveBeenCalledWith("/terminal", { replace: true }),
     );
     second.unmount();
 
@@ -654,7 +654,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
     expect(screen.queryByText("Step 2 of 3 - Vault")).not.toBeInTheDocument();
     const quietLine = screen.getByText("Your vault is set up and secured on this machine.");
-    const openPractice = screen.getByRole("button", { name: "Open Practice desk" });
+    const openPractice = screen.getByRole("button", { name: "Open Terminal" });
     expect(
       quietLine.compareDocumentPosition(openPractice) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -1029,7 +1029,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByText(/of 3/)).not.toBeInTheDocument();
     expect(screen.queryByText("Step 2 of 3 - Vault")).not.toBeInTheDocument();
     const quietLine = screen.getByText("Your vault is set up and secured on this machine.");
-    const openPractice = screen.getByRole("button", { name: "Open Practice desk" });
+    const openPractice = screen.getByRole("button", { name: "Open Terminal" });
     expect(
       quietLine.compareDocumentPosition(openPractice) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

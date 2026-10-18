@@ -45,12 +45,14 @@ describe("Slice 2 Home vs Trade ownership — source guard", () => {
     expect(src).not.toMatch(/nav:home|nav:trade/);
   });
 
-  it("KeyboardShortcutsDialog documents Go to Home and Go to Trade", () => {
+  it("KeyboardShortcutsDialog lists one Go to Terminal entry and hides the Alt+H alias", () => {
     const src = stripComments(read("components/KeyboardShortcuts/KeyboardShortcutsDialog.tsx"));
-    expect(src).toMatch(/Go to Home/);
-    expect(src).toMatch(/Go to Trade/);
-    expect(src).toMatch(/["']Alt["']\s*,\s*["']H["']/);
+    expect(src).toMatch(/Go to Terminal/);
+    expect(src).not.toMatch(/Go to Home/);
+    expect(src).not.toMatch(/Go to Trade/);
     expect(src).toMatch(/["']Alt["']\s*,\s*["']T["']/);
+    expect(src).toMatch(/["']Alt["']\s*,\s*["']H["']/);
+    expect(src).toMatch(/hidden:\s*true/);
   });
 
   it("useGlobalKeys implements Alt+H / Alt+T and AppLayout wires navigate callbacks", () => {
@@ -63,8 +65,7 @@ describe("Slice 2 Home vs Trade ownership — source guard", () => {
     expect(layout).toMatch(/useGlobalKeys\s*\(/);
     expect(layout).toMatch(/onGoHome\s*:/);
     expect(layout).toMatch(/onGoTrade\s*:/);
-    expect(layout).toMatch(/navigate\(\s*[\"']\/home[\"']\s*\)/);
-    expect(layout).toMatch(/navigate\(\s*[\"']\/trade[\"']\s*\)/);
+    expect(layout).toMatch(/navigate\(\s*[\"']\/terminal[\"']\s*\)/);
     // Single mount only — no second useGlobalKeys import usage beyond the call.
     const mounts = layout.match(/useGlobalKeys\s*\(/g) ?? [];
     expect(mounts).toHaveLength(1);

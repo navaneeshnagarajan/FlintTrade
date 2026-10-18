@@ -150,8 +150,8 @@ describe("LearnRoute", () => {
     renderLearnRoute();
     fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
 
-    expect(screen.getByText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
+    expect(screen.getByText("Practice is built in. Open Terminal and place a simulated order, no broker needed.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Terminal" })).toHaveAttribute("href", "/terminal");
     expect(screen.getByText(/Choose Practice from the Mode menu/)).toBeInTheDocument();
     expect(screen.getByRole("tabpanel")).toHaveClass("min-w-0");
     expect(screen.getByRole("tabpanel")).not.toHaveTextContent(/sandbox|Kotak|funded unlock/i);
@@ -176,8 +176,8 @@ describe("LearnRoute", () => {
     const practice = screen.getByTestId("practice-trading");
     expect(practice).toHaveClass("min-w-0", "max-w-full");
 
-    const cta = screen.getByRole("link", { name: "Open Trade desk" });
-    expect(cta).toHaveAttribute("href", "/trade");
+    const cta = screen.getByRole("link", { name: "Open Terminal" });
+    expect(cta).toHaveAttribute("href", "/terminal");
     expect(cta).toHaveClass("whitespace-normal");
     expect(cta.className).not.toMatch(/(?:^|\s)whitespace-nowrap(?:\s|$)/);
 

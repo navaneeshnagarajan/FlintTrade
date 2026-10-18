@@ -904,9 +904,9 @@ backend refuses an example-data order if the UI slips (FT-TRADE-009).
 
 ### Learn → Practice Trading
 
-The tab explains: “Practice is built in. Open the Trade desk and place a
+The tab explains: “Practice is built in. Open Terminal and place a
 simulated order, no broker needed.” Choose **Practice** from the Mode menu,
-then use **Open Trade desk** to open `/trade`. The link preserves the selected
+then use **Open Terminal** to open `/terminal`. The link preserves the selected
 Mode; it does not silently switch to Practice or Live. Use the Order Pad to
 place a simulated order, then review simulated orders, positions and P&L.
 Practice uses virtual funds, and simulated fills do not guarantee the same
@@ -1043,11 +1043,11 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. `/login` redirects here and opens sign-in. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing is **Demo (example data)**. Installed web and desktop builds redirect `/explore` to `/welcome`. Example data is Welcome or sign-in → **Try with example data**. |
-| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
+| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards. Read-only discovery; order controls live on Terminal. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). Alt+H opens Terminal and is not listed in shortcut help. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
+| `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets. Opens Terminal. Alt+T is the listed **Go to Terminal** shortcut. |
 | `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
-| `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`; choose Practice in the Mode menu before placing a simulated order. |
+| `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Terminal** links to `/terminal`; choose Practice in the Mode menu before placing a simulated order. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automate — schedules, monitors, webhooks, logs. Kill-switch activate/reset lives under Settings → Risk & Safety. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
@@ -1065,14 +1065,14 @@ step. The titles stay **Step 1 of 2 - Create operator**, then **Step 2 of
 2 - Practice desk**. That path never shows "of 3". An unfinished
 operator on that path resumes on **Step 2 of 2 - Practice desk**. On that
 Practice step only, **Your vault is set up and secured on this machine.**
-appears above **Open Practice desk**. The line under the title on that
+appears above **Open Terminal**. The line under the title on that
 last step is **1 of 2 completed - last step**.
 
 When the vault is not yet secured, Setup keeps three steps: **Step 1 of
 3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 -
 Practice desk**. An unfinished operator resumes on **Step 2 of 3 -
 Vault** until the vault opens, then on **Step 3 of 3 - Practice desk**.
-The vault step asks for a master password and **Open vault**. The secured-vault line above **Open Practice desk** stays on
+The vault step asks for a master password and **Open vault**. The secured-vault line above **Open Terminal** stays on
 the two-step path only. The last-step line is **2 of 3 completed - last
 step**.
 
@@ -1137,7 +1137,7 @@ through Setup. For an operator marked complete, `/setup` does not
 restart step 1. A signed-in operator is sent to `/trade`. A signed-out
 operator sees **Setup is complete. Sign in to open the desk.**
 
-**Open Practice desk** affirms Practice and lands on `/trade`. After the
+**Open Terminal** affirms Practice and lands on `/terminal`. After the
 affirm, the desk shows a one-line strip. The step total fixed above does
 not change. With nothing skipped the strip reads
 `Optional setup · N of 4 done`. N counts finished cards only. Skipping
@@ -1170,8 +1170,8 @@ does not change. The authenticator panel's actions are **Enrol** and
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
-sees the same Home as sidebar Home, Alt+H, or the TopBar logo —
-never the password Welcome Back gate. That gate stays on `/welcome`
+sees the same Home as sidebar Home or the TopBar logo —
+never the password Welcome Back gate. Alt+H opens Terminal and is not listed in shortcut help. That gate stays on `/welcome`
 for unauthenticated visitors only (FT-HOME-003).
 
 ### Home

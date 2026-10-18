@@ -18,11 +18,11 @@ test("Learn teaches built-in Practice and its Trade link preserves the selected 
   await expect(page.getByRole("region", { name: "Learn app", exact: true }).getByRole("heading", { level: 1, name: "Learn", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Practice Trading" }).click();
   const practice = page.getByTestId("practice-trading");
-  await expect(practice).toContainText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.");
+  await expect(practice).toContainText("Practice is built in. Open Terminal and place a simulated order, no broker needed.");
   await expect(practice).not.toContainText(/sandbox|Kotak|funded unlock/i);
-  await expect(practice.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
+  await expect(practice.getByRole("link", { name: "Open Terminal" })).toHaveAttribute("href", "/terminal");
   await page.screenshot({ path: info.outputPath("learn-practice.png"), fullPage: true });
-  await practice.getByRole("link", { name: "Open Trade desk" }).click();
+  await practice.getByRole("link", { name: "Open Terminal" }).click();
   await expect(page).toHaveURL(/\/terminal$/);
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
   await expect(terminal.getByRole("heading", { level: 1, name: "Terminal", exact: true })).toBeVisible();

@@ -218,12 +218,10 @@ export default function AppLayout() {
   // Escape is forwarded on the event bus so route-local overlays (e.g. the
   // /trade tool/picker overlays in TerminalRoute) can close themselves
   // without mounting the hook a second time.
-  // Alt+H / Alt+T navigation is wired here only — do not add a second mount.
-  const handleGoHome = useCallback(() => {
-    navigate("/home");
-  }, [navigate]);
-  const handleGoTrade = useCallback(() => {
-    navigate("/trade");
+  // Alt+T opens Terminal. Alt+H is the same destination, kept as a hidden alias.
+  // Wired here only — do not add a second mount.
+  const handleGoTerminal = useCallback(() => {
+    navigate("/terminal");
   }, [navigate]);
 
   useGlobalKeys({
@@ -233,8 +231,8 @@ export default function AppLayout() {
     onCommandPalette: handleToggleCommandPalette,
     tradingHotkeysEnabled: appForPath(location.pathname) === "terminal",
     onShowShortcuts: handleShowShortcuts,
-    onGoHome: handleGoHome,
-    onGoTrade: handleGoTrade,
+    onGoHome: handleGoTerminal,
+    onGoTrade: handleGoTerminal,
   });
 
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
