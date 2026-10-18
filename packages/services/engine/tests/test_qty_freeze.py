@@ -446,18 +446,24 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
 
     assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3510, lot_size=65) is None
     message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3575, lot_size=65)
-    assert message == "Max 3510 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 3,510 per order for NIFTY. Place smaller orders."
     assert quantity_admission_refusal("BANKNIFTY", "NFO", 1455, lot_size=15) == (
-        "Max 1440 per order for BANKNIFTY. Place smaller orders."
+        "Max 1,440 per order for BANKNIFTY. Place smaller orders."
     )
     assert quantity_admission_refusal("NIFTYNXT50", "NFO", 1126) == (
-        "Max 1125 per order for NIFTYNXT50. Place smaller orders."
+        "Max 1,125 per order for NIFTYNXT50. Place smaller orders."
     )
     assert quantity_admission_refusal("FINNIFTY-OCT2026-FUT", "NFO", 3240) is None
     assert quantity_admission_refusal("MIDCPNIFTY", "NFO", 5761) == (
-        "Max 5760 per order for MIDCPNIFTY. Place smaller orders."
+        "Max 5,760 per order for MIDCPNIFTY. Place smaller orders."
     )
     assert quantity_admission_refusal("NIFTYFPI", "NFO", 53900) is None
+    assert quantity_admission_refusal("NIFTYFPI", "NFO", 53901) == (
+        "Max 53,900 per order for NIFTYFPI. Place smaller orders."
+    )
+    assert quantity_admission_refusal("SBIN", "NSE", 100001, broker_freeze_qty=100000) == (
+        "Max 1,00,000 per order for SBIN. Place smaller orders."
+    )
 
 
 def test_admission_prefers_broker_freeze_qty() -> None:
@@ -470,7 +476,7 @@ def test_admission_prefers_broker_freeze_qty() -> None:
         lot_size=65,
         broker_freeze_qty=100,
     )
-    assert message == "Max 100 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 100 per order for NIFTY. Place smaller orders."
     assert quantity_admission_refusal(
         "RELIANCE",
         "NSE",

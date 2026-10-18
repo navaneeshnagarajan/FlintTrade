@@ -149,10 +149,47 @@ def _positive_int(value: object) -> int | None:
     return value if value > 0 else None
 
 
+def grouped_quantity(value: int) -> str:
+    """Group a whole quantity the Indian way (en-IN).
+
+    3510 is ``3,510`` and 100000 is ``1,00,000``. Values under 1000 stay plain.
+    """
+    sign = "-" if value < 0 else ""
+    digits = str(abs(value))
+    if len(digits) <= 3:
+        return f"{sign}{digits}"
+    head, tail = digits[:-3], digits[-3:]
+    parts = [tail]
+    while head:
+        parts.append(head[-2:])
+        head = head[:-2]
+    return sign + ",".join(reversed(parts))
+
+
 def order_symbol_label(symbol: str) -> str:
-    """Symbol named in the freeze refusal. Blank input uses a neutral label."""
+    """Underlying named in the freeze refusal. Blank input uses a neutral label."""
     text = " ".join(str(symbol).split())
-    return text or "this contract"
+    if not text:
+        return "this contract"
+    listed = index_underlying(text)
+    if listed:
+        return listed
+    compact = "".join(text.upper().split())
+    from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol  # noqa: PLC0415
+
+    option = parse_option_symbol(compact)
+    if option is not None:
+        return option.underlying
+    future = parse_future_symbol(compact)
+    if future is not None:
+        return future.underlying
+    head = ""
+    for character in text.upper():
+        if character.isalnum() or character == "&":
+            head += character
+        else:
+            break
+    return head or "this contract"
 
 
 def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
@@ -198,7 +235,10 @@ def quantity_admission_refusal(
     limit = resolve_freeze_quantity(symbol, broker_freeze_qty)
     if limit is None or quantity <= limit:
         return None
-    return f"Max {limit} per order for {order_symbol_label(symbol)}. Place smaller orders."
+    return (
+        f"Max {grouped_quantity(limit)} per order for {order_symbol_label(symbol)}. "
+        "Place smaller orders."
+    )
 
 
 # ---------------------------------------------------------------------------
